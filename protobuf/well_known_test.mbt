@@ -218,3 +218,227 @@ test "the last seconds and nanos of a Timestamp win, and the paths of a FieldMas
     ),
   )
 }
+
+///|
+/// `text`, JSON text, encoded as a message of `name`, a type of
+/// fixtures/protobuf/wellknown/, protobuf's types included, in hex, or the
+/// error that stops it. JSON text keeps the digits of an integer that a
+/// double does not hold.
+fn known_reply(name : String, text : String) -> String {
+  let json = @json.parse(text) catch { err => abort("not JSON: \{err}") }
+  encoded(wellknown_set, name, json)
+}
+
+///|
+test "replies in the printed forms have protoc's bytes, and so do replies in every other form ProtoJSON reads: offsets, other fraction lengths, numbers as strings, URL-safe base64 and proto names" {
+  let expected = @hex.encode(fixture(known))
+  assert_eq(
+    known_reply(
+      "wellknown.Known",
+      (
+        #|{"at":"2025-11-14T09:30:00.123456Z","ttl":"-3.250s","mask":"userName,address.cityName","aDouble":1.5,"aFloat":9.99,"anInt64":9223372036854775807,"aUint64":18446744073709551615,"anInt32":-2147483648,"aUint32":4294967295,"aBool":true,"aString":"Tom","aBytes":"+/8=","nothing":{},"history":["0001-01-01T00:00:00Z","9999-12-31T23:59:59.999999999Z"],"limits":{"read":"315576000000.999999999s","write":"0.000001s"},"ids":[1,0]}
+      ),
+    ),
+    expected,
+  )
+  assert_eq(
+    known_reply(
+      "wellknown.Known",
+      (
+        #|{"at":"2025-11-14T18:30:00.123456+09:00","ttl":"-3.25s","mask":"userName,address.cityName",
+        #| "a_double":"1.5","a_float":"9.99","an_int64":"9223372036854775807","a_uint64":"18446744073709551615",
+        #| "an_int32":"-2147483648","a_uint32":4.294967295e9,"a_bool":true,"a_string":"Tom","a_bytes":"-_8",
+        #| "nothing":{},"history":["0001-01-01T01:00:00+01:00","9999-12-31T22:59:59.999999999-01:00"],
+        #| "limits":{"write":"0.000001000s","read":"315576000000.999999999s"},"ids":["1",0]}
+      ),
+    ),
+    expected,
+  )
+  // Each message present, at its default, and Empty.
+  assert_eq(
+    known_reply(
+      "wellknown.Known",
+      (
+        #|{"at":"1970-01-01T00:00:00Z","ttl":"0s","mask":"","aDouble":0,"aFloat":0,"anInt64":0,"aUint64":0,
+        #| "anInt32":0,"aUint32":0,"aBool":false,"aString":"","aBytes":"","nothing":{}}
+      ),
+    ),
+    @hex.encode(fixture(known_defaults)),
+  )
+  assert_eq(
+    known_reply(
+      "wellknown.Known",
+      (
+        #|{"at":"1970-01-01T01:00:00+01:00","ttl":"-0.000s","mask":"","aDouble":"0","aFloat":"0","anInt64":"0",
+        #| "aUint64":"0","anInt32":0,"aUint32":0,"aBool":false,"aString":"","aBytes":"","nothing":{}}
+      ),
+    ),
+    @hex.encode(fixture(known_defaults)),
+  )
+}
+
+///|
+test "null leaves a field of a well-known type unset, and the ticket's example has protoc's bytes" {
+  assert_eq(
+    known_reply(
+      "wellknown.Lease",
+      (
+        #|{"createdAt":"1970-01-01T00:00:01.500Z","ttl":"1.500s"}
+      ),
+    ),
+    @hex.encode(fixture(lease)),
+  )
+  assert_eq(
+    known_reply(
+      "wellknown.Lease",
+      (
+        #|{"created_at":"1970-01-01T00:00:01.5Z","ttl":"1.5s"}
+      ),
+    ),
+    @hex.encode(fixture(lease)),
+  )
+  inspect(
+    known_reply(
+      "wellknown.Known",
+      (
+        #|{"at":null,"ttl":null,"mask":null,"aFloat":null,"nothing":null}
+      ),
+    ),
+    content="",
+  )
+}
+
+///|
+test "a well-known type as a method's whole reply is read in its form too" {
+  let reply = (name, text) => known_reply("google.protobuf.\{name}", text)
+  let lines = [
+    reply("Timestamp", "\"1970-01-01T00:00:01.5Z\"") ==
+    @hex.encode(seconds_and_nanos(1, 500_000_000)),
+    reply("Duration", "\"-0.5s\"") ==
+    @hex.encode(seconds_and_nanos(0, -500_000_000)),
+    reply("Duration", "\"-1s\"") == @hex.encode(seconds_and_nanos(-1, 0)),
+    reply("FieldMask", "\"a,bC.dE\"") ==
+    @hex.encode(
+      nested(w => {
+        string_field(w, 1, "a")
+        string_field(w, 1, "b_c.d_e")
+      }),
+    ),
+    reply("FloatValue", "0.1") ==
+    @hex.encode(
+      nested(w => {
+        w.tag(1, I32)
+        w.fixed32(Float::from_double(0.1).reinterpret_as_uint())
+      }),
+    ),
+    reply("StringValue", "\"Tom\"") ==
+    @hex.encode(nested(w => string_field(w, 1, "Tom"))),
+    reply("BoolValue", "false") == "",
+    reply("Empty", "{}") == "",
+  ]
+  inspect(lines, content="[true, true, true, true, true, true, true, true]")
+}
+
+///|
+test "a value that ProtoJSON does not read as its type, or that is out of its range, is not a message of the type" {
+  let lines = []
+  for
+    case in [
+      ("at", "\"0000-01-01T00:00:00Z\""),
+      ("at", "\"10000-01-01T00:00:00Z\""),
+      ("at", "\"9999-12-31T23:59:59-01:00\""),
+      ("at", "\"0001-01-01T00:00:00+00:01\""),
+      ("at", "\"1970-01-01T00:00:00z\""),
+      ("at", "\"1970-01-01t00:00:00Z\""),
+      ("at", "\"1970-01-01 00:00:00Z\""),
+      ("at", "\"1970-01-01T00:00:00\""),
+      ("at", "\"1970-01-01T00:00:00.Z\""),
+      ("at", "\"1970-01-01T00:00:00.0000000001Z\""),
+      ("at", "\"1970-02-29T00:00:00Z\""),
+      ("at", "\"1970-13-01T00:00:00Z\""),
+      ("at", "\"1970-01-01T24:00:00Z\""),
+      ("at", "\"1970-01-01T00:00:60Z\""),
+      ("at", "\"1970-01-01T00:00:00+24:00\""),
+      ("at", "\"1970-01-01T00:00:00+0900\""),
+      ("at", "0"),
+      ("at", "{\"seconds\":1}"),
+      ("ttl", "\"1\""),
+      ("ttl", "\"1.5\""),
+      ("ttl", "\"315576000001s\""),
+      ("ttl", "\"-315576000001s\""),
+      ("ttl", "\"1.0000000001s\""),
+      ("ttl", "\"+1s\""),
+      ("ttl", "\".5s\""),
+      ("ttl", "\"1.s\""),
+      ("ttl", "\"1 s\""),
+      ("ttl", "1.5"),
+      ("mask", "\"user_name\""),
+      ("mask", "\"a b\""),
+      ("mask", "[\"a\"]"),
+      ("anInt32", "2147483648"),
+      ("aFloat", "1e39"),
+      ("aBool", "\"true\""),
+      ("aBytes", "\"*\""),
+      ("nothing", "{\"x\":1}"),
+      ("history", "[null]"),
+      ("limits", "{\"a\":\"1\"}"),
+      ("ids", "[\"x\"]"),
+    ] {
+    let (key, value) = case
+    lines.push(
+      "\{key} \{value} -> \{known_reply("wellknown.Known", "{\"\{key}\":\{value}}")}",
+    )
+  }
+  lines.push(
+    "Timestamp null -> \{known_reply("google.protobuf.Timestamp", "null")}",
+  )
+  lines.push(
+    "Int64Value null -> \{known_reply("google.protobuf.Int64Value", "null")}",
+  )
+  inspect(
+    lines.join("\n"),
+    content=(
+      #|at "0000-01-01T00:00:00Z" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "10000-01-01T00:00:00Z" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "9999-12-31T23:59:59-01:00" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "0001-01-01T00:00:00+00:01" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "1970-01-01T00:00:00z" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "1970-01-01t00:00:00Z" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "1970-01-01 00:00:00Z" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "1970-01-01T00:00:00" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "1970-01-01T00:00:00.Z" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "1970-01-01T00:00:00.0000000001Z" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "1970-02-29T00:00:00Z" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "1970-13-01T00:00:00Z" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "1970-01-01T24:00:00Z" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "1970-01-01T00:00:60Z" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "1970-01-01T00:00:00+24:00" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at "1970-01-01T00:00:00+0900" -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at 0 -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|at {"seconds":1} -> error: /at: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the field at of wellknown.Known has the type google.protobuf.Timestamp
+      #|ttl "1" -> error: /ttl: must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s": the field ttl of wellknown.Known has the type google.protobuf.Duration
+      #|ttl "1.5" -> error: /ttl: must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s": the field ttl of wellknown.Known has the type google.protobuf.Duration
+      #|ttl "315576000001s" -> error: /ttl: must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s": the field ttl of wellknown.Known has the type google.protobuf.Duration
+      #|ttl "-315576000001s" -> error: /ttl: must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s": the field ttl of wellknown.Known has the type google.protobuf.Duration
+      #|ttl "1.0000000001s" -> error: /ttl: must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s": the field ttl of wellknown.Known has the type google.protobuf.Duration
+      #|ttl "+1s" -> error: /ttl: must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s": the field ttl of wellknown.Known has the type google.protobuf.Duration
+      #|ttl ".5s" -> error: /ttl: must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s": the field ttl of wellknown.Known has the type google.protobuf.Duration
+      #|ttl "1.s" -> error: /ttl: must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s": the field ttl of wellknown.Known has the type google.protobuf.Duration
+      #|ttl "1 s" -> error: /ttl: must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s": the field ttl of wellknown.Known has the type google.protobuf.Duration
+      #|ttl 1.5 -> error: /ttl: must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s": the field ttl of wellknown.Known has the type google.protobuf.Duration
+      #|mask "user_name" -> error: /mask: must be a string of field paths in lowerCamelCase, joined by commas, such as "userName,address.city": the field mask of wellknown.Known has the type google.protobuf.FieldMask
+      #|mask "a b" -> error: /mask: must be a string of field paths in lowerCamelCase, joined by commas, such as "userName,address.city": the field mask of wellknown.Known has the type google.protobuf.FieldMask
+      #|mask ["a"] -> error: /mask: must be a string of field paths in lowerCamelCase, joined by commas, such as "userName,address.city": the field mask of wellknown.Known has the type google.protobuf.FieldMask
+      #|anInt32 2147483648 -> error: /anInt32: must be an integer from -2147483648 to 2147483647: the field an_int32 of wellknown.Known has the type google.protobuf.Int32Value
+      #|aFloat 1e39 -> error: /aFloat: must be a number within the range of a float, or "NaN", "Infinity" or "-Infinity": the field a_float of wellknown.Known has the type google.protobuf.FloatValue
+      #|aBool "true" -> error: /aBool: must be true or false: the field a_bool of wellknown.Known has the type google.protobuf.BoolValue
+      #|aBytes "*" -> error: /aBytes: must be a string in base64, standard or URL-safe, with or without padding: the field a_bytes of wellknown.Known has the type google.protobuf.BytesValue
+      #|nothing {"x":1} -> error: /nothing/x: is not a field of google.protobuf.Empty
+      #|history [null] -> error: /history/0: cannot be null: it is an element of the repeated field history of wellknown.Known
+      #|limits {"a":"1"} -> error: /limits/a: must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s": the values of the map field limits of wellknown.Known have the type google.protobuf.Duration
+      #|ids ["x"] -> error: /ids/0: must be an integer from -9223372036854775808 to 9223372036854775807: the elements of the field ids of wellknown.Known have the type google.protobuf.Int64Value
+      #|Timestamp null -> error: must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z": the message is a google.protobuf.Timestamp
+      #|Int64Value null -> error: must be an integer from -9223372036854775808 to 9223372036854775807: the message is a google.protobuf.Int64Value
+    ),
+  )
+}
