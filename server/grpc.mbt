@@ -165,11 +165,13 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
     self.answer_unserved(stream, request, ended=true)
     return
   }
-  let deframer = @grpc.Deframer()
-  guard deframer.take(incoming.body) is Prefix(flag=b'\x00', rest~, ..) &&
-    deframer.take(rest) is All &&
-    deframer.ending() is Whole(messages=1) else {
-    self.refuse_call(stream, NotOneMessage, ended=true)
+  // Each prefix was checked as it arrived, so the body's one message, if
+  // it has one, is as it is, uncompressed.
+  guard request.deframer is Some(deframer) else {
+    abort("a gRPC call reads its framing")
+  }
+  if check_end(deframer) is Some(refusal) {
+    self.refuse_call(stream, refusal, ended=true)
     return
   }
   // A message that does not parse, or whose type has a field that smock

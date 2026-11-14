@@ -438,3 +438,96 @@ async test "a message's prefix is checked as soon as it arrives: a flag other th
     })
   })
 }
+
+///|
+async test "once the request ends, one that ends inside a prefix or a message gets INTERNAL, and one with no message or several gets UNIMPLEMENTED; none is journaled" {
+  with_greeter_set([("greeter.yaml", checks_example)], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let raw = smock.raw_h2()
+      defer raw.close()
+      let out = [raw.acknowledge_settings()]
+      let hello = framed(@fs.read_file(hello_request_path).binary())
+      let bodies : Array[(String, Bytes)] = [
+        ("Inside a prefix", b"\x00\x00\x00"),
+        ("Inside a message", b"\x00\x00\x00\x00\x05\x0a\x03T"),
+        ("A message, then inside a prefix", hello + b"\x00\x00"),
+        ("Two messages", hello + hello),
+      ]
+      for i, body in bodies {
+        let stream = 1 + 2 * i
+        raw.send([
+          headers_frame(
+            stream,
+            raw.block(checked_call("POST")),
+            end_stream=false,
+          ),
+          // The last octet in a DATA frame of its own.
+          Data(
+            stream_id=stream,
+            data=body.1[:body.1.length() - 1].to_owned(),
+            end_stream=false,
+            padding=0,
+          ),
+          Data(
+            stream_id=stream,
+            data=body.1[body.1.length() - 1:].to_owned(),
+            end_stream=true,
+            padding=0,
+          ),
+        ])
+        out.push("\{body.0}:")
+        out.push(raw.frames_until_stream_ends(stream))
+      }
+      raw.send([headers_frame(9, raw.block(checked_call("POST")))])
+      out.push("No message, the HEADERS ending the request:")
+      out.push(raw.frames_until_stream_ends(9))
+      out.push("Journal:")
+      out.push(checked_journaled(smock))
+      out.push(smock.metric("smock_requests_total"))
+      inspect(
+        out.join("\n"),
+        content=(
+          #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
+          #|Inside a prefix:
+          #|SETTINGS ACK
+          #|HEADERS 1 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 13, grpc-message: the request ends inside a message prefix, date: <now>]
+          #|Inside a message:
+          #|HEADERS 3 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 13, grpc-message: the request ends inside a message, date: <now>]
+          #|A message, then inside a prefix:
+          #|HEADERS 5 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 13, grpc-message: the request ends inside a message prefix, date: <now>]
+          #|Two messages:
+          #|HEADERS 7 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 12, grpc-message: the request has more than one message, date: <now>]
+          #|No message, the HEADERS ending the request:
+          #|HEADERS 9 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 12, grpc-message: the request has no message, date: <now>]
+          #|Journal:
+          #|
+          #|smock_requests_total{mock="",stub=""} 5
+        ),
+      )
+    })
+  })
+}
+
+///|
+async test "a message of zero octets, 00 00 00 00 00, is one message with every field at its default, so a call taking Empty is served" {
+  let stubs =
+    #|  - id: now
+    #|    mock: leases
+    #|    request: { path: /wellknown.Leases/Now, body: { json: {} } }
+    #|    response: { json: "1970-01-01T00:00:01.5Z" }
+  with_leases(stubs, dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      let reply = client.call(
+        "/wellknown.Leases/Now",
+        body=b"\x00\x00\x00\x00\x00",
+      )
+      inspect(
+        "\{reply.status()} \{reply.data == [wellknown_message("now")]}",
+        content="0 true",
+      )
+      inspect(smock.bodies(), content="\"now\": {}")
+    })
+  })
+}

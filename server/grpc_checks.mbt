@@ -39,8 +39,14 @@ priv enum CallRefusal {
   /// never decompresses: UNIMPLEMENTED, with `grpc-accept-encoding:
   /// identity`.
   Compressed(String)
-  /// A body that is not one uncompressed message: INTERNAL.
-  NotOneMessage
+  /// A request that ends inside a message's prefix: INTERNAL.
+  EndsInPrefix
+  /// A request that ends inside a message: INTERNAL.
+  EndsInMessage
+  /// A request with no message: UNIMPLEMENTED.
+  NoMessage
+  /// A request with more than one message: UNIMPLEMENTED.
+  SeveralMessages
   /// A message that does not parse, or that smock cannot print: INTERNAL.
   Undecodable
 }
@@ -63,9 +69,11 @@ fn CallRefusal::status(self : CallRefusal) -> @grpc.Status {
     | MalformedTimeout
     | UnknownFlag
     | CompressedWithoutEncoding
-    | NotOneMessage
+    | EndsInPrefix
+    | EndsInMessage
     | Undecodable => Internal
-    UnservedSubtype | Compressed(_) => Unimplemented
+    UnservedSubtype | Compressed(_) | NoMessage | SeveralMessages =>
+      Unimplemented
     OverBodyLimit => ResourceExhausted
   }
 }
@@ -83,7 +91,10 @@ fn CallRefusal::message(self : CallRefusal) -> String {
       "a compressed message needs a grpc-encoding other than identity"
     Compressed(encoding) =>
       "the grpc-encoding \{encoding} is not served, only identity"
-    NotOneMessage => "the request is not one uncompressed message"
+    EndsInPrefix => "the request ends inside a message prefix"
+    EndsInMessage => "the request ends inside a message"
+    NoMessage => "the request has no message"
+    SeveralMessages => "the request has more than one message"
     Undecodable => "the request message cannot be decoded"
   }
 }
@@ -165,4 +176,20 @@ fn encoding_of(request : H2Request) -> String? {
     }
   }
   encoding
+}
+
+///|
+/// What smock refuses in the framing of a gRPC call once its request has
+/// ended, its framing read by `deframer`, or `None` when the body is one
+/// whole message, a message of zero octets included: a request that ends
+/// inside a prefix or a message, then one with no message or several, as
+/// a unary method takes one.
+fn check_end(deframer : @grpc.Deframer) -> CallRefusal? {
+  match deframer.ending() {
+    InPrefix => Some(EndsInPrefix)
+    InMessage(..) => Some(EndsInMessage)
+    Whole(messages=0) => Some(NoMessage)
+    Whole(messages=1) => None
+    Whole(..) => Some(SeveralMessages)
+  }
 }
