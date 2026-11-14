@@ -1680,10 +1680,11 @@ let no_match_names_set_by_smock : Array[String] = [
 /// the JSON Schema cannot express, and none may be one of `set_by_smock`.
 ///
 /// With `metadata`, they are the metadata of a gRPC reply, its initial or
-/// its trailing metadata, under gRPC's rules too (`File::check_metadata`):
-/// the names are returned in lower case, as HTTP/2 sends them, and a
-/// `-bin` value as written without its base64 padding. With `templated`,
-/// the values are templates, whose rendered values the engine checks.
+/// its trailing metadata, under gRPC's rules instead of HTTP's
+/// (`File::check_metadata_name`, `File::metadata_value`): the names are
+/// returned in lower case, as HTTP/2 sends them, and a `-bin` value as
+/// written without its base64 padding. With `templated`, the values are
+/// templates, whose rendered values the engine checks.
 fn File::read_headers(
   self : File,
   pointer : String,
