@@ -250,6 +250,10 @@ fn DescriptorSet::print_message(
   records : Array[BytesView],
   depth : Int32,
 ) -> Unit raise DecodeError {
+  if well_known_form(message) is Some(form) {
+    self.print_well_known(out, message, form, records, depth)
+    return
+  }
   let fields = message.fields
   let values = scan(message, records)
   out.write_byte(b'{')
@@ -736,9 +740,9 @@ fn DescriptorSet::print_number(
 
 ///|
 /// Why `decode_json` does not decode `field` yet, a field of a message of
-/// this set, or `None` when it does: it is a group, or of a well-known
-/// type, which ProtoJSON prints in a form of its own, or a map whose
-/// values are.
+/// this set, or `None` when it does: it is a group, or of a well-known type
+/// that it does not serve yet, as `is_unserved_well_known` says, or a map
+/// whose values are.
 fn DescriptorSet::not_decoded(
   self : DescriptorSet,
   field : FieldDescriptor,
@@ -750,13 +754,14 @@ fn DescriptorSet::not_decoded(
     self.message_of(field) is Some(entry) &&
     entry.map_entry &&
     is_map_entry(entry) {
-    return match self.well_known_of(entry.fields[entry.field_index(2)]) {
+    return match
+      self.unserved_well_known_of(entry.fields[entry.field_index(2)]) {
       Some(name) =>
         Some("is a map whose values have the well-known type \{name}")
       None => None
     }
   }
-  match self.well_known_of(field) {
+  match self.unserved_well_known_of(field) {
     Some(name) => Some("has the well-known type \{name}")
     None => None
   }
@@ -764,8 +769,9 @@ fn DescriptorSet::not_decoded(
 
 ///|
 /// The full name of the type of `field`, a field of a message of this set,
-/// when it is a well-known type, as `is_well_known` says.
-fn DescriptorSet::well_known_of(
+/// when it is a well-known type that the module does not serve yet, as
+/// `is_unserved_well_known` says.
+fn DescriptorSet::unserved_well_known_of(
   self : DescriptorSet,
   field : FieldDescriptor,
 ) -> String? {
@@ -774,7 +780,7 @@ fn DescriptorSet::well_known_of(
     (_, Some(type_)) => type_.full_name
     _ => return None
   }
-  if is_well_known(name) {
+  if is_unserved_well_known(name) {
     Some(name)
   } else {
     None
