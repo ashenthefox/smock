@@ -39,7 +39,8 @@ pub(all) suberror PrintedError {
 /// - `bytes` is a string of standard base64 with its padding;
 /// - an enum is the name of one of its values, or a number from the int32
 ///   range, and is returned as the first name of its number, or as the
-///   number when no value has it, as an open enum allows;
+///   number when no value has it, as an open enum allows; a closed enum,
+///   as a proto2 enum is, takes only the numbers it defines;
 /// - a message is an object, returned as it is: its members are not
 ///   checked here.
 ///
@@ -110,6 +111,9 @@ pub fn DescriptorSet::printed_value(
       }
       match type_.find_value_by_number(number) {
         Some(value) => Json::string(value.name)
+        // A closed enum, as a proto2 enum is, keeps a number it does not
+        // define as an unknown field, which a message never prints.
+        None if type_.syntax is Proto2 => raise unfit
         None => number_of(number.to_string())
       }
     }

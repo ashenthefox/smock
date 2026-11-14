@@ -231,3 +231,23 @@ test "a number that a closed enum does not define is not a value of it, singular
     content="error: /carrierState: must be the name or the number of a value of shipping.State: the field carrier_state of shipping.Parcel has the type shipping.State",
   )
 }
+
+///|
+test "a condition on a closed enum takes the names and numbers it defines, as smock prints them, and no other number, which a call's message never shows" {
+  let texts = ["\"SHIPPED\"", "1", "0", "9", "-1", "\"9\""]
+  inspect(
+    texts
+    .map(text => {
+      "\{text} -> \{printed_form(shipping_set, "shipping.Parcel", "state", text)}"
+    })
+    .join("\n"),
+    content=(
+      #|"SHIPPED" -> "SHIPPED"
+      #|1 -> "SHIPPED"
+      #|0 -> "NEW"
+      #|9 -> must be the name or the number of a value of shipping.State
+      #|-1 -> must be the name or the number of a value of shipping.State
+      #|"9" -> must be the name or the number of a value of shipping.State
+    ),
+  )
+}
