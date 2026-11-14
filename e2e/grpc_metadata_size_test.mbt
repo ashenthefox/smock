@@ -120,3 +120,117 @@ async test "an Ephemeral gRPC Stub whose static reply's metadata is over --heade
     ),
   )
 }
+
+///|
+/// The Stubs of the per-call tests on SayHello, told apart by `x-case`, for
+/// the Mock `greeter`, on the Host `localhost` and the Default Mock: a
+/// templated OK reply whose `x-trace` trailers repeat the call's `x-pad`
+/// `copies` times, one whose `x-trace` header does, and a static error
+/// with an `x-trace` trailer of `n` octets, a Trailers-Only block of
+/// 250 + n octets, or 312 + n when the Default Mock answers, with
+/// `smock-mock: greeter; via=default` (10 + 20 + 32).
+fn pad_stubs(copies~ : Int32 = 1, n~ : Int32 = 2000) -> String {
+  let pads = Array::make(copies, "\"${header.x-pad}\"").join(", ")
+  (
+    $|mocks:
+    $|  - name: greeter
+    $|    hosts: [localhost]
+    $|    default: true
+    $|    grpc: { descriptorSet: greeter.binpb }
+    $|stubs:
+    $|  - id: trailers
+    $|    mock: greeter
+    $|    request: { path: /helloworld.Greeter/SayHello, headers: { x-case: trailers } }
+    $|    response:
+    $|      template: true
+    $|      json: { message: "Hello ${body.name}" }
+    $|      grpc: { trailers: { x-trace: [\{pads}] } }
+    $|  - id: headers
+    $|    mock: greeter
+    $|    request: { path: /helloworld.Greeter/SayHello, headers: { x-case: headers } }
+    $|    response:
+    $|      template: true
+    $|      headers: { x-trace: [\{pads}] }
+    $|      json: { message: "Hello ${body.name}" }
+    $|  - id: static
+    $|    mock: greeter
+    $|    request: { path: /helloworld.Greeter/SayHello, headers: { x-case: static } }
+    $|    response: { grpc: { status: NOT_FOUND, trailers: { x-trace: \{"a".repeat(n)} } } }
+    $|
+  )
+}
+
+///|
+/// Makes the call of `case` on `client`, to `authority`, with an `x-pad`
+/// of `pad` octets, and renders its reply as the client got it.
+async fn H2Client::padded_case(
+  self : H2Client,
+  case : String,
+  pad~ : Int32 = 0,
+  authority~ : String = "localhost",
+) -> String {
+  let reply = self.call("/helloworld.Greeter/SayHello", authority~, headers=[
+    ("x-case", case),
+    ("x-pad", "p".repeat(pad)),
+  ])
+  "\{case}, x-pad of \{pad}:\n\{reply.render()}"
+}
+
+///|
+async test "the ticket's example: a templated reply that renders 4 KiB of trailers, to a client that advertised a SETTINGS_MAX_HEADER_LIST_SIZE of 1024, gets Trailers-Only INTERNAL reply metadata too large, and templateError says why" {
+  with_greeter_set([("greeter.yaml", pad_stubs())], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c(
+        settings=@http2.Settings::new(max_header_list_size=Some(1024)),
+      )
+      defer client.close()
+      let replies = [
+        client.padded_case("trailers", pad=4096),
+        client.padded_case("trailers", pad=3),
+        client.padded_case("static"),
+      ]
+      inspect(
+        replies.join("\n"),
+        content=(
+          #|trailers, x-pad of 4096:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  grpc-status: 13
+          #|  grpc-message: reply metadata too large
+          #|  date: <now>
+          #|(end)
+          #|trailers, x-pad of 3:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  date: <now>
+          #|DATA 000000000b0a0948656c6c6f20546f6d
+          #|TRAILERS
+          #|  grpc-status: 0
+          #|  x-trace: ppp
+          #|(end)
+          #|static, x-pad of 0:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  grpc-status: 13
+          #|  grpc-message: reply metadata too large
+          #|  date: <now>
+          #|(end)
+        ),
+      )
+      // grpc-status: 0, 11 + 1 + 32; x-trace, 7 + 4096 + 32. The static
+      // reply's Trailers-Only block takes 250 + 2000.
+      let (_, page) = smock.journal()
+      inspect(
+        answers(page),
+        content=(
+          #|"trailers" 200 "INTERNAL" templateError={"at":"/response","message":"the reply's trailers would take 4179 bytes, over the 1024 that the client allows in its SETTINGS_MAX_HEADER_LIST_SIZE"}
+          #|"trailers" 200 "OK"
+          #|"static" 200 "INTERNAL" templateError={"at":"/response","message":"the reply's Trailers-Only block would take 2250 bytes, over the 1024 that the client allows in its SETTINGS_MAX_HEADER_LIST_SIZE"}
+        ),
+      )
+    })
+  })
+}
