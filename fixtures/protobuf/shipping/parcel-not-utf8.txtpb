@@ -1,0 +1,4 @@
+# Strings that are not UTF-8, which a proto2 string may hold.
+label: "a\303\050b"
+tags: ["\377\376", "ok"]
+notes { key: "\377" value: "\360\237\230" }

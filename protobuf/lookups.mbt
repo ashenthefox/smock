@@ -199,6 +199,12 @@ pub fn MessageDescriptor::find_extension(
 }
 
 ///|
+/// Whether an extension of the set extends the message.
+pub fn MessageDescriptor::is_extended(self : MessageDescriptor) -> Bool {
+  self.extended_by is Some(_)
+}
+
+///|
 /// The value of the enum named `name`. An alias is found by its own name.
 pub fn EnumDescriptor::find_value_by_name(
   self : EnumDescriptor,

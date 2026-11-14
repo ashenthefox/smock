@@ -1,6 +1,6 @@
 // Written for smock's tests: methods whose output types reach types that
-// gRPC Stubs do not serve yet, a well-known type and a type of a proto2
-// file, at the top or through nested messages.
+// gRPC Stubs do not serve yet, a well-known type, at the top or through
+// nested messages, and a type of a proto2 file, which they serve.
 syntax = "proto3";
 
 package unserved;

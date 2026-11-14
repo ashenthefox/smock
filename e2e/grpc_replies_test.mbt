@@ -332,7 +332,6 @@ async test "smock check reports a static reply that is not a message of the outp
         #|replies.yaml: /stubs/4/response/json/nested/recursive/anInt32: must be an integer from -2147483648 to 2147483647: the field an_int32 of replies.Everything has the type int32
         #|replies.yaml: /stubs/5/request/path: the output type unserved.TimeReply is not served yet: its field at has the well-known type google.protobuf.Timestamp, and gRPC Stubs serve no well-known types so far
         #|replies.yaml: /stubs/6/request/path: the output type unserved.ScheduleReply is not served yet: the field start of unserved.ScheduleReply.Slot, a type it reaches, has the well-known type google.protobuf.Timestamp, and gRPC Stubs serve no well-known types so far
-        #|replies.yaml: /stubs/6/request/path: the output type unserved.ScheduleReply is not served yet: old.proto, which defines old.Note, a type it reaches, is a proto2 file, and gRPC Stubs serve only types of proto3 files so far
         #|replies.yaml: /stubs/7/request/path: the output type google.protobuf.Timestamp is not served yet: it is a well-known type, and gRPC Stubs serve no well-known types so far
         #|
       ),

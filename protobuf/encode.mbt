@@ -1,10 +1,12 @@
 // Messages encoded from JSON, as ProtoJSON reads it
 // (https://protobuf.dev/programming-guides/json/), in protobuf's binary
 // encoding, as protoc encodes them: fields in field-number order, a field
-// without presence left out at its default, repeated scalars packed unless
-// the field says `packed = false`, and map entries sorted by key, each
-// with its key and its value, as protoc's deterministic output writes
-// them. Types of proto3 files are encoded, but for the well-known types.
+// without presence left out at its default, repeated scalars of proto3
+// packed unless the field says `packed = false` and those of proto2 only
+// when it says `packed = true`, and map entries sorted by key, each with
+// its key and its value, as protoc's deterministic output writes them.
+// Types of proto3 and proto2 files are encoded, but for the well-known
+// types and MessageSets.
 
 ///|
 /// Why JSON is not a message of the type it is encoded as. `pointer` is the
@@ -47,17 +49,21 @@ let no_oneofs : FixedArray[Int32] = []
 /// zeros if need be, and 64-bit integers are exact at any size. Floats
 /// and doubles are numbers or strings, or `"NaN"`, `"Infinity"` and
 /// `"-Infinity"`. bytes are base64, standard or URL-safe, with or without
-/// padding. An enum is the name of one of its values, or its number. A
-/// map is an object whose keys are the map's keys written as strings:
-/// integers in decimal, and `true` and `false`.
+/// padding. An enum is the name of one of its values, or its number: any
+/// number of an open enum, as a proto3 enum is, and a number that a closed
+/// enum, as a proto2 enum is, defines. A map is an object whose keys are
+/// the map's keys written as strings: integers in decimal, and `true` and
+/// `false`. Every singular field of a proto2 message is written whenever
+/// it is set, and a message must give each of its required fields.
 ///
 /// Raises `EncodeError`, at the JSON Pointer of the value at fault, for
 /// JSON that is not such a message: one that is not an object, a key that
 /// names no field, a field given by both its names, two members of one
 /// oneof, `null` in a repeated field or as a map value, a value of the
-/// wrong type or out of its type's range, and messages nested deeper than
-/// 100. It also raises for a type it does not encode yet: a well-known
-/// type, or a type of a file that is not proto3.
+/// wrong type or out of its type's range, a message without one of its
+/// required fields, and messages nested deeper than 100. It also raises
+/// for a type it does not encode: a well-known type or a type of an
+/// editions file, not yet, and a MessageSet.
 pub fn DescriptorSet::encode_json(
   self : DescriptorSet,
   message : MessageDescriptor,
@@ -80,20 +86,22 @@ pub fn DescriptorSet::encode_json(
 }
 
 ///|
-/// Why the encoder does not encode messages of the type `message` yet, or
-/// `None` when it does.
+/// Why the encoder does not encode messages of the type `message`, or
+/// `None` when it does: a well-known type and a type of an editions file
+/// are not encoded yet, and a MessageSet is not encoded.
 fn not_encoded(message : MessageDescriptor) -> String? {
   if is_well_known(message.full_name) {
     return Some(
       "smock does not encode \{message.full_name} yet: it is a well-known type",
     )
   }
+  if message.message_set_wire_format {
+    return Some(
+      "smock does not encode \{message.full_name}: it is a MessageSet, whose extensions use another wire form",
+    )
+  }
   match message.syntax {
-    Proto3 => None
-    Proto2 =>
-      Some(
-        "smock does not encode \{message.full_name} yet: it is a type of a proto2 file",
-      )
+    Proto3 | Proto2 => None
     Editions =>
       Some(
         "smock does not encode \{message.full_name} yet: it is a type of an editions file",
@@ -105,7 +113,7 @@ fn not_encoded(message : MessageDescriptor) -> String? {
 /// Writes `members`, the members of an object that is a message of the
 /// type `message` at nesting depth `depth`, as its fields, in field-number
 /// order. Raises at the JSON Pointer of the value at fault, from
-/// `members`.
+/// `members`, or of the object when it lacks a required field.
 fn DescriptorSet::write_message(
   self : DescriptorSet,
   writer : Writer,
@@ -157,8 +165,16 @@ fn DescriptorSet::write_message(
   let order = message.by_number
   for n in 0..<order.length() {
     let index = order[n]
-    guard values[index] is Some(value) else { continue }
     let field = fields[index]
+    guard values[index] is Some(value) && !(value is Null) else {
+      if field.label is Required {
+        raise EncodeError(
+          pointer="",
+          message="lacks the required field \{field.name} of \{message.full_name}",
+        )
+      }
+      continue
+    }
     self.write_field(writer, message, field, value, depth) catch {
       EncodeError(pointer~, message=why) =>
         raise EncodeError(
@@ -225,9 +241,12 @@ fn DescriptorSet::write_field(
     }
     return
   }
-  // A message field, and a member of a oneof, a proto3 `optional` field
-  // included, have presence: they are written whenever they are set.
-  let present = field.oneof_index is Some(_) || field.type_ is Message
+  // A message field, a member of a oneof, a proto3 `optional` field
+  // included, and every singular field of a proto2 message have presence:
+  // they are written whenever they are set.
+  let present = message.syntax is Proto2 ||
+    field.oneof_index is Some(_) ||
+    field.type_ is Message
   self.write_value(writer, field, json, depth, present~) catch {
     Unfit =>
       raise EncodeError(
@@ -324,8 +343,8 @@ fn DescriptorSet::encoded_message(
 ///|
 /// Writes `json`, the value of `field`, a repeated field of `message` that
 /// is not a map, from an array: packed, when the field is a scalar of a
-/// proto3 type that does not say `packed = false`, otherwise one record
-/// per element.
+/// proto3 type that does not say `packed = false`, or of a proto2 type that
+/// says `packed = true`, otherwise one record per element.
 fn DescriptorSet::write_list(
   self : DescriptorSet,
   writer : Writer,
@@ -343,8 +362,13 @@ fn DescriptorSet::write_list(
   if items.is_empty() {
     return
   }
+  // proto3 packs repeated scalars unless the field says otherwise, and
+  // proto2 only when it says so.
   let packed = !(field.type_ is (String | Bytes | Message | Group)) &&
-    field.packed is (None | Some(true))
+    (
+      field.packed is Some(true) ||
+      (field.packed is None && message.syntax is Proto3)
+    )
   let out = if packed { Writer() } else { writer }
   // An element's JSON Pointer is made only for an error.
   for i, item in items {
@@ -701,8 +725,15 @@ fn DescriptorSet::scalar_bits(
             Some(value) => value.number.to_int64().reinterpret_as_uint64()
             None => raise Unfit
           }
-        // Any number of an open enum, as a proto3 enum is.
-        _ => integer_bits(json, signed=true, wide=false)
+        _ => {
+          let bits = integer_bits(json, signed=true, wide=false)
+          // Any number of an open enum, as a proto3 enum is, but only a
+          // number that a closed enum, as a proto2 enum is, defines.
+          if type_.syntax is Proto2 && !type_.defines(bits) {
+            raise Unfit
+          }
+          bits
+        }
       }
     }
     String | Bytes | Message | Group => raise Unfit
@@ -747,6 +778,8 @@ fn DescriptorSet::wanted(
     Bytes => "a string in base64, standard or URL-safe, with or without padding"
     Enum =>
       match self.enum_of(field) {
+        Some(type_) if type_.syntax is Proto2 =>
+          "the name or the number of a value of \{type_.full_name}"
         Some(type_) =>
           "the name of a value of \{type_.full_name}, or an integer from -2147483648 to 2147483647"
         None => "an enum value"
