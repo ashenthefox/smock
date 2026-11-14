@@ -126,7 +126,7 @@ fn DescriptorSet::print_well_known(
         if !is_timestamp(seconds, nanos) {
           raise DecodeError(
             position~,
-            message="the Timestamp of \{seconds} seconds and \{nanos} nanoseconds is outside the range from 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z that ProtoJSON prints",
+            message="the Timestamp of seconds \{seconds} and nanos \{nanos} is outside the range from 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z that ProtoJSON prints",
           )
         }
         write_timestamp(out, seconds, nanos)
@@ -134,7 +134,7 @@ fn DescriptorSet::print_well_known(
         if !is_duration(seconds, nanos) {
           raise DecodeError(
             position~,
-            message="the Duration of \{seconds} seconds and \{nanos} nanoseconds is outside the range from -315576000000.999999999s to 315576000000.999999999s that ProtoJSON prints, or its seconds and nanoseconds have opposite signs",
+            message="the Duration of seconds \{seconds} and nanos \{nanos} is outside the range from -315576000000.999999999s to 315576000000.999999999s that ProtoJSON prints, or its seconds and nanos have opposite signs",
           )
         }
         write_duration(out, seconds, nanos)

@@ -1,6 +1,7 @@
 // Messages decoded from their descriptors into smock's decoded form, the
 // JSON text the engine, the Journal and templates see. For now the decoder
-// serves every field but groups and those of the well-known types.
+// serves every field but groups and those of the well-known types that
+// is_unserved_well_known names (well_known.mbt prints the others).
 // encode.mbt encodes messages from JSON.
 
 ///|
@@ -87,16 +88,33 @@ let no_runs : Array[BytesView] = []
 /// repeats, the last entry wins. Unknown fields, and fields sent with
 /// another wire type than their type's, are skipped.
 ///
+/// The well-known types Timestamp, Duration, FieldMask, the wrappers and
+/// Empty are printed in their ProtoJSON forms, at any place, the whole
+/// message included: a Timestamp as a string of the date and time in UTC,
+/// such as `"1970-01-01T00:00:01.500Z"`, a Duration as a string of
+/// seconds, such as `"1.500s"`, each with 0, 3, 6 or 9 fractional digits; a
+/// FieldMask as its paths in lowerCamelCase, joined by commas; a wrapper as
+/// the value it wraps, an Int64Value or a UInt64Value as a number, a
+/// FloatValue as a float; and Empty as `{}`.
+///
 /// Raises `DecodeError` when the input is not protobuf, when a string is
 /// not UTF-8, as a proto3 string must be, when messages nest deeper than
-/// 100, a map entry counting as a message, and when a message it prints
-/// has a field that it does not decode yet: a group, or a field of a
-/// well-known type, a map's values included.
+/// 100, a map entry counting as a message, when a Timestamp, a Duration or
+/// a FieldMask has a value that ProtoJSON cannot print, and when a message
+/// it prints is or has a field that it does not decode yet: a group, or a
+/// well-known type that `is_unserved_well_known` names, a map's values
+/// included.
 pub fn decode_json(
   set : DescriptorSet,
   message : MessageDescriptor,
   input : BytesView,
 ) -> Bytes raise DecodeError {
+  if is_unserved_well_known(message.full_name) {
+    raise DecodeError(
+      position=input.start_offset(),
+      message="the message is of the well-known type \{message.full_name}, which smock does not decode yet",
+    )
+  }
   let out = @buffer.Buffer(size_hint=2 * input.length() + 16)
   set.print_message(out, message, [input], 0)
   out.to_bytes()
