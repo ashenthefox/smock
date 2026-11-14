@@ -77,8 +77,11 @@ fn pick_response(ordinary : @definitions.Ordinary, draw : UInt64) -> Int32? {
 ///
 /// The reply to a gRPC call, when `grpc` is true, gets the plan's gRPC
 /// part last: the status of the response's `grpc`, `OK` without one, its
-/// message, as written or rendered after the body, and the reply message
-/// encoded when the files were loaded, if it was.
+/// message, as written or rendered after the body, its trailing metadata,
+/// as written or rendered after the message, and the reply message encoded
+/// when the files were loaded, if it was. The header fields are its
+/// initial metadata. A rendered value of either that gRPC metadata cannot
+/// carry is a render error (`sent_metadata`).
 ///
 /// Every template of the response renders in one rendering for the
 /// request: `context`, the one that the Stub's Variables left, or, without
@@ -132,7 +135,18 @@ fn plan_response(
       let headers = Array(capacity=fields.length() + room)
       for i in 0..<fields.length() {
         let field = fields[i]
-        headers.push((field.0, field.1.render(rendering)))
+        let value = field.1.render(rendering)
+        // A gRPC reply's headers are its initial metadata.
+        headers.push(
+          (
+            field.0,
+            if grpc {
+              sent_metadata(field.0, value, field.1.pointer)
+            } else {
+              value
+            },
+          ),
+        )
       }
       headers
     }
@@ -215,11 +229,13 @@ fn plan_response(
     }
   }
   guard grpc else { return plan }
-  let (status, message) = match response.grpc {
-    None => (@grpc.Ok, None)
-    Some({ status, message: None, }) => (status, None)
-    Some({ status, message: Some(Written(text)), }) => (status, Some(text))
-    Some({ status, message: Some(Templated(text)), }) => {
+  guard response.grpc is Some(reply) else {
+    return { ..plan, grpc: Some({ ..grpc_ok, encoded: response.encoded, }), }
+  }
+  let message = match reply.message {
+    None => None
+    Some(Written(text)) => Some(text)
+    Some(Templated(text)) => {
       let rendering = rendering_for(
         incoming,
         context,
@@ -229,13 +245,82 @@ fn plan_response(
         data~,
         copies~,
       )
-      (status, Some(text.render(rendering)))
+      context = Some(rendering)
+      Some(text.render(rendering))
+    }
+  }
+  let trailers = match reply.trailers {
+    Written(fields) => fields
+    Templated(fields) => {
+      let rendering = rendering_for(
+        incoming,
+        context,
+        now~,
+        draw~,
+        vars~,
+        data~,
+        copies~,
+      )
+      let trailers = Array(capacity=fields.length())
+      for i in 0..<fields.length() {
+        let field = fields[i]
+        trailers.push(
+          (
+            field.0,
+            sent_metadata(field.0, field.1.render(rendering), field.1.pointer),
+          ),
+        )
+      }
+      ReadOnlyArray::from_array(trailers)
     }
   }
   {
     ..plan,
-    grpc: Some({ ..grpc_ok, status, message, encoded: response.encoded, }),
+    grpc: Some({
+      status: reply.status,
+      message,
+      trailers,
+      encoded: response.encoded,
+    }),
   }
+}
+
+///|
+/// `value`, the rendered value of the field `name`, in lower case, of a
+/// gRPC reply's metadata, as it is sent: as it is, when it holds only
+/// characters from 0x20 to 0x7E, or, for a `-bin` field, without its
+/// padding, when it is standard base64, padded or not.
+///
+/// Raises `RenderError` at `at`, the template's pointer, otherwise: gRPC
+/// metadata cannot carry it, and the call gets `template_failed`.
+fn sent_metadata(
+  name : String,
+  value : String,
+  at : String,
+) -> String raise @template.RenderError {
+  if @grpc.is_binary_name(name) {
+    guard @grpc.unpadded_base64(value) is Some(unpadded) else {
+      raise @template.RenderError(
+        at~,
+        message="the rendered value is not standard base64, which a field whose name ends with -bin holds",
+      )
+    }
+    return if unpadded.length() == value.length() {
+      value
+    } else {
+      unpadded.to_owned()
+    }
+  }
+  for c in value {
+    if c < ' ' || c > '~' {
+      let code = c.to_int().to_string(radix=16).to_upper().pad_start(4, '0')
+      raise @template.RenderError(
+        at~,
+        message="the rendered value holds U+\{code}, and gRPC metadata values hold only characters from 0x20 to 0x7E",
+      )
+    }
+  }
+  value
 }
 
 ///|

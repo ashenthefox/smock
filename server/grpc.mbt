@@ -14,9 +14,10 @@
 // with the metadata as headers, the JSON as the body and the gRPC call
 // marker. The reply is the message that a static reply was encoded into
 // when the files were loaded, or else the rendered reply JSON, encoded here
-// with the method's output type. It is written as gRPC writes it: HEADERS,
-// one DATA frame with the framed message, then trailers with
-// `grpc-status: 0` and the reply's `grpc-message`, if it gives one. The
+// with the method's output type. It is written as gRPC writes it: HEADERS
+// with the reply's initial metadata, one DATA frame with the framed
+// message, then trailers with `grpc-status: 0`, the reply's
+// `grpc-message`, if it gives one, and its trailing metadata. The
 // second lookup, the decoding, `handle` and the encoding run with no await
 // between them, so a reload never splits them, and a call that the reload
 // leaves without a gRPC Stub to reach gets the answer it would have got
@@ -27,7 +28,10 @@
 // unmatched. A plan whose gRPC status is not OK, such as a gRPC Stub's
 // error or that UNIMPLEMENTED, is sent as Trailers-Only, one HEADERS block
 // that ends the stream, with `:status` 200, its `grpc-status`, its
-// `grpc-message` and its trailers, such as the Near miss. A `grpc-message`
+// `grpc-message` and its trailers, such as the Near miss, unless the reply
+// has initial metadata: it then gets HEADERS with it, then the trailers.
+// Metadata goes out as spec E sends header fields: names in lower case,
+// values trimmed, and the fields HTTP/2 forbids left out. A `grpc-message`
 // is the status message percent-encoded, so any Unicode text fits in the
 // field (`@grpc.percent_encode`). An answer sent before the client has
 // ended its request is followed by RST_STREAM NO_ERROR (`end_early`). What
@@ -253,7 +257,7 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
         }
       }
   }
-  let trailers = ok_trailers(part.message)
+  let trailers = status_trailers(Ok, part.message, part.trailers)
   let rest = self.queue_reply(
     stream,
     reply_head(plan.headers, date~),
@@ -270,10 +274,13 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
 
 ///|
 /// Answers `stream`, a gRPC call that the engine decided `outcome` for,
-/// whose plan has the gRPC part `part`, with a status other than OK: with
-/// Trailers-Only, carrying the part's status, message and trailers, and
-/// commits the call's Journal entry just before. `date` is the value of the
-/// answer's `date` field.
+/// whose plan has the gRPC part `part`, with a status other than OK, and
+/// commits the call's Journal entry just before the block that ends the
+/// stream. A reply with initial metadata, header fields of its plan other
+/// than smock's own, gets HEADERS with them, as a reply that succeeded
+/// does, then trailers with the part's status, message and trailing
+/// metadata. One without gets Trailers-Only, one HEADERS block that
+/// carries all of these. `date` is the value of the answer's `date` field.
 fn H2Connection::answer_status(
   self : H2Connection,
   stream : Int32,
@@ -282,15 +289,61 @@ fn H2Connection::answer_status(
   part : @engine.GrpcPart,
   date~ : String,
 ) -> Unit {
-  let fields = trailers_only(
-    part.status,
-    part.message,
-    smock_mock_of(outcome.plan.headers),
-    date~,
-    trailers=part.trailers,
-  )
-  self.headers_only(stream, fields, outcome.journal, partial=false)
+  let headers = outcome.plan.headers
+  if has_initial_metadata(headers) {
+    self.head_then_trailers(
+      stream,
+      reply_head(headers, date~),
+      status_trailers(part.status, part.message, part.trailers),
+      outcome.journal,
+    )
+  } else {
+    let fields = trailers_only(
+      part.status,
+      part.message,
+      smock_mock_of(headers),
+      date~,
+      trailers=part.trailers,
+    )
+    self.headers_only(stream, fields, outcome.journal, partial=false)
+  }
   self.ended_in_place(request, outcome)
+}
+
+///|
+/// Whether `headers`, a gRPC reply's plan's, hold initial metadata: a
+/// field other than `Smock-Mock`, smock's own field, which the engine adds
+/// when the Default Mock answered. An error with initial metadata is sent
+/// as HEADERS, then trailers; one without, as Trailers-Only.
+fn has_initial_metadata(headers : Array[(String, String)]) -> Bool {
+  for header in headers {
+    if header.0 != "Smock-Mock" {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Sends on `stream` the HEADERS `head` of a reply without a message, then
+/// the trailers `trailers`, which end the stream, and commits the Journal
+/// entry `entry` just before the trailers. HEADERS or trailers the `Conn`
+/// refuses get RST_STREAM INTERNAL_ERROR, the entry committed just before.
+fn H2Connection::head_then_trailers(
+  self : H2Connection,
+  stream : Int32,
+  head : Array[@header.Header],
+  trailers : Array[@header.Header],
+  entry : @engine.JournalEntry?,
+) -> Unit {
+  self.conn.headers(stream, head) catch {
+    _ => {
+      self.reset_after(stream, entry)
+      return
+    }
+  }
+  self.ports.commit(entry)
+  self.end_with_trailers(stream, trailers)
 }
 
 ///|
@@ -479,18 +532,50 @@ fn reply_head(
 }
 
 ///|
-/// The trailers of a reply that succeeded: `grpc-status: 0`, then
-/// `grpc-message` with `message`, percent-encoded, when the reply gives
-/// one.
-fn ok_trailers(message : String?) -> Array[@header.Header] {
-  match message {
-    None => [{ name: b"grpc-status", value: b"0", }]
-    Some(text) =>
-      [
-        { name: b"grpc-status", value: b"0", },
-        { name: b"grpc-message", value: @grpc.percent_encode(text), },
-      ]
+/// The trailers of a reply that sent HEADERS: `grpc-status` with the code
+/// of `status`, `grpc-message` with `message`, percent-encoded, when the
+/// reply gives one, then each of `trailers`, the trailing metadata, as
+/// `push_metadata` sends it.
+fn status_trailers(
+  status : @grpc.Status,
+  message : String?,
+  trailers : ReadOnlyArray[(String, String)],
+) -> Array[@header.Header] {
+  let fields = Array(capacity=trailers.length() + 2)
+  fields.push(@header.Header::{
+    name: b"grpc-status",
+    value: decimal(status.code()),
+  })
+  if message is Some(text) {
+    fields.push({ name: b"grpc-message", value: @grpc.percent_encode(text), })
   }
+  let _ = push_metadata(fields, trailers)
+  fields
+}
+
+///|
+/// Pushes onto `fields` each of `metadata`, fields of a gRPC reply's
+/// metadata or smock's own, as spec E's rules for HTTP/2 responses send a
+/// header field: its name in lower case, its value trimmed of spaces and
+/// tabs, and the fields HTTP/2 forbids left out. Returns whether one of
+/// them is `date`.
+fn push_metadata(
+  fields : Array[@header.Header],
+  metadata : ReadOnlyArray[(String, String)],
+) -> Bool {
+  let mut has_date = false
+  for i in 0..<metadata.length() {
+    let (name, value) = metadata[i]
+    let name = lower_case(name)
+    if is_connection_specific(name) {
+      continue
+    }
+    if name == b"date" {
+      has_date = true
+    }
+    fields.push({ name, value: @http1.field_octets(trimmed(value)), })
+  }
+  has_date
 }
 
 ///|
@@ -498,8 +583,9 @@ fn ok_trailers(message : String?) -> Array[@header.Header] {
 /// stream: `:status` 200, `content-type: application/grpc`, `grpc-status`
 /// with the code of `status`, `grpc-message` when `message` gives its text,
 /// percent-encoded, then `smock-mock` when `mock` gives its value, each of
-/// `trailers`, such as `smock-near-miss`, as `reply_head` sends a header
-/// field, and `date` with the value `date`.
+/// `trailers`, the trailing metadata or smock's own fields such as
+/// `smock-near-miss`, as `push_metadata` sends it, and `date` with the
+/// value `date`, unless `trailers` give one.
 fn trailers_only(
   status : @grpc.Status,
   message : String?,
@@ -517,14 +603,9 @@ fn trailers_only(
   if mock is Some(value) {
     fields.push({ name: b"smock-mock", value: @http1.field_octets(value), })
   }
-  for i in 0..<trailers.length() {
-    let (name, value) = trailers[i]
-    fields.push({
-      name: lower_case(name),
-      value: @http1.field_octets(trimmed(value)),
-    })
+  if !push_metadata(fields, trailers) {
+    fields.push({ name: b"date", value: @http1.field_octets(date), })
   }
-  fields.push({ name: b"date", value: @http1.field_octets(date), })
   fields
 }
 

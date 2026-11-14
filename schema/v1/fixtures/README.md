@@ -52,8 +52,16 @@ disagree.
   Schema cannot see, since a Stub is one when its exact path names a method
   of its Mock's Descriptor set: an HTTP Stub's response without `status`,
   an HTTP Stub's response that gives `grpc`, a gRPC Stub on a streaming
-  method, and a gRPC Stub's `json` condition with a key that names no
-  field of the method's input type.
+  method, a gRPC Stub's `json` condition with a key that names no
+  field of the method's input type, a gRPC Stub that gives a field
+  that makes no sense on it, such as `query` or a response's `body`, or a
+  `method` other than `POST`, and a gRPC Stub's `headers` that give a
+  name gRPC reserves, such as `grpc-foo` or a Content-Type. So do metadata
+  values that break gRPC's rules, in `headers` or `grpc.trailers`: a value
+  outside 0x20 to 0x7E, or a `-bin` value that is not base64. smock checks
+  them only when the response is not a template, which the Schema does not
+  tell apart. The Schema itself refuses, in `grpc.trailers`, names outside
+  gRPC's grammar and names that gRPC reserves.
 
 A field joins the Schema only together with smock's support for it, so no
 fixture is accepted by the Schema and rejected by smock for a field smock

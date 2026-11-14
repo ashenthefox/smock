@@ -24,6 +24,26 @@ pub struct EphemeralStub {
   /// Its own generator, when it has a seed, created from the seed when it
   /// was added.
   priv generator : @prng.Generator?
+  /// What it answers. It was checked against its Mock's Descriptor set when
+  /// it was added, and each reload that swaps in a new set looks the method
+  /// of an Ephemeral gRPC Stub up again (`Engine::recheck_ephemeral`).
+  priv mut answers : Answers
+}
+
+///|
+/// What an Ephemeral Stub answers.
+#derive(Eq)
+priv enum Answers {
+  /// HTTP requests: it is an HTTP Stub.
+  HttpRequests
+  /// gRPC calls: it is a gRPC Stub, and its Mock's Descriptor set has its
+  /// method as a unary method.
+  GrpcCalls
+  /// Nothing: it is a gRPC Stub, but since a reload, its Mock's Descriptor
+  /// set no longer has its method as a unary method, or the Mock has no
+  /// set. A later reload that brings the method back makes it answer gRPC
+  /// calls again.
+  Nothing
 }
 
 ///|
@@ -103,7 +123,9 @@ fn EphemeralStubs::of(
 /// Definition files use, without `id` and `mock`, with an inline body. It
 /// is validated and compiled like a Stub from a Definition file, with the
 /// environment variables the engine was created with, and it may read and
-/// write the Data buckets the Mock declares. It gets the next ID,
+/// write the Data buckets the Mock declares. A Stub whose exact path names
+/// a method of the Mock's Descriptor set is a gRPC Stub, checked against
+/// the set and normalised as a file Stub is. It gets the next ID,
 /// `eph-<n>`. A Stub with a seed gets its own generator, from its seed.
 ///
 /// Raises `UnknownMock` when no Mock has the name `mock`, and
@@ -114,12 +136,19 @@ pub fn Engine::add_ephemeral_stub(
   session~ : String?,
   stub : Json,
 ) -> EphemeralStub raise AdminError {
-  let buckets = self.mock_named(mock).buckets
+  let declared = self.mock_named(mock)
   let ephemeral = self.ephemeral
   let n = ephemeral.last_n + 1
   let id = "eph-\{n}"
   let compiled = match
-    @definitions.ephemeral_stub(stub, id~, mock~, env=self.env, buckets~) {
+    @definitions.ephemeral_stub(
+      stub,
+      id~,
+      mock~,
+      env=self.env,
+      buckets=declared.buckets,
+      descriptor_set?=declared.descriptor_set,
+    ) {
     Ok(compiled) => compiled
     Err(problems) => raise InvalidStub(problems)
   }
@@ -136,6 +165,11 @@ pub fn Engine::add_ephemeral_stub(
     added: fields.copy(),
     stub: compiled,
     generator,
+    answers: if compiled.is_grpc() {
+      GrpcCalls
+    } else {
+      HttpRequests
+    },
   }
   let by_session = match ephemeral.by_mock.get(mock) {
     Some(by_session) => by_session
@@ -158,6 +192,52 @@ pub fn Engine::add_ephemeral_stub(
   let at = list.search_by(other => other.stub.compare_priority(compiled) >= 0)
   list.insert(at.unwrap_or(list.length()), added)
   added
+}
+
+///|
+/// Looks the method of each Ephemeral gRPC Stub up again in `mocks`, the
+/// Mocks of the snapshot a reload has just swapped in, by name: the Stub
+/// answers gRPC calls while its Mock's Descriptor set has its exact path as
+/// a unary method, and nothing otherwise. Its reply is checked against the
+/// method's output type on each call, since it was encoded with the set
+/// served when it was added. The Ephemeral Stubs of a Mock that is gone
+/// have been dropped already.
+fn Engine::recheck_ephemeral(
+  self : Engine,
+  mocks : Map[String, @definitions.Mock],
+) -> Unit {
+  for mock, by_session in self.ephemeral.by_mock {
+    guard mocks.get(mock) is Some(declared) else { continue }
+    for _, list in by_session {
+      for e in list {
+        if e.stub.serves
+          is Ordinary(
+            {
+              grpc_method: Some(_),
+              request: { path: Some(Has(Exact(path))), .. },
+              ..
+            }
+          ) {
+          e.answers = if has_unary_method(declared, path) {
+            GrpcCalls
+          } else {
+            Nothing
+          }
+        }
+      }
+    }
+  }
+}
+
+///|
+/// Whether the Descriptor set of `mock` has `path`, the path of a gRPC
+/// call, such as `/helloworld.Greeter/SayHello`, as a unary method. There is
+/// none without a set.
+fn has_unary_method(mock : @definitions.Mock, path : String) -> Bool {
+  mock.descriptor_set is Some(set) &&
+  set.find_method(path) is Some(rpc) &&
+  !rpc.client_streaming &&
+  !rpc.server_streaming
 }
 
 ///|

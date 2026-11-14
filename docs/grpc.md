@@ -16,6 +16,9 @@ Mock's `grpc` field and gRPC Stubs.
 - [Ports and detection](#ports-and-detection)
   - [Other subtypes](#other-subtypes)
   - [Requests that are not gRPC calls](#requests-that-are-not-grpc-calls)
+- [gRPC Stubs](#grpc-stubs)
+  - [A path that names no method](#a-path-that-names-no-method)
+  - [Ephemeral gRPC Stubs](#ephemeral-grpc-stubs)
 - [How smock serves a call](#how-smock-serves-a-call)
   - [The call's Mock](#the-calls-mock)
   - [Reloads](#reloads)
@@ -30,6 +33,7 @@ Mock's `grpc` field and gRPC Stubs.
 - [Status and message](#status-and-message)
   - [The status](#the-status)
   - [The message](#the-message)
+  - [Metadata](#metadata)
   - [Trailers-Only](#trailers-only)
 - [Unmatched calls](#unmatched-calls)
   - [Calls answered from their HEADERS](#calls-answered-from-their-headers)
@@ -175,6 +179,110 @@ or its `noMatch` answer when none matches, as before:
 Such a request never matches a gRPC Stub, even on the path of a gRPC
 method.
 
+## gRPC Stubs
+
+A gRPC Stub is an ordinary Stub whose exact `path` names a method of its
+Mock's set: `/`, the service's full name, `/` and the method's name, as a
+gRPC call names it. It needs no `method`, since every gRPC call is a
+`POST`, and no `status`:
+
+```yaml
+stubs:
+  - id: hello
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello
+      headers: { x-tenant: acme }
+      body: { json: { name: Tom } }
+    response:
+      json: { message: Hello Tom }
+```
+
+- Its conditions are `headers`, on the call's metadata, and a `json`
+  condition on the message
+  ([Conditions on the message](#conditions-on-the-message)).
+- Its reply is `json`, the reply message ([The reply](#the-reply)),
+  `headers`, its initial metadata ([Metadata](#metadata)), and `grpc`,
+  the status, message and trailing metadata the reply ends with
+  ([Status and message](#status-and-message)). `template` and weighted
+  `responses` work as on HTTP.
+- `priority`, `scenario`, `variables`, `dataWrites` and `fault.seed` work
+  as on HTTP.
+
+Fields that make no sense for gRPC are problems when the files load:
+`query` and `cookies` conditions, a body condition other than `json`, and
+`status`, `body`, `bodyFile`, `events` and `llm` in a reply. So is a
+`method` other than `POST`. Each problem says why:
+
+```text
+greeter.yaml: /stubs/0/request/query: makes no sense on a gRPC Stub: a gRPC call's path has no query
+```
+
+Faults that delay or break the connection are not served yet. The
+[Definition-file reference](definition-files.md#a-grpc-stubs-fields)
+lists every field. A [CRUD Stub](definition-files.md#crud-stubs) is never
+a gRPC Stub, whatever its path: it has no request path, so gRPC calls
+never reach it.
+
+### A path that names no method
+
+A typo in a gRPC Stub's path, such as `/helloworld.Greeter/SayHelo`,
+leaves an HTTP Stub, which gRPC calls never reach. Without `status`, it
+fails to load, since an HTTP Stub's response needs one. With `status`,
+`smock check` warns about it, since its path has the form of a gRPC
+method, `/package.Service/Method`, but names no method of the set:
+
+```text
+greeter.yaml: /stubs/1/request/path: warning: the Stub "hello-typo" is an HTTP Stub that gRPC calls never reach: its path has the form of a gRPC method, /package.Service/Method, but the Mock's Descriptor set has no method helloworld.Greeter/SayHelo
+```
+
+The warning does not change the exit status
+([A path that looks like a gRPC method](definition-files.md#a-path-that-looks-like-a-grpc-method)).
+
+### Ephemeral gRPC Stubs
+
+A test can add a gRPC Stub through the Admin API, as any
+[Ephemeral Stub](../README.md#sessions-and-ephemeral-stubs). It is a gRPC
+Stub when its path names a method of the Mock's set. This one makes the
+calls of the Session `test-a` fail with UNAVAILABLE:
+
+```sh
+curl -H "Authorization: Bearer change-me" \
+  -H "baggage: smock-session=test-a" \
+  -d '{"request": {"path": "/helloworld.Greeter/SayHello"}, "response": {"grpc": {"status": "UNAVAILABLE", "message": "try again"}}}' \
+  localhost:9090/v1/mocks/greeter/stubs
+grpcurl -plaintext -protoset defs/files/greeter.binpb \
+  -H "baggage: smock-session=test-a" \
+  -d '{"name": "Tom"}' localhost:8080 helloworld.Greeter/SayHello
+```
+
+grpcurl reports `Code: Unavailable` and `Message: try again`. The same
+call without the Session still gets the reply of the Stub from the files.
+
+- smock checks the Stub against the set, and normalises its `json`
+  condition, as it does a Stub in a Definition file. One that does not fit
+  gets 400 `invalid_stub`, whose message gives each problem with its JSON
+  Pointer, as `smock check` gives it:
+
+  ```json
+  {"error":"invalid_stub","message":"/response/json/mesage: is not a field of helloworld.HelloReply","warnings":[]}
+  ```
+
+- It answers the calls of its Session before the gRPC Stubs from the
+  files, and counts for their [Near miss](#the-near-miss-trailer). HTTP
+  requests never reach it, and gRPC calls never reach an Ephemeral HTTP
+  Stub.
+- It is not read again at a reload ([Reloads](#reloads)). While the Mock's
+  set does not have its method as a unary method, it answers no call, and
+  a call to the method gets the answer from its HEADERS
+  ([Calls answered from their HEADERS](#calls-answered-from-their-headers)).
+  Once a reload brings the method back, it answers again.
+- Its reply was encoded with the set served when it was added. After a
+  reload, smock encodes it on each call, and a reply that no longer fits
+  the output type gets INTERNAL `template failed`, with a `templateError`
+  in the call's Journal entry that says why
+  ([The reply](#the-reply)).
+
 ## How smock serves a call
 
 smock tells a gRPC call by its content type
@@ -241,6 +349,10 @@ the call gets the answer its HEADERS would get then
 ([Calls answered from their HEADERS](#calls-answered-from-their-headers)).
 A set that fails to load keeps the whole current definition set served.
 
+A reload does not read [Ephemeral gRPC Stubs](#ephemeral-grpc-stubs)
+again. One answers calls while the new set has its method as a unary
+method, and its reply is encoded with the new output type.
+
 ### The call the Stubs see
 
 A gRPC Stub sees a call as a request:
@@ -253,13 +365,14 @@ A gRPC Stub sees a call as a request:
   ([The request message as JSON](#the-request-message-as-json)). So the
   message `name: "Tom"` is `{"name":"Tom"}`.
 
-A call is matched only against the gRPC Stubs on its method, in the order
-Stubs are tried, never against an HTTP Stub, even one whose conditions it
-meets. A call that none of them matches gets UNIMPLEMENTED
-([Unmatched calls](#unmatched-calls)). A `json` body condition matches the
-decoded message, as it matches a JSON body, once smock has checked it
-against the input type and rewritten it into the same form
-([Conditions on the message](#conditions-on-the-message)):
+A call is matched only against the gRPC Stubs on its method, never
+against an HTTP Stub, even one whose conditions it meets: first its
+Session's [Ephemeral gRPC Stubs](#ephemeral-grpc-stubs), then those of the
+files, in the order Stubs are tried. A call that none of them matches
+gets UNIMPLEMENTED ([Unmatched calls](#unmatched-calls)). A `json` body
+condition matches the decoded message, as it matches a JSON body, once
+smock has checked it against the input type and rewritten it into the
+same form ([Conditions on the message](#conditions-on-the-message)):
 
 ```yaml
 request:
@@ -626,12 +739,13 @@ key and its value; extensions among the fields in field-number order;
 and groups between their start and end tags. It sends what a gRPC server
 sends:
 
-- HEADERS with `:status` 200, `content-type: application/grpc`,
+- HEADERS with `:status` 200, `content-type: application/grpc`, the
+  Stub's `headers`, its initial metadata ([Metadata](#metadata)),
   `smock-mock` when the Default Mock answered, and `date`;
 - one DATA frame with the reply message, framed;
-- trailers with `grpc-status: 0`, and `grpc-message` when the Stub gives
-  a message ([Status and message](#status-and-message)), which end the
-  stream.
+- trailers with `grpc-status: 0`, `grpc-message` when the Stub gives
+  a message ([Status and message](#status-and-message)), and its
+  `grpc.trailers`, its trailing metadata, which end the stream.
 
 A reply larger than the client's flow-control windows goes out as the
 client widens them, and the trailers follow it.
@@ -908,11 +1022,94 @@ A reply with `OK` may give a message too. It goes in the trailers, after
 `grpc-status: 0`, though most clients ignore the message of a call that
 succeeded.
 
+### Metadata
+
+A gRPC reply carries metadata in two places. A gRPC Stub's `headers` are
+its initial metadata, sent in the reply's HEADERS, and its
+`grpc.trailers` are its trailing metadata, sent in its trailers after
+`grpc-status` and `grpc-message`. Both take the shape of an HTTP Stub's
+`headers`: a value by name, or an array of values, each sent as a field of
+its own:
+
+```yaml
+response:
+  headers: { x-served-by: smock }
+  grpc:
+    status: NOT_FOUND
+    trailers: { x-trace: abc, x-tag: [a, b], trace-bin: "AAE=" }
+```
+
+A call to this Stub gets HEADERS, then trailers that end the stream:
+
+```text
+HEADERS
+  :status: 200
+  content-type: application/grpc
+  x-served-by: smock
+  date: Sat, 14 Nov 2026 07:00:00 GMT
+TRAILERS
+  grpc-status: 5
+  x-trace: abc
+  x-tag: a
+  x-tag: b
+  trace-bin: AAE
+```
+
+gRPC's rules for metadata apply to both, and `smock check` reports each
+problem at its JSON Pointer:
+
+- A name holds only `0-9`, `a-z`, `_`, `-` and `.` once in lower case.
+  smock sends it in lower case, so `X-Trace` goes out as `x-trace`. Two
+  names that differ only in case are a problem.
+- gRPC keeps `content-type`, `te` and every name that starts with `grpc-`
+  for itself, and HTTP/2 forbids `keep-alive`, `proxy-connection` and
+  `upgrade`. None of them can be given, nor the fields smock sets itself
+  (`content-length`, `transfer-encoding`, `connection` and `smock-mock`).
+  So a gRPC Stub that gives a Content-Type is a problem: smock always
+  sends `content-type: application/grpc`.
+- A value holds only characters from 0x20 to 0x7E, space and printable
+  ASCII. Other text goes in binary metadata.
+- Binary metadata has a name that ends with `-bin`. Its value is written
+  in standard base64, padded or not, and smock sends it without its
+  padding, as gRPC servers do: `"AAE="` goes out as `AAE`. A value that
+  is not base64 is a problem.
+
+```text
+greeter.yaml: /stubs/0/response/headers/grpc-foo: is reserved by gRPC, which keeps content-type, te and every name starting with grpc- for itself
+greeter.yaml: /stubs/0/response/grpc/trailers/x-note: must hold only characters from 0x20 to 0x7E: other values go in a field whose name ends with -bin, in base64
+```
+
+As with every field smock sends over HTTP/2, the spaces at either end of
+a value are trimmed when it is sent.
+
+With `template: true`, the values of both are text templates, rendered as
+header values are: the control characters they render become spaces, and
+tabs stay. Trailer values render after the message. smock checks a
+rendered value as it checks one as written: a value outside 0x20 to 0x7E,
+a tab included, or a `-bin` value that is not base64 gets Trailers-Only
+INTERNAL `template failed`, and the Journal entry's `templateError` says
+why:
+
+```json
+{
+  "at": "/response/grpc/trailers/x-trace",
+  "message": "the rendered value holds U+00E9, and gRPC metadata values hold only characters from 0x20 to 0x7E"
+}
+```
+
+A rendered `-bin` value loses its padding too.
+
+An error whose reply has initial metadata is sent as HEADERS with it,
+then trailers with the status, the message and the trailing metadata, as
+the example above shows. An error without initial metadata is sent as
+[Trailers-Only](#trailers-only). `smock-mock`, which smock adds when the
+Default Mock answers, does not count as initial metadata.
+
 ### Trailers-Only
 
-An error goes out as Trailers-Only, as gRPC servers send it: one HEADERS
-block that ends the stream, with no DATA and no trailers after it. Its
-fields are, in order:
+An error without initial metadata goes out as Trailers-Only, as gRPC
+servers send it: one HEADERS block that ends the stream, with no DATA and
+no trailers after it. Its fields are, in order:
 
 - `:status: 200`;
 - `content-type: application/grpc`;
@@ -920,6 +1117,7 @@ fields are, in order:
 - `grpc-message`, when the reply gives a message;
 - smock's own fields: `smock-mock` when the Default Mock answered, and
   `smock-near-miss` for an [unmatched call](#unmatched-calls);
+- the trailing metadata, the Stub's `grpc.trailers`;
 - `date`.
 
 ```text
@@ -1012,7 +1210,9 @@ with the octets of its message as its body's `size`
 
 The Near miss is the gRPC Stub of the call's Mock that failed the fewest
 conditions, the one tried first on a tie, as on HTTP
-([When no Stub matches](definition-files.md#when-no-stub-matches)). A
+([When no Stub matches](definition-files.md#when-no-stub-matches)). The
+call's Session's [Ephemeral gRPC Stubs](#ephemeral-grpc-stubs) count, and
+are tried first, but not one whose method a reload took away. A
 Stub on another method fails the `path` condition, so a call to a method
 that no Stub is on, or that the set lacks, has a Near miss too. smock
 sends it in the `smock-near-miss` field of the answer, in the form of the
@@ -1072,7 +1272,7 @@ fit the output type, whose `templateError` says why:
 
 | The call | `grpc-message` |
 |---|---|
-| The Stub's reply, its message, a `variables` value or a `dataWrites` value fails to render, or the rendered reply does not fit the output type | `template failed` |
+| The Stub's reply, its message, its metadata, a `variables` value or a `dataWrites` value fails to render, a rendered metadata value breaks gRPC's rules ([Metadata](#metadata)), or the rendered reply does not fit the output type | `template failed` |
 | A write of the Stub's `dataWrites` cannot be applied | `data write failed` |
 | The Stub's writes do not fit the bound on per-Session state | `state limit reached` |
 

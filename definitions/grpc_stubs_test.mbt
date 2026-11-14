@@ -264,7 +264,98 @@ test "a method whose input or output type comes from an editions file is not ser
 }
 
 ///|
-test "a gRPC Stub's fields other than those served so far are not served yet, each at its pointer" {
+test "fields that make no sense on a gRPC Stub are refused at load, each at its pointer, saying why" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: conditions
+        #|    mock: greeter
+        #|    request:
+        #|      path: /helloworld.Greeter/SayHello
+        #|      query: { page: "1" }
+        #|      cookies: { session: abc }
+        #|      body: Tom
+        #|    response: { status: 200, body: hi }
+        #|  - id: body-pattern
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello, body: { pattern: ".*" } }
+        #|    responses:
+        #|      - { bodyFile: greeter.binpb }
+        #|      - { events: [{ data: hi }] }
+        #|      - { llm: { api: openai-chat, text: hi } }
+        #|  - id: body-form
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello, body: { form: {} } }
+        #|    response: {}
+        #|  - id: body-xml
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello, body: { xml: {} } }
+        #|    response: {}
+      ),
+    ),
+    content=(
+      #|a.yaml: /stubs/0/request/query: makes no sense on a gRPC Stub: a gRPC call's path has no query
+      #|a.yaml: /stubs/0/request/cookies: makes no sense on a gRPC Stub: a gRPC call sends metadata, which headers conditions match, not cookies
+      #|a.yaml: /stubs/0/request/body: an exact-text condition makes no sense on a gRPC Stub: a call's message is matched as JSON, with a json condition
+      #|a.yaml: /stubs/0/response/status: makes no sense on a gRPC Stub: a gRPC reply's HTTP status is always 200, and grpc.status gives its gRPC status
+      #|a.yaml: /stubs/0/response/body: makes no sense on a gRPC Stub: its reply message is json, which smock encodes with the method's output type
+      #|a.yaml: /stubs/1/request/body/pattern: makes no sense on a gRPC Stub: a call's message is matched as JSON, with a json condition
+      #|a.yaml: /stubs/1/responses/0/bodyFile: makes no sense on a gRPC Stub: its reply message is json, which smock encodes with the method's output type
+      #|a.yaml: /stubs/1/responses/1/events: makes no sense on a gRPC Stub: a unary call gets one reply message, not an event stream
+      #|a.yaml: /stubs/1/responses/2/llm: makes no sense on a gRPC Stub: an LLM reply is written in an LLM API's HTTP wire form
+      #|a.yaml: /stubs/2/request/body/form: makes no sense on a gRPC Stub: a call's message is matched as JSON, with a json condition
+      #|a.yaml: /stubs/3/request/body/xml: makes no sense on a gRPC Stub: a call's message is matched as JSON, with a json condition
+    ),
+  )
+}
+
+///|
+test "a gRPC Stub's method may be left out, and when given must be POST; a method that is not an HTTP token gets that problem alone" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: post
+        #|    mock: greeter
+        #|    request: { method: POST, path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+        #|  - id: any
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+      ),
+    ),
+    content=(
+      #|greeter: post: gRPC Stub of SayHello
+      #|greeter: any: gRPC Stub of SayHello
+    ),
+  )
+  inspect(
+    check_stubs(
+      (
+        #|  - id: get
+        #|    mock: greeter
+        #|    request: { method: GET, path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+        #|  - id: lower-case
+        #|    mock: greeter
+        #|    request: { method: post, path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+        #|  - id: not-a-token
+        #|    mock: greeter
+        #|    request: { method: "PO ST", path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+      ),
+    ),
+    content=(
+      #|a.yaml: /stubs/0/request/method: must be POST on a gRPC Stub, or left out: a gRPC call is always a POST
+      #|a.yaml: /stubs/1/request/method: must be POST on a gRPC Stub, or left out: a gRPC call is always a POST
+      #|a.yaml: /stubs/2/request/method: must be an HTTP token, such as GET
+    ),
+  )
+}
+
+///|
+test "a gRPC Stub's Faults that delay or break the connection are not served yet, each at its pointer, while its reply headers are" {
   inspect(
     check_stubs(
       (
@@ -285,44 +376,13 @@ test "a gRPC Stub's fields other than those served so far are not served yet, ea
         #|  - id: not-served
         #|    mock: greeter
         #|    fault: { delay: { fixed: 50 }, connection: { kind: reset, probability: 1 } }
-        #|    request:
-        #|      path: /helloworld.Greeter/SayHello
-        #|      query: { page: "1" }
-        #|      cookies: { session: abc }
-        #|      body: Tom
-        #|    response: { status: 200, headers: { x-served-by: smock }, body: hi }
-        #|  - id: body-pattern
-        #|    mock: greeter
-        #|    request: { path: /helloworld.Greeter/SayHello, body: { pattern: ".*" } }
-        #|    responses:
-        #|      - { bodyFile: greeter.binpb }
-        #|      - { events: [{ data: hi }] }
-        #|      - { llm: { api: openai-chat, text: hi } }
-        #|  - id: body-form
-        #|    mock: greeter
-        #|    request: { path: /helloworld.Greeter/SayHello, body: { form: {} } }
-        #|    response: {}
-        #|  - id: body-xml
-        #|    mock: greeter
-        #|    request: { path: /helloworld.Greeter/SayHello, body: { xml: {} } }
-        #|    response: {}
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: { headers: { x-served-by: smock } }
       ),
     ),
     content=(
       #|a.yaml: /stubs/1/fault/delay: is not served on gRPC Stubs yet
       #|a.yaml: /stubs/1/fault/connection: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/1/request/query: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/1/request/cookies: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/1/request/body: an exact-text condition is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/1/response/status: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/1/response/headers: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/1/response/body: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/2/request/body/pattern: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/2/responses/0/bodyFile: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/2/responses/1/events: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/2/responses/2/llm: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/3/request/body/form: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/4/request/body/xml: is not served on gRPC Stubs yet
     ),
   )
 }
@@ -504,6 +564,89 @@ test "an input type that reaches a type of a proto2 file is served" {
     ),
     content=(
       #|scalars: remember: gRPC Stub of Remember
+    ),
+  )
+}
+
+///|
+test "a CRUD Stub stays an HTTP Stub even when its path names a method of its Mock's set: it has no request path" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: hello-crud
+        #|    mock: greeter
+        #|    crud: { bucket: greetings, path: /helloworld.Greeter/SayHello }
+        #|data:
+        #|  - { mock: greeter, name: greetings, key: id, json: [] }
+      ),
+    ),
+    content=(
+      #|greeter: hello-crud: HTTP Stub
+    ),
+  )
+}
+
+///|
+test "an HTTP Stub of a Mock with a set whose exact path has the form /package.Service/Method, but names no method of the set, gets a warning at its path" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: hello
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+        #|  - id: typo
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHelo }
+        #|    response: { status: 200 }
+        #|  - id: no-such-service
+        #|    mock: greeter
+        #|    request: { method: POST, path: /helloworld.Greeters/SayHello }
+        #|    response: { status: 200 }
+        #|  - id: rest
+        #|    mock: greeter
+        #|    request: { path: /users/1 }
+        #|    response: { status: 200 }
+        #|  - id: no-package
+        #|    mock: greeter
+        #|    request: { path: /Greeter/SayHello }
+        #|    response: { status: 200 }
+        #|  - id: version
+        #|    mock: greeter
+        #|    request: { path: /v1.2/items }
+        #|    response: { status: 200 }
+        #|  - id: three-names
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello/again }
+        #|    response: { status: 200 }
+        #|  - id: pattern
+        #|    mock: greeter
+        #|    request: { path: { pattern: "/helloworld[.]Greeter/SayHelo" } }
+        #|    response: { status: 200 }
+        #|  - id: plain-typo
+        #|    mock: plain
+        #|    request: { path: /helloworld.Greeter/SayHelo }
+        #|    response: { status: 200 }
+        #|  - id: crud
+        #|    mock: greeter
+        #|    crud: { bucket: greetings, path: /helloworld.Greeter/List }
+        #|data:
+        #|  - { mock: greeter, name: greetings, key: id, json: [] }
+      ),
+    ),
+    content=(
+      #|greeter: hello: gRPC Stub of SayHello
+      #|greeter: typo: HTTP Stub
+      #|greeter: no-such-service: HTTP Stub
+      #|greeter: rest: HTTP Stub
+      #|greeter: no-package: HTTP Stub
+      #|greeter: version: HTTP Stub
+      #|greeter: three-names: HTTP Stub
+      #|greeter: pattern: HTTP Stub
+      #|greeter: crud: HTTP Stub
+      #|plain: plain-typo: HTTP Stub
+      #|a.yaml: /stubs/1/request/path: warning: the Stub "typo" is an HTTP Stub that gRPC calls never reach: its path has the form of a gRPC method, /package.Service/Method, but the Mock's Descriptor set has no method helloworld.Greeter/SayHelo
+      #|a.yaml: /stubs/2/request/path: warning: the Stub "no-such-service" is an HTTP Stub that gRPC calls never reach: its path has the form of a gRPC method, /package.Service/Method, but the Mock's Descriptor set has no method helloworld.Greeters/SayHello
     ),
   )
 }

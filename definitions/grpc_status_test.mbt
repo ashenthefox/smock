@@ -29,10 +29,10 @@ fn grpc_replies(stubs : String) -> String raise {
           replies.push(
             match weighted.response.grpc {
               None => "-"
-              Some({ status, message: None, }) => "\{status}"
-              Some({ status, message: Some(Written(text)), }) =>
+              Some({ status, message: None, .. }) => "\{status}"
+              Some({ status, message: Some(Written(text)), .. }) =>
                 "\{status} \{text.escape()}"
-              Some({ status, message: Some(Templated(text)), }) =>
+              Some({ status, message: Some(Templated(text)), .. }) =>
                 "\{status} template \{text.source.escape()}"
             },
           )

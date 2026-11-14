@@ -793,7 +793,10 @@ pub struct Response {
   /// The header fields, in the order written, their values as written or
   /// text templates. A header given an array has one field per value, in
   /// array order. A `json` body adds `Content-Type: application/json` at
-  /// the end unless one is given.
+  /// the end unless one is given. A gRPC Stub's are its reply's initial
+  /// metadata: their names are in lower case, a `json` reply adds none, and
+  /// a value of a `-bin` field as written is held without its base64
+  /// padding.
   headers : ResponseHeaders
   /// What the response sends, as one kind that says how it is made: as
   /// written, or rendered for each request.
@@ -831,6 +834,13 @@ pub struct GrpcReply {
   /// The status message, which the server percent-encodes into
   /// `grpc-message`; `None` without `message`.
   message : GrpcMessage?
+  /// The trailing metadata, from `trailers`, sent after the status and the
+  /// message: fields in the order written, with their names in lower case,
+  /// one per value of a name given an array. A value of a `-bin` field as
+  /// written is held without its base64 padding. With `template` on, the
+  /// values are text templates, rendered as header values are, after the
+  /// message.
+  trailers : ResponseHeaders
 }
 
 ///|
