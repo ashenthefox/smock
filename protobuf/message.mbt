@@ -105,8 +105,12 @@ pub fn decode_json(
 ///|
 /// The values of the fields of the message of the type `message` whose
 /// records are `records`, merged in order, by the index of each field in
-/// `message.fields`; `None` for a field the message leaves out.
-fn scan(
+/// `message.fields`; `None` for a field the message leaves out. A number
+/// that a closed enum does not define is skipped, as protobuf's parsers
+/// keep it as an unknown field: the field keeps the value it had, and a
+/// oneof the member it had.
+fn DescriptorSet::scan(
+  self : DescriptorSet,
   message : MessageDescriptor,
   records : Array[BytesView],
 ) -> FixedArray[Value?] raise DecodeError {
@@ -197,8 +201,15 @@ fn scan(
         continue
       }
       match (field.type_, reader.wire_type()) {
-        (Int32 | Int64 | UInt32 | UInt64 | SInt32 | SInt64 | Bool | Enum, Varint
-        ) => values[index] = Some(Number(reader.varint()))
+        (Int32 | Int64 | UInt32 | UInt64 | SInt32 | SInt64 | Bool, Varint) =>
+          values[index] = Some(Number(reader.varint()))
+        (Enum, Varint) => {
+          let bits = reader.varint()
+          if self.closed_enum_of(field) is Some(type_) && !type_.defines(bits) {
+            continue
+          }
+          values[index] = Some(Number(bits))
+        }
         (Fixed64 | SFixed64 | Double, I64) =>
           values[index] = Some(Number(reader.fixed64()))
         (Fixed32 | SFixed32 | Float, I32) =>
@@ -251,7 +262,7 @@ fn DescriptorSet::print_message(
   depth : Int32,
 ) -> Unit raise DecodeError {
   let fields = message.fields
-  let values = scan(message, records)
+  let values = self.scan(message, records)
   out.write_byte(b'{')
   let order = message.by_number
   // Every singular field of a proto2 message has presence.
@@ -355,6 +366,9 @@ fn DescriptorSet::print_list(
   depth : Int32,
 ) -> Unit raise DecodeError {
   out.write_byte(b'[')
+  // A number that a closed enum does not define is skipped, as protobuf's
+  // parsers keep it as an unknown field.
+  let closed = self.closed_enum_of(field)
   let mut first = true
   for r in 0..<runs.length() {
     let reader = Reader(runs[r])
@@ -386,6 +400,9 @@ fn DescriptorSet::print_list(
           let values = Reader(reader.length_delimited())
           while !values.at_end() {
             let bits = values.number(field.type_)
+            if closed is Some(type_) && !type_.defines(bits) {
+              continue
+            }
             if !first {
               out.write_byte(b',')
             }
@@ -395,6 +412,9 @@ fn DescriptorSet::print_list(
         }
         _ => {
           let bits = reader.number(field.type_)
+          if closed is Some(type_) && !type_.defines(bits) {
+            continue
+          }
           if !first {
             out.write_byte(b',')
           }
@@ -448,7 +468,8 @@ fn is_map_entry(entry : MessageDescriptor) -> Bool {
 /// records in `runs`, a field of a message `depth` messages deep, as an
 /// object with a member per key, in key order. An entry without a key or a
 /// value takes the default, and of the entries with one key, the last
-/// wins.
+/// wins. An entry whose value is a number that a closed enum does not
+/// define is skipped, as protobuf's parsers keep it as an unknown field.
 fn DescriptorSet::print_map(
   self : DescriptorSet,
   out : @buffer.Buffer,
@@ -464,8 +485,7 @@ fn DescriptorSet::print_map(
       entries.push(reader.length_delimited())
     }
   }
-  let count = entries.length()
-  if count == 0 {
+  if entries.length() == 0 {
     out.write_bytes(b"{}")
     return
   }
@@ -481,23 +501,27 @@ fn DescriptorSet::print_map(
   let key_field = entry.fields[key_index]
   let value_field = entry.fields[value_index]
   let textual = key_field.type_ is String
+  let closed = self.closed_enum_of(value_field)
   // Each entry's key: its text for a string key, or else a number whose
   // unsigned order is the key's order, the default's until the entry
   // gives one.
-  let keys : FixedArray[UInt64] = FixedArray::make(
-    count,
-    key_order(key_field.type_, 0),
-  )
+  let no_key = key_order(key_field.type_, 0)
+  let keys : FixedArray[UInt64] = FixedArray::make(entries.length(), no_key)
   let texts : FixedArray[BytesView] = FixedArray::make(
     if textual {
-      count
+      entries.length()
     } else {
       0
     },
     b""[:],
   )
-  for i in 0..<count {
+  // The entries kept, at the start of `entries`, `keys` and `texts`.
+  let mut count = 0
+  for i in 0..<entries.length() {
     let reader = Reader(entries[i])
+    // Whether the entry's last value is a number its closed enum does not
+    // define.
+    let mut unknown = false
     while !reader.at_end() {
       let number = reader.tag()
       let at = reader.pos
@@ -510,12 +534,12 @@ fn DescriptorSet::print_map(
               "the field \{key_field.name} holds octets that are not UTF-8",
             )
           }
-          texts[i] = text
+          texts[count] = text
         }
         (1, Int32 | Int64 | UInt32 | UInt64 | SInt32 | SInt64 | Bool, Varint)
         | (1, Fixed64 | SFixed64, I64)
         | (1, Fixed32 | SFixed32, I32) =>
-          keys[i] = key_order(
+          keys[count] = key_order(
             key_field.type_,
             match reader.wire_type() {
               I64 => reader.fixed64()
@@ -533,11 +557,26 @@ fn DescriptorSet::print_map(
             )
           }
         }
+        (2, _, Varint) if closed is Some(type_) =>
+          unknown = !type_.defines(reader.varint())
         _ => reader.skip()
       }
     }
+    if unknown {
+      keys[count] = no_key
+      if textual {
+        texts[count] = b""[:]
+      }
+      continue
+    }
+    entries[count] = entries[i]
+    count += 1
   }
-  let order = sorted_entries(keys, texts)
+  if count == 0 {
+    out.write_bytes(b"{}")
+    return
+  }
+  let order = sorted_entries(keys, texts, count)
   out.write_byte(b'{')
   let mut first = true
   for n in 0..<count {
@@ -550,7 +589,7 @@ fn DescriptorSet::print_map(
       out.write_byte(b',')
     }
     first = false
-    let values = scan(entry, [entries[i]])
+    let values = self.scan(entry, [entries[i]])
     match values[key_index] {
       Some(Octets(text)) => write_json_string(out, text)
       Some(Number(bits)) => {
@@ -646,14 +685,14 @@ fn same_key(
 }
 
 ///|
-/// The indexes of a map's entries, whose keys are `keys` or `texts`, as
-/// `compare_keys` says, in key order, entries with one key in their order:
-/// a merge sort, a run at a time, with plain loops.
+/// The indexes of the first `count` entries of a map, whose keys are `keys`
+/// or `texts`, as `compare_keys` says, in key order, entries with one key
+/// in their order: a merge sort, a run at a time, with plain loops.
 fn sorted_entries(
   keys : FixedArray[UInt64],
   texts : FixedArray[BytesView],
+  count : Int32,
 ) -> FixedArray[Int32] {
-  let count = keys.length()
   let mut from : FixedArray[Int32] = FixedArray::make(count, 0)
   for i in 0..<count {
     from[i] = i
@@ -740,6 +779,28 @@ fn DescriptorSet::print_number(
     }
     _ => ()
   }
+}
+
+///|
+/// The enum type of `field`, a field of a message of this set, when it is
+/// a closed enum, as the enums of proto2 files are: protobuf's parsers keep
+/// a number it does not define as an unknown field. `None` for an open
+/// enum and for any other type.
+fn DescriptorSet::closed_enum_of(
+  self : DescriptorSet,
+  field : FieldDescriptor,
+) -> EnumDescriptor? {
+  match self.enum_of(field) {
+    Some(type_) if type_.syntax is Proto2 => Some(type_)
+    _ => None
+  }
+}
+
+///|
+/// Whether the enum defines the number whose bits, as a varint gives them,
+/// are `bits`: their low 32 bits, as protobuf's parsers read an enum.
+fn EnumDescriptor::defines(self : EnumDescriptor, bits : UInt64) -> Bool {
+  self.find_value_by_number(bits.to_uint().reinterpret_as_int()) is Some(_)
 }
 
 ///|

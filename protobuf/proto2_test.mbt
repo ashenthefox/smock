@@ -53,3 +53,47 @@ test "a message without a required field does not parse, nested ones and a map's
     ),
   )
 }
+
+///|
+test "proto2 fields print only when set, at their defaults too, and repeated fields and maps print [] and {}" {
+  inspect(
+    decoded(shipping_set, "shipping.Parcel", fixture(shipping_parcel)),
+    content=(
+      #|{"state":"SHIPPED","history":["NEW","DELIVERED"],"weights":[1,300],"sizes":[3,4],"order":{"id":7},"orders":[{"id":8,"note":""},{"id":-1}],"states":{"a":"NEW","b":"DELIVERED"},"label":"","tags":["x",""],"notes":{"k":"v"},"fragile":false,"count":0,"carrierName":"post","byId":{"2":{"id":2}}}
+    ),
+  )
+  inspect(
+    decoded(shipping_set, "shipping.Parcel", b""),
+    content=(
+      #|{"history":[],"weights":[],"sizes":[],"orders":[],"states":{},"tags":[],"notes":{},"byId":{}}
+    ),
+  )
+}
+
+///|
+test "an unknown value of a closed enum is kept as an unknown field: the field keeps its value, a list drops it, a map drops its entry, and a oneof keeps its member" {
+  // parcel-unknown.txtpb, then carrier-unknown.txtpb, which protobuf's
+  // parsers read as one message: state 1 then 9, a packed history of 0,
+  // 9, 2 and -1, entries a: 1, a: 9 and b: 9, carrier_name, then
+  // carrier_state 7.
+  inspect(
+    decoded(
+      shipping_set,
+      "shipping.Parcel",
+      fixture(shipping_unknown) + b"\x68\x07",
+    ),
+    content=(
+      #|{"state":"SHIPPED","history":["NEW","DELIVERED"],"weights":[],"sizes":[],"orders":[],"states":{"a":"SHIPPED"},"tags":[],"notes":{},"carrierName":"post","byId":{}}
+    ),
+  )
+  // An unpacked history, 9 then 1; a state that is unknown alone; an entry
+  // of 9 alone; carrier_state 7 alone.
+  inspect(
+    decoded(
+      shipping_set, "shipping.Parcel", b"\x10\x09\x10\x01\x08\x09\x3a\x05\x0a\x01c\x10\x09\x68\x07",
+    ),
+    content=(
+      #|{"history":["SHIPPED"],"weights":[],"sizes":[],"orders":[],"states":{},"tags":[],"notes":{},"byId":{}}
+    ),
+  )
+}
