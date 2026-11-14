@@ -161,7 +161,7 @@ test "an Any's type that the set lacks, in a condition or a static reply, is a p
       #|a.yaml: /stubs/0/response/json/@type: names the type missing.Greeting, which the Descriptor set does not define
       #|a.yaml: /stubs/1/request/body/json/nmae: is not a field of helloworld.HelloRequest
       #|a.yaml: /stubs/1/response/json/value: is not a field of google.protobuf.Empty
-      #|a.yaml: /stubs/2/request/body/json/value: must be written "1.500s", as smock prints it: the message is a google.protobuf.Duration
+      #|a.yaml: /stubs/2/request/body/json/value: must be written "1.500s", as smock prints it: the Any holds a google.protobuf.Duration
       #|a.yaml: /stubs/2/request/body/json/seconds: is not a member of an Any that holds a google.protobuf.Duration: give the google.protobuf.Duration as "value"
       #|a.yaml: /stubs/3/request/body/json: must give "@type", the type URL of the message the Any holds, so that its other members can be checked against its type
       #|a.yaml: /stubs/4/request/body/json/@type: must be a type URL: / and the full name of a type of the set at its end, such as "type.googleapis.com/helloworld.HelloRequest", when the Any gives other members: they are checked against the type it names

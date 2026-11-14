@@ -25,6 +25,8 @@ Mock's `grpc` field and gRPC Stubs.
   - [The call the Stubs see](#the-call-the-stubs-see)
   - [The request message as JSON](#the-request-message-as-json)
   - [Well-known types](#well-known-types)
+  - [JSON values: Struct, Value, ListValue and NullValue](#json-values-struct-value-listvalue-and-nullvalue)
+  - [Any](#any)
   - [Conditions on the message](#conditions-on-the-message)
   - [Printed forms](#printed-forms)
   - [The reply](#the-reply)
@@ -409,6 +411,11 @@ the `.proto` file gives it a `json_name`. Each type prints as follows:
 | `google.protobuf.FieldMask` | a string of its paths in lowerCamelCase, joined by commas | `"userName,address.city"` |
 | a wrapper, such as `google.protobuf.Int32Value` | the value it wraps, printed as its type is: `Int64Value` and `UInt64Value` as numbers, `FloatValue` as a `float`, `BytesValue` in base64 | `5`, `9.99`, `"Tom"` |
 | `google.protobuf.Empty` | an empty object | `{}` |
+| `google.protobuf.Struct` | an object of any JSON values, its members in key order | `{"age":42,"name":"Tom"}` |
+| `google.protobuf.Value` | the JSON value it holds: `null`, a number, which prints as a `double` does, a string, `true` or `false`, an object or an array | `null`, `1.5`, `["x"]` |
+| `google.protobuf.ListValue` | an array of any JSON values | `["Tom",null,7]` |
+| `google.protobuf.NullValue` | `null` | `null` |
+| `google.protobuf.Any` | an object of its type URL as `"@type"`, then the message it holds: its fields, or, for a well-known type with a form of its own, that form as `"value"` ([Any](#any)) | `{"@type":"type.googleapis.com/helloworld.HelloRequest","name":"Tom"}` |
 
 So the message `id: 9223372036854775807 price: 9.99 status: ACTIVE
 address { city: "Kyoto" }` is:
@@ -461,20 +468,19 @@ the Near miss, whichever client sent it. The message
 {"tags":["a","b"],"counts":{"1":3,"2":5,"10":1}}
 ```
 
-For now, smock does not decode the well-known types
-`google.protobuf.Any`, `Struct`, `Value`, `ListValue` and `NullValue`,
-or groups. It answers with replies of every type of a proto3 or a proto2
-file but those, groups and types that an extension extends
-([The reply](#the-reply), [proto2 types](#proto2-types)). The
+For now, smock does not decode groups. It answers with replies of every
+type of a proto3 or a proto2 file but groups and types that an extension
+extends ([The reply](#the-reply), [proto2 types](#proto2-types)). The
 [Definition-file reference](definition-files.md#grpc-stubs) lists what a
 gRPC Stub cannot hold yet.
 
 ### Well-known types
 
-protobuf's well-known types Timestamp, Duration, FieldMask, the wrappers
-and Empty print in their ProtoJSON forms, as grpcurl shows them, not as
-objects of their fields ([the table above](#the-request-message-as-json)).
-With this message:
+protobuf's well-known types print in their ProtoJSON forms, as grpcurl
+shows them, not as objects of their fields
+([the table above](#the-request-message-as-json)). This section shows
+Timestamp, Duration, FieldMask, the wrappers and Empty; the next two show
+the types that hold any JSON value, and Any. With this message:
 
 ```proto
 message Lease {
@@ -530,6 +536,93 @@ lowerCamelCase form, such as `user__name`, cannot be printed, so it does
 not decode: the call gets INTERNAL, as a message that does not parse
 does.
 
+### JSON values: Struct, Value, ListValue and NullValue
+
+`google.protobuf.Struct`, `Value` and `ListValue` hold any JSON value, and
+print as that value. A Struct is an object, its members in key order, as
+a map's are. A ListValue is an array. A Value is `null`, a number, a
+string, `true` or `false`, an object, which is a Struct, or an array,
+which is a ListValue. A number prints as a `double` does: `3`, `1.5`,
+`1e+21`. `google.protobuf.NullValue`, the enum of a Value's `null`, prints
+as `null`. With this message:
+
+```proto
+message Document {
+  google.protobuf.Struct labels = 1;
+  google.protobuf.Value value = 2;
+  google.protobuf.NullValue nothing = 4;
+}
+```
+
+a call is journaled as:
+
+```json
+{"labels":{"count":3,"team":"core"},"value":["x",null],"nothing":null}
+```
+
+A NullValue field without presence prints `null` even when the message
+leaves it out, as any field at its default does.
+
+A condition on one of these types may hold any JSON value, with patterns
+and operators in any place. A Struct's keys are data, as a map's are:
+smock never rewrites them, and a key that starts with `$` is written
+`$$`. A number is rewritten into the form a `double` prints, such as
+`3` for `3.0`, and a NullValue's name, `NULL_VALUE`, or its number into
+`null`.
+
+In a reply, `null` sets a Value, a Struct's members and a ListValue's
+elements included, to `null_value`, and a NullValue field to its one
+value. It leaves any other field unset:
+
+```yaml
+response:
+  json: { labels: { gone: null }, value: null, nothing: null }
+```
+
+A Value that holds no value, or a number that JSON has none for, NaN or
+an infinity, cannot be printed, so a call whose message holds one does
+not decode and gets INTERNAL, as protobuf's JSON printers refuse it.
+
+### Any
+
+A `google.protobuf.Any` holds a message of any type, with the type's URL,
+such as `type.googleapis.com/helloworld.HelloRequest`. smock looks the
+type up in the Mock's Descriptor set, by the full name after the URL's
+last `/`, so the set must hold the file that defines it, as
+`protoc --include_imports` puts it there when a file of the set imports
+it. An Any prints as an object of the URL as `"@type"`, then the message
+it holds: its fields, as any message prints, or, for a well-known type
+with a form of its own, that form as `"value"`. An Any that holds an
+Empty prints `"@type"` alone, and an empty Any prints `{}`.
+
+So an Any that holds a `helloworld.HelloRequest` is journaled as:
+
+```json
+{"@type":"type.googleapis.com/helloworld.HelloRequest","name":"Tom"}
+```
+
+and one that holds a Duration of 1.5 s as:
+
+```json
+{"@type":"type.googleapis.com/google.protobuf.Duration","value":"1.500s"}
+```
+
+A condition on an Any is written in the same form. smock checks its
+other members against the type that `"@type"` names, and rewrites them as
+in any condition. `"@type"` may be a pattern or an operator only when it
+is the Any's only member. A reply is read in the same form, field names
+in either spelling, and an Empty may also be given `"value": {}`, as
+grpcurl prints it.
+
+An Any whose type the set lacks cannot be printed. A call whose message
+holds one gets INTERNAL, as a message that does not parse does. In a
+condition or a static reply, it is a problem when the files load, and a
+templated reply that names one gets INTERNAL `template failed`:
+
+```text
+documents.yaml: /stubs/0/request/body/json/@type: names the type missing.Greeting, which the Descriptor set does not define
+```
+
 ### Conditions on the message
 
 When the files load, smock checks each gRPC Stub's `json` condition
@@ -583,12 +676,17 @@ smock rewrites:
   | `ratio: 16777217` | `16777216` | `16777217`, which a float holds as 16777216 |
 
 - an integer written with an exponent or a fraction of zeros, such as
-  `1e3`, into its digits, `1000`.
+  `1e3`, into its digits, `1000`;
+- a NullValue's name or number into `null`, and a number that a Value
+  holds into the form a `double` prints
+  ([JSON values](#json-values-struct-value-listvalue-and-nullvalue)).
 
 Map keys are data, never rewritten: `profile: {scores: {math_score: 90}}`
 matches the key `math_score` as written, while `profile` and its field
 `display_name` become `profile` and `displayName`. A key that starts with
-`$` is written `$$`, as in any `json` condition.
+`$` is written `$$`, as in any `json` condition. A Struct's keys are data
+too, and an Any's members are checked against the type its `"@type"`
+names ([Any](#any)).
 
 smock refuses, as a problem at the JSON Pointer of the value at fault:
 
@@ -599,7 +697,7 @@ smock refuses, as a problem at the JSON Pointer of the value at fault:
   fraction, an enum name the enum lacks, a `float` outside the float range,
   a string for a number or a number for a string, an array for a field
   that is not repeated, a map or a message that is not an object, and
-  `null`, which smock never prints;
+  `null`, which smock prints only for a Value and a NullValue;
 - a literal that ProtoJSON reads but smock never prints
   ([Printed forms](#printed-forms)).
 
@@ -674,28 +772,32 @@ is:
 | `bytes` | A string in base64, standard or URL-safe, with or without its padding. |
 | An enum | The name of a value, such as `ACTIVE`, or a number, which may name no value, as an open enum allows. A closed enum, as a proto2 enum is, takes only the numbers it defines. |
 | A message | An object. |
-| A repeated field | An array. `null` in it is a problem. |
-| A map | An object whose keys are the map's keys as strings: integers in decimal, such as `"-1"`, and `"true"` and `"false"`. A `null` value is a problem. |
+| A repeated field | An array. `null` in it is a problem, but in a list of Values or NullValues. |
+| A map | An object whose keys are the map's keys as strings: integers in decimal, such as `"-1"`, and `"true"` and `"false"`. A `null` value is a problem, but in a map of Values or NullValues. |
 | A oneof | One of its members. Two members in one object are a problem, but a member that is `null` does not count. |
 | `google.protobuf.Timestamp` | A string in RFC 3339 form, with 0 to 9 fractional digits, then `Z` or an offset such as `+09:00`: `"1970-01-01T09:00:01.5+09:00"`. From 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, once the offset is taken off. |
 | `google.protobuf.Duration` | A string of seconds, with 0 to 9 fractional digits, then `s`: `"1.5s"`, `"-0.25s"`. At most `315576000000.999999999s` either way. |
 | `google.protobuf.FieldMask` | A string of paths in lowerCamelCase, joined by commas: `"userName,address.city"`. An underscore in it is a problem. |
 | A wrapper | The value it wraps, as its type reads it: `5` or `"5"` for an `Int64Value`. |
 | `google.protobuf.Empty` | `{}`. |
+| `google.protobuf.Struct` | An object of any JSON values. |
+| `google.protobuf.Value` | Any JSON value, `null` included. |
+| `google.protobuf.ListValue` | An array of any JSON values, `null` included. |
+| `google.protobuf.NullValue` | `null`, or its name `NULL_VALUE`, or its number. |
+| `google.protobuf.Any` | An object of `"@type"`, a type URL that names a type of the set, and the message it holds ([Any](#any)). |
 
-`null` leaves a field unset. A key that names no field is a problem. A
-Stub without `json` answers an empty message, with every field at its
-default.
+`null` leaves a field unset, but sets a Value or a NullValue field
+([JSON values](#json-values-struct-value-listvalue-and-nullvalue)). A key
+that names no field is a problem. A Stub without `json` answers an empty
+message, with every field at its default.
 
 The reply's output type may be any message of a proto3 or a proto2 file,
 with any of these fields, a well-known type such as
 `google.protobuf.Timestamp` included, whose value is then the whole
-`json`, such as `json: "1970-01-01T00:00:01.5Z"`. smock does not serve the
-well-known types `google.protobuf.Any`, `Struct`, `Value`, `ListValue`
-and `NullValue` yet: a Stub on a method whose output type is one, or
-reaches one through its fields, is a problem at its `path`, as is one
-whose output type reaches a group, a type that an extension extends, a
-type of an editions file or a MessageSet ([proto2 types](#proto2-types)).
+`json`, such as `json: "1970-01-01T00:00:01.5Z"`. A Stub on a method whose
+output type reaches a group, a type that an extension extends, a type of
+an editions file or a MessageSet is a problem at its `path`
+([proto2 types](#proto2-types)).
 
 A reply without `template` is read and encoded once, when the files load.
 A reply that is not a message of the output type is a problem at the JSON
@@ -1111,7 +1213,10 @@ field included, or messages nested deeper than 100, each map entry
 counting as a message, or when it lacks a proto2 required field
 ([proto2 types](#proto2-types)). smock cannot print a Timestamp, a
 Duration or a FieldMask path out of its range or form
-([Well-known types](#well-known-types)).
+([Well-known types](#well-known-types)), a Value that holds no value, NaN
+or an infinity
+([JSON values](#json-values-struct-value-listvalue-and-nullvalue)), or an
+Any whose type the set lacks ([Any](#any)).
 
 These calls reach the Stubs. The Journal records each with the
 `grpcStatus` `INTERNAL`, and with the HTTP status planned for it: 500 or

@@ -5933,13 +5933,9 @@ what is not served yet:
 
 - A method whose input or output type has a group field, or is a type
   that an extension in the set extends, or reaches one.
-- A method whose input or output type is one of the well-known types
-  `google.protobuf.Any`, `Struct`, `Value`, `ListValue` and `NullValue`,
-  or has, or reaches, a field of one, singular, repeated or as a map's
-  values. Every other type is served on both sides, with fields of every
-  type: scalars, enums, nested messages, `optional` fields, repeated
-  fields, maps, oneofs, and the well-known types Timestamp, Duration,
-  FieldMask, the wrappers and Empty, in their ProtoJSON forms
+  Every other type is served on both sides, with fields of every type:
+  scalars, enums, nested messages, `optional` fields, repeated fields,
+  maps, oneofs, and every well-known type, in its ProtoJSON form
   ([Well-known types](grpc.md#well-known-types)).
 - `fault.delay`, `fault.connection`, and `headers` in a reply, as the
   table above says.
@@ -6066,8 +6062,14 @@ request:
   `"1.5s"`, which suggests `"1.500s"`; and a Timestamp with an offset other
   than `Z`, such as `+09:00`, which suggests its time in UTC
   ([Well-known types](grpc.md#well-known-types)).
+- A NullValue's name or number becomes `null`, and a number that a
+  `google.protobuf.Value` holds is rewritten into the form a `double`
+  prints.
 - Map keys are data: they are never rewritten, `$$` for a key that starts
-  with `$` included.
+  with `$` included. So are a `google.protobuf.Struct`'s keys.
+- An Any's `"@type"` must name a type of the Mock's set, and its other
+  members are checked against that type
+  ([Any](grpc.md#any)).
 - Patterns and operators are allowed in any place. An operator's
   condition is checked as the value in its place, and the condition of
   `$includes` or `$last` on a repeated field as one of its elements.

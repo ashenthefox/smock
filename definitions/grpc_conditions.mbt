@@ -16,6 +16,9 @@
 priv enum Place {
   /// The whole message, of this type.
   Whole(@protobuf.MessageDescriptor)
+  /// The message that an Any holds, of this type, a well-known type with a
+  /// form of its own, given as the Any's `value`.
+  Held(@protobuf.MessageDescriptor)
   /// The value of a field of a message: a map's entries, a repeated
   /// field's elements, or a singular field's value.
   Of(@protobuf.MessageDescriptor, @protobuf.FieldDescriptor)
@@ -104,14 +107,15 @@ fn File::grpc_condition(
   }
   match place {
     // A well-known type with a form of its own is checked in that form.
-    Whole(message) =>
+    Whole(message) | Held(message) =>
       try set.printed_message(message, json) catch {
         error => {
-          self.printed_error(
-            pointer,
-            error,
-            "the message is a \{message.full_name}",
-          )
+          let subject = if place is Held(_) {
+            "the Any holds a \{message.full_name}"
+          } else {
+            "the message is a \{message.full_name}"
+          }
+          self.printed_error(pointer, error, subject)
           None
         }
       } noraise {
@@ -352,7 +356,7 @@ fn File::any_condition(
           self.grpc_condition(
             child_pointer(pointer, key),
             set,
-            Whole(held),
+            Held(held),
             value,
           ) {
           Some(value) => out[key] = value

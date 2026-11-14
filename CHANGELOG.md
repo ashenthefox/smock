@@ -198,8 +198,7 @@ of each GitHub release include its section
   Mock, and the Default Mock answers with its own set. A call is looked up
   again when its request ends, so a reload never makes a call decoded with
   one version of a set and answered with another. For now smock serves
-  replies of every proto3 and proto2 type but the well-known types Any,
-  Struct, Value, ListValue and NullValue, groups and extended types, and
+  replies of every proto3 and proto2 type but groups and extended types, and
   answers the calls it does not serve yet with Trailers-Only INTERNAL and
   a fixed message. The new `smock/grpc` module frames messages, names gRPC's
   status codes and percent-encodes status messages, and `smock/protobuf`
@@ -224,8 +223,7 @@ of each GitHub release include its section
   unpacked, a later oneof member replacing an earlier one, and the values
   of a message field merged. So a message gives one text, whatever order
   its client encoded it in. A message that does not parse gets INTERNAL
-  and counts as rejected traffic. The well-known types Any, Struct, Value,
-  ListValue and NullValue are not served yet. See
+  and counts as rejected traffic. See
   [The request message as JSON](docs/grpc.md#the-request-message-as-json).
 - `response.grpc`: a gRPC Stub's reply, or each of its `responses`, gives
   the gRPC status it ends with by name, from `OK` to `UNAUTHENTICATED`,
@@ -281,6 +279,21 @@ of each GitHub release include its section
   than `Z`, such as `+09:00`, names its time in UTC. A FloatValue in a
   condition is rounded as a `float` is. See
   [Well-known types](docs/grpc.md#well-known-types).
+- protobuf's well-known types Struct, Value, ListValue, NullValue and Any
+  in their ProtoJSON forms, so every proto3 type is served. A Struct, a
+  Value and a ListValue print as the JSON values they hold, a Struct's
+  members in key order and a Value's numbers as a `double` prints them,
+  and a NullValue as `null`. In a reply, `null` sets a Value, a Struct's
+  members and a ListValue's elements included, and a NullValue, and leaves
+  other fields unset. A condition's Struct keys are data, never rewritten.
+  An Any prints as its type URL in `"@type"`, then the fields of the
+  message it holds, or its form in `"value"` for a well-known type that
+  has one, such as
+  `{"@type":"type.googleapis.com/google.protobuf.Duration","value":"1.500s"}`;
+  one that holds an Empty prints `"@type"` alone. Its type is looked up in
+  the Mock's Descriptor set: a call whose Any holds a type the set lacks
+  gets INTERNAL, and in a condition or a static reply such a type is a load
+  error. See [Any](docs/grpc.md#any).
 - A gRPC Stub's fields that make no sense for gRPC are load errors that
   say why: `query` and `cookies` conditions, a body condition other than
   `json`, and `status`, `body`, `bodyFile`, `events` and `llm` in a reply.
