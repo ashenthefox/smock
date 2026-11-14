@@ -281,6 +281,23 @@ of each GitHub release include its section
   than `Z`, such as `+09:00`, names its time in UTC. A FloatValue in a
   condition is rounded as a `float` is. See
   [Well-known types](docs/grpc.md#well-known-types).
+- A gRPC Stub's fields that make no sense for gRPC are load errors that
+  say why: `query` and `cookies` conditions, a body condition other than
+  `json`, and `status`, `body`, `bodyFile`, `events` and `llm` in a reply.
+  `method` may be left out, and when given, must be `POST`. A CRUD Stub
+  stays an HTTP Stub whatever its path. `smock check` warns about an HTTP
+  Stub of a Mock with a set whose exact path has the form
+  `/package.Service/Method` but names no method of the set, which gRPC
+  calls never reach. See [gRPC Stubs](docs/grpc.md#grpc-stubs).
+- Ephemeral gRPC Stubs. An Ephemeral Stub whose exact path names a method
+  of its Mock's set is a gRPC Stub, checked against the set and normalised
+  as a Stub in a Definition file is, or refused with 400 `invalid_stub` and
+  each problem's JSON Pointer. A call tries its Session's Ephemeral gRPC
+  Stubs first. They are not read again at a reload: while the new set
+  lacks their method as a unary method, they answer no call, and a reply
+  that no longer fits the output type gets INTERNAL, with a
+  `templateError`. See
+  [Ephemeral gRPC Stubs](docs/grpc.md#ephemeral-grpc-stubs).
 
 ### Changed
 
@@ -362,6 +379,9 @@ of each GitHub release include its section
   `templateError` says that a gRPC call got INTERNAL instead of 500, and
   that, for a gRPC call, it also says why a templated reply, once
   rendered, is not a message of the method's output type.
+- The Admin API document's `EphemeralStubInput` says that an Ephemeral
+  Stub may be a gRPC Stub, checked against its Mock's set, and what a
+  reload does to it.
 
 ### Fixed
 

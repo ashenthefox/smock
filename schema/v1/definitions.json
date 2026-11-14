@@ -315,7 +315,7 @@
       "additionalProperties": false
     },
     "request": {
-      "description": "The conditions a request must meet for the Stub to match it. Every condition given must hold. An omitted condition matches anything, so a Stub without request matches every request its Mock receives.",
+      "description": "The conditions a request must meet for the Stub to match it. Every condition given must hold. An omitted condition matches anything, so a Stub without request matches every request its Mock receives. On a gRPC Stub, whose exact path names a unary method of its Mock's Descriptor set, method may be left out and is otherwise POST, and query, cookies and every body condition but json make no sense: smock refuses them.",
       "type": "object",
       "properties": {
         "method": {
@@ -472,7 +472,7 @@
       "unevaluatedProperties": false
     },
     "responseFields": {
-      "description": "The fields of a response: its status, its headers, its body or LLM reply, and whether it is a template. An HTTP Stub's response needs status. A gRPC Stub, whose exact request path names a unary method of its Mock's Descriptor set, answers with json, the reply message, and grpc, the gRPC status and message its reply ends with; its response has no status. This definition does not close itself to other properties so that weightedResponse can add weight; response and weightedResponse each close it with unevaluatedProperties: false.",
+      "description": "The fields of a response: its status, its headers, its body or LLM reply, and whether it is a template. An HTTP Stub's response needs status. A gRPC Stub, whose exact request path names a unary method of its Mock's Descriptor set, answers with json, the reply message, and grpc, the gRPC status and message its reply ends with; its response has no status, and status, body, bodyFile, events and llm make no sense on it: smock refuses them. This definition does not close itself to other properties so that weightedResponse can add weight; response and weightedResponse each close it with unevaluatedProperties: false.",
       "type": "object",
       "properties": {
         "status": {
