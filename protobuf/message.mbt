@@ -254,6 +254,8 @@ fn DescriptorSet::print_message(
   let values = scan(message, records)
   out.write_byte(b'{')
   let order = message.by_number
+  // Every singular field of a proto2 message has presence.
+  let proto2 = message.syntax is Proto2
   let mut first = true
   for n in 0..<order.length() {
     let index = order[n]
@@ -267,7 +269,7 @@ fn DescriptorSet::print_message(
     let value = values[index]
     if value is None &&
       !(field.label is Repeated) &&
-      (field.oneof_index is Some(_) || field.type_ is Message) {
+      (proto2 || field.oneof_index is Some(_) || field.type_ is Message) {
       continue
     }
     if !first {

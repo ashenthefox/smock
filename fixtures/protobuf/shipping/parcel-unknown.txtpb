@@ -1,0 +1,9 @@
+# Numbers that State does not define, which a Parcel keeps as unknown
+# fields: a state after a known one, in a packed history, and as the value
+# of map entries. carrier-unknown.txtpb follows it in a test.
+state: [1, 9]
+history: [0, 9, 2, -1]
+states { key: "a" value: 1 }
+states { key: "a" value: 9 }
+states { key: "b" value: 9 }
+carrier_name: "post"

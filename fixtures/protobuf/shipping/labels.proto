@@ -1,0 +1,15 @@
+// Written for smock's tests: an editions file, whose types smock serves in
+// a later spec.
+edition = "2023";
+
+package labels;
+
+message Label {
+  string text = 1;
+  Color color = 2;
+}
+
+enum Color {
+  COLOR_UNSPECIFIED = 0;
+  RED = 1;
+}

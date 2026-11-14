@@ -1,0 +1,18 @@
+# A parcel with every field set, some at their defaults, which a proto2
+# field with presence holds.
+state: SHIPPED
+history: [NEW, DELIVERED]
+weights: [1, 300]
+sizes: [3, 4]
+order { id: 7 }
+orders { id: 8 note: "" }
+orders { id: -1 }
+states { key: "b" value: DELIVERED }
+states { key: "a" value: NEW }
+label: ""
+tags: ["x", ""]
+notes { key: "k" value: "v" }
+fragile: false
+count: 0
+carrier_name: "post"
+by_id { key: 2 value { id: 2 } }
