@@ -5,7 +5,10 @@
 /// caller has checked exists. Its body must be inline. Its templates may
 /// read the environment variables in `env`, as a load's may, and it may
 /// read and write the Data buckets `buckets`, those the Mock declares: by
-/// default, none.
+/// default, none. `descriptor_set` is the Mock's Descriptor set, if it has
+/// one: a Stub whose exact path names one of its methods is a gRPC Stub,
+/// checked against the set and normalised as a gRPC Stub in a Definition
+/// file is.
 ///
 /// Returns the Stub, or every problem found, with the messages a Stub in a
 /// Definition file gets. A problem has no file (`""`), and its JSON Pointer
@@ -16,6 +19,7 @@ pub fn ephemeral_stub(
   mock~ : String,
   env~ : @template.Env = @template.no_env,
   buckets~ : ReadOnlyArray[DataBucket] = ReadOnlyArray::from_array([]),
+  descriptor_set? : @protobuf.DescriptorSet,
 ) -> Result[Stub, Array[Diagnostic]] {
   let diagnostics = []
   let keys = Map([])
@@ -31,7 +35,11 @@ pub fn ephemeral_stub(
     body_files: None,
     env,
     buckets: Map::from_array([(mock, MockBuckets::new(keys))]),
-    sets: no_declared_sets,
+    sets: match descriptor_set {
+      Some(set) =>
+        { by_path: Map([]), by_mock: Map::from_array([(mock, set)]), }
+      None => no_declared_sets
+    },
   }
   guard json is Object(fields) else {
     file.error("", "must be an object")

@@ -139,6 +139,7 @@ hex_test helloworld/greeter.binpb greeter_set "The Descriptor set of gRPC's hell
 # they do not serve yet, from a proto3, a proto2 and an editions file.
 descriptor_set catalog catalog.binpb catalog.proto
 hex_test catalog/catalog.binpb catalog_set "The Descriptor set of fixtures/protobuf/catalog/catalog.proto, fixtures/protobuf/catalog/catalog.binpb, in hex." definitions
+hex_test catalog/catalog.binpb catalog_set "The Descriptor set of fixtures/protobuf/catalog/catalog.proto, fixtures/protobuf/catalog/catalog.binpb, in hex." engine
 
 # Every part of the descriptor model: proto2, proto3 and an edition, nested
 # types, enums with an alias, groups, extensions, maps, oneofs and streaming.

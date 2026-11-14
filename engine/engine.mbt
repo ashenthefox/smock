@@ -441,7 +441,9 @@ pub fn ReloadOutcome::name(self : ReloadOutcome) -> String {
 ///   new generator, created from its seed. Plans the engine returned before
 ///   stay as they were: they hold their own bytes. Ephemeral Stubs stay,
 ///   generators included, except those of a Mock the new set does not
-///   declare, which are dropped. Then each Scenario state stays while its
+///   declare, which are dropped. They are not read again, but an Ephemeral
+///   gRPC Stub answers only while the Mock's new set has its method as a
+///   unary method. Then each Scenario state stays while its
 ///   name is one of the known states of its Mock, Session and Scenario;
 ///   any other goes back to `Started`, and the states of a Mock that is
 ///   gone are dropped. Variables and the copies of Data buckets stay,
@@ -474,6 +476,9 @@ pub fn Engine::reload(
         snapshot.mocks.iter().map(mock => (mock.name, mock)),
       )
       self.ephemeral.remove_where((mock, _) => !mocks.contains(mock)) |> ignore
+      // An Ephemeral gRPC Stub that stays answers while the new set has its
+      // method as a unary method.
+      self.recheck_ephemeral(mocks)
       // Only then are Scenario states checked, since the known states
       // include those of the Ephemeral Stubs that stay.
       scenario_states_reset = self.prune_scenario_states(mocks)
@@ -515,9 +520,11 @@ pub fn Engine::reload(
 ///   a `host` field it sent. HTTP/1.1 never gives it.
 /// - `grpc`, when given, marks the request as a gRPC call, made with the
 ///   method it names. A gRPC call is matched only against the Mock's gRPC
-///   Stubs on that method, in matching order, and its Near miss is chosen
-///   among every gRPC Stub of the Mock; the Ephemeral Stubs, which are
-///   never gRPC Stubs, are not tried. A call that none matches is planned
+///   Stubs on that method: the Session's Ephemeral gRPC Stubs, in their
+///   order, then those of the Definition files, in matching order. Its Near
+///   miss is chosen among every gRPC Stub of the Mock, the Session's
+///   Ephemeral gRPC Stubs first. An Ephemeral gRPC Stub whose method a
+///   reload took away answers no call. A call that none matches is planned
 ///   UNIMPLEMENTED, with a fixed message that says why and its Near miss in
 ///   a trailer, never with the Mock's `noMatch`, and so is a call whose
 ///   Host reaches no Mock. Its Journal entry records the call's octets as
@@ -560,13 +567,15 @@ pub fn Engine::handle(
   // The Ephemeral Stubs of the Mock and the Session come first, in their
   // own order, then the Stubs from Definition files: their HTTP Stubs, as
   // the files load them, since a request never matches a gRPC Stub. The
-  // match index only narrows the search among the latter. The Near miss of
-  // a request that matched nothing is chosen among every candidate, in
-  // that order.
+  // match index only narrows the search among the latter. Each Ephemeral
+  // Stub answers HTTP requests or gRPC calls, or since a reload nothing
+  // (`Answers`), and is tried for those only. The Near miss of a request
+  // that matched nothing is chosen among every candidate, in that order.
   let ephemeral = match mock {
-    Some(mock) if grpc is None => self.ephemeral.of(mock.name, session)
-    _ => None
+    Some(mock) => self.ephemeral.of(mock.name, session)
+    None => None
   }
+  let answers : Answers = if grpc is None { HttpRequests } else { GrpcCalls }
   // A Stub with a Scenario clause matches only in the state it requires,
   // checked once its request conditions hold. The Session's states for the
   // Mock are looked up at most once, and only when a Stub has a clause.
@@ -576,6 +585,9 @@ pub fn Engine::handle(
   if ephemeral is Some(list) {
     for i in 0..<list.length() {
       let e = list[i]
+      if e.answers != answers {
+        continue
+      }
       match e.stub.serves {
         Ordinary(ordinary) =>
           if incoming.meets(ordinary.request) {
@@ -844,7 +856,11 @@ pub fn Engine::handle(
             }
           }
           let ephemeral = match ephemeral {
-            Some(list) => list.iter().map(e => (e.stub, StubSource::Ephemeral))
+            Some(list) =>
+              list
+              .iter()
+              .filter(e => e.answers == answers)
+              .map(e => (e.stub, StubSource::Ephemeral))
             None => Iter::empty()
           }
           // A gRPC call's Near miss is chosen among every gRPC Stub of its
