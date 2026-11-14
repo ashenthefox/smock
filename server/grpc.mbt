@@ -39,11 +39,13 @@
 // client advertised, gets Trailers-Only INTERNAL `reply metadata too large`
 // instead (`answer_too_large`). An answer sent before the client has
 // ended its request is followed by RST_STREAM NO_ERROR (`end_early`). What
-// the layer refuses, or cannot serve yet, gets Trailers-Only too, with its
-// `grpc-status` and a fixed ASCII `grpc-message`. A call that does not
-// reach the engine is counted as rejected traffic and is not journaled; one
-// that does is journaled as the engine planned it, with the gRPC status
-// INTERNAL, which the entry records before it is committed.
+// gRPC's rules refuse in a call, checked as soon as it arrives, and what the
+// layer cannot serve yet, get Trailers-Only too, with their `grpc-status`
+// and a fixed `grpc-message`, and `:status` 200 but for a method other than
+// POST and a malformed `grpc-timeout` (grpc_checks.mbt). A call that does
+// not reach the engine is counted as rejected traffic and is not
+// journaled; one that does is journaled as the engine planned it, with the
+// gRPC status INTERNAL, which the entry records before it is committed.
 
 ///|
 /// The content type of gRPC calls, as the octets of a field value.
@@ -55,11 +57,6 @@ let grpc_content_type : Bytes = @utf8.encode(@grpc.content_type)
 fn is_served_subtype(subtype : BytesView) -> Bool {
   subtype.length() == 0 || subtype == b"proto"[:]
 }
-
-///|
-/// The fixed `grpc-message` of the UNIMPLEMENTED answer to a gRPC call
-/// whose content subtype smock does not serve, such as `json`.
-let unserved_subtype_message : String = "only the proto content subtype is served"
 
 ///|
 /// The unary method that a gRPC call to `path` calls in `set`, the
@@ -150,10 +147,11 @@ fn H2Connection::end_early(self : H2Connection, stream : Int32) -> Unit {
 
 ///|
 /// Answers the gRPC call that has arrived in full on `stream`: through the
-/// engine, when the call can be served, or else with Trailers-Only
-/// INTERNAL, as `refuse_call` sends it. The call's Mock and its set are
-/// looked up again first, and a call that cannot reach a gRPC Stub now is
-/// answered as from its HEADERS (`answer_unserved`). A plan whose gRPC
+/// engine, when the call can be served, or else with the refusal that
+/// `refuse_call` sends, when its body is not one whole message
+/// (`check_end`) or the message does not decode. The call's Mock and its
+/// set are looked up again first, and a call that cannot reach a gRPC Stub
+/// now is answered as from its HEADERS (`answer_unserved`). A plan whose gRPC
 /// status is not OK is sent as Trailers-Only, with its gRPC part. A reply
 /// too large to send gets INTERNAL instead (`answer_too_large`). A reply
 /// whose framed message fits the windows is queued at once; the rest of a
@@ -167,15 +165,6 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
 ) -> Unit {
   let ports = self.ports
   let incoming = request.to_engine()
-  if incoming.meth != "POST" {
-    self.refuse_call(
-      stream,
-      @grpc.Internal,
-      "the method must be POST",
-      ended=true,
-    )
-    return
-  }
   // The second lookup, from the definition set served now: a reload since
   // the HEADERS may have changed the Mock, its set or the method.
   guard ports.engine.mock_for_call(incoming, authority?=request.authority)
@@ -184,27 +173,21 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
     self.answer_unserved(stream, request, ended=true)
     return
   }
-  guard @grpc.next_message(incoming.body)
-    is Message(flag=b'\x00', message~, rest~) &&
-    @grpc.next_message(rest) is Done else {
-    self.refuse_call(
-      stream,
-      @grpc.Internal,
-      "the request is not one uncompressed message",
-      ended=true,
-    )
+  // Each prefix was checked as it arrived, so the body's one message, if
+  // it has one, is as it is, uncompressed.
+  guard request.deframer is Some(deframer) else {
+    abort("a gRPC call reads its framing")
+  }
+  if check_end(deframer) is Some(refusal) {
+    self.refuse_call(stream, refusal, ended=true)
     return
   }
   // A message that does not parse, or whose type has a field that smock
   // does not decode yet, does not decode.
+  let message = incoming.body[@grpc.prefix_length:]
   let json = @protobuf.decode_json(set, set.input_of(rpc), message) catch {
     _ => {
-      self.refuse_call(
-        stream,
-        @grpc.Internal,
-        "the request message cannot be decoded",
-        ended=true,
-      )
+      self.refuse_call(stream, Undecodable, ended=true)
       return
     }
   }
@@ -591,25 +574,25 @@ fn H2Connection::end_with_trailers(
 }
 
 ///|
-/// Answers `stream`, a gRPC call that this layer refuses, with Trailers-Only,
-/// the gRPC status `status` and the fixed ASCII `message`, and counts it as
-/// rejected traffic, with `mock=""` and `stub=""`: one whose content
-/// subtype smock does not serve, from its HEADERS, or one that this layer
-/// cannot serve, once its request has ended. It never reached the engine,
-/// so it has no Journal entry. A call whose request has not `ended` then
-/// gets RST_STREAM NO_ERROR (`end_early`).
+/// Answers `stream`, a gRPC call that this layer refuses for `refusal`,
+/// with Trailers-Only, the refusal's `:status`, gRPC status and fixed
+/// `grpc-message`, and counts it as rejected traffic, with `mock=""` and
+/// `stub=""`. It never reached the engine, so it has no Journal entry. A
+/// call whose request has not `ended` then gets RST_STREAM NO_ERROR
+/// (`end_early`).
 fn H2Connection::refuse_call(
   self : H2Connection,
   stream : Int32,
-  status : @grpc.Status,
-  message : String,
+  refusal : CallRefusal,
   ended~ : Bool,
 ) -> Unit {
   let fields = trailers_only(
-    status,
-    Some(message),
+    refusal.status(),
+    Some(refusal.message()),
     None,
     date=self.ports.dates.at(self.now),
+    trailers=refusal.fields(),
+    http_status=refusal.http_status(),
   )
   self.conn.headers(stream, fields, end=true) catch {
     _ => {
@@ -702,7 +685,8 @@ fn push_metadata(
 
 ///|
 /// The fields of a Trailers-Only answer, one HEADERS block that ends the
-/// stream: `:status` 200, `content-type: application/grpc`, `grpc-status`
+/// stream: `:status` `http_status`, by default 200, `content-type:
+/// application/grpc`, `grpc-status`
 /// with the code of `status`, `grpc-message` when `message` gives its text,
 /// percent-encoded, then `smock-mock` when `mock` gives its value, each of
 /// `trailers`, the trailing metadata or smock's own fields such as
@@ -714,9 +698,10 @@ fn trailers_only(
   mock : String?,
   date~ : String,
   trailers~ : ReadOnlyArray[(String, String)] = [],
+  http_status~ : Bytes = b"200",
 ) -> Array[@header.Header] {
   let fields = Array(capacity=trailers.length() + 6)
-  fields.push(@header.Header::{ name: b":status", value: b"200", })
+  fields.push(@header.Header::{ name: b":status", value: http_status, })
   fields.push({ name: b"content-type", value: grpc_content_type, })
   fields.push({ name: b"grpc-status", value: decimal(status.code()), })
   if message is Some(text) {

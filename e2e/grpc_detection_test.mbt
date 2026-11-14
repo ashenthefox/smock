@@ -517,7 +517,7 @@ async test "with --tls-http2 off, the TLS port serves no gRPC: a client offering
 }
 
 ///|
-async test "the method is checked before the subtype: a call with +json and a method other than POST gets the method's answer, as one with no subtype does" {
+async test "the method is checked before the subtype: a call with +json and a method other than POST gets the method's answer, :status 405 with INTERNAL, as one with no subtype does" {
   with_detection(smock => {
     let client = smock.h2c()
     defer client.close()
@@ -536,8 +536,8 @@ async test "the method is checked before the subtype: a call with +json and a me
     inspect(
       out.join("\n"),
       content=(
-        #|PUT application/grpc+json: :status: 200, grpc-status: 13, grpc-message: the method must be POST, 0 DATA (end)
-        #|PUT application/grpc: :status: 200, grpc-status: 13, grpc-message: the method must be POST, 0 DATA (end)
+        #|PUT application/grpc+json: :status: 405, grpc-status: 13, grpc-message: the method must be POST, 0 DATA (end)
+        #|PUT application/grpc: :status: 405, grpc-status: 13, grpc-message: the method must be POST, 0 DATA (end)
       ),
     )
   })
