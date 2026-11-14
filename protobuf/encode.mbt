@@ -80,20 +80,22 @@ pub fn DescriptorSet::encode_json(
 }
 
 ///|
-/// Why the encoder does not encode messages of the type `message` yet, or
-/// `None` when it does.
+/// Why the encoder does not encode messages of the type `message`, or
+/// `None` when it does: a well-known type and a type of an editions file
+/// are not encoded yet, and a MessageSet is not encoded.
 fn not_encoded(message : MessageDescriptor) -> String? {
   if is_well_known(message.full_name) {
     return Some(
       "smock does not encode \{message.full_name} yet: it is a well-known type",
     )
   }
+  if message.message_set_wire_format {
+    return Some(
+      "smock does not encode \{message.full_name}: it is a MessageSet, whose extensions use another wire form",
+    )
+  }
   match message.syntax {
-    Proto3 => None
-    Proto2 =>
-      Some(
-        "smock does not encode \{message.full_name} yet: it is a type of a proto2 file",
-      )
+    Proto3 | Proto2 => None
     Editions =>
       Some(
         "smock does not encode \{message.full_name} yet: it is a type of an editions file",
@@ -225,9 +227,12 @@ fn DescriptorSet::write_field(
     }
     return
   }
-  // A message field, and a member of a oneof, a proto3 `optional` field
-  // included, have presence: they are written whenever they are set.
-  let present = field.oneof_index is Some(_) || field.type_ is Message
+  // A message field, a member of a oneof, a proto3 `optional` field
+  // included, and every singular field of a proto2 message have presence:
+  // they are written whenever they are set.
+  let present = message.syntax is Proto2 ||
+    field.oneof_index is Some(_) ||
+    field.type_ is Message
   self.write_value(writer, field, json, depth, present~) catch {
     Unfit =>
       raise EncodeError(
@@ -343,8 +348,13 @@ fn DescriptorSet::write_list(
   if items.is_empty() {
     return
   }
+  // proto3 packs repeated scalars unless the field says otherwise, and
+  // proto2 only when it says so.
   let packed = !(field.type_ is (String | Bytes | Message | Group)) &&
-    field.packed is (None | Some(true))
+    (
+      field.packed is Some(true) ||
+      (field.packed is None && message.syntax is Proto3)
+    )
   let out = if packed { Writer() } else { writer }
   // An element's JSON Pointer is made only for an error.
   for i, item in items {

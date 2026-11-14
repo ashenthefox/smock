@@ -137,3 +137,52 @@ test "a message of an editions file, and a MessageSet, are not decoded" {
     ),
   )
 }
+
+///|
+/// `text`, JSON text, encoded as a message of `name`, a type of
+/// fixtures/protobuf/shipping/shipping.proto, in hex, or the error that
+/// stops it.
+fn shipped(name : String, text : String) -> String {
+  let set = hex_set(shipping_set)
+  guard set.find_message(name) is Some(message) else {
+    abort("no message \{name}")
+  }
+  let json = @json.parse(text) catch { err => abort("not JSON: \{err}") }
+  @hex.encode(set.encode_json(message, json)) catch {
+    err => "error: \{err}"
+  }
+}
+
+///|
+test "a Parcel has protoc's bytes: proto2 fields written whenever set, at their defaults too, and repeated scalars packed only with packed = true" {
+  assert_eq(
+    shipped(
+      "shipping.Parcel",
+      (
+        #|{"state": "SHIPPED", "history": ["NEW", 2], "weights": [1, 300],
+        #| "sizes": [3, 4], "order": {"id": 7}, "orders": [{"id": "8", "note": ""}, {"id": -1}],
+        #| "states": {"b": "DELIVERED", "a": "NEW"}, "label": "", "tags": ["x", ""],
+        #| "notes": {"k": "v"}, "fragile": false, "count": 0, "carrier_name": "post",
+        #| "byId": {"2": {"id": 2}}}
+      ),
+    ),
+    @hex.encode(fixture(shipping_parcel)),
+  )
+  // null leaves a field unset.
+  inspect(
+    shipped("shipping.Order", "{\"id\": 7, \"note\": null}"),
+    content="0807",
+  )
+}
+
+///|
+test "a type of an editions file, and a MessageSet, are not encoded" {
+  inspect(
+    shipped("labels.Label", "{\"text\": \"a\"}"),
+    content="error: smock does not encode labels.Label yet: it is a type of an editions file",
+  )
+  inspect(
+    shipped("shipping.Crate", "{\"bag\": {}}"),
+    content="error: /bag: smock does not encode shipping.Bag: it is a MessageSet, whose extensions use another wire form",
+  )
+}
