@@ -141,31 +141,20 @@ fn well_known_form(message : MessageDescriptor) -> WellKnown? {
 }
 
 ///|
-/// Whether `full_name`, a full name without a leading dot, is one of the
-/// well-known types that `decode_json` and `DescriptorSet::encode_json` do
-/// not serve yet: Any, Struct, Value, ListValue and NullValue, whose JSON
-/// forms hold any JSON value or a message of another type.
-pub fn is_unserved_well_known(full_name : String) -> Bool {
-  full_name.has_prefix("google.protobuf.") &&
-  full_name
-  is ("google.protobuf.Any"
-  | "google.protobuf.Struct"
-  | "google.protobuf.Value"
-  | "google.protobuf.ListValue"
-  | "google.protobuf.NullValue")
-}
-
-///|
 /// Prints to `out` the message of the type `message`, a well-known type
 /// whose form is `form`, whose records are `records`, merged in order,
 /// `depth` messages deep, as ProtoJSON prints it. A Timestamp's or a
 /// Duration's last seconds and nanos win, and a FieldMask's paths are
-/// joined, as protobuf's parsers merge them.
+/// joined, as protobuf's parsers merge them. A Struct prints as a map is
+/// printed, in key order, a ListValue as a list, a Value as the JSON value
+/// of the member of its oneof that it holds, and an Any as `print_any`
+/// says.
 ///
 /// Raises `DecodeError` for a value that ProtoJSON cannot print: a
 /// Timestamp or a Duration out of its range, or a Duration whose seconds
-/// and nanos have opposite signs, and a FieldMask path that has no
-/// lowerCamelCase form.
+/// and nanos have opposite signs, a FieldMask path that has no
+/// lowerCamelCase form, a Value that holds nothing, NaN or an infinity, at
+/// any depth, and an Any that `print_any` cannot print.
 fn DescriptorSet::print_well_known(
   self : DescriptorSet,
   out : @buffer.Buffer,
@@ -555,8 +544,11 @@ fn write_path(out : @buffer.Buffer, path : BytesView) -> Bool {
 /// fields, as protoc writes them, reading `json` as ProtoJSON reads it: a
 /// Timestamp, a Duration or a FieldMask from a string, as
 /// `write_timestamp_of`, `write_duration_of` and `write_field_mask_of` say,
-/// and a wrapper from the value it wraps, which is left out at its
-/// default. Raises `Unfit` when `json` is not such a message.
+/// a wrapper from the value it wraps, which is left out at its default, a
+/// Struct from an object, a ListValue from an array and a Value from any
+/// JSON value, `null` included, and an Any as `write_any` says. Raises
+/// `Unfit` when `json` is not such a message, and `EncodeError` when a
+/// message it holds does not fit its type.
 fn DescriptorSet::write_well_known(
   self : DescriptorSet,
   writer : Writer,

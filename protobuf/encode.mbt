@@ -6,8 +6,7 @@
 // when it says `packed = true`, and map entries sorted by key, each with
 // its key and its value, as protoc's deterministic output writes them.
 // Types of proto3 and proto2 files are encoded, the well-known types in
-// their ProtoJSON forms (well_known.mbt), but for MessageSets and the
-// well-known types that is_unserved_well_known names.
+// their ProtoJSON forms (well_known.mbt), but for MessageSets.
 
 ///|
 /// Why JSON is not a message of the type it is encoded as. `pointer` is the
@@ -45,7 +44,8 @@ let no_oneofs : FixedArray[Int32] = []
 /// it.
 ///
 /// It reads JSON as ProtoJSON reads it. A member's key is the field's
-/// proto name or its JSON name. `null` leaves a field unset. Integers are
+/// proto name or its JSON name. `null` leaves a field unset, but sets
+/// `null_value` in a google.protobuf.Value, and a NullValue. Integers are
 /// numbers or strings, in decimal, with an exponent or a fraction of
 /// zeros if need be, and 64-bit integers are exact at any size. Floats
 /// and doubles are numbers or strings, or `"NaN"`, `"Infinity"` and
@@ -55,16 +55,19 @@ let no_oneofs : FixedArray[Int32] = []
 /// enum, as a proto2 enum is, defines. A map is an object whose keys are
 /// the map's keys written as strings: integers in decimal, and `true` and
 /// `false`. Every singular field of a proto2 message is written whenever
-/// it is set, and a message must give each of its required fields.
+/// it is set, and a message must give each of its required fields. The
+/// well-known types are read in their ProtoJSON forms; an Any's type is
+/// the type of this set that its `@type` names.
 ///
 /// Raises `EncodeError`, at the JSON Pointer of the value at fault, for
 /// JSON that is not such a message: one that is not an object, a key that
 /// names no field, a field given by both its names, two members of one
-/// oneof, `null` in a repeated field or as a map value, a value of the
-/// wrong type or out of its type's range, a message without one of its
-/// required fields, and messages nested deeper than 100. It also raises
-/// for a type it does not encode: a well-known type or a type of an
-/// editions file, not yet, and a MessageSet.
+/// oneof, `null` in a repeated field or as a map value but of a Value or a
+/// NullValue, a value of the wrong type or out of its type's range, a
+/// message without one of its required fields, an Any whose type this set
+/// does not define, and messages nested deeper than 100. It also raises
+/// for a type it does not encode: a type of an editions file, not yet, and
+/// a MessageSet.
 pub fn DescriptorSet::encode_json(
   self : DescriptorSet,
   message : MessageDescriptor,
@@ -99,8 +102,8 @@ pub fn DescriptorSet::encode_json(
 
 ///|
 /// Why the encoder does not encode messages of the type `message`, or
-/// `None` when it does: a well-known type and a type of an editions file
-/// are not encoded yet, and a MessageSet is not encoded.
+/// `None` when it does: a type of an editions file is not encoded yet, and
+/// a MessageSet is not encoded.
 fn not_encoded(message : MessageDescriptor) -> String? {
   if message.message_set_wire_format {
     return Some(

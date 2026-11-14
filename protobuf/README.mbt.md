@@ -260,10 +260,9 @@ a field or a oneof keeps the value it had. A proto2 string that is not
 UTF-8 prints with U+FFFD for each bad sequence. It raises `DecodeError`
 when the input is not protobuf, a proto3 string is not UTF-8, a message
 lacks a proto2 required field, or messages nest deeper than 100, a map
-entry counting as a message. It does not decode groups and the well-known
-types Any, Struct, Value, ListValue and NullValue yet, nor types of
+entry counting as a message. It does not decode groups yet, nor types of
 editions files and MessageSets, and raises its error for a message that is
-or has one. The other well-known types print in their ProtoJSON forms
+or has one. The well-known types print in their ProtoJSON forms
 ([below](#well-known-types)).
 
 `set.encode_json(message, json)` encodes JSON, a message of the type
@@ -274,17 +273,15 @@ set, repeated scalars of a proto3 message packed unless the field says
 `packed = false` and those of a proto2 message only when it says
 `packed = true`, and map entries sorted by key. It reads JSON as ProtoJSON reads it: a key
 may be the field's proto name or its JSON name, `null` leaves a field
-unset, an enum is a name or a number, a 64-bit integer a number or a
+unset but for a Value or a NullValue, an enum is a name or a number, a 64-bit integer a number or a
 string, exact at any size, a float `"NaN"`, `"Infinity"` or `"-Infinity"`
 too, and bytes are base64, standard or URL-safe, with or without padding.
 It raises `EncodeError`, which names the JSON Pointer of the value at
 fault, for JSON that is not a message of the type, a message that lacks a
 proto2 required field and a number that a closed enum does not define
-included, and for the types it does not encode: the well-known types Any,
-Struct, Value, ListValue and NullValue, and types of editions files, not
-yet, and MessageSets.
-`@protobuf.is_well_known(full_name)` tells the well-known types, and
-`@protobuf.is_unserved_well_known(full_name)` those not served yet.
+included, and for the types it does not encode: types of editions files,
+not yet, and MessageSets.
+`@protobuf.is_well_known(full_name)` tells the well-known types.
 
 ```mbt check
 ///|
@@ -306,10 +303,9 @@ test "decode a message, and encode one" {
 
 ## Well-known types
 
-`decode_json` and `encode_json` give protobuf's well-known types
-Timestamp, Duration, FieldMask, the wrappers and Empty their ProtoJSON
-forms, at any place, a message's whole type included. A type is known by
-its full name, such as `google.protobuf.Duration`.
+`decode_json` and `encode_json` give protobuf's well-known types their
+ProtoJSON forms, at any place, a message's whole type included. A type is
+known by its full name, such as `google.protobuf.Duration`.
 
 - A Timestamp prints as a string of the date and time in UTC, with 0, 3,
   6 or 9 fractional digits, then `Z`, such as `"1970-01-01T00:00:01.500Z"`,
@@ -325,12 +321,29 @@ its full name, such as `google.protobuf.Duration`.
 - A wrapper prints as the value it wraps, as its type prints: an
   Int64Value as a number, a FloatValue as a float.
 - Empty prints as `{}`.
+- A Struct, a Value and a ListValue print as the JSON values they hold: a
+  Struct as an object in key order, a ListValue as an array, and a Value
+  as `null`, a number, which prints as a double does, a string, a bool, an
+  object or an array. A NullValue prints as `null`. In JSON, `null` sets
+  `null_value` in a Value, and a NullValue, where it leaves other fields
+  unset.
+- An Any prints as an object of its type URL as `@type`, then the message
+  it holds: the message's fields, or its form as `value` when it is a
+  well-known type that has one, so an Any that holds an Empty prints
+  `@type` alone. Its type is the type of the set that the URL names after
+  its last `/`, as `@protobuf.type_name_of_url(url)` gives it, and an Any
+  whose type the set lacks cannot be printed or read. An empty Any prints
+  as `{}`.
 
 A value that ProtoJSON cannot print, such as a Timestamp in the year
 10000, is a `DecodeError`, and a value out of range in JSON an
 `EncodeError`. `set.printed_message(message, json)` checks a whole message
 as `printed_value` checks a field's value ([below](#printed-values)):
-`"1.5s"` for a Duration gives `NotPrinted` with `"1.500s"`.
+`"1.5s"` for a Duration gives `NotPrinted` with `"1.500s"`. A Struct, a
+ListValue and an Any must be an object, an array and an object, whose
+members the caller checks, as `message.json_form()` says, and
+`@protobuf.printed_json_value(json)` gives a value that a Value holds in
+its printed form.
 
 ```mbt check
 ///|
@@ -357,6 +370,23 @@ test "a Duration in its ProtoJSON form" {
     _ => "kept"
   }
   inspect(suggested, content="write \"1.500s\"")
+}
+```
+
+```mbt check
+///|
+test "an Any's type, and a Value's number" {
+  let url = "type.googleapis.com/helloworld.HelloRequest"
+  inspect(
+    @protobuf.type_name_of_url(url).unwrap_or("no type"),
+    content="helloworld.HelloRequest",
+  )
+  inspect(
+    @protobuf.type_name_of_url("helloworld.HelloRequest").unwrap_or("no type"),
+    content="no type",
+  )
+  let number = @json.parse("1e3")
+  inspect(@protobuf.printed_json_value(number).stringify(), content="1000")
 }
 ```
 
