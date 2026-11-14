@@ -237,16 +237,22 @@ async test "a request message that does not parse, such as one whose string is n
 }
 
 ///|
-async test "smock check refuses a gRPC Stub whose input type has fields of a well-known type, singular, repeated or as a map's values, which are not served yet" {
+async test "smock check accepts a gRPC Stub whose input type has Timestamps, singular, repeated or as a map's values, and refuses one whose input type has fields of Struct, Value or ListValue, which are not served yet" {
   let yaml =
     #|mocks:
     #|  - name: clock
     #|    grpc: { descriptorSet: stamped.binpb }
+    #|  - name: described
+    #|    grpc: { descriptorSet: unserved.binpb }
     #|stubs:
     #|  - id: stamp
     #|    mock: clock
     #|    request: { path: /stamped.Clock/Stamp }
     #|    response: { json: { ok: true } }
+    #|  - id: describe
+    #|    mock: described
+    #|    request: { path: /unserved.Clock/Describe }
+    #|    response: { json: { zone: UTC } }
   with_definitions([("clock.yaml", yaml)], dir => {
     @fs.mkdir("\{dir}/files")
     write_bytes(
@@ -254,13 +260,18 @@ async test "smock check refuses a gRPC Stub whose input type has fields of a wel
       "files/stamped.binpb",
       @fs.read_file("fixtures/protobuf/stamped/stamped.binpb").binary(),
     )
+    write_bytes(
+      dir,
+      "files/unserved.binpb",
+      @fs.read_file("fixtures/protobuf/unserved/unserved.binpb").binary(),
+    )
     inspect(
       check([dir]),
       content=(
         #|status 1
-        #|clock.yaml: /stubs/0/request/path: the input type stamped.Stamped is not served yet: its field at has the well-known type google.protobuf.Timestamp, and gRPC Stubs serve no well-known types so far
-        #|clock.yaml: /stubs/0/request/path: the input type stamped.Stamped is not served yet: its field history has the well-known type google.protobuf.Timestamp, and gRPC Stubs serve no well-known types so far
-        #|clock.yaml: /stubs/0/request/path: the input type stamped.Stamped is not served yet: its field by_name is a map whose values have the well-known type google.protobuf.Timestamp, and gRPC Stubs serve no well-known types so far
+        #|clock.yaml: /stubs/1/request/path: the input type unserved.Described is not served yet: its field labels has the well-known type google.protobuf.Struct, and gRPC Stubs serve no Any, Struct, Value, ListValue or NullValue so far
+        #|clock.yaml: /stubs/1/request/path: the input type unserved.Described is not served yet: its field values has the well-known type google.protobuf.Value, and gRPC Stubs serve no Any, Struct, Value, ListValue or NullValue so far
+        #|clock.yaml: /stubs/1/request/path: the input type unserved.Described is not served yet: its field lists is a map whose values have the well-known type google.protobuf.ListValue, and gRPC Stubs serve no Any, Struct, Value, ListValue or NullValue so far
         #|
       ),
     )

@@ -21,6 +21,7 @@ Mock's `grpc` field and gRPC Stubs.
   - [Reloads](#reloads)
   - [The call the Stubs see](#the-call-the-stubs-see)
   - [The request message as JSON](#the-request-message-as-json)
+  - [Well-known types](#well-known-types)
   - [Conditions on the message](#conditions-on-the-message)
   - [Printed forms](#printed-forms)
   - [The reply](#the-reply)
@@ -291,6 +292,11 @@ the `.proto` file gives it a `json_name`. Each type prints as follows:
 | a repeated field | an array of its values, in order | `["a","b"]` |
 | a map | an object with a member per key, in key order; integer keys in decimal and bool keys as `"true"` and `"false"`, as strings | `{"1":3,"2":5,"10":1}` |
 | a oneof | the member the message holds, under its own JSON name, and no other | `"word":"w"` |
+| `google.protobuf.Timestamp` | a string of the date and time in UTC, with 0, 3, 6 or 9 fractional digits, then `Z` | `"1970-01-01T00:00:01.500Z"` |
+| `google.protobuf.Duration` | a string of seconds, with 0, 3, 6 or 9 fractional digits, then `s` | `"1.500s"`, `"-0.250s"` |
+| `google.protobuf.FieldMask` | a string of its paths in lowerCamelCase, joined by commas | `"userName,address.city"` |
+| a wrapper, such as `google.protobuf.Int32Value` | the value it wraps, printed as its type is: `Int64Value` and `UInt64Value` as numbers, `FloatValue` as a `float`, `BytesValue` in base64 | `5`, `9.99`, `"Tom"` |
+| `google.protobuf.Empty` | an empty object | `{}` |
 
 So the message `id: 9223372036854775807 price: 9.99 status: ACTIVE
 address { city: "Kyoto" }` is:
@@ -343,13 +349,74 @@ the Near miss, whichever client sent it. The message
 {"tags":["a","b"],"counts":{"1":3,"2":5,"10":1}}
 ```
 
-For now, smock does not decode the well-known types, such as
-`google.protobuf.Timestamp`, or groups. It answers with replies of every
-type of a proto3 or a proto2 file but the well-known types, groups and
-types that an extension extends ([The reply](#the-reply),
-[proto2 types](#proto2-types)). The
+For now, smock does not decode the well-known types
+`google.protobuf.Any`, `Struct`, `Value`, `ListValue` and `NullValue`,
+or groups. It answers with replies of every type of a proto3 or a proto2
+file but those, groups and types that an extension extends
+([The reply](#the-reply), [proto2 types](#proto2-types)). The
 [Definition-file reference](definition-files.md#grpc-stubs) lists what a
 gRPC Stub cannot hold yet.
+
+### Well-known types
+
+protobuf's well-known types Timestamp, Duration, FieldMask, the wrappers
+and Empty print in their ProtoJSON forms, as grpcurl shows them, not as
+objects of their fields ([the table above](#the-request-message-as-json)).
+With this message:
+
+```proto
+message Lease {
+  google.protobuf.Timestamp created_at = 1;
+  google.protobuf.Duration ttl = 2;
+}
+```
+
+a call with a Timestamp 1.5 s after the epoch and a Duration of 1.5 s is
+journaled as:
+
+```json
+{"createdAt":"1970-01-01T00:00:01.500Z","ttl":"1.500s"}
+```
+
+A Timestamp and a Duration print the fewest fractional digits of 0, 3, 6
+and 9 that hold their nanoseconds: `"1s"`, `"1.500s"`, `"0.000120s"`,
+`"0.000000001s"`. A negative Duration starts with `-`, such as `"-0.500s"`.
+
+A field of a well-known type is a message field. It prints only when the
+message holds it, and then even at its default: a Timestamp of the epoch
+prints `"1970-01-01T00:00:00Z"`, a Duration of 0 `"0s"`, a FieldMask
+without paths `""`, and an `Int32Value` that holds 0 prints `0`. So, on an
+`Int32Value` field `count`, the condition `{count: {$exists: false}}`
+tells a message that leaves `count` out from one that holds 0.
+
+A condition on one of these types is written in its printed form
+([Printed forms](#printed-forms)): `{ttl: "1.5s"}` is a problem that names
+`"1.500s"`. A reply reads every form that ProtoJSON reads, offsets and
+other fraction lengths included ([The reply](#the-reply)). A reply value
+out of its type's range is a problem, or INTERNAL `template failed` when
+the reply is templated.
+
+A method's whole input or output may be a well-known type, too. A call
+that sends `google.protobuf.Empty` is `{}`, and one that sends a
+`google.protobuf.Duration` is the string, such as `"1.500s"`. A Stub's
+`json` condition, and its reply, are then that value:
+
+```yaml
+- id: wait
+  mock: leases
+  request:
+    path: /wellknown.Leases/Wait            # takes a google.protobuf.Duration
+    body: { json: "1.500s" }
+  response: {}                              # returns google.protobuf.Empty
+```
+
+A message whose Timestamp is outside the range from
+0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, whose Duration
+is longer than 315,576,000,000 seconds either way or has seconds and
+nanoseconds of opposite signs, or whose FieldMask has a path with no
+lowerCamelCase form, such as `user__name`, cannot be printed, so it does
+not decode: the call gets INTERNAL, as a message that does not parse
+does.
 
 ### Conditions on the message
 
@@ -394,7 +461,8 @@ smock rewrites:
   value has stays a number, as smock prints it for an open enum, and is a
   problem for a closed enum, which never prints it
   ([proto2 types](#proto2-types));
-- a `float` into the nearest 32-bit float, in the form smock prints it:
+- a `float`, or the value of a `google.protobuf.FloatValue`, into the
+  nearest 32-bit float, in the form smock prints it:
 
   | Written | Matched as | Meets a call of |
   |---|---|---|
@@ -460,15 +528,22 @@ refuses them when the files load, with the form to write:
 | `bytes`, in base64 without its padding | `token: "+/8"` | `"+/8="` |
 | `bytes`, in URL-safe base64 | `token: "-_8="` | `"+/8="` |
 | An integer map key not in decimal | `labels: {"007": seven}` | `"7"` |
+| `google.protobuf.Duration` | `ttl: "1.5s"` | `"1.500s"` |
+| `google.protobuf.Timestamp`, with an offset other than `Z` | `createdAt: "1970-01-01T09:00:01.500+09:00"` | `"1970-01-01T00:00:01.500Z"` |
+| `google.protobuf.Timestamp`, with other fractional digits | `createdAt: "1970-01-01T00:00:01.5Z"` | `"1970-01-01T00:00:01.500Z"` |
 
 ```text
 users.yaml: /stubs/0/request/body/json/user_id: must be written 42, as smock prints it: the field user_id of users.Query has the type int64
 users.yaml: /stubs/1/request/body/json/labels/007: must be written "7", as smock prints it: the keys of the map field labels of users.Query have the type int32
+leases.yaml: /stubs/0/request/body/json/ttl: must be written "1.500s", as smock prints it: the field ttl of wellknown.Lease has the type google.protobuf.Duration
 ```
 
 The same holds for bytes whose base64 has bits after its last octet, such
-as `"QR=="`, which smock prints `"QQ=="`, and for an integer key such as
-`"-0"` or `"1e3"`.
+as `"QR=="`, which smock prints `"QQ=="`, for an integer key such as
+`"-0"` or `"1e3"`, and for a wrapper's value as for its type's: an
+`Int64Value` written `"42"` names `42`. A FieldMask's paths are data,
+which smock does not check against any type, so its printed form is the
+one ProtoJSON reads: lowerCamelCase paths, joined by commas.
 
 ### The reply
 
@@ -490,18 +565,25 @@ is:
 | A repeated field | An array. `null` in it is a problem. |
 | A map | An object whose keys are the map's keys as strings: integers in decimal, such as `"-1"`, and `"true"` and `"false"`. A `null` value is a problem. |
 | A oneof | One of its members. Two members in one object are a problem, but a member that is `null` does not count. |
+| `google.protobuf.Timestamp` | A string in RFC 3339 form, with 0 to 9 fractional digits, then `Z` or an offset such as `+09:00`: `"1970-01-01T09:00:01.5+09:00"`. From 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, once the offset is taken off. |
+| `google.protobuf.Duration` | A string of seconds, with 0 to 9 fractional digits, then `s`: `"1.5s"`, `"-0.25s"`. At most `315576000000.999999999s` either way. |
+| `google.protobuf.FieldMask` | A string of paths in lowerCamelCase, joined by commas: `"userName,address.city"`. An underscore in it is a problem. |
+| A wrapper | The value it wraps, as its type reads it: `5` or `"5"` for an `Int64Value`. |
+| `google.protobuf.Empty` | `{}`. |
 
 `null` leaves a field unset. A key that names no field is a problem. A
 Stub without `json` answers an empty message, with every field at its
 default.
 
 The reply's output type may be any message of a proto3 or a proto2 file,
-with any of these fields, but for the well-known types, such as
-`google.protobuf.Timestamp`, which smock does not serve yet: a Stub on a
-method whose output type is one, or reaches one through its fields, is a
-problem at its `path`, as is one whose output type reaches a group, a type
-that an extension extends, a type of an editions file or a MessageSet
-([proto2 types](#proto2-types)).
+with any of these fields, a well-known type such as
+`google.protobuf.Timestamp` included, whose value is then the whole
+`json`, such as `json: "1970-01-01T00:00:01.5Z"`. smock does not serve the
+well-known types `google.protobuf.Any`, `Struct`, `Value`, `ListValue`
+and `NullValue` yet: a Stub on a method whose output type is one, or
+reaches one through its fields, is a problem at its `path`, as is one
+whose output type reaches a group, a type that an extension extends, a
+type of an editions file or a MessageSet ([proto2 types](#proto2-types)).
 
 A reply without `template` is read and encoded once, when the files load.
 A reply that is not a message of the output type is a problem at the JSON
@@ -906,14 +988,16 @@ request metrics count them as rejected requests, with `mock=""` and
 |---|---|
 | Its method is not `POST` | `the method must be POST` |
 | Its body is not one uncompressed message | `the request is not one uncompressed message` |
-| Its message does not parse, or its type has a field that smock does not decode yet | `the request message cannot be decoded` |
+| Its message does not parse, holds a value that smock cannot print, or its type has a field that smock does not decode yet | `the request message cannot be decoded` |
 
 A message does not parse, as protobuf's parsers refuse it, when it holds a
 proto3 string that is not UTF-8, field number 0 or one above 2^29-1, wire
 type 6 or 7, a varint, a fixed-size value or a length cut short, a packed
 field included, or messages nested deeper than 100, each map entry
 counting as a message, or when it lacks a proto2 required field
-([proto2 types](#proto2-types)).
+([proto2 types](#proto2-types)). smock cannot print a Timestamp, a
+Duration or a FieldMask path out of its range or form
+([Well-known types](#well-known-types)).
 
 These calls reach the Stubs. The Journal records each with the
 `grpcStatus` `INTERNAL`, and with the HTTP status planned for it: 500 or

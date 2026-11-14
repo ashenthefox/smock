@@ -1,0 +1,81 @@
+
+û
+google/protobuf/duration.protogoogle.protobuf":
+Duration
+seconds (Rseconds
+nanos (RnanosBƒ
+com.google.protobufBDurationProtoPZ1google.golang.org/protobuf/types/known/durationpbø¢GPBªGoogle.Protobuf.WellKnownTypesbproto3
+¾
+google/protobuf/empty.protogoogle.protobuf"
+EmptyB}
+com.google.protobufB
+EmptyProtoPZ.google.golang.org/protobuf/types/known/emptypbø¢GPBªGoogle.Protobuf.WellKnownTypesbproto3
+æ
+ google/protobuf/field_mask.protogoogle.protobuf"!
+	FieldMask
+paths (	RpathsB…
+com.google.protobufBFieldMaskProtoPZ2google.golang.org/protobuf/types/known/fieldmaskpbø¢GPBªGoogle.Protobuf.WellKnownTypesbproto3
+ÿ
+google/protobuf/timestamp.protogoogle.protobuf";
+	Timestamp
+seconds (Rseconds
+nanos (RnanosB…
+com.google.protobufBTimestampProtoPZ2google.golang.org/protobuf/types/known/timestamppbø¢GPBªGoogle.Protobuf.WellKnownTypesbproto3
+†
+google/protobuf/wrappers.protogoogle.protobuf"#
+DoubleValue
+value (Rvalue""
+
+FloatValue
+value (Rvalue""
+
+Int64Value
+value (Rvalue"#
+UInt64Value
+value (Rvalue""
+
+Int32Value
+value (Rvalue"#
+UInt32Value
+value (Rvalue"!
+	BoolValue
+value (Rvalue"#
+StringValue
+value (	Rvalue""
+
+BytesValue
+value (RvalueBƒ
+com.google.protobufBWrappersProtoPZ1google.golang.org/protobuf/types/known/wrapperspbø¢GPBªGoogle.Protobuf.WellKnownTypesbproto3
+ú
+wellknown.proto	wellknowngoogle/protobuf/duration.protogoogle/protobuf/empty.proto google/protobuf/field_mask.protogoogle/protobuf/timestamp.protogoogle/protobuf/wrappers.proto"o
+Lease9
+
+created_at (2.google.protobuf.TimestampR	createdAt+
+ttl (2.google.protobuf.DurationRttl"¦
+Known*
+at (2.google.protobuf.TimestampRat+
+ttl (2.google.protobuf.DurationRttl.
+mask (2.google.protobuf.FieldMaskRmask7
+a_double (2.google.protobuf.DoubleValueRaDouble4
+a_float (2.google.protobuf.FloatValueRaFloat6
+an_int64 (2.google.protobuf.Int64ValueRanInt647
+a_uint64 (2.google.protobuf.UInt64ValueRaUint646
+an_int32 (2.google.protobuf.Int32ValueRanInt327
+a_uint32	 (2.google.protobuf.UInt32ValueRaUint321
+a_bool
+ (2.google.protobuf.BoolValueRaBool7
+a_string (2.google.protobuf.StringValueRaString4
+a_bytes (2.google.protobuf.BytesValueRaBytes0
+nothing (2.google.protobuf.EmptyRnothing4
+history (2.google.protobuf.TimestampRhistory4
+limits (2.wellknown.Known.LimitsEntryRlimits-
+ids (2.google.protobuf.Int64ValueRidsT
+LimitsEntry
+key (	Rkey/
+value (2.google.protobuf.DurationRvalue:82™
+Leases*
+Open.wellknown.Lease.wellknown.Lease*
+Know.wellknown.Known.wellknown.Known9
+Now.google.protobuf.Empty.google.protobuf.Timestamp9
+Wait.google.protobuf.Duration.google.protobuf.EmptyA
+Scale.google.protobuf.FloatValue.google.protobuf.FloatValuebproto3

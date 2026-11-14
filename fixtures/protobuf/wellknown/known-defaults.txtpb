@@ -1,0 +1,16 @@
+# Every singular field set to a message that holds its default: the epoch,
+# a Duration of 0, a FieldMask without paths, each wrapper's default and
+# Empty.
+at {}
+ttl {}
+mask {}
+a_double {}
+a_float {}
+an_int64 {}
+a_uint64 {}
+an_int32 {}
+a_uint32 {}
+a_bool {}
+a_string {}
+a_bytes {}
+nothing {}

@@ -627,19 +627,11 @@ test "messages in lists and in maps nest 100 deep and no deeper, each map entry 
 }
 
 ///|
-test "a repeated field and a map of a well-known type are not decoded yet" {
-  let timestamp = file_proto(
-    "google/protobuf/timestamp.proto",
+test "a repeated field and a map of a well-known type that is not served yet, such as Struct, are not decoded" {
+  let struct_ = file_proto(
+    "google/protobuf/struct.proto",
     package_name="google.protobuf",
-    body=w => {
-      message_field(
-        w,
-        4,
-        message_proto("Timestamp", body=w => {
-          message_field(w, 2, field_proto("seconds", 1, 3))
-        }),
-      )
-    },
+    body=w => message_field(w, 4, message_proto("Struct")),
   )
   let field = (name : String, number : UInt64, type_name : String) => {
     nested(w => {
@@ -653,13 +645,13 @@ test "a repeated field and a map of a well-known type are not decoded yet" {
   let stamped = file_proto(
     "stamped.proto",
     package_name="stamped",
-    dependencies=["google/protobuf/timestamp.proto"],
+    dependencies=["google/protobuf/struct.proto"],
     body=w => {
       message_field(
         w,
         4,
         message_proto("History", body=w => {
-          message_field(w, 2, field("at", 1, ".google.protobuf.Timestamp"))
+          message_field(w, 2, field("at", 1, ".google.protobuf.Struct"))
         }),
       )
       message_field(
@@ -675,12 +667,7 @@ test "a repeated field and a map of a well-known type are not decoded yet" {
               message_field(
                 w,
                 2,
-                field_proto(
-                  "value",
-                  2,
-                  11,
-                  type_name=".google.protobuf.Timestamp",
-                ),
+                field_proto("value", 2, 11, type_name=".google.protobuf.Struct"),
               )
               message_field(w, 7, nested(w => varint_field(w, 7, 1)))
             }),
@@ -689,7 +676,7 @@ test "a repeated field and a map of a well-known type are not decoded yet" {
       )
     },
   )
-  let set = @protobuf.read_descriptor_set(set_of([timestamp, stamped])) catch {
+  let set = @protobuf.read_descriptor_set(set_of([struct_, stamped])) catch {
     err => fail("not a set: \{err}")
   }
   let errors = ["stamped.History", "stamped.ByName"].map(name => {
@@ -703,8 +690,8 @@ test "a repeated field and a map of a well-known type are not decoded yet" {
   inspect(
     errors.join("\n"),
     content=(
-      #|octet 0: the field at has the well-known type google.protobuf.Timestamp, which smock does not decode yet
-      #|octet 0: the field at is a map whose values have the well-known type google.protobuf.Timestamp, which smock does not decode yet
+      #|octet 0: the field at has the well-known type google.protobuf.Struct, which smock does not decode yet
+      #|octet 0: the field at is a map whose values have the well-known type google.protobuf.Struct, which smock does not decode yet
     ),
   )
 }

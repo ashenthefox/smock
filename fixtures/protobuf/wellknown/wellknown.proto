@@ -1,0 +1,49 @@
+// Written for smock's tests: methods whose types hold the well-known types
+// that ProtoJSON prints in forms of their own, Timestamp, Duration,
+// FieldMask, the wrappers and Empty: singular, repeated, as a map's values,
+// and as a method's whole input or output type. The files of those types,
+// under google/protobuf/, are protobuf's.
+syntax = "proto3";
+
+package wellknown;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+service Leases {
+  // A Timestamp and a Duration, the ticket's example.
+  rpc Open (Lease) returns (Lease);
+  // Every type, in one message.
+  rpc Know (Known) returns (Known);
+  // Well-known types as a method's whole input or output type.
+  rpc Now (google.protobuf.Empty) returns (google.protobuf.Timestamp);
+  rpc Wait (google.protobuf.Duration) returns (google.protobuf.Empty);
+  rpc Scale (google.protobuf.FloatValue) returns (google.protobuf.FloatValue);
+}
+
+message Lease {
+  google.protobuf.Timestamp created_at = 1;
+  google.protobuf.Duration ttl = 2;
+}
+
+message Known {
+  google.protobuf.Timestamp at = 1;
+  google.protobuf.Duration ttl = 2;
+  google.protobuf.FieldMask mask = 3;
+  google.protobuf.DoubleValue a_double = 4;
+  google.protobuf.FloatValue a_float = 5;
+  google.protobuf.Int64Value an_int64 = 6;
+  google.protobuf.UInt64Value a_uint64 = 7;
+  google.protobuf.Int32Value an_int32 = 8;
+  google.protobuf.UInt32Value a_uint32 = 9;
+  google.protobuf.BoolValue a_bool = 10;
+  google.protobuf.StringValue a_string = 11;
+  google.protobuf.BytesValue a_bytes = 12;
+  google.protobuf.Empty nothing = 13;
+  repeated google.protobuf.Timestamp history = 14;
+  map<string, google.protobuf.Duration> limits = 15;
+  repeated google.protobuf.Int64Value ids = 16;
+}
