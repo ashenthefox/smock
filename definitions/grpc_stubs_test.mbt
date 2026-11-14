@@ -230,7 +230,7 @@ test "a Stub on a client-, server- or bidi-streaming method is a problem at its 
 }
 
 ///|
-test "a method whose input type has a repeated field, or whose input or output type comes from a file that is not proto3, is not served yet, each side on its own; a nested type is served" {
+test "a method whose input or output type comes from an editions file is not served yet, each side on its own; a nested type and a type of a proto2 file are served" {
   inspect(
     check_stubs(
       (
@@ -258,8 +258,7 @@ test "a method whose input type has a repeated field, or whose input or output t
     ),
     content=(
       #|a.yaml: /stubs/0/response/json/sku: is not a field of catalog.Item
-      #|a.yaml: /stubs/3/request/path: the input type legacy.LegacyRequest is not served yet: legacy.proto, which defines it, is a proto2 file, and gRPC Stubs serve only types of proto3 files so far
-      #|a.yaml: /stubs/4/request/path: the input type edition.EditionRequest is not served yet: edition.proto, which defines it, is an editions file, and gRPC Stubs serve only types of proto3 files so far
+      #|a.yaml: /stubs/4/request/path: the input type edition.EditionRequest is not served yet: edition.proto, which defines it, is an editions file, and editions come in a later spec
     ),
   )
 }
@@ -493,7 +492,7 @@ test "an input type of fields of every scalar type, enums, nested messages, prot
 }
 
 ///|
-test "an input type that is, or reaches, a type of a file that is not proto3 is not served yet" {
+test "an input type that reaches a type of a proto2 file is served" {
   inspect(
     check_stubs(
       (
@@ -504,7 +503,7 @@ test "an input type that is, or reaches, a type of a file that is not proto3 is 
       ),
     ),
     content=(
-      #|a.yaml: /stubs/0/request/path: the input type scalars.Memo is not served yet: legacy.proto, which defines legacy.Note, a type it reaches, is a proto2 file, and gRPC Stubs serve only types of proto3 files so far
+      #|scalars: remember: gRPC Stub of Remember
     ),
   )
 }
