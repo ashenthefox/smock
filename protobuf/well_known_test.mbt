@@ -336,7 +336,10 @@ test "a well-known type as a method's whole reply is read in its form too" {
     reply("BoolValue", "false") == "",
     reply("Empty", "{}") == "",
   ]
-  inspect(lines, content="[true, true, true, true, true, true, true, true]")
+  inspect(
+    lines.map(same => same.to_string()).join(" "),
+    content="true true true true true true true true",
+  )
 }
 
 ///|
