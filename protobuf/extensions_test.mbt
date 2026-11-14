@@ -367,7 +367,7 @@ test "groups count as messages toward the depth of 100, decoded and encoded" {
     _ => "encoded"
   }
   // The 101st group, at the pointer of the value that holds it.
-  let pointer = StringBuilder::new()
+  let pointer = StringBuilder()
   for _ in 0..<101 {
     pointer.write_string("/g")
   }
