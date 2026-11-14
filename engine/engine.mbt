@@ -443,13 +443,13 @@ pub fn ReloadOutcome::name(self : ReloadOutcome) -> String {
 ///   generators included, except those of a Mock the new set does not
 ///   declare, which are dropped. They are not read again, but an Ephemeral
 ///   gRPC Stub answers only while the Mock's new set has its method as a
-///   unary method. Then each Scenario state stays while its
-///   name is one of the known states of its Mock, Session and Scenario;
-///   any other goes back to `Started`, and the states of a Mock that is
-///   gone are dropped. Variables and the copies of Data buckets stay,
-///   except those of a Mock that is gone, which are dropped. So are the
-///   copies of a bucket that the new set no longer declares, or whose
-///   initial value or `key` it changed (`bucket_changed`).
+///   unary method. Then each Scenario state stays while its name is one of
+///   the known states of its Mock, Session and Scenario; any other goes
+///   back to `Started`, and the states of a Mock that is gone are dropped.
+///   Variables and the copies of Data buckets stay, except those of a Mock
+///   that is gone, which are dropped. So are the copies of a bucket that
+///   the new set no longer declares, or whose initial value or `key` it
+///   changed (`bucket_changed`).
 /// - When it is valid with the digest served, nothing is swapped.
 /// - When it is invalid, the served snapshot stays.
 ///
