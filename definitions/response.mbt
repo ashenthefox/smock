@@ -70,11 +70,15 @@ priv struct ToolCallDecl {
 }
 
 ///|
-/// A gRPC Stub's `grpc` as written: its status, and its message with its
-/// JSON Pointer, which is parsed as a template with `template` on.
+/// A gRPC Stub's `grpc` as written: its status, its message with its JSON
+/// Pointer, which is parsed as a template with `template` on, and its
+/// trailing metadata as (name, value, JSON Pointer of the value), as
+/// `File::read_headers` reads metadata, whose values are parsed as
+/// templates with `template` on.
 priv struct GrpcDecl {
   status : @grpc.Status
   message : (String, String)?
+  trailers : Array[(String, String, String)]
 }
 
 ///|
@@ -164,7 +168,10 @@ fn File::read_response(
     let field = child_pointer(pointer, key)
     match key {
       "status" => status = self.read_status(field, value)
-      "headers" => headers.append(self.read_headers(field, value))
+      "headers" =>
+        headers.append(
+          self.read_headers(field, value, metadata=grpc, templated~),
+        )
       "body" => body = Inline(field, self.string(field, value).unwrap_or(""))
       "bodyFile" => body = File(field, self.read_body_file(field, value))
       "json" => body = JsonBody(field, value)
@@ -182,7 +189,7 @@ fn File::read_response(
         }
       "grpc" =>
         if grpc {
-          grpc_reply = self.read_reply_grpc(field, value)
+          grpc_reply = self.read_reply_grpc(field, value, templated~)
         } else {
           self.error(
             field, "is only for gRPC Stubs, and this is an HTTP Stub: its exact path names no method of its Mock's Descriptor set",
@@ -280,34 +287,57 @@ fn File::read_response(
   }
   let grpc_reply : GrpcReply? = match grpc_reply {
     None => None
-    Some({ status, message: None, }) => Some({ status, message: None, })
-    Some({ status, message: Some((text, field)), }) =>
-      if template {
-        // A message that fails to parse is reported, and the set is not
-        // loaded, so the reply it leaves is never sent.
-        match
-          @template.Text::parse(
-            text,
-            pointer=template_pointer(stub_pointer, field),
-            kind=Body(Plain),
-            env=self.env,
-            buckets~,
-          ) {
-          Ok(template) => Some({ status, message: Some(Templated(template)), })
-          Err(problem) => {
-            self.report_template_problem(stub_pointer, problem)
-            Some({ status, message: None, })
+    Some({ status, message, trailers, }) => {
+      let message : GrpcMessage? = match message {
+        None => None
+        Some((text, field)) =>
+          if template {
+            // A message that fails to parse is reported, and the set is
+            // not loaded, so the reply it leaves is never sent.
+            match
+              @template.Text::parse(
+                text,
+                pointer=template_pointer(stub_pointer, field),
+                kind=Body(Plain),
+                env=self.env,
+                buckets~,
+              ) {
+              Ok(template) => Some(Templated(template))
+              Err(problem) => {
+                self.report_template_problem(stub_pointer, problem)
+                None
+              }
+            }
+          } else {
+            Some(Written(text))
           }
-        }
-      } else {
-        Some({ status, message: Some(GrpcMessage::Written(text)), })
       }
+      let trailers : ResponseHeaders = if template {
+        Templated(self.parse_header_values(stub_pointer, trailers, buckets~))
+      } else {
+        Written(
+          ReadOnlyArray::from_iter(
+            trailers.iter().map(trailer => (trailer.0, trailer.1)),
+          ),
+        )
+      }
+      Some({ status, message, trailers, })
+    }
   }
-  // Whether the templated message reads Variables, and Data buckets.
+  // Whether the templated message or trailers read Variables, and Data
+  // buckets.
   let (message_vars, message_data) = match grpc_reply {
-    Some({ message: Some(Templated(text)), .. }) =>
-      (text.reads_vars(), text.reads_data())
-    _ => (false, false)
+    Some({ message, trailers, .. }) => {
+      let (vars, data) = match message {
+        Some(Templated(text)) => (text.reads_vars(), text.reads_data())
+        _ => (false, false)
+      }
+      (
+        vars || trailers.reads(@template.Text::reads_vars),
+        data || trailers.reads(@template.Text::reads_data),
+      )
+    }
+    None => (false, false)
   }
   {
     status,
@@ -329,12 +359,15 @@ fn File::read_response(
 ///|
 /// Reads a gRPC Stub's `grpc`, a closed object, the value `json` at
 /// `pointer`: `status`, a name from `OK` to `UNAUTHENTICATED`, by default
-/// `OK`, and `message`, any string. Returns `None` when it is not an
-/// object.
+/// `OK`, `message`, any string, and `trailers`, the trailing metadata, in
+/// the shape of `headers` and under gRPC's rules, as `File::read_headers`
+/// reads metadata, whose values are templates when `templated`. Returns
+/// `None` when it is not an object.
 fn File::read_reply_grpc(
   self : File,
   pointer : String,
   json : Json,
+  templated~ : Bool,
 ) -> GrpcDecl? {
   guard json is Object(grpc) else {
     self.error(pointer, "must be an object")
@@ -342,6 +375,7 @@ fn File::read_reply_grpc(
   }
   let mut status : @grpc.Status = Ok
   let mut message = None
+  let trailers = []
   for key, value in grpc {
     let field = child_pointer(pointer, key)
     match key {
@@ -355,10 +389,46 @@ fn File::read_reply_grpc(
         if self.string(field, value) is Some(text) {
           message = Some((text, field))
         }
+      "trailers" =>
+        trailers.append(
+          self.read_headers(field, value, metadata=true, templated~),
+        )
       _ => self.unknown_field(field)
     }
   }
-  Some({ status, message, })
+  Some({ status, message, trailers, })
+}
+
+///|
+/// Parses `fields`, header fields as (name, value, JSON Pointer of the
+/// value) of a response with `template` on, such as a gRPC reply's
+/// trailing metadata, each value as a text template of a header value, and
+/// reports every problem in them. `stub_pointer` is the JSON Pointer of
+/// the Stub: a template's own pointer is within the Stub. The templates may
+/// read the Data buckets `buckets`. Returns the fields that parse: a
+/// response with a problem is never sent, since the set is not loaded.
+fn File::parse_header_values(
+  self : File,
+  stub_pointer : String,
+  fields : Array[(String, String, String)],
+  buckets~ : @template.Buckets,
+) -> ReadOnlyArray[(String, @template.Text)] {
+  let parsed = []
+  for field in fields {
+    let (name, value, pointer) = field
+    match
+      @template.Text::parse(
+        value,
+        pointer=template_pointer(stub_pointer, pointer),
+        kind=HeaderValue,
+        env=self.env,
+        buckets~,
+      ) {
+      Ok(template) => parsed.push((name, template))
+      Err(problem) => self.report_template_problem(stub_pointer, problem)
+    }
+  }
+  ReadOnlyArray::from_array(parsed)
 }
 
 ///|

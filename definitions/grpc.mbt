@@ -480,13 +480,13 @@ fn File::check_input(
 /// Stub cannot give, or that gRPC Stubs do not serve yet. They serve `id`,
 /// `mock`, `priority`, `scenario`, `variables`, `dataWrites`, `fault.seed`,
 /// `request.method` when it is `POST`, `request.path`, `request.headers`,
-/// a `json` body condition, and `json`, `grpc`, `template` and `weight` in
-/// a reply. `query`, `cookies`, every other body condition, another method,
-/// and a reply's `status`, `body`, `bodyFile`, `events` and `llm` make no
-/// sense on a gRPC Stub (`File::refuse_reply`); `fault.delay`,
-/// `fault.connection` and a reply's `headers` are not served yet. A member
-/// that no Stub has is reported as unknown where it is read, and a method
-/// that is not an HTTP token as such.
+/// a `json` body condition, and `headers`, `json`, `grpc`, `template` and
+/// `weight` in a reply. `query`, `cookies`, every other body condition,
+/// another method, and a reply's `status`, `body`, `bodyFile`, `events`
+/// and `llm` make no sense on a gRPC Stub (`File::refuse_reply`);
+/// `fault.delay` and `fault.connection` are not served yet. A member that
+/// no Stub has is reported as unknown where it is read, and a method that
+/// is not an HTTP token as such.
 fn File::refuse_fields(
   self : File,
   pointer : String,
@@ -548,8 +548,8 @@ let matched_as_json : String = "a call's message is matched as JSON, with a json
 ///|
 /// Reports each member of `response`, a reply of a gRPC Stub at `pointer`,
 /// that it cannot give: `status`, `body`, `bodyFile`, `events` and `llm`,
-/// which make no sense on a gRPC Stub, and `headers`, which is not served
-/// yet. It may give `json`, `grpc`, `template` and `weight`.
+/// which make no sense on a gRPC Stub. It may give `headers`, its initial
+/// metadata, `json`, `grpc`, `template` and `weight`.
 fn File::refuse_reply(
   self : File,
   pointer : String,
@@ -574,7 +574,6 @@ fn File::refuse_reply(
         self.no_sense(
           field, "an LLM reply is written in an LLM API's HTTP wire form",
         )
-      "headers" => self.not_served(field)
       _ => ()
     }
   }

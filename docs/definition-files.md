@@ -81,6 +81,7 @@ in a definitions directory, such as `defs/`, that `smock serve --dir` and
   - [Descriptor sets](#descriptor-sets)
   - [gRPC Stubs](#grpc-stubs)
   - [The status of a gRPC reply](#the-status-of-a-grpc-reply)
+  - [gRPC reply metadata](#grpc-reply-metadata)
   - [gRPC Stub conditions](#grpc-stub-conditions)
 - [Faults](#faults)
   - [Delays](#delays)
@@ -1046,7 +1047,9 @@ several responses to pick from instead
 ([Several responses](#several-responses)). `status` is required, except on a
 [gRPC Stub](#grpc-stubs), whose reply has none: it gives `grpc` instead,
 the gRPC status and message its reply ends with
-([The status of a gRPC reply](#the-status-of-a-grpc-reply)).
+([The status of a gRPC reply](#the-status-of-a-grpc-reply)). A gRPC
+Stub's `headers` are its reply's initial metadata, under gRPC's rules
+([gRPC reply metadata](#grpc-reply-metadata)).
 
 `headers` maps each header name to a string or to an array of strings.
 An array sends one field per value, in order, where the name stands.
@@ -3615,6 +3618,10 @@ What is a template with `template: true`:
 - A gRPC Stub's `grpc.message` is a text template. The control characters
   it renders are kept, then percent-encoded
   ([The status of a gRPC reply](#the-status-of-a-grpc-reply)).
+- A gRPC Stub's `grpc.trailers` values are text templates, rendered as
+  header values are, after the message. A rendered value of its headers
+  or trailers that gRPC's rules refuse fails the call
+  ([gRPC reply metadata](#grpc-reply-metadata)).
 - `status`, a gRPC Stub's `grpc.status` and an event's `delay` are never
   templated.
 
@@ -5818,9 +5825,11 @@ stubs:
 - The method must be unary. A Stub on a client-, server- or
   bidi-streaming method is a problem at its `path`. Streaming methods are
   planned for R3, a later release.
-- A gRPC Stub's reply is `json`, the reply message, and `grpc`, the gRPC
-  status and message it ends with
-  ([The status of a gRPC reply](#the-status-of-a-grpc-reply)). It has no
+- A gRPC Stub's reply is `json`, the reply message, `headers`, its
+  initial metadata, and `grpc`, the gRPC status, message and trailing
+  metadata it ends with
+  ([The status of a gRPC reply](#the-status-of-a-grpc-reply),
+  [gRPC reply metadata](#grpc-reply-metadata)). It has no
   `status`: every gRPC reply has the HTTP status 200. `status` is
   required on HTTP Stubs only. smock adds no `Content-Type` for a gRPC
   Stub's `json`.
@@ -5899,13 +5908,13 @@ JSON Pointer, and so is a `method` other than `POST`:
 | `request.body` as text, or with `pattern`, `form` or `xml` | Makes no sense: the message is matched as JSON, with a `json` condition. |
 | `response`, or `responses` with `weight` | As on HTTP. |
 | `json` in a reply | The reply message. |
-| `grpc` in a reply | The gRPC status and message ([The status of a gRPC reply](#the-status-of-a-grpc-reply)). |
+| `headers` in a reply | The initial metadata, under gRPC's rules ([gRPC reply metadata](#grpc-reply-metadata)). |
+| `grpc` in a reply | The gRPC status, message and trailing metadata ([The status of a gRPC reply](#the-status-of-a-grpc-reply), [gRPC reply metadata](#grpc-reply-metadata)). |
 | `template` in a reply | As on HTTP. |
 | `status` in a reply | Makes no sense: every gRPC reply has the HTTP status 200, and `grpc.status` gives its gRPC status. |
 | `body` or `bodyFile` in a reply | Makes no sense: the reply message is `json`, which smock encodes with the method's output type. |
 | `events` in a reply | Makes no sense: a unary call gets one reply message, not an event stream. |
 | `llm` in a reply | Makes no sense: an LLM reply is written in an LLM API's HTTP wire form. |
-| `headers` in a reply | Not served yet: a problem that says so. |
 | `crud` | Never: a CRUD Stub is an HTTP Stub. |
 
 Each problem says why:
@@ -5941,8 +5950,7 @@ what is not served yet:
   fields, maps, oneofs, and the well-known types Timestamp, Duration,
   FieldMask, the wrappers and Empty, in their ProtoJSON forms
   ([Well-known types](grpc.md#well-known-types)).
-- `fault.delay`, `fault.connection`, and `headers` in a reply, as the
-  table above says.
+- `fault.delay` and `fault.connection`, as the table above says.
 
 #### Ephemeral gRPC Stubs
 
@@ -5990,8 +5998,10 @@ stubs:
       - { weight: 1, grpc: { status: UNAVAILABLE, message: "try again ☺" } }
 ```
 
-- `grpc` is an object with two fields, `status` and `message`, both
-  optional. A reply without it ends with `OK` and no message.
+- `grpc` is an object with three fields, `status`, `message` and
+  `trailers`, all optional. A reply without it ends with `OK`, no message
+  and no trailing metadata. `trailers` is the reply's trailing metadata
+  ([gRPC reply metadata](#grpc-reply-metadata)).
 - `status` is a name of one of gRPC's seventeen status codes, from `OK`,
   0, to `UNAUTHENTICATED`, 16, as gRPC writes them: `OK`, `CANCELLED`,
   `UNKNOWN`, `INVALID_ARGUMENT`, `DEADLINE_EXCEEDED`, `NOT_FOUND`,
@@ -6013,10 +6023,12 @@ stubs:
   greeter.yaml: /stubs/0/response/json: is not allowed with the gRPC status NOT_FOUND: a gRPC call gets a reply message or an error, never both
   ```
 
-- An error goes out as Trailers-Only, one HEADERS block that ends the
-  stream, as gRPC servers send it. A reply with `OK` goes out as HEADERS,
-  the reply message in one DATA frame, then the trailers, which carry the
-  status message, if it has one.
+- An error without initial metadata goes out as Trailers-Only, one
+  HEADERS block that ends the stream, as gRPC servers send it. An error
+  with initial metadata goes out as HEADERS, then the trailers. A reply
+  with `OK` goes out as HEADERS, the reply message in one DATA frame, then
+  the trailers, which carry the status message, if it has one, and the
+  trailing metadata.
 - An HTTP Stub's response cannot give `grpc`: it is a problem at `grpc`,
   which says that the Stub's exact path names no method of its Mock's set.
 - The Journal records the status a call got as its `grpcStatus`, while its
@@ -6024,6 +6036,64 @@ stubs:
 
 The [gRPC guide](grpc.md#status-and-message) shows what goes out on the
 wire and how smock percent-encodes a message.
+
+### gRPC reply metadata
+
+A gRPC Stub's `headers` are its reply's initial metadata, sent in its
+HEADERS, and its `grpc.trailers` its trailing metadata, sent in its
+trailers after the status and the message:
+
+```yaml
+stubs:
+  - id: hello-missing
+    mock: greeter
+    request: { path: /helloworld.Greeter/SayHello }
+    response:
+      headers: { x-served-by: smock }
+      grpc:
+        status: NOT_FOUND
+        trailers: { x-trace: abc, x-tag: [a, b], trace-bin: "AAE=" }
+```
+
+- Both map each name to a string or to a non-empty array of strings, as
+  an HTTP Stub's `headers` do. An array sends one field per value, in
+  order.
+- A name, once in lower case, holds only `0-9`, `a-z`, `_`, `-` and `.`,
+  as gRPC's grammar says. smock sends names in lower case. Two names that
+  differ only in case are a problem.
+- These names are problems in both: `content-type`, `te` and every name
+  that starts with `grpc-`, which gRPC keeps for itself; `keep-alive`,
+  `proxy-connection` and `upgrade`, which HTTP/2 forbids; and
+  `content-length`, `transfer-encoding`, `connection` and `smock-mock`,
+  which smock sets. So a gRPC Stub cannot give a Content-Type: smock
+  always sends `content-type: application/grpc`.
+- A value holds only characters from 0x20 to 0x7E, space and printable
+  ASCII. A tab or any other character is a problem.
+- A name that ends with `-bin` holds binary metadata. Its value is
+  written in standard base64, padded or not, and smock sends it without
+  its padding: `"AAE="` goes out as `AAE`. A value that is not base64 is
+  a problem.
+- Each problem is reported at its JSON Pointer:
+
+  ```text
+  greeter.yaml: /stubs/0/response/headers/grpc-foo: is reserved by gRPC, which keeps content-type, te and every name starting with grpc- for itself
+  greeter.yaml: /stubs/0/response/grpc/trailers/trace-bin: must be standard base64, padded or not: a field whose name ends with -bin is binary
+  ```
+
+- With `template: true`, the values of both are text templates, rendered
+  as header values are, with the control characters they render turned
+  into spaces. Trailer values render after the message. smock checks
+  the rendered values as it checks values as written, and drops the
+  padding of a rendered `-bin` value. A rendered value that breaks the
+  rules gets INTERNAL `template failed`, and the call's Journal entry says
+  why in `templateError`, at the value's JSON Pointer.
+- An error with initial metadata goes out as HEADERS with it, then
+  trailers with the status, the message and the trailing metadata. An
+  error without it goes out as Trailers-Only, with the trailing metadata
+  in its one block. `smock-mock`, which smock adds when the Default Mock
+  answers, does not count as initial metadata.
+
+The [gRPC guide](grpc.md#metadata) shows the reply on the wire.
 
 ### gRPC Stub conditions
 
