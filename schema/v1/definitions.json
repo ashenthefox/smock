@@ -419,7 +419,7 @@
       "type": "object",
       "properties": {
         "json": {
-          "description": "The JSON value the body must contain. An object whose only member is `pattern`, with a string, is a pattern on the value in its place. It matches a string, or the JSON text of a number, `true` or `false`, as a whole; a number's text is its shortest form, so `1.50` is matched as `1.5`. It never matches `null`, an object or an array. Any other object needs each listed key, matched recursively, and may have others. An array needs the same length and is matched element by element. Any other value must be equal. To match an object such as `{\"pattern\": \"a.b\"}` itself, nest a pattern in it: `{\"pattern\": {\"pattern\": \"a\\\\.b\"}}`. An object whose only key starts with `$` is an operator on the value in its place: `$not` holds when the value does not meet the condition it holds, and a missing key holds it when a missing key does not meet that condition, so a missing key meets `{\"$not\": \"x\"}` but not `{\"$not\": {\"$exists\": false}}`; `$exists` (`true` or `false`) when the value is present, even `null`, or missing; `$includes` when the value is an array with an element that meets the condition it holds; `$last` when the value is an array with at least one element and its last element meets the condition it holds, as in `{\"messages\": {\"$last\": {\"role\": \"tool\"}}}`. Any other `$` key is reserved, and a key that starts with `$` is written `$$`: `$$ref` is the key `$ref`. smock checks the operators, not this Schema, because literal JSON is valid here. On a gRPC Stub, smock checks the condition against the method's input type when the definitions are loaded: each key names a field, by its proto name or its JSON name, and each literal is a value of its field's type as smock prints the request message; proto names become JSON names, enum numbers and aliases become the enum's first name, and a float is rounded to 32 bits."
+          "description": "The JSON value the body must contain. An object whose only member is `pattern`, with a string, is a pattern on the value in its place. It matches a string, or the JSON text of a number, `true` or `false`, as a whole; a number's text is its shortest form, so `1.50` is matched as `1.5`. It never matches `null`, an object or an array. Any other object needs each listed key, matched recursively, and may have others. An array needs the same length and is matched element by element. Any other value must be equal. To match an object such as `{\"pattern\": \"a.b\"}` itself, nest a pattern in it: `{\"pattern\": {\"pattern\": \"a\\\\.b\"}}`. An object whose only key starts with `$` is an operator on the value in its place: `$not` holds when the value does not meet the condition it holds, and a missing key holds it when a missing key does not meet that condition, so a missing key meets `{\"$not\": \"x\"}` but not `{\"$not\": {\"$exists\": false}}`; `$exists` (`true` or `false`) when the value is present, even `null`, or missing; `$includes` when the value is an array with an element that meets the condition it holds; `$last` when the value is an array with at least one element and its last element meets the condition it holds, as in `{\"messages\": {\"$last\": {\"role\": \"tool\"}}}`. Any other `$` key is reserved, and a key that starts with `$` is written `$$`: `$$ref` is the key `$ref`. smock checks the operators, not this Schema, because literal JSON is valid here. On a gRPC Stub, smock checks the condition against the method's input type when the definitions are loaded: each key names a field, by its proto name or its JSON name, or an extension of the type, by its full name in brackets such as [shop.priority], and each literal is a value of its field's type as smock prints the request message; proto names become JSON names, enum numbers and aliases become the enum's first name, and a float is rounded to 32 bits."
         }
       },
       "required": ["json"],
@@ -480,7 +480,7 @@
           "$ref": "#/$defs/status"
         },
         "headers": {
-          "description": "Header fields to send, by name: a value, or a non-empty array of values, each sent as its own field line, in order, such as several Set-Cookie fields. Content-Type takes one value. Names are compared case-insensitively, so two names that differ only in case, such as Set-Cookie and set-cookie, are rejected. smock sets Content-Length, Transfer-Encoding and Connection itself, and Smock-Mock when the Default Mock answers, so they cannot be given. smock sends Date with the current time, unless Date is given here.",
+          "description": "Header fields to send, by name: a value, or a non-empty array of values, each sent as its own field line, in order, such as several Set-Cookie fields. Content-Type takes one value. Names are compared case-insensitively, so two names that differ only in case, such as Set-Cookie and set-cookie, are rejected. smock sets Content-Length, Transfer-Encoding and Connection itself, and Smock-Mock when the Default Mock answers, so they cannot be given. smock sends Date with the current time, unless Date is given here. On a gRPC Stub, they are the reply's initial metadata, sent in its HEADERS, under the rules of grpc.trailers: smock refuses there what this Schema cannot tell apart from an HTTP Stub's headers, such as a Content-Type, a name starting with grpc-, or a value outside 0x20 to 0x7E.",
           "type": "object",
           "propertyNames": { "$ref": "#/$defs/responseHeaderName" },
           "patternProperties": {
@@ -501,10 +501,10 @@
           "pattern": "^(?!\\.)[^/]+(/(?!\\.)[^/]+)*$"
         },
         "json": {
-          "description": "The body as JSON: any JSON value, sent as compact JSON in UTF-8, with Content-Type: application/json unless headers gives a Content-Type. On a gRPC Stub, it is the reply message as ProtoJSON writes it, an object whose keys name fields of the method's output type by their proto names or JSON names, read and encoded when the definitions are loaded, or on each call once rendered when template is true, and it gets no Content-Type. smock writes every number in its shortest form (9.90 is sent as 9.9); use body when the exact bytes matter. With template true, it is a structured template: a string that is exactly one ${expr} gives the value with its own type, an object with $each gives an array, and an object with $if gives its then or else."
+          "description": "The body as JSON: any JSON value, sent as compact JSON in UTF-8, with Content-Type: application/json unless headers gives a Content-Type. On a gRPC Stub, it is the reply message as ProtoJSON writes it, an object whose keys name fields of the method's output type by their proto names or JSON names, or its extensions by their full names in brackets, read and encoded when the definitions are loaded, or on each call once rendered when template is true, and it gets no Content-Type. smock writes every number in its shortest form (9.90 is sent as 9.9); use body when the exact bytes matter. With template true, it is a structured template: a string that is exactly one ${expr} gives the value with its own type, an object with $each gives an array, and an object with $if gives its then or else."
         },
         "template": {
-          "description": "Whether the header values (except Content-Type, which cannot contain ${), the body (body, bodyFile or json), the events, in llm, the text, each chunk, id, model, each tool call's name, id and arguments, and the error's message, and in grpc, the message, are templates, rendered for each request. With template false, nothing is parsed or rendered: ${ is plain text and $each a plain key. Default false.",
+          "description": "Whether the header values (except Content-Type, which cannot contain ${), the body (body, bodyFile or json), the events, in llm, the text, each chunk, id, model, each tool call's name, id and arguments, and the error's message, and in grpc, the message and the trailer values, are templates, rendered for each request. With template false, nothing is parsed or rendered: ${ is plain text and $each a plain key. Default false.",
           "type": "boolean",
           "default": false
         },
@@ -515,7 +515,7 @@
         },
         "llm": { "$ref": "#/$defs/llm" },
         "grpc": {
-          "description": "How a gRPC Stub's reply ends: its gRPC status and status message. Only a gRPC Stub's response gives it; an HTTP Stub that gives it is refused. Without it, the reply ends with OK and no message. An error, a status other than OK, gives no json: a gRPC call gets a reply message or an error, never both.",
+          "description": "How a gRPC Stub's reply ends: its gRPC status, its status message and its trailing metadata. Only a gRPC Stub's response gives it; an HTTP Stub that gives it is refused. Without it, the reply ends with OK, no message and no trailing metadata. An error, a status other than OK, gives no json: a gRPC call gets a reply message or an error, never both.",
           "type": "object",
           "properties": {
             "status": {
@@ -526,6 +526,12 @@
             "message": {
               "description": "The status message, any Unicode text, sent in grpc-message: smock percent-encodes its UTF-8, so octets 0x20 to 0x7E other than % stay as they are, every other octet becomes %XX, and a space at either end becomes %20. With template true, it is a text template, and the control characters it renders are kept, then percent-encoded.",
               "type": "string"
+            },
+            "trailers": {
+              "description": "The trailing metadata, sent after grpc-status and grpc-message, in the shape of headers: by name, a value, or a non-empty array of values, each sent as its own field, in order. Names are sent in lower case and compared case-insensitively. A name holds only 0-9, a-z, _, - and . in lower case; content-type, te, names starting with grpc-, the fields HTTP/2 forbids (keep-alive, proxy-connection, upgrade) and the fields smock sets cannot be given. A value holds only characters from 0x20 to 0x7E, and the value of a name ending with -bin is binary, written in standard base64, padded or not, and sent without padding; smock checks both when the definitions are loaded, or once rendered when template is true, in which case each value is a text template, rendered as header values are, control characters becoming spaces. An error whose response gives headers is sent as HEADERS with them, then trailers; one without is Trailers-Only, one HEADERS block that ends the stream.",
+              "type": "object",
+              "propertyNames": { "$ref": "#/$defs/metadataName" },
+              "additionalProperties": { "$ref": "#/$defs/headerValues" }
             }
           },
           "additionalProperties": false
@@ -957,6 +963,15 @@
       "not": {
         "description": "A header field smock sets itself.",
         "pattern": "^([Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Ll][Ee][Nn][Gg][Tt][Hh]|[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]-[Ee][Nn][Cc][Oo][Dd][Ii][Nn][Gg]|[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn]|[Ss][Mm][Oo][Cc][Kk]-[Mm][Oo][Cc][Kk])$"
+      }
+    },
+    "metadataName": {
+      "description": "A name of a gRPC reply's metadata: in lower case, one or more of 0-9, a-z, _, - and ., other than a name gRPC reserves, a field HTTP/2 forbids or a field smock sets.",
+      "type": "string",
+      "pattern": "^[0-9A-Za-z_.-]+$",
+      "not": {
+        "description": "A name gRPC reserves (content-type, te and every name starting with grpc-), a field specific to an HTTP/1.1 connection, which HTTP/2 forbids, or a field smock sets itself.",
+        "pattern": "^([Gg][Rr][Pp][Cc]-.*|[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Tt][Yy][Pp][Ee]|[Tt][Ee]|[Kk][Ee][Ee][Pp]-[Aa][Ll][Ii][Vv][Ee]|[Pp][Rr][Oo][Xx][Yy]-[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn]|[Uu][Pp][Gg][Rr][Aa][Dd][Ee]|[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Ll][Ee][Nn][Gg][Tt][Hh]|[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]-[Ee][Nn][Cc][Oo][Dd][Ii][Nn][Gg]|[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn]|[Ss][Mm][Oo][Cc][Kk]-[Mm][Oo][Cc][Kk])$"
       }
     },
     "headerValues": {

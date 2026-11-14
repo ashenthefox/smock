@@ -230,13 +230,7 @@ fn DescriptorSet::print_well_known(
     }
     Struct(index) | ListValue(index) => {
       let values = self.scan(message, records)
-      self.print_repeated(
-        out,
-        message.fields[index],
-        values[index],
-        depth,
-        proto2=false,
-      )
+      self.print_repeated(out, message.fields[index], values[index], depth)
     }
     Value => {
       let values = self.scan(message, records)

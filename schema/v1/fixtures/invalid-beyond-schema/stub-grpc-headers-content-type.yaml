@@ -1,0 +1,12 @@
+mocks:
+  - name: greeter
+    grpc:
+      descriptorSet: greeter.binpb
+stubs:
+  - id: hello
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello
+    response:
+      headers: { Content-Type: application/grpc }
+      json: { message: Hello }

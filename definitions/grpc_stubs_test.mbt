@@ -355,7 +355,7 @@ test "a gRPC Stub's method may be left out, and when given must be POST; a metho
 }
 
 ///|
-test "a gRPC Stub's Faults that delay or break the connection, and its reply headers, are not served yet, each at its pointer" {
+test "a gRPC Stub's Faults that delay or break the connection are not served yet, each at its pointer, while its reply headers are" {
   inspect(
     check_stubs(
       (
@@ -383,7 +383,6 @@ test "a gRPC Stub's Faults that delay or break the connection, and its reply hea
     content=(
       #|a.yaml: /stubs/1/fault/delay: is not served on gRPC Stubs yet
       #|a.yaml: /stubs/1/fault/connection: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/1/response/headers: is not served on gRPC Stubs yet
     ),
   )
 }

@@ -265,6 +265,29 @@ pub fn Reader::skip(self : Reader) -> Unit raise DecodeError {
 }
 
 ///|
+/// Reads the value of a group, the last tag read being its start tag: the
+/// records up to the end tag with its field number, which it returns as a
+/// view of the input, without the end tag. The start tag stays the last tag
+/// read.
+///
+/// Raises `DecodeError` when the last tag read does not start a group, and
+/// as `skip` does: when the input ends inside the group, when it ends with
+/// the tag of another field number, and when groups nest deeper than 100
+/// in it.
+pub fn Reader::group(self : Reader) -> BytesView raise DecodeError {
+  self.expect(StartGroup)
+  let at = self.tag_at
+  let field = self.field
+  let start = self.pos
+  self.skip_group(field, at, 1)
+  let end = self.tag_at
+  self.tag_at = at
+  self.field = field
+  self.wire_type = StartGroup
+  self.input[start:end]
+}
+
+///|
 /// Skips the rest of the group of field `field`, whose start tag is at
 /// `at`, `depth` groups deep, up to and including its end tag.
 fn Reader::skip_group(

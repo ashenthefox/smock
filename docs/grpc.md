@@ -35,6 +35,7 @@ Mock's `grpc` field and gRPC Stubs.
 - [Status and message](#status-and-message)
   - [The status](#the-status)
   - [The message](#the-message)
+  - [Metadata](#metadata)
   - [Trailers-Only](#trailers-only)
 - [Unmatched calls](#unmatched-calls)
   - [Calls answered from their HEADERS](#calls-answered-from-their-headers)
@@ -202,8 +203,9 @@ stubs:
 - Its conditions are `headers`, on the call's metadata, and a `json`
   condition on the message
   ([Conditions on the message](#conditions-on-the-message)).
-- Its reply is `json`, the reply message ([The reply](#the-reply)), and
-  `grpc`, the status and message the reply ends with
+- Its reply is `json`, the reply message ([The reply](#the-reply)),
+  `headers`, its initial metadata ([Metadata](#metadata)), and `grpc`,
+  the status, message and trailing metadata the reply ends with
   ([Status and message](#status-and-message)). `template` and weighted
   `responses` work as on HTTP.
 - `priority`, `scenario`, `variables`, `dataWrites` and `fault.seed` work
@@ -218,8 +220,7 @@ Fields that make no sense for gRPC are problems when the files load:
 greeter.yaml: /stubs/0/request/query: makes no sense on a gRPC Stub: a gRPC call's path has no query
 ```
 
-Faults that delay or break the connection, and `headers` in a reply, are
-not served yet. The
+Faults that delay or break the connection are not served yet. The
 [Definition-file reference](definition-files.md#a-grpc-stubs-fields)
 lists every field. A [CRUD Stub](definition-files.md#crud-stubs) is never
 a gRPC Stub, whatever its path: it has no request path, so gRPC calls
@@ -406,6 +407,8 @@ the `.proto` file gives it a `json_name`. Each type prints as follows:
 | a repeated field | an array of its values, in order | `["a","b"]` |
 | a map | an object with a member per key, in key order; integer keys in decimal and bool keys as `"true"` and `"false"`, as strings | `{"1":3,"2":5,"10":1}` |
 | a oneof | the member the message holds, under its own JSON name, and no other | `"word":"w"` |
+| a proto2 group | an object, as a message | `"stop":[{"city":"Paris"}]` |
+| a proto2 extension | its value, under its full name in brackets, among the fields in field-number order, only when the message holds it ([proto2 types](#proto2-types)) | `"[shop.priority]":3` |
 | `google.protobuf.Timestamp` | a string of the date and time in UTC, with 0, 3, 6 or 9 fractional digits, then `Z` | `"1970-01-01T00:00:01.500Z"` |
 | `google.protobuf.Duration` | a string of seconds, with 0, 3, 6 or 9 fractional digits, then `s` | `"1.500s"`, `"-0.250s"` |
 | `google.protobuf.FieldMask` | a string of its paths in lowerCamelCase, joined by commas | `"userName,address.city"` |
@@ -468,9 +471,9 @@ the Near miss, whichever client sent it. The message
 {"tags":["a","b"],"counts":{"1":3,"2":5,"10":1}}
 ```
 
-For now, smock does not decode groups. It answers with replies of every
-type of a proto3 or a proto2 file but groups and types that an extension
-extends ([The reply](#the-reply), [proto2 types](#proto2-types)). The
+smock decodes requests, and answers with replies, of every type of a
+proto3 or a proto2 file ([The reply](#the-reply),
+[proto2 types](#proto2-types)). The
 [Definition-file reference](definition-files.md#grpc-stubs) lists what a
 gRPC Stub cannot hold yet.
 
@@ -688,10 +691,15 @@ matches the key `math_score` as written, while `profile` and its field
 too, and an Any's members are checked against the type its `"@type"`
 names ([Any](#any)).
 
+An extension is written by its full name in brackets, as ProtoJSON writes
+it, such as `"[shop.priority]": 3`, and the key stays as written
+([proto2 types](#proto2-types)).
+
 smock refuses, as a problem at the JSON Pointer of the value at fault:
 
-- a key that names no field of the type at its place, and a field given
-  by both its names in one object;
+- a key that names no field of the type at its place, a key in brackets
+  that names no extension of the set that extends the type, and a field
+  given by both its names in one object;
 - a literal that is not a value of its field's type as smock prints it,
   and so can never match: an integer out of its type's range or with a
   fraction, an enum name the enum lacks, a `float` outside the float range,
@@ -775,6 +783,8 @@ is:
 | A repeated field | An array. `null` in it is a problem, but in a list of Values or NullValues. |
 | A map | An object whose keys are the map's keys as strings: integers in decimal, such as `"-1"`, and `"true"` and `"false"`. A `null` value is a problem, but in a map of Values or NullValues. |
 | A oneof | One of its members. Two members in one object are a problem, but a member that is `null` does not count. |
+| A proto2 group | An object, as for a message. |
+| A proto2 extension | Its full name in brackets, such as `"[shop.priority]": 3`. It must name an extension of the set that extends the type. |
 | `google.protobuf.Timestamp` | A string in RFC 3339 form, with 0 to 9 fractional digits, then `Z` or an offset such as `+09:00`: `"1970-01-01T09:00:01.5+09:00"`. From 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, once the offset is taken off. |
 | `google.protobuf.Duration` | A string of seconds, with 0 to 9 fractional digits, then `s`: `"1.5s"`, `"-0.25s"`. At most `315576000000.999999999s` either way. |
 | `google.protobuf.FieldMask` | A string of paths in lowerCamelCase, joined by commas: `"userName,address.city"`. An underscore in it is a problem. |
@@ -795,8 +805,8 @@ The reply's output type may be any message of a proto3 or a proto2 file,
 with any of these fields, a well-known type such as
 `google.protobuf.Timestamp` included, whose value is then the whole
 `json`, such as `json: "1970-01-01T00:00:01.5Z"`. A Stub on a method whose
-output type reaches a group, a type that an extension extends, a type of
-an editions file or a MessageSet is a problem at its `path`
+output type reaches a type of an editions file or a MessageSet, through
+its fields or its extensions, is a problem at its `path`
 ([proto2 types](#proto2-types)).
 
 A reply without `template` is read and encoded once, when the files load.
@@ -827,15 +837,18 @@ field, a member of a oneof, a proto3 `optional` field and every singular
 field of a proto2 message are written whenever they are set; repeated
 scalars of a proto3 message packed, unless the field says
 `packed = false`, and those of a proto2 message packed only when the
-field says `packed = true`; and map entries sorted by key, each with its
-key and its value. It sends what a gRPC server sends:
+field says `packed = true`; map entries sorted by key, each with its
+key and its value; extensions among the fields in field-number order;
+and groups between their start and end tags. It sends what a gRPC server
+sends:
 
-- HEADERS with `:status` 200, `content-type: application/grpc`,
+- HEADERS with `:status` 200, `content-type: application/grpc`, the
+  Stub's `headers`, its initial metadata ([Metadata](#metadata)),
   `smock-mock` when the Default Mock answered, and `date`;
 - one DATA frame with the reply message, framed;
-- trailers with `grpc-status: 0`, and `grpc-message` when the Stub gives
-  a message ([Status and message](#status-and-message)), which end the
-  stream.
+- trailers with `grpc-status: 0`, `grpc-message` when the Stub gives
+  a message ([Status and message](#status-and-message)), and its
+  `grpc.trailers`, its trailing metadata, which end the stream.
 
 A reply larger than the client's flow-control windows goes out as the
 client widens them, and the trailers follow it.
@@ -898,12 +911,71 @@ journaled as `{"id":7}`, and a call without `id` gets INTERNAL.
   with U+FFFD for each bad sequence, as smock reads header values: the
   octets `61 c3 28 62` print as `"a�(b"`. Two map keys that print alike
   are one key, and the last entry wins.
+- **Groups.** A group is a message field that protobuf delimits with a
+  start tag and an end tag instead of a length. smock prints, matches and
+  writes it as a message, under the JSON name of its field:
+  `repeated group Stop = 2 { optional string city = 3; }` prints as
+  `"stop":[{"city":"Paris"}]`, groups nested in groups included. A group
+  whose end tag names another field, or that the message ends inside,
+  does not parse, as protobuf's parsers refuse it: the call gets
+  INTERNAL `the request message cannot be decoded`.
 
-Two kinds of type are not served, each a problem at the `path` of a Stub
-whose method's input or output type is, or reaches, one:
+#### Extensions
+
+An extension that the set declares, at the top level of a file or in a
+message, is found by the type it extends and its field number, within the
+Mock's set. It prints under its full name in brackets, as ProtoJSON
+writes it, among the message's fields in field-number order, and only when
+the message holds it, a repeated one too. A number in an extension range
+that no extension of the set has is an unknown field, and is skipped.
+With this file:
+
+```proto
+syntax = "proto2";
+
+package shop;
+
+message Order {
+  optional int64 id = 1;
+  extensions 100 to 199;
+}
+
+extend Order {
+  optional int32 priority = 100;
+}
+```
+
+a call whose `Order` has `id` 7 and `priority` 3 is journaled as
+`{"id":7,"[shop.priority]":3}`, and meets the condition
+`{"[shop.priority]": 3}`. A reply may set the same key,
+`json: {id: 7, "[shop.priority]": 3}`, and is encoded as protoc encodes
+it. An extension declared in a message is named by its full name too,
+such as `[shop.Gift.gift]` for an extension `gift` declared in
+`shop.Gift`. Templates read one with brackets:
+`${body['[shop.priority]']}`.
+
+A key in brackets, in a condition or a reply, must name an extension of
+the set that extends the type at its place:
+
+```text
+shop.yaml: /stubs/0/request/body/json/[shop.urgency]: is not an extension of shop.Order: the Descriptor set has no extension shop.urgency
+shop.yaml: /stubs/1/request/body/json/[shop.priority]: is not an extension of shop.Itinerary: shop.priority extends shop.Order
+```
+
+An extension follows the syntax of the file that declares it. One that a
+proto3 file declares, as a custom option is, holds UTF-8 strings and
+packs its repeated numbers, though the message it extends is proto2.
+
+#### What is not served
+
+Three kinds of type are not served, each a problem at the `path` of a
+Stub whose method's input or output type is, or reaches, one through its
+fields or its extensions:
 
 - a type of an editions file, such as a file with `edition = "2023"`, an
   enum included. Editions come in a later spec;
+- a type that an extension declared in an editions file extends, since
+  what such an extension is depends on features that smock does not read;
 - a MessageSet, a message with the option `message_set_wire_format`,
   whose extensions use another wire form.
 
@@ -917,10 +989,6 @@ Stub's method reaches loads quietly. A call to such a method never reaches
 a Stub: it gets UNIMPLEMENTED ([Unmatched calls](#unmatched-calls)), or
 INTERNAL when its message is, or holds, a value of such a type, which
 smock does not decode.
-
-Groups, and types that an extension in the set extends, are not served
-yet. A Stub whose method's types have or reach one is a problem at its
-`path` too.
 
 ### The Journal and the metrics
 
@@ -1057,11 +1125,94 @@ A reply with `OK` may give a message too. It goes in the trailers, after
 `grpc-status: 0`, though most clients ignore the message of a call that
 succeeded.
 
+### Metadata
+
+A gRPC reply carries metadata in two places. A gRPC Stub's `headers` are
+its initial metadata, sent in the reply's HEADERS, and its
+`grpc.trailers` are its trailing metadata, sent in its trailers after
+`grpc-status` and `grpc-message`. Both take the shape of an HTTP Stub's
+`headers`: a value by name, or an array of values, each sent as a field of
+its own:
+
+```yaml
+response:
+  headers: { x-served-by: smock }
+  grpc:
+    status: NOT_FOUND
+    trailers: { x-trace: abc, x-tag: [a, b], trace-bin: "AAE=" }
+```
+
+A call to this Stub gets HEADERS, then trailers that end the stream:
+
+```text
+HEADERS
+  :status: 200
+  content-type: application/grpc
+  x-served-by: smock
+  date: Sat, 14 Nov 2026 07:00:00 GMT
+TRAILERS
+  grpc-status: 5
+  x-trace: abc
+  x-tag: a
+  x-tag: b
+  trace-bin: AAE
+```
+
+gRPC's rules for metadata apply to both, and `smock check` reports each
+problem at its JSON Pointer:
+
+- A name holds only `0-9`, `a-z`, `_`, `-` and `.` once in lower case.
+  smock sends it in lower case, so `X-Trace` goes out as `x-trace`. Two
+  names that differ only in case are a problem.
+- gRPC keeps `content-type`, `te` and every name that starts with `grpc-`
+  for itself, and HTTP/2 forbids `keep-alive`, `proxy-connection` and
+  `upgrade`. None of them can be given, nor the fields smock sets itself
+  (`content-length`, `transfer-encoding`, `connection` and `smock-mock`).
+  So a gRPC Stub that gives a Content-Type is a problem: smock always
+  sends `content-type: application/grpc`.
+- A value holds only characters from 0x20 to 0x7E, space and printable
+  ASCII. Other text goes in binary metadata.
+- Binary metadata has a name that ends with `-bin`. Its value is written
+  in standard base64, padded or not, and smock sends it without its
+  padding, as gRPC servers do: `"AAE="` goes out as `AAE`. A value that
+  is not base64 is a problem.
+
+```text
+greeter.yaml: /stubs/0/response/headers/grpc-foo: is reserved by gRPC, which keeps content-type, te and every name starting with grpc- for itself
+greeter.yaml: /stubs/0/response/grpc/trailers/x-note: must hold only characters from 0x20 to 0x7E: other values go in a field whose name ends with -bin, in base64
+```
+
+As with every field smock sends over HTTP/2, the spaces at either end of
+a value are trimmed when it is sent.
+
+With `template: true`, the values of both are text templates, rendered as
+header values are: the control characters they render become spaces, and
+tabs stay. Trailer values render after the message. smock checks a
+rendered value as it checks one as written: a value outside 0x20 to 0x7E,
+a tab included, or a `-bin` value that is not base64 gets Trailers-Only
+INTERNAL `template failed`, and the Journal entry's `templateError` says
+why:
+
+```json
+{
+  "at": "/response/grpc/trailers/x-trace",
+  "message": "the rendered value holds U+00E9, and gRPC metadata values hold only characters from 0x20 to 0x7E"
+}
+```
+
+A rendered `-bin` value loses its padding too.
+
+An error whose reply has initial metadata is sent as HEADERS with it,
+then trailers with the status, the message and the trailing metadata, as
+the example above shows. An error without initial metadata is sent as
+[Trailers-Only](#trailers-only). `smock-mock`, which smock adds when the
+Default Mock answers, does not count as initial metadata.
+
 ### Trailers-Only
 
-An error goes out as Trailers-Only, as gRPC servers send it: one HEADERS
-block that ends the stream, with no DATA and no trailers after it. Its
-fields are, in order:
+An error without initial metadata goes out as Trailers-Only, as gRPC
+servers send it: one HEADERS block that ends the stream, with no DATA and
+no trailers after it. Its fields are, in order:
 
 - `:status: 200`;
 - `content-type: application/grpc`;
@@ -1069,6 +1220,7 @@ fields are, in order:
 - `grpc-message`, when the reply gives a message;
 - smock's own fields: `smock-mock` when the Default Mock answered, and
   `smock-near-miss` for an [unmatched call](#unmatched-calls);
+- the trailing metadata, the Stub's `grpc.trailers`;
 - `date`.
 
 ```text
@@ -1209,7 +1361,8 @@ request metrics count them as rejected requests, with `mock=""` and
 A message does not parse, as protobuf's parsers refuse it, when it holds a
 proto3 string that is not UTF-8, field number 0 or one above 2^29-1, wire
 type 6 or 7, a varint, a fixed-size value or a length cut short, a packed
-field included, or messages nested deeper than 100, each map entry
+field included, a group whose end tag names another field or that it ends
+inside, or messages nested deeper than 100, each map entry and each group
 counting as a message, or when it lacks a proto2 required field
 ([proto2 types](#proto2-types)). smock cannot print a Timestamp, a
 Duration or a FieldMask path out of its range or form
@@ -1225,7 +1378,7 @@ fit the output type, whose `templateError` says why:
 
 | The call | `grpc-message` |
 |---|---|
-| The Stub's reply, its message, a `variables` value or a `dataWrites` value fails to render, or the rendered reply does not fit the output type | `template failed` |
+| The Stub's reply, its message, its metadata, a `variables` value or a `dataWrites` value fails to render, a rendered metadata value breaks gRPC's rules ([Metadata](#metadata)), or the rendered reply does not fit the output type | `template failed` |
 | A write of the Stub's `dataWrites` cannot be applied | `data write failed` |
 | The Stub's writes do not fit the bound on per-Session state | `state limit reached` |
 

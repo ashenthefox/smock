@@ -1,8 +1,8 @@
 // gRPC Stubs on methods whose types come from proto2 files, at load: they
 // are served, with their required fields checked in static replies and
-// closed enums in conditions; a type of an editions file and a MessageSet
-// are load errors, per method, and a group and a type that an extension
-// extends are not served yet. The set is
+// closed enums in conditions, groups and extended types included; a type
+// of an editions file and a MessageSet are load errors, per method. The
+// set is
 // fixtures/protobuf/shipping/shipping.proto (shipping_set_test.mbt), which
 // imports labels.proto, an editions file.
 
@@ -107,7 +107,7 @@ test "a condition on a closed enum takes only the numbers it defines" {
 }
 
 ///|
-test "a method whose types are, or reach, types of an editions file or a MessageSet is a load error, and a group or a type that an extension extends is not served yet; methods that reach none of them are served" {
+test "a method whose types are, or reach, types of an editions file or a MessageSet is a load error; one with a group or a type that an extension extends is served" {
   inspect(
     check_shipping(
       (
@@ -123,14 +123,6 @@ test "a method whose types are, or reach, types of an editions file or a Message
         #|    mock: shipping
         #|    request: { path: /shipping.Orders/Pack }
         #|    response: { json: { id: 1 } }
-        #|  - id: plan
-        #|    mock: shipping
-        #|    request: { path: /shipping.Orders/Plan }
-        #|    response: { json: { id: 1 } }
-        #|  - id: stamp
-        #|    mock: shipping
-        #|    request: { path: /shipping.Orders/Stamp }
-        #|    response: { json: {} }
       ),
     ),
     content=(
@@ -138,8 +130,26 @@ test "a method whose types are, or reach, types of an editions file or a Message
       #|a.yaml: /stubs/0/request/path: the output type shipping.Sheet is not served yet: labels.proto, which defines labels.Label, a type it reaches, is an editions file, and editions come in a later spec
       #|a.yaml: /stubs/1/request/path: the input type labels.Label is not served yet: labels.proto, which defines it, is an editions file, and editions come in a later spec
       #|a.yaml: /stubs/2/request/path: the input type shipping.Crate is not served: shipping.Bag, a type it reaches, is a MessageSet, whose extensions use another wire form, and smock serves no MessageSet types
-      #|a.yaml: /stubs/3/request/path: the input type shipping.Itinerary is not served yet: its field stop is a group, and gRPC Stubs serve no groups so far
-      #|a.yaml: /stubs/4/request/path: the output type shipping.Stamped is not served yet: it is extended by an extension of the set, and gRPC Stubs serve no extended types so far
+    ),
+  )
+  // Plan takes an Itinerary, which has a group, and Stamp returns a
+  // Stamped, which the extension shipping.stamp extends.
+  inspect(
+    check_shipping(
+      (
+        #|  - id: plan
+        #|    mock: shipping
+        #|    request: { path: /shipping.Orders/Plan, body: { json: { stop: [{ city: Paris }] } } }
+        #|    response: { json: { id: 1 } }
+        #|  - id: stamp
+        #|    mock: shipping
+        #|    request: { path: /shipping.Orders/Stamp }
+        #|    response: { json: { by: me, "[shipping.stamp]": paid } }
+      ),
+    ),
+    content=(
+      #|shipping: plan: gRPC Stub of Plan
+      #|shipping: stamp: gRPC Stub of Stamp
     ),
   )
 }

@@ -1,0 +1,13 @@
+// Written for smock's tests: extensions of shop.Order declared in an
+// editions file, which smock does not serve, since what they are depends
+// on features that it does not read.
+edition = "2023";
+
+package shop.edition;
+
+import "shop.proto";
+
+extend shop.Order {
+  repeated int32 counts = 120;
+  string label = 121;
+}

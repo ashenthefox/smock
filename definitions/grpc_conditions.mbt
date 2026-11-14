@@ -2,13 +2,17 @@
 // the Stub's method when the files load, and normalised to smock's decoded
 // form, in which a call's message reaches the Stubs. A key must name a
 // field of the type at its place, by its proto name or its JSON name, and
-// becomes its JSON name. A literal must be a value of its field's type as
-// smock prints it (`@protobuf.DescriptorSet::printed_value`): an enum
-// number or alias becomes the enum's first name, and a float is rounded to
-// 32 bits. A well-known type with a form of its own, such as a Duration,
-// must be in its printed form, `"1.500s"`, not `"1.5s"`. Map keys are data, never rewritten, and must be printed keys.
-// Patterns and operators are allowed in any place. So matching a call
-// costs nothing more than matching a JSON body.
+// becomes its JSON name; or an extension of the set that extends the type,
+// by its full name in brackets, such as `[shop.priority]`, as ProtoJSON
+// writes it, which stays. A group is a message. A literal must be a value
+// of its field's type as smock prints it
+// (`@protobuf.DescriptorSet::printed_value`): an enum number or alias
+// becomes the enum's first name, and a float is rounded to 32 bits. A
+// well-known type with a form of its own, such as a Duration, must be in
+// its printed form, `"1.500s"`, not `"1.5s"`. Map keys are data, never
+// rewritten, and must be printed keys. Patterns and operators are allowed
+// in any place. So matching a call costs nothing more than matching a JSON
+// body.
 
 ///|
 /// Where a value of a gRPC Stub's `json` condition is, in the input type,
@@ -139,7 +143,7 @@ fn File::grpc_condition(
           guard json is Array(items) else {
             self.error(
               pointer,
-              "must be an array: the field \{field.name} of \{message.full_name} is repeated",
+              "must be an array: the \{field_text(field, message)} is repeated",
             )
             return None
           }
@@ -164,7 +168,7 @@ fn File::grpc_condition(
             set,
             field,
             json,
-            "the field \{field.name} of \{message.full_name} has the type \{type_text(field)}",
+            "the \{field_text(field, message)} has the type \{type_text(field)}",
           )
       }
     Element(message, field) =>
@@ -173,7 +177,7 @@ fn File::grpc_condition(
         set,
         field,
         json,
-        "the elements of the field \{field.name} of \{message.full_name} have the type \{type_text(field)}",
+        "the elements of the \{field_text(field, message)} have the type \{type_text(field)}",
       )
     Value(message, field, value_field) =>
       self.value_condition(
@@ -396,6 +400,14 @@ fn File::message_condition(
   let mut valid = true
   for key, value in members {
     let at = child_pointer(pointer, key)
+    if is_extension_key(key) {
+      // An extension has one key, its full name in brackets, which stays.
+      match self.extension_condition(at, set, message, key, value) {
+        Some(value) => out[key] = value
+        None => valid = false
+      }
+      continue
+    }
     let field = match message.find_field_by_json_name(key) {
       Some(field) => Some(field)
       None => message.find_field_by_name(key)
@@ -423,6 +435,74 @@ fn File::message_condition(
     Some(Json::object(out))
   } else {
     None
+  }
+}
+
+///|
+/// Whether `key`, a key of a condition on a message, names an extension, as
+/// ProtoJSON writes it: its full name in brackets, such as
+/// `[shop.priority]`.
+fn is_extension_key(key : String) -> Bool {
+  key.length() > 2 && key.has_prefix("[") && key.has_suffix("]")
+}
+
+///|
+/// `value`, the value at `pointer` of the member `key` of a condition on a
+/// message of the type `message`, a type of `set`, where `key` is an
+/// extension's full name in brackets, checked and normalised at the
+/// extension's place. The set must have an extension of that name that
+/// extends the type. `None` when it has a problem, each reported.
+fn File::extension_condition(
+  self : File,
+  pointer : String,
+  set : @protobuf.DescriptorSet,
+  message : @protobuf.MessageDescriptor,
+  key : String,
+  value : Json,
+) -> Json? {
+  let name = key[1:key.length() - 1].to_owned()
+  guard set.find_extension(name) is Some(extension) else {
+    self.error(
+      pointer,
+      "is not an extension of \{message.full_name}: the Descriptor set has no extension \{name}",
+    )
+    return None
+  }
+  guard message.find_extension(extension.number) is Some(found) &&
+    physical_equal(found, extension) else {
+    self.error(
+      pointer,
+      "is not an extension of \{message.full_name}: \{name} extends \{without_dot(extension.extendee)}",
+    )
+    return None
+  }
+  self.grpc_condition(pointer, set, Of(message, extension), value)
+}
+
+///|
+/// `type_name`, the full name of a type as a set gives it, without its
+/// leading dot.
+fn without_dot(type_name : String) -> String {
+  if type_name.has_prefix(".") {
+    type_name[1:].to_owned()
+  } else {
+    type_name
+  }
+}
+
+///|
+/// `field`, a field of `message` or an extension that extends it, as a
+/// problem names it: `field` and its name, such as `field id of
+/// shop.Order`, or `extension` and its full name, such as `extension
+/// shop.priority of shop.Order`.
+fn field_text(
+  field : @protobuf.FieldDescriptor,
+  message : @protobuf.MessageDescriptor,
+) -> String {
+  if field.extendee != "" {
+    "extension \{field.full_name} of \{message.full_name}"
+  } else {
+    "field \{field.name} of \{message.full_name}"
   }
 }
 

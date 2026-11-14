@@ -1,0 +1,13 @@
+# An Order with every field and every extension set.
+id: 8
+note: "gift"
+[shop.priority]: -2
+[shop.codes]: "a"
+[shop.codes]: ""
+[shop.label] {
+  text: "fragile"
+}
+[shop.Gift.gift] {
+  wrap: "red"
+}
+urgent: true

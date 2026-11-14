@@ -1,0 +1,47 @@
+
+´
+
+shop.protoshop"K
+Order
+id (Rid
+note (	Rnote
+urgentÈ (Rurgent*dÈ"
+Label
+text (	Rtext"G
+Gift
+wrap (	Rwrap2+
+gift.shop.Ordern (2
+.shop.GiftRgift"™
+	Itinerary
+name (	Rname(
+stop (
+2.shop.Itinerary.StopRstop(
+note (
+2.shop.Itinerary.NoteRnote‡
+Stop
+city (	Rcity3
+window (
+2.shop.Itinerary.Stop.WindowRwindow6
+Window
+opens (Ropens
+closes (Rcloses
+Note
+text (	Rtext2U
+Orders!
+Place.shop.Order.shop.Order(
+Plan.shop.Itinerary.shop.Itinerary:'
+priority.shop.Orderd (Rpriority:!
+codes.shop.Ordere (	Rcodes:.
+label.shop.Orderf (
+2.shop.LabelRlabel
+@
+
+note.proto	shop.note"
+Note
+text (	Rtextbeditionspè
+d
+reach.proto
+shop.reach
+shop.proto
+note.proto:1
+note.shop.Order‚ (2.shop.note.NoteRnote

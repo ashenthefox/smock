@@ -1,0 +1,4 @@
+# The Order of the ticket's example: id 7, and the extension shop.priority
+# set to 3.
+id: 7
+[shop.priority]: 3

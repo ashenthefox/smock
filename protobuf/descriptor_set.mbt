@@ -145,6 +145,9 @@ priv struct Checker {
   fields : Array[FieldDescriptor]
   /// Every extension, to resolve.
   extensions : Array[FieldDescriptor]
+  /// The extensions that extend each message, by their numbers, by the
+  /// index of the message in the set's `all_messages`.
+  extending : Map[Int32, Map[Int32, FieldDescriptor]]
   /// Every method, with its full name, to resolve.
   methods : Array[(String, MethodDescriptor)]
   /// What is left of the bound on full names.
@@ -161,6 +164,7 @@ fn Checker::new(set : DescriptorSet, names : Names) -> Checker {
     symbols: Map([]),
     fields: [],
     extensions: [],
+    extending: Map([]),
     methods: [],
     names,
   }
@@ -391,11 +395,11 @@ fn Checker::resolve(self : Checker) -> Unit {
             "the extension \{extension.full_name} has field number \{extension.number}, which \{message.full_name} does not declare for extensions",
           )
         } else {
-          let extended_by = match message.extended_by {
+          let extended_by = match self.extending.get(index) {
             Some(extended_by) => extended_by
             None => {
               let extended_by = Map([])
-              message.extended_by = Some(extended_by)
+              self.extending[index] = extended_by
               extended_by
             }
           }
@@ -410,6 +414,9 @@ fn Checker::resolve(self : Checker) -> Unit {
       }
     }
     self.resolve_type(extension, "extension")
+  }
+  for index, extended_by in self.extending {
+    self.set.all_messages[index].index_extensions(extended_by)
   }
   for entry in self.methods {
     let (full_name, rpc) = entry
@@ -475,4 +482,35 @@ fn Checker::resolve_type(
       }
     _ => ()
   }
+}
+
+///|
+/// Indexes `extended_by`, the extensions that extend the message, by their
+/// numbers: in field-number order, and, with its fields, in `numbered`.
+fn MessageDescriptor::index_extensions(
+  self : MessageDescriptor,
+  extended_by : Map[Int32, FieldDescriptor],
+) -> Unit {
+  let extensions = extended_by.values().collect()
+  extensions.sort_by_key(extension => extension.number)
+  self.extended_by = ReadOnlyArray::from_array(extensions)
+  // The fields' indexes and the extensions', each in number order, merged.
+  let fields = self.fields.length()
+  let numbered = FixedArray::make(fields + extensions.length(), 0)
+  let mut f = 0
+  let mut e = 0
+  for n in 0..<numbered.length() {
+    if e >= extensions.length() ||
+      (
+        f < fields &&
+        self.fields[self.by_number[f]].number < extensions[e].number
+      ) {
+      numbered[n] = self.by_number[f]
+      f += 1
+    } else {
+      numbered[n] = fields + e
+      e += 1
+    }
+  }
+  self.numbered = numbered
 }

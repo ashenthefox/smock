@@ -1,0 +1,54 @@
+// Written for smock's tests of proto2 extensions and groups: extensions
+// declared at the top level of the package and in a message, of a scalar,
+// a repeated, a group and a message type; and groups, singular and
+// repeated, nested in one another.
+syntax = "proto2";
+
+package shop;
+
+service Orders {
+  // The ticket's example: an Order with the extension shop.priority.
+  rpc Place (Order) returns (Order);
+  // Groups in requests and replies.
+  rpc Plan (Itinerary) returns (Itinerary);
+}
+
+message Order {
+  optional int64 id = 1;
+  optional string note = 2;
+  extensions 100 to 199;
+  // A field after the extensions' numbers, so that the extensions come
+  // between fields in field-number order.
+  optional bool urgent = 200;
+}
+
+// Extensions declared at the top level of the package.
+extend Order {
+  optional int32 priority = 100;
+  repeated string codes = 101;
+  optional group Label = 102 {
+    optional string text = 1;
+  }
+}
+
+message Gift {
+  optional string wrap = 1;
+  // An extension declared in a message: its full name is shop.Gift.gift.
+  extend Order {
+    optional Gift gift = 110;
+  }
+}
+
+message Itinerary {
+  optional string name = 1;
+  repeated group Stop = 2 {
+    optional string city = 3;
+    optional group Window = 4 {
+      optional int32 opens = 5;
+      optional int32 closes = 6;
+    }
+  }
+  optional group Note = 7 {
+    optional string text = 8;
+  }
+}

@@ -138,8 +138,12 @@ fn DescriptorSet::scan(
   message : MessageDescriptor,
   records : Array[BytesView],
 ) -> FixedArray[Value?] raise DecodeError {
-  let fields = message.fields
-  let values : FixedArray[Value?] = FixedArray::make(fields.length(), None)
+  // A field's value at its index in `fields`, and an extension's after
+  // them, as `field_or_extension` says.
+  let values : FixedArray[Value?] = FixedArray::make(
+    message.fields.length() + message.extended_by.length(),
+    None,
+  )
   // The index of the member of each oneof that the message holds, by the
   // oneof's index, or -1.
   let chosen = if message.oneofs.length() == 0 {
@@ -147,20 +151,21 @@ fn DescriptorSet::scan(
   } else {
     FixedArray::make(message.oneofs.length(), -1)
   }
-  // A proto3 string must be UTF-8. A proto2 string need not be, and is
-  // printed with U+FFFD for each bad sequence.
-  let checked = message.syntax is Proto3
   for r in 0..<records.length() {
     let record = records[r]
     let reader = Reader(record)
     while !reader.at_end() {
-      let index = message.field_index(reader.tag())
+      let index = message.field_or_extension_index(reader.tag())
       guard index >= 0 else {
         reader.skip()
         continue
       }
-      let field = fields[index]
+      let field = message.field_or_extension(index)
+      // A string of a proto3 file must be UTF-8. One of a proto2 file need
+      // not be, and is printed with U+FFFD for each bad sequence.
+      let checked = field.syntax is Proto3
       if field.label is Repeated {
+        let start = reader.tag_at
         let at = reader.pos
         match (field.type_, reader.wire_type()) {
           (String, Len) => {
@@ -206,13 +211,13 @@ fn DescriptorSet::scan(
           ) => ignore(reader.varint())
           (Fixed64 | SFixed64 | Double, I64) => ignore(reader.fixed64())
           (Fixed32 | SFixed32 | Float, I32) => ignore(reader.fixed32())
+          (Group, StartGroup) => ignore(reader.group())
           _ => {
             reader.skip()
             continue
           }
         }
         // The record joins the field's last run when it follows it.
-        let start = reader.tag_at
         match values[index] {
           Some(Elements(runs)) => {
             let last = runs[runs.length() - 1]
@@ -256,8 +261,12 @@ fn DescriptorSet::scan(
           }
         }
         (Bytes, Len) => values[index] = Some(Octets(reader.length_delimited()))
-        (Message, Len) => {
-          let value = reader.length_delimited()
+        (Message, Len) | (Group, StartGroup) => {
+          let value = if field.type_ is Group {
+            reader.group()
+          } else {
+            reader.length_delimited()
+          }
           match values[index] {
             Some(Messages(list)) => list.push(value)
             _ => values[index] = Some(Messages([value]))
@@ -310,39 +319,62 @@ fn DescriptorSet::print_message(
   let fields = message.fields
   let values = self.scan(message, records)
   out.write_byte(b'{')
-  let order = message.by_number
+  // The fields, and the extensions that extend the message, in
+  // field-number order.
+  let order = message.numbered
   // Every singular field of a proto2 message has presence.
   let proto2 = message.syntax is Proto2
   let mut first = true
   for n in 0..<order.length() {
     let index = order[n]
-    let field = fields[index]
+    let field = message.field_or_extension(index)
+    let extension = index >= fields.length()
     if self.not_decoded(field) is Some(why) {
+      let what = if extension {
+        "extension \{field.full_name}"
+      } else {
+        "field \{field.name}"
+      }
       raise DecodeError(
         position=records[0].start_offset(),
-        message="the field \{field.name} \{why}, which smock does not decode yet",
+        message="the \{what} \{why}, which smock does not decode yet",
       )
     }
     let value = values[index]
-    if value is None && field.label is Required {
+    if value is None && field.label is Required && !extension {
       raise DecodeError(
         position=records[0].start_offset(),
         message="the message \{message.full_name} lacks its required field \{field.name}",
       )
     }
+    // An extension is printed only when the message holds it, as
+    // ProtoJSON prints it, a repeated one too.
     if value is None &&
-      !(field.label is Repeated) &&
-      (proto2 || field.oneof_index is Some(_) || field.type_ is Message) {
+      (
+        extension ||
+        (
+          !(field.label is Repeated) &&
+          (
+            proto2 ||
+            field.oneof_index is Some(_) ||
+            field.type_ is (Message | Group)
+          )
+        )
+      ) {
       continue
     }
     if !first {
       out.write_byte(b',')
     }
     first = false
-    write_json_name(out, field.json_name)
+    if extension {
+      write_extension_name(out, field.full_name)
+    } else {
+      write_json_name(out, field.json_name)
+    }
     out.write_byte(b':')
     if field.label is Repeated {
-      self.print_repeated(out, field, value, depth, proto2~)
+      self.print_repeated(out, field, value, depth)
     } else {
       self.print_value(out, field, value, depth)
     }
@@ -353,15 +385,13 @@ fn DescriptorSet::print_message(
 ///|
 /// Prints to `out` the value `value` of `field`, a repeated field of a
 /// message `depth` messages deep: a map as an object, or else a list as an
-/// array. The message is of a proto2 file when `proto2`, so its strings may
-/// not be UTF-8.
+/// array.
 fn DescriptorSet::print_repeated(
   self : DescriptorSet,
   out : @buffer.Buffer,
   field : FieldDescriptor,
   value : Value?,
   depth : Int32,
-  proto2~ : Bool,
 ) -> Unit raise DecodeError {
   let runs = match value {
     Some(Elements(runs)) => runs
@@ -370,7 +400,7 @@ fn DescriptorSet::print_repeated(
   match self.message_of(field) {
     Some(entry) if entry.map_entry && is_map_entry(entry) =>
       self.print_map(out, entry, runs, depth)
-    _ => self.print_list(out, field, runs, depth, proto2~)
+    _ => self.print_list(out, field, runs, depth)
   }
 }
 
@@ -419,17 +449,18 @@ fn DescriptorSet::print_value(
 ///|
 /// Prints to `out` the values of `field`, a repeated field other than a
 /// map of a message `depth` messages deep, whose records are in `runs`,
-/// as an array. The message is of a proto2 file when `proto2`, so its
-/// strings may not be UTF-8.
+/// as an array.
 fn DescriptorSet::print_list(
   self : DescriptorSet,
   out : @buffer.Buffer,
   field : FieldDescriptor,
   runs : Array[BytesView],
   depth : Int32,
-  proto2~ : Bool,
 ) -> Unit raise DecodeError {
   out.write_byte(b'[')
+  // The strings of a proto3 file were checked when the message was
+  // scanned. Those of a proto2 file may not be UTF-8.
+  let checked = field.syntax is Proto3
   // A number that a closed enum does not define is skipped, as protobuf's
   // parsers keep it as an unknown field.
   let closed = self.closed_enum_of(field)
@@ -440,7 +471,11 @@ fn DescriptorSet::print_list(
       ignore(reader.tag())
       match (field.type_, reader.wire_type()) {
         (String | Bytes | Message | Group, _) => {
-          let element = reader.length_delimited()
+          let element = if field.type_ is Group {
+            reader.group()
+          } else {
+            reader.length_delimited()
+          }
           if !first {
             out.write_byte(b',')
           }
@@ -456,7 +491,7 @@ fn DescriptorSet::print_list(
               self.print_message(out, type_, [element], depth + 1)
             }
             None if field.type_ is Bytes => write_base64(out, element)
-            None if proto2 && !is_utf8(element) =>
+            None if !checked && !is_utf8(element) =>
               write_json_string(out, repaired(element))
             None => write_json_string(out, element)
           }
@@ -880,14 +915,15 @@ fn EnumDescriptor::defines(self : EnumDescriptor, bits : UInt64) -> Bool {
 
 ///|
 /// Why `decode_json` does not decode `field` yet, a field of a message of
-/// this set, or `None` when it does: it is a group.
+/// this set or an extension that extends one, or `None` when it does: it
+/// is declared in an editions file, as an extension may be.
 fn DescriptorSet::not_decoded(
   self : DescriptorSet,
   field : FieldDescriptor,
 ) -> String? {
   ignore(self)
-  if field.type_ is Group {
-    Some("is a group")
+  if field.syntax is Editions {
+    Some("is declared in an editions file")
   } else {
     None
   }
@@ -1017,6 +1053,28 @@ fn write_json_name(out : @buffer.Buffer, name : String) -> Unit {
     out.write_byte(name[i].to_byte())
   }
   out.write_byte(b'"')
+}
+
+///|
+/// Writes the key of an extension whose full name is `full_name`, as
+/// ProtoJSON writes it: the full name in brackets, as a JSON string, such
+/// as `"[shop.priority]"`.
+fn write_extension_name(out : @buffer.Buffer, full_name : String) -> Unit {
+  // A full name is ASCII without quotes or controls, as protoc writes it,
+  // but a set may hold any, so it is written as `write_json_name` writes a
+  // name.
+  for i in 0..<full_name.length() {
+    let unit = full_name[i]
+    if unit < 0x20 || unit >= 0x7F || unit == '"' || unit == '\\' {
+      write_json_string(out, @utf8.encode("[" + full_name + "]"))
+      return
+    }
+  }
+  out.write_bytes(b"\"[")
+  for i in 0..<full_name.length() {
+    out.write_byte(full_name[i].to_byte())
+  }
+  out.write_bytes(b"]\"")
 }
 
 ///|

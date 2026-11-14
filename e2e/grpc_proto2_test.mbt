@@ -1,7 +1,8 @@
 // Seam 2 tests of gRPC Stubs on proto2 types over h2c: required fields in
 // requests and replies, presence, closed enums, packing and strings that
 // are not UTF-8; and `smock check` on methods whose types reach a type of
-// an editions file, a MessageSet, a group or an extended type. The set is
+// an editions file or a MessageSet, and on those with a group or an
+// extended type, which load. The set is
 // fixtures/protobuf/shipping/shipping.proto, and the messages are what
 // protoc encodes from the .txtpb files beside it
 // (scripts/gen-protobuf-fixtures.sh), so the codec is never checked
@@ -226,7 +227,7 @@ async test "a reply of a proto2 type has protoc's bytes: fields written whenever
 }
 
 ///|
-async test "smock check refuses a static reply without a required field and numbers a closed enum does not define, and methods whose types reach an editions file, a MessageSet, a group or an extended type; editions files that no Stub uses load quietly" {
+async test "smock check refuses a static reply without a required field and numbers a closed enum does not define, and methods whose types reach an editions file or a MessageSet; editions files that no Stub uses load quietly, as do methods with a group or an extended type" {
   let stubs =
     #|  - id: no-id
     #|    mock: shipping
@@ -248,14 +249,6 @@ async test "smock check refuses a static reply without a required field and numb
     #|    mock: shipping
     #|    request: { path: /shipping.Orders/Pack }
     #|    response: { json: { id: 1 } }
-    #|  - id: plan
-    #|    mock: shipping
-    #|    request: { path: /shipping.Orders/Plan }
-    #|    response: { json: { id: 1 } }
-    #|  - id: stamp
-    #|    mock: shipping
-    #|    request: { path: /shipping.Orders/Stamp }
-    #|    response: { json: {} }
   with_shipping(stubs, dir => {
     inspect(
       check([dir]),
@@ -268,17 +261,25 @@ async test "smock check refuses a static reply without a required field and numb
         #|shipping.yaml: /stubs/2/request/path: the output type shipping.Sheet is not served yet: labels.proto, which defines labels.Label, a type it reaches, is an editions file, and editions come in a later spec
         #|shipping.yaml: /stubs/3/request/path: the input type labels.Label is not served yet: labels.proto, which defines it, is an editions file, and editions come in a later spec
         #|shipping.yaml: /stubs/4/request/path: the input type shipping.Crate is not served: shipping.Bag, a type it reaches, is a MessageSet, whose extensions use another wire form, and smock serves no MessageSet types
-        #|shipping.yaml: /stubs/5/request/path: the input type shipping.Itinerary is not served yet: its field stop is a group, and gRPC Stubs serve no groups so far
-        #|shipping.yaml: /stubs/6/request/path: the output type shipping.Stamped is not served yet: it is extended by an extension of the set, and gRPC Stubs serve no extended types so far
         #|
       ),
     )
   })
   // The set holds labels.proto, an editions file, and types no Stub uses.
+  // Plan takes an Itinerary, which has a group, and Stamp returns a
+  // Stamped, which the extension shipping.stamp extends.
   let stubs =
     #|  - id: place
     #|    mock: shipping
     #|    request: { path: /shipping.Orders/Place }
     #|    response: { json: { id: 7 } }
+    #|  - id: plan
+    #|    mock: shipping
+    #|    request: { path: /shipping.Orders/Plan }
+    #|    response: { json: { id: 1 } }
+    #|  - id: stamp
+    #|    mock: shipping
+    #|    request: { path: /shipping.Orders/Stamp }
+    #|    response: { json: { "[shipping.stamp]": paid } }
   with_shipping(stubs, dir => inspect(check([dir]), content="status 0\n"))
 }
