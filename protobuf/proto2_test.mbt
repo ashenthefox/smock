@@ -97,3 +97,24 @@ test "an unknown value of a closed enum is kept as an unknown field: the field k
     ),
   )
 }
+
+///|
+test "a proto2 string that is not UTF-8 is valid protobuf, and prints with U+FFFD for each bad sequence, as smock reads header values" {
+  // parcel-not-utf8.txtpb: label a, C3 28, b; tags FF FE and ok; notes
+  // FF: F0 9F 98, the first three octets of a four-octet sequence.
+  inspect(
+    decoded(shipping_set, "shipping.Parcel", fixture(shipping_not_utf8)),
+    content=(
+      #|{"history":[],"weights":[],"sizes":[],"orders":[],"states":{},"label":"a�(b","tags":["��","ok"],"notes":{"�":"�"},"byId":{}}
+    ),
+  )
+  // Two keys that print alike are one key, and the last entry wins.
+  inspect(
+    decoded(
+      shipping_set, "shipping.Parcel", b"\x52\x06\x0a\x01\xff\x12\x011\x52\x06\x0a\x01\xfe\x12\x012\x52\x05\x0a\x01a\x12\x00",
+    ),
+    content=(
+      #|{"history":[],"weights":[],"sizes":[],"orders":[],"states":{},"tags":[],"notes":{"a":"","�":"2"},"byId":{}}
+    ),
+  )
+}

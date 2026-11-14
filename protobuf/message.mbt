@@ -123,6 +123,9 @@ fn DescriptorSet::scan(
   } else {
     FixedArray::make(message.oneofs.length(), -1)
   }
+  // A proto3 string must be UTF-8. A proto2 string need not be, and is
+  // printed with U+FFFD for each bad sequence.
+  let checked = message.syntax is Proto3
   for r in 0..<records.length() {
     let record = records[r]
     let reader = Reader(record)
@@ -138,7 +141,7 @@ fn DescriptorSet::scan(
         match (field.type_, reader.wire_type()) {
           (String, Len) => {
             let value = reader.length_delimited()
-            if !is_utf8(value) {
+            if checked && !is_utf8(value) {
               raise reader.error(
                 at,
                 "the field \{field.name} holds octets that are not UTF-8",
@@ -217,13 +220,16 @@ fn DescriptorSet::scan(
         (String, Len) => {
           let at = reader.pos
           let value = reader.length_delimited()
-          if !is_utf8(value) {
+          if is_utf8(value) {
+            values[index] = Some(Octets(value))
+          } else if checked {
             raise reader.error(
               at,
               "the field \{field.name} holds octets that are not UTF-8",
             )
+          } else {
+            values[index] = Some(Octets(repaired(value)))
           }
-          values[index] = Some(Octets(value))
         }
         (Bytes, Len) => values[index] = Some(Octets(reader.length_delimited()))
         (Message, Len) => {
@@ -303,7 +309,7 @@ fn DescriptorSet::print_message(
       match self.message_of(field) {
         Some(entry) if entry.map_entry && is_map_entry(entry) =>
           self.print_map(out, entry, runs, depth)
-        _ => self.print_list(out, field, runs, depth)
+        _ => self.print_list(out, field, runs, depth, proto2~)
       }
     } else {
       self.print_value(out, field, value, depth)
@@ -357,13 +363,15 @@ fn DescriptorSet::print_value(
 ///|
 /// Prints to `out` the values of `field`, a repeated field other than a
 /// map of a message `depth` messages deep, whose records are in `runs`,
-/// as an array.
+/// as an array. The message is of a proto2 file when `proto2`, so its
+/// strings may not be UTF-8.
 fn DescriptorSet::print_list(
   self : DescriptorSet,
   out : @buffer.Buffer,
   field : FieldDescriptor,
   runs : Array[BytesView],
   depth : Int32,
+  proto2~ : Bool,
 ) -> Unit raise DecodeError {
   out.write_byte(b'[')
   // A number that a closed enum does not define is skipped, as protobuf's
@@ -392,6 +400,8 @@ fn DescriptorSet::print_list(
               self.print_message(out, type_, [element], depth + 1)
             }
             None if field.type_ is Bytes => write_base64(out, element)
+            None if proto2 && !is_utf8(element) =>
+              write_json_string(out, repaired(element))
             None => write_json_string(out, element)
           }
         }
@@ -501,6 +511,7 @@ fn DescriptorSet::print_map(
   let key_field = entry.fields[key_index]
   let value_field = entry.fields[value_index]
   let textual = key_field.type_ is String
+  let checked = entry.syntax is Proto3
   let closed = self.closed_enum_of(value_field)
   // Each entry's key: its text for a string key, or else a number whose
   // unsigned order is the key's order, the default's until the entry
@@ -528,13 +539,17 @@ fn DescriptorSet::print_map(
       match (number, key_field.type_, reader.wire_type()) {
         (1, String, Len) => {
           let text = reader.length_delimited()
-          if !is_utf8(text) {
+          texts[count] = if is_utf8(text) {
+            text
+          } else if checked {
             raise reader.error(
               at,
               "the field \{key_field.name} holds octets that are not UTF-8",
             )
+          } else {
+            // Keys that print alike are one key.
+            repaired(text)
           }
-          texts[count] = text
         }
         (1, Int32 | Int64 | UInt32 | UInt64 | SInt32 | SInt64 | Bool, Varint)
         | (1, Fixed64 | SFixed64, I64)
@@ -547,7 +562,7 @@ fn DescriptorSet::print_map(
               _ => reader.varint()
             },
           )
-        (2, _, Len) if value_field.type_ is String => {
+        (2, _, Len) if checked && value_field.type_ is String => {
           // Checked here, since only the last entry of a key is printed.
           let text = reader.length_delimited()
           if !is_utf8(text) {
@@ -974,6 +989,13 @@ fn write_json_name(out : @buffer.Buffer, name : String) -> Unit {
     out.write_byte(name[i].to_byte())
   }
   out.write_byte(b'"')
+}
+
+///|
+/// `octets`, which are not UTF-8, as UTF-8, with U+FFFD for each bad
+/// sequence, as smock reads header values.
+fn repaired(octets : BytesView) -> BytesView {
+  @utf8.encode(@utf8.decode_lossy(octets))
 }
 
 ///|
