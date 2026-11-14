@@ -101,3 +101,103 @@ test "a group whose end does not match, or that the message ends inside, does no
     content="error: octet 3: the group of field 7 ends where none started",
   )
 }
+
+///|
+/// `text`, JSON text, encoded as a message of `name`, a type of
+/// fixtures/protobuf/extensions/shop.proto, in hex, or the error that stops
+/// it.
+fn shop_encoded(name : String, text : String) -> String {
+  let set = hex_set(extensions_set)
+  guard set.find_message(name) is Some(message) else {
+    abort("no message \{name}")
+  }
+  let json = @json.parse(text) catch { err => abort("not JSON: \{err}") }
+  @hex.encode(set.encode_json(message, json)) catch {
+    err => "error: \{err}"
+  }
+}
+
+///|
+test "a reply that sets extensions under their [full.name] keys has protoc's bytes, extensions in field-number order among the fields" {
+  // The ticket's example, as protoc encodes order.txtpb.
+  inspect(
+    shop_encoded("shop.Order", "{\"id\": 7, \"[shop.priority]\": 3}"),
+    content="0807a00603",
+  )
+  // order-full.txtpb, its keys in another order.
+  assert_eq(
+    shop_encoded(
+      "shop.Order",
+      (
+        #|{"urgent": true, "[shop.Gift.gift]": {"wrap": "red"},
+        #| "[shop.label]": {"text": "fragile"}, "[shop.codes]": ["a", ""],
+        #| "[shop.priority]": "-2", "note": "gift", "id": 8}
+      ),
+    ),
+    @hex.encode(fixture(order_full)),
+  )
+  // null leaves an extension unset; an empty list writes nothing.
+  inspect(
+    shop_encoded(
+      "shop.Order", "{\"[shop.priority]\": null, \"[shop.codes]\": [], \"[shop.label]\": {}}",
+    ),
+    content="b306b406",
+  )
+}
+
+///|
+test "a reply with groups, repeated and nested, has protoc's bytes" {
+  assert_eq(
+    shop_encoded(
+      "shop.Itinerary",
+      (
+        #|{"name": "tour", "stop": [{"city": "Paris", "window": {"opens": 9, "closes": 17}},
+        #| {"city": "Lyon"}], "note": {"text": "by train"}}
+      ),
+    ),
+    @hex.encode(fixture(itinerary)),
+  )
+  // A group is a message: its value must be an object.
+  inspect(
+    shop_encoded("shop.Itinerary", "{\"stop\": [{\"window\": 9}]}"),
+    content="error: /stop/0/window: must be an object: the field window of shop.Itinerary.Stop has the type shop.Itinerary.Stop.Window",
+  )
+}
+
+///|
+test "a [full.name] key that names no extension of the set, or one that extends another type, is not an extension of the message" {
+  inspect(
+    shop_encoded("shop.Order", "{\"[shop.urgency]\": 1}"),
+    content="error: /[shop.urgency]: is not an extension of shop.Order: the Descriptor set has no extension shop.urgency",
+  )
+  inspect(
+    shop_encoded("shop.Itinerary", "{\"[shop.priority]\": 1}"),
+    content="error: /[shop.priority]: is not an extension of shop.Itinerary: shop.priority extends shop.Order",
+  )
+  // An extension's value is checked against its type, at its key.
+  inspect(
+    shop_encoded("shop.Order", "{\"[shop.Gift.gift]\": {\"wrap\": 1}}"),
+    content="error: /[shop.Gift.gift]/wrap: must be a string of Unicode text: the field wrap of shop.Gift has the type string",
+  )
+  inspect(
+    shop_encoded("shop.Order", "{\"[shop.priority]\": \"high\"}"),
+    content="error: /[shop.priority]: must be an integer from -2147483648 to 2147483647: the extension shop.priority of shop.Order has the type int32",
+  )
+  inspect(
+    shop_encoded("shop.Order", "{\"[shop.codes]\": \"a\"}"),
+    content="error: /[shop.codes]: must be an array: the extension shop.codes of shop.Order is repeated",
+  )
+  inspect(
+    shop_encoded("shop.Order", "{\"[shop.codes]\": [\"a\", 1]}"),
+    content="error: /[shop.codes]/1: must be a string of Unicode text: the elements of the extension shop.codes of shop.Order have the type string",
+  )
+  inspect(
+    shop_encoded("shop.Order", "{\"[shop.codes]\": [null]}"),
+    content="error: /[shop.codes]/0: cannot be null: it is an element of the repeated extension shop.codes of shop.Order",
+  )
+  // An extension is found by its full name only.
+  inspect(
+    shop_encoded("shop.Order", "{\"priority\": 1}"),
+    content="error: /priority: is not a field of shop.Order",
+  )
+}
