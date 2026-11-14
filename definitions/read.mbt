@@ -1678,11 +1678,19 @@ let no_match_names_set_by_smock : Array[String] = [
 /// Returns the fields as (name, value, JSON Pointer of the value). Header
 /// names are case-insensitive, so no two may differ only in case, a rule
 /// the JSON Schema cannot express, and none may be one of `set_by_smock`.
+///
+/// With `metadata`, they are the metadata of a gRPC reply, its initial or
+/// its trailing metadata, under gRPC's rules too (`File::check_metadata`):
+/// the names are returned in lower case, as HTTP/2 sends them, and a
+/// `-bin` value as written without its base64 padding. With `templated`,
+/// the values are templates, whose rendered values the engine checks.
 fn File::read_headers(
   self : File,
   pointer : String,
   json : Json,
   set_by_smock~ : Array[String] = response_names_set_by_smock,
+  metadata~ : Bool = false,
+  templated~ : Bool = false,
 ) -> Array[(String, String, String)] {
   let out = []
   guard json is Object(headers) else {
@@ -1694,7 +1702,18 @@ fn File::read_headers(
   for name, value in headers {
     let field = child_pointer(pointer, name)
     let lower = name.to_lower()
-    if !@http1.is_token(name) {
+    if metadata {
+      if self.check_metadata_name(field, lower, set_by_smock) {
+        if names.get(lower) is Some(earlier) {
+          self.error(
+            field,
+            "the header name \{earlier.escape()} is already given: header names are case-insensitive",
+          )
+        } else {
+          names[lower] = name
+        }
+      }
+    } else if !@http1.is_token(name) {
       self.error(field, "is not a valid header name")
     } else if set_by_smock.contains(lower) {
       self.error(field, "is set by smock and cannot be given")
@@ -1707,8 +1726,12 @@ fn File::read_headers(
       names[lower] = name
     }
     let push_field = (text : String, at : String) => {
-      if @http1.is_field_value(text) {
-        out.push((name, text, at))
+      if metadata && !templated {
+        if self.metadata_value(at, lower, text) is Some(sent) {
+          out.push((lower, sent, at))
+        }
+      } else if @http1.is_field_value(text) {
+        out.push((if metadata { lower } else { name }, text, at))
       } else {
         self.error(at, "must not contain control characters other than tab")
       }
@@ -1717,7 +1740,7 @@ fn File::read_headers(
       String(text) => push_field(text, field)
       // smock reads Content-Type, to escape a templated body, so it takes
       // one string, where it can be given.
-      _ if lower == "content-type" && !set_by_smock.contains(lower) =>
+      _ if lower == "content-type" && !metadata && !set_by_smock.contains(lower) =>
         self.error(field, "must be a string")
       Array([]) => self.error(field, "must not be an empty array")
       Array(items) =>
@@ -1732,6 +1755,65 @@ fn File::read_headers(
     }
   }
   out
+}
+
+///|
+/// Checks `name`, in lower case, the name of a field of a gRPC reply's
+/// metadata at `pointer`, and reports why it cannot be one: it is outside
+/// gRPC's grammar, smock sets it (`set_by_smock`), gRPC reserves it, or
+/// HTTP/2 forbids it, since it is specific to an HTTP/1.1 connection.
+/// Returns whether it can be one.
+fn File::check_metadata_name(
+  self : File,
+  pointer : String,
+  name : String,
+  set_by_smock : Array[String],
+) -> Bool {
+  let problem = if !@grpc.is_metadata_name(name) {
+    "is not a gRPC metadata name: in lower case, it may hold only 0-9, a-z, _, - and ."
+  } else if set_by_smock.contains(name) {
+    "is set by smock and cannot be given"
+  } else if @grpc.is_reserved_name(name) {
+    "is reserved by gRPC, which keeps content-type, te and every name starting with grpc- for itself"
+  } else if name is ("keep-alive" | "proxy-connection" | "upgrade") {
+    "is specific to an HTTP/1.1 connection, which HTTP/2 forbids"
+  } else {
+    return true
+  }
+  self.error(pointer, problem)
+  false
+}
+
+///|
+/// The value `text` of the field `name`, in lower case, of a gRPC reply's
+/// metadata, as written at `pointer`, as it is sent: as it is, when it
+/// holds only characters from 0x20 to 0x7E, or, for a `-bin` field,
+/// without its padding, when it is standard base64, padded or not. Reports
+/// why it cannot be one, and returns `None`, otherwise.
+fn File::metadata_value(
+  self : File,
+  pointer : String,
+  name : String,
+  text : String,
+) -> String? {
+  if @grpc.is_binary_name(name) {
+    match @grpc.unpadded_base64(text) {
+      Some(value) => Some(value.to_owned())
+      None => {
+        self.error(
+          pointer, "must be standard base64, padded or not: a field whose name ends with -bin is binary",
+        )
+        None
+      }
+    }
+  } else if @grpc.is_ascii_value(text) {
+    Some(text)
+  } else {
+    self.error(
+      pointer, "must hold only characters from 0x20 to 0x7E: other values go in a field whose name ends with -bin, in base64",
+    )
+    None
+  }
 }
 
 ///|

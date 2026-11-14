@@ -461,8 +461,8 @@ fn File::check_input(
 /// Reports each member of the gRPC Stub `stub`, at `pointer`, that gRPC
 /// Stubs do not serve yet. They serve `id`, `mock`, `priority`, `scenario`,
 /// `variables`, `dataWrites`, `fault.seed`, `request.method`,
-/// `request.path`, `request.headers`, a `json` body condition, and `json`,
-/// `grpc`, `template` and `weight` in a reply. A member that no Stub has is
+/// `request.path`, `request.headers`, a `json` body condition, and
+/// `headers`, `json`, `grpc`, `template` and `weight` in a reply. A member that no Stub has is
 /// reported as unknown where it is read.
 fn File::refuse_unserved(
   self : File,
@@ -513,15 +513,15 @@ fn File::refuse_unserved(
 
 ///|
 /// Reports each member of `response`, a reply of a gRPC Stub at `pointer`,
-/// that gRPC Stubs do not serve yet: all but `json`, `grpc`, `template`
-/// and `weight`.
+/// that gRPC Stubs do not serve yet: all but `headers`, `json`, `grpc`,
+/// `template` and `weight`.
 fn File::refuse_unserved_reply(
   self : File,
   pointer : String,
   response : Map[String, Json],
 ) -> Unit {
   for name, _ in response {
-    if name is ("status" | "headers" | "body" | "bodyFile" | "events" | "llm") {
+    if name is ("status" | "body" | "bodyFile" | "events" | "llm") {
       self.not_served(child_pointer(pointer, name))
     }
   }

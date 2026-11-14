@@ -315,7 +315,6 @@ test "a gRPC Stub's fields other than those served so far are not served yet, ea
       #|a.yaml: /stubs/1/request/cookies: is not served on gRPC Stubs yet
       #|a.yaml: /stubs/1/request/body: an exact-text condition is not served on gRPC Stubs yet
       #|a.yaml: /stubs/1/response/status: is not served on gRPC Stubs yet
-      #|a.yaml: /stubs/1/response/headers: is not served on gRPC Stubs yet
       #|a.yaml: /stubs/1/response/body: is not served on gRPC Stubs yet
       #|a.yaml: /stubs/2/request/body/pattern: is not served on gRPC Stubs yet
       #|a.yaml: /stubs/2/responses/0/bodyFile: is not served on gRPC Stubs yet
