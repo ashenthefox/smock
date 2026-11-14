@@ -619,8 +619,8 @@ shipping.yaml: /stubs/1/request/path: the input type shipping.Crate is not serve
 The check is per method, so a set whose editions files and MessageSets no
 Stub's method reaches loads quietly. A call to such a method never reaches
 a Stub: it gets UNIMPLEMENTED ([Unmatched calls](#unmatched-calls)), or
-INTERNAL when its message holds a value of such a type, which smock does
-not decode.
+INTERNAL when its message is, or holds, a value of such a type, which
+smock does not decode.
 
 Groups, and types that an extension in the set extends, are not served
 yet. A Stub whose method's types have or reach one is a problem at its
