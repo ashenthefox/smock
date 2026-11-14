@@ -1,0 +1,15 @@
+# An Itinerary with two stops, the first with a window, and a note.
+name: "tour"
+Stop {
+  city: "Paris"
+  Window {
+    opens: 9
+    closes: 17
+  }
+}
+Stop {
+  city: "Lyon"
+}
+Note {
+  text: "by train"
+}

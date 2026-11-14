@@ -139,7 +139,7 @@ test "each key must name a field of the type at its place, by its proto name or 
     ),
     content=(
       #|a.yaml: /stubs/0/request/body/json/profile/display: is not a field of users.Profile
-      #|a.yaml: /stubs/0/request/body/json/[users.extra]: is not a field of users.Query
+      #|a.yaml: /stubs/0/request/body/json/[users.extra]: is not an extension of users.Query: the Descriptor set has no extension users.extra
       #|a.yaml: /stubs/0/request/body/json/$$user_id: is not a field of users.Query
       #|a.yaml: /stubs/0/request/body/json/status/$not: must be the name of a value of users.Status, or an integer from -2147483648 to 2147483647: the field status of users.Query has the type users.Status
       #|a.yaml: /stubs/0/request/body/json/history/$includes: must be the name of a value of users.Status, or an integer from -2147483648 to 2147483647: the elements of the field history of users.Query have the type users.Status

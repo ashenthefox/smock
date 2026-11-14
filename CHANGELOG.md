@@ -199,12 +199,11 @@ of each GitHub release include its section
   again when its request ends, so a reload never makes a call decoded with
   one version of a set and answered with another. For now smock serves
   replies of every proto3 and proto2 type but the well-known types Any,
-  Struct, Value, ListValue and NullValue, groups and extended types, and
-  answers the calls it does not serve yet with Trailers-Only INTERNAL and
-  a fixed message. The new `smock/grpc` module frames messages, names gRPC's
-  status codes, percent-encodes status messages and checks reply metadata,
-  and `smock/protobuf` decodes and encodes messages. See
-  [gRPC](docs/grpc.md).
+  Struct, Value, ListValue and NullValue, and answers the calls it does
+  not serve yet with Trailers-Only INTERNAL and a fixed message. The new
+  `smock/grpc` module frames messages, names gRPC's status codes,
+  percent-encodes status messages and checks reply metadata, and
+  `smock/protobuf` decodes and encodes messages. See [gRPC](docs/grpc.md).
 - `grpcStatus` in the Journal. A gRPC call's entry records the name of the
   gRPC status the call got, such as `OK` or `UNIMPLEMENTED`, beside its
   HTTP status, which is 200 for a reply and for an unmatched call. An HTTP
@@ -276,11 +275,17 @@ of each GitHub release include its section
   an unknown field, so it is never printed or matched, and a condition or
   a reply that gives one is refused. A reply packs a proto2 field's
   repeated scalars only when it says `packed = true`. A proto2 string that
-  is not UTF-8 prints with U+FFFD for each bad sequence. A Stub whose
-  method's types reach a type of an editions file, or a MessageSet, is a
-  load error that says why, per method, so files that no Stub uses still
-  load. Groups and types that an extension extends are not served yet. See
-  [proto2 types](docs/grpc.md#proto2-types).
+  is not UTF-8 prints with U+FFFD for each bad sequence. Groups decode
+  and encode as messages, and a group whose end tag does not match makes
+  the message not parse. An extension prints under its full name in
+  brackets, as ProtoJSON writes it, such as `{"id":7,"[shop.priority]":3}`,
+  among the fields in field-number order and only when set; conditions
+  and replies give it under the same key, and a key in brackets that names
+  no extension of the Mock's set, or one that extends another type, is a
+  load error. A Stub whose method's types reach a type of an editions
+  file, a type that an extension declared in one extends, or a
+  MessageSet, is a load error that says why, per method, so files that no
+  Stub uses still load. See [proto2 types](docs/grpc.md#proto2-types).
 - protobuf's well-known types Timestamp, Duration, FieldMask, the wrappers
   and Empty in their ProtoJSON forms, as grpcurl shows them, in request
   messages, conditions and replies, at any place, a method's whole input
