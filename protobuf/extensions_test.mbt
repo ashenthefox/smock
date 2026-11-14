@@ -201,3 +201,106 @@ test "a [full.name] key that names no extension of the set, or one that extends 
     content="error: /priority: is not a field of shop.Order",
   )
 }
+
+///|
+/// A set of two files: `order.proto`, proto2, whose message `p.Order` has
+/// the string `note`, field 1, and declares 100 to 199 for extensions; and
+/// `extra.proto`, proto3, which declares the extensions `p.counts`, a
+/// repeated int32 numbered 100, and `p.label`, a string numbered 101, of
+/// `p.Order`. protoc writes such extensions only for options, but a set may
+/// hold any.
+fn proto3_extensions() -> @protobuf.DescriptorSet {
+  let order = nested(w => {
+    string_field(w, 1, "order.proto")
+    string_field(w, 2, "p")
+    message_field(
+      w,
+      4,
+      message_proto("Order", body=w => {
+        message_field(w, 2, field_proto("note", 1, 9))
+        message_field(
+          w,
+          5,
+          nested(w => {
+            varint_field(w, 1, 100)
+            varint_field(w, 2, 200)
+          }),
+        )
+      }),
+    )
+  })
+  let counts = nested(w => {
+    string_field(w, 1, "counts")
+    string_field(w, 2, ".p.Order")
+    varint_field(w, 3, 100)
+    varint_field(w, 4, 3)
+    varint_field(w, 5, 5)
+  })
+  let extra = file_proto(
+    "extra.proto",
+    package_name="p",
+    dependencies=["order.proto"],
+    body=w => {
+      message_field(w, 7, counts)
+      message_field(w, 7, field_proto("label", 101, 9, extendee=".p.Order"))
+    },
+  )
+  @protobuf.read_descriptor_set(set_of([order, extra])) catch {
+    err => abort("not a set: \{err}")
+  }
+}
+
+///|
+test "an extension follows the syntax of the file that declares it: one of a proto3 file packs and checks UTF-8, though the message it extends is proto2" {
+  let set = proto3_extensions()
+  guard set.find_message("p.Order") is Some(order) else { fail("no Order") }
+  let decoded = (input : Bytes) => {
+    @utf8.decode(@protobuf.decode_json(set, order, input[:])) catch {
+      err => "error: \{err}"
+    }
+  }
+  // note, of the proto2 message, may hold octets that are not UTF-8.
+  inspect(
+    decoded(b"\x0a\x01\xff\xa2\x06\x02\x01\x02"),
+    content=(
+      #|{"note":"�","[p.counts]":[1,2]}
+    ),
+  )
+  // p.label, of the proto3 file, may not.
+  inspect(
+    decoded(b"\xaa\x06\x01\xff"),
+    content="error: octet 2: the field label holds octets that are not UTF-8",
+  )
+  // p.counts is packed, as proto3 packs repeated scalars.
+  inspect(
+    @hex.encode(set.encode_json(order, @json.parse("{\"[p.counts]\": [1, 2]}"))),
+    content="a206020102",
+  )
+}
+
+///|
+test "an extension declared in an editions file is neither decoded nor encoded, since what it is depends on features smock does not read" {
+  // fixtures/protobuf/extensions/edition.proto extends shop.Order with
+  // shop.edition.counts and shop.edition.label.
+  inspect(
+    decoded(edition_extensions_set, "shop.Order", b"\x08\x07"),
+    content="error: octet 0: the extension shop.edition.counts is declared in an editions file, which smock does not decode yet",
+  )
+  let set = hex_set(edition_extensions_set)
+  guard set.find_message("shop.Order") is Some(order) else { fail("no Order") }
+  let json = @json.parse("{\"[shop.edition.label]\": \"x\"}")
+  let text = try set.encode_json(order, json) catch {
+    err => err.to_string()
+  } noraise {
+    _ => "encoded"
+  }
+  inspect(
+    text,
+    content="/[shop.edition.label]: smock does not encode the extension shop.edition.label yet: it is declared in an editions file",
+  )
+  // The extensions of shop.proto, in the same set, are served.
+  inspect(
+    shop_encoded("shop.Order", "{\"id\": 7, \"[shop.priority]\": 3}"),
+    content="0807a00603",
+  )
+}
