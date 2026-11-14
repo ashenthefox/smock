@@ -414,8 +414,7 @@ fn File::refuse_fields(
         for name, condition in request {
           let field = child_pointer(at, name)
           match (name, condition) {
-            ("method", String(meth)) if meth != "POST" &&
-              @http1.is_token(meth) =>
+            ("method", String(meth)) if meth != "POST" && @http1.is_token(meth) =>
               self.error(
                 field, "must be POST on a gRPC Stub, or left out: a gRPC call is always a POST",
               )

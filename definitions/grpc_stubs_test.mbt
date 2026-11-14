@@ -569,3 +569,86 @@ test "an input type that is, or reaches, a type of a file that is not proto3 is 
     ),
   )
 }
+
+///|
+test "a CRUD Stub stays an HTTP Stub even when its path names a method of its Mock's set: it has no request path" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: hello-crud
+        #|    mock: greeter
+        #|    crud: { bucket: greetings, path: /helloworld.Greeter/SayHello }
+        #|data:
+        #|  - { mock: greeter, name: greetings, key: id, json: [] }
+      ),
+    ),
+    content=(
+      #|greeter: hello-crud: HTTP Stub
+    ),
+  )
+}
+
+///|
+test "an HTTP Stub of a Mock with a set whose exact path has the form /package.Service/Method, but names no method of the set, gets a warning at its path" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: hello
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+        #|  - id: typo
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHelo }
+        #|    response: { status: 200 }
+        #|  - id: no-such-service
+        #|    mock: greeter
+        #|    request: { method: POST, path: /helloworld.Greeters/SayHello }
+        #|    response: { status: 200 }
+        #|  - id: rest
+        #|    mock: greeter
+        #|    request: { path: /users/1 }
+        #|    response: { status: 200 }
+        #|  - id: no-package
+        #|    mock: greeter
+        #|    request: { path: /Greeter/SayHello }
+        #|    response: { status: 200 }
+        #|  - id: version
+        #|    mock: greeter
+        #|    request: { path: /v1.2/items }
+        #|    response: { status: 200 }
+        #|  - id: three-names
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello/again }
+        #|    response: { status: 200 }
+        #|  - id: pattern
+        #|    mock: greeter
+        #|    request: { path: { pattern: "/helloworld[.]Greeter/SayHelo" } }
+        #|    response: { status: 200 }
+        #|  - id: plain-typo
+        #|    mock: plain
+        #|    request: { path: /helloworld.Greeter/SayHelo }
+        #|    response: { status: 200 }
+        #|  - id: crud
+        #|    mock: greeter
+        #|    crud: { bucket: greetings, path: /helloworld.Greeter/List }
+        #|data:
+        #|  - { mock: greeter, name: greetings, key: id, json: [] }
+      ),
+    ),
+    content=(
+      #|greeter: hello: gRPC Stub of SayHello
+      #|greeter: typo: HTTP Stub
+      #|greeter: no-such-service: HTTP Stub
+      #|greeter: rest: HTTP Stub
+      #|greeter: no-package: HTTP Stub
+      #|greeter: version: HTTP Stub
+      #|greeter: three-names: HTTP Stub
+      #|greeter: pattern: HTTP Stub
+      #|greeter: crud: HTTP Stub
+      #|plain: plain-typo: HTTP Stub
+      #|a.yaml: /stubs/1/request/path: warning: the Stub "typo" is an HTTP Stub that gRPC calls never reach: its path has the form of a gRPC method, /package.Service/Method, but the Mock's Descriptor set has no method helloworld.Greeter/SayHelo
+      #|a.yaml: /stubs/2/request/path: warning: the Stub "no-such-service" is an HTTP Stub that gRPC calls never reach: its path has the form of a gRPC method, /package.Service/Method, but the Mock's Descriptor set has no method helloworld.Greeters/SayHello
+    ),
+  )
+}
