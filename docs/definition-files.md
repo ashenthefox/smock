@@ -5880,6 +5880,49 @@ stubs:
   method that the set lacks or that streams, and a call to a Mock without
   a set, as soon as its HEADERS arrive
   ([Calls answered from their HEADERS](grpc.md#calls-answered-from-their-headers)).
+- A Stub of a Mock with a set whose exact `path` has the form of a gRPC
+  method, `/package.Service/Method`, but names no method of the set, is an
+  HTTP Stub that gRPC calls never reach. `smock check` warns about it
+  ([A path that looks like a gRPC method](#a-path-that-looks-like-a-grpc-method)).
+- A gRPC Stub can be an Ephemeral Stub
+  ([Ephemeral gRPC Stubs](#ephemeral-grpc-stubs)).
+
+#### A gRPC Stub's fields
+
+A gRPC Stub is an ordinary Stub, and most fields work as on HTTP. Those
+that make no sense for gRPC are problems when the files load, at their
+JSON Pointer, and so is a `method` other than `POST`:
+
+| Field | On a gRPC Stub |
+|---|---|
+| `id`, `mock`, `priority` | As on every Stub. |
+| `scenario`, `variables`, `dataWrites` | As on HTTP. |
+| `fault.seed` | As on HTTP. |
+| `fault.delay`, `fault.connection` | Not served yet: a problem that says so. |
+| `request.method` | May be left out. When given, it must be `POST`, since every gRPC call is a POST. |
+| `request.path` | The method's path, exact: `/`, the service's full name, `/` and the method's name. |
+| `request.headers` | Conditions on the call's metadata. |
+| `request.body` with `json` | A condition on the request message, checked against the input type ([gRPC Stub conditions](#grpc-stub-conditions)). |
+| `request.query` | Makes no sense: a gRPC call's path has no query. |
+| `request.cookies` | Makes no sense: a gRPC call sends metadata, which `headers` conditions match, not cookies. |
+| `request.body` as text, or with `pattern`, `form` or `xml` | Makes no sense: the message is matched as JSON, with a `json` condition. |
+| `response`, or `responses` with `weight` | As on HTTP. |
+| `json` in a reply | The reply message. |
+| `headers` in a reply | The initial metadata, under gRPC's rules ([gRPC reply metadata](#grpc-reply-metadata)). |
+| `grpc` in a reply | The gRPC status, message and trailing metadata ([The status of a gRPC reply](#the-status-of-a-grpc-reply), [gRPC reply metadata](#grpc-reply-metadata)). |
+| `template` in a reply | As on HTTP. |
+| `status` in a reply | Makes no sense: every gRPC reply has the HTTP status 200, and `grpc.status` gives its gRPC status. |
+| `body` or `bodyFile` in a reply | Makes no sense: the reply message is `json`, which smock encodes with the method's output type. |
+| `events` in a reply | Makes no sense: a unary call gets one reply message, not an event stream. |
+| `llm` in a reply | Makes no sense: an LLM reply is written in an LLM API's HTTP wire form. |
+| `crud` | Never: a CRUD Stub is an HTTP Stub. |
+
+Each problem says why:
+
+```text
+greeter.yaml: /stubs/0/request/query: makes no sense on a gRPC Stub: a gRPC call's path has no query
+greeter.yaml: /stubs/0/request/method: must be POST on a gRPC Stub, or left out: a gRPC call is always a POST
+```
 
 Types of proto3 and proto2 files are served, proto2's required fields,
 closed enums and packing included
@@ -5899,18 +5942,45 @@ what is not served yet:
 
 - A method whose input or output type has a group field, or is a type
   that an extension in the set extends, or reaches one.
-- A method whose input type has a field of a well-known type, such as
-  `google.protobuf.Timestamp`, singular, repeated or as a map's values, or
-  reaches a message type that has one. Fields of every scalar type, enums,
-  nested messages, `optional` fields, repeated fields, maps and oneofs
-  are served.
-- A method whose output type is a well-known type, or has, or reaches, a
-  field of one. Every other output type is served, with fields of every
-  type.
-- Any field of the Stub other than `id`, `mock`, `priority`, `scenario`,
-  `variables`, `dataWrites`, `fault.seed`, `request.method`,
-  `request.path`, `request.headers`, a `json` body condition, and
-  `headers`, `json`, `grpc`, `template` and `weight` in a reply.
+- A method whose input or output type is one of the well-known types
+  `google.protobuf.Any`, `Struct`, `Value`, `ListValue` and `NullValue`,
+  or has, or reaches, a field of one, singular, repeated or as a map's
+  values. Every other type is served on both sides, with fields of every
+  type: scalars, enums, nested messages, `optional` fields, repeated
+  fields, maps, oneofs, and the well-known types Timestamp, Duration,
+  FieldMask, the wrappers and Empty, in their ProtoJSON forms
+  ([Well-known types](grpc.md#well-known-types)).
+- `fault.delay` and `fault.connection`, as the table above says.
+
+#### Ephemeral gRPC Stubs
+
+An [Ephemeral Stub](../README.md#sessions-and-ephemeral-stubs) is a gRPC
+Stub when its exact `path` names a method of its Mock's set, as a Stub in a
+Definition file is. smock checks it against the set and normalises its
+`json` condition, as it does when the files load, or refuses it with 400
+`invalid_stub`, whose message gives each problem with its JSON Pointer:
+
+```text
+/response/json/mesage: is not a field of helloworld.HelloReply
+```
+
+It answers the calls of the Session that added it, before the Mock's gRPC
+Stubs from the files, and counts for their
+[Near miss](grpc.md#the-near-miss-trailer). HTTP requests never reach it,
+and gRPC calls never reach an Ephemeral HTTP Stub.
+
+An Ephemeral Stub is not read again at a [reload](#reloading):
+
+- While the Mock's new set does not have its method as a unary method, or
+  the Mock has no set, it answers no call, and a call to the method gets
+  the answer its HEADERS get
+  ([Calls answered from their HEADERS](grpc.md#calls-answered-from-their-headers)).
+  It still belongs to its Session, and answers again once a reload brings
+  the method back.
+- Its reply was encoded with the set served when it was added. After a
+  reload, smock encodes it again on each call. A reply that no longer
+  fits the method's output type gets INTERNAL `template failed`, and the
+  call's Journal entry says why in `templateError`.
 
 ### The status of a gRPC reply
 
@@ -6052,16 +6122,20 @@ request:
 - An enum number or alias becomes the enum's first name for that number,
   such as `ACTIVE` for `1` or for its alias `ENABLED`. A number that no
   value has stays a number, as smock prints it for an open enum.
-- A `float` literal is rounded to the nearest 32-bit float and kept in the
-  form smock prints it, so `{ratio: 0.1}` matches a float of 0.1, and
-  `16777217` becomes `16777216`, which is what a call of 16777217 prints. A
-  `float` literal outside the float range is a problem.
+- A `float` literal, and a `google.protobuf.FloatValue`'s, is rounded to
+  the nearest 32-bit float and kept in the form smock prints it, so
+  `{ratio: 0.1}` matches a float of 0.1, and `16777217` becomes
+  `16777216`, which is what a call of 16777217 prints. A `float` literal
+  outside the float range is a problem.
 - A value that ProtoJSON reads but smock never prints is a problem that
   names the printed form: a 64-bit integer written as a string, such as
   `"42"`, which suggests `42`; any number written as a string; bytes in
   URL-safe base64, without their padding, or with bits after their last
-  octet; and an integer map key that is not in decimal, such as `"007"`,
-  which suggests `"7"`.
+  octet; an integer map key that is not in decimal, such as `"007"`,
+  which suggests `"7"`; a Duration with other fractional digits, such as
+  `"1.5s"`, which suggests `"1.500s"`; and a Timestamp with an offset other
+  than `Z`, such as `+09:00`, which suggests its time in UTC
+  ([Well-known types](grpc.md#well-known-types)).
 - Map keys are data: they are never rewritten, `$$` for a key that starts
   with `$` included.
 - Patterns and operators are allowed in any place. An operator's
@@ -6290,7 +6364,8 @@ change, without a restart:
   requests for a moment, longer for larger files.
 - Ephemeral Stubs survive the swap. A Mock the new set no longer declares
   is gone: its Ephemeral Stubs are dropped, and its Hosts resolve like any
-  unknown Host.
+  unknown Host. An [Ephemeral gRPC Stub](#ephemeral-grpc-stubs) answers
+  calls while the Mock's new set has its method as a unary method.
 - [Variables](#variables) survive the swap. Those of a Mock that is gone
   are dropped with it.
 - [Copies of Data buckets](#session-copies) survive the swap while their
@@ -6427,11 +6502,12 @@ In CI, run it as a step that fails the build:
 
 ### Warnings
 
-For a valid directory, `smock check` also warns about two things that do
-not stop the directory from loading: a Stub that can never match, and a
-Stub that requires a state that no Stub moves to. Each warning is one
-line, marked `warning:`, with the file and a JSON Pointer. Warnings do not
-change the exit status:
+For a valid directory, `smock check` also warns about three things that
+do not stop the directory from loading: a Stub that can never match, a
+Stub that requires a state that no Stub moves to, and an HTTP Stub whose
+path looks like a gRPC method that its Mock's set lacks. Each warning is
+one line, marked `warning:`, with the file and a JSON Pointer. Warnings do
+not change the exit status:
 
 ```console
 $ smock check defs
@@ -6510,6 +6586,28 @@ of a flow.
   which Stubs without a clause answer, is a normal design.
 - Ephemeral Stubs are never checked, and their `moveTo` does not count:
   `smock check` reads only the Definition files.
+
+#### A path that looks like a gRPC method
+
+A Stub whose exact `path` names a method of its Mock's
+[Descriptor set](#descriptor-sets) is a [gRPC Stub](#grpc-stubs). So a
+typo in the path, such as `/helloworld.Greeter/SayHelo`, leaves an HTTP
+Stub, which gRPC calls never reach. Without `status`, it fails to load,
+since an HTTP Stub's response needs one. With `status`, it loads, and
+smock warns when the Stub's Mock has a set and the path has the form of a
+gRPC method, `/package.Service/Method`, but names no method of the set.
+The warning points at the `path`:
+
+```text
+greeter.yaml: /stubs/1/request/path: warning: the Stub "hello-typo" is an HTTP Stub that gRPC calls never reach: its path has the form of a gRPC method, /package.Service/Method, but the Mock's Descriptor set has no method helloworld.Greeter/SayHelo
+```
+
+- The form is `/`, two or more names joined by `.`, `/` and one name,
+  each name a letter or `_` followed by letters, digits and `_`. So
+  `/users/1`, `/Greeter/SayHello` and `/v1.2/items` get no warning.
+- A path pattern, a CRUD Stub and a Stub of a Mock without a set get none.
+- The warning states a fact. The Stub may be an HTTP Stub on purpose, for
+  clients that call its path over HTTP/1.1.
 
 ## Editor support
 

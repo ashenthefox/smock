@@ -16,11 +16,15 @@ Mock's `grpc` field and gRPC Stubs.
 - [Ports and detection](#ports-and-detection)
   - [Other subtypes](#other-subtypes)
   - [Requests that are not gRPC calls](#requests-that-are-not-grpc-calls)
+- [gRPC Stubs](#grpc-stubs)
+  - [A path that names no method](#a-path-that-names-no-method)
+  - [Ephemeral gRPC Stubs](#ephemeral-grpc-stubs)
 - [How smock serves a call](#how-smock-serves-a-call)
   - [The call's Mock](#the-calls-mock)
   - [Reloads](#reloads)
   - [The call the Stubs see](#the-call-the-stubs-see)
   - [The request message as JSON](#the-request-message-as-json)
+  - [Well-known types](#well-known-types)
   - [Conditions on the message](#conditions-on-the-message)
   - [Printed forms](#printed-forms)
   - [The reply](#the-reply)
@@ -175,6 +179,110 @@ or its `noMatch` answer when none matches, as before:
 Such a request never matches a gRPC Stub, even on the path of a gRPC
 method.
 
+## gRPC Stubs
+
+A gRPC Stub is an ordinary Stub whose exact `path` names a method of its
+Mock's set: `/`, the service's full name, `/` and the method's name, as a
+gRPC call names it. It needs no `method`, since every gRPC call is a
+`POST`, and no `status`:
+
+```yaml
+stubs:
+  - id: hello
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello
+      headers: { x-tenant: acme }
+      body: { json: { name: Tom } }
+    response:
+      json: { message: Hello Tom }
+```
+
+- Its conditions are `headers`, on the call's metadata, and a `json`
+  condition on the message
+  ([Conditions on the message](#conditions-on-the-message)).
+- Its reply is `json`, the reply message ([The reply](#the-reply)),
+  `headers`, its initial metadata ([Metadata](#metadata)), and `grpc`,
+  the status, message and trailing metadata the reply ends with
+  ([Status and message](#status-and-message)). `template` and weighted
+  `responses` work as on HTTP.
+- `priority`, `scenario`, `variables`, `dataWrites` and `fault.seed` work
+  as on HTTP.
+
+Fields that make no sense for gRPC are problems when the files load:
+`query` and `cookies` conditions, a body condition other than `json`, and
+`status`, `body`, `bodyFile`, `events` and `llm` in a reply. So is a
+`method` other than `POST`. Each problem says why:
+
+```text
+greeter.yaml: /stubs/0/request/query: makes no sense on a gRPC Stub: a gRPC call's path has no query
+```
+
+Faults that delay or break the connection are not served yet. The
+[Definition-file reference](definition-files.md#a-grpc-stubs-fields)
+lists every field. A [CRUD Stub](definition-files.md#crud-stubs) is never
+a gRPC Stub, whatever its path: it has no request path, so gRPC calls
+never reach it.
+
+### A path that names no method
+
+A typo in a gRPC Stub's path, such as `/helloworld.Greeter/SayHelo`,
+leaves an HTTP Stub, which gRPC calls never reach. Without `status`, it
+fails to load, since an HTTP Stub's response needs one. With `status`,
+`smock check` warns about it, since its path has the form of a gRPC
+method, `/package.Service/Method`, but names no method of the set:
+
+```text
+greeter.yaml: /stubs/1/request/path: warning: the Stub "hello-typo" is an HTTP Stub that gRPC calls never reach: its path has the form of a gRPC method, /package.Service/Method, but the Mock's Descriptor set has no method helloworld.Greeter/SayHelo
+```
+
+The warning does not change the exit status
+([A path that looks like a gRPC method](definition-files.md#a-path-that-looks-like-a-grpc-method)).
+
+### Ephemeral gRPC Stubs
+
+A test can add a gRPC Stub through the Admin API, as any
+[Ephemeral Stub](../README.md#sessions-and-ephemeral-stubs). It is a gRPC
+Stub when its path names a method of the Mock's set. This one makes the
+calls of the Session `test-a` fail with UNAVAILABLE:
+
+```sh
+curl -H "Authorization: Bearer change-me" \
+  -H "baggage: smock-session=test-a" \
+  -d '{"request": {"path": "/helloworld.Greeter/SayHello"}, "response": {"grpc": {"status": "UNAVAILABLE", "message": "try again"}}}' \
+  localhost:9090/v1/mocks/greeter/stubs
+grpcurl -plaintext -protoset defs/files/greeter.binpb \
+  -H "baggage: smock-session=test-a" \
+  -d '{"name": "Tom"}' localhost:8080 helloworld.Greeter/SayHello
+```
+
+grpcurl reports `Code: Unavailable` and `Message: try again`. The same
+call without the Session still gets the reply of the Stub from the files.
+
+- smock checks the Stub against the set, and normalises its `json`
+  condition, as it does a Stub in a Definition file. One that does not fit
+  gets 400 `invalid_stub`, whose message gives each problem with its JSON
+  Pointer, as `smock check` gives it:
+
+  ```json
+  {"error":"invalid_stub","message":"/response/json/mesage: is not a field of helloworld.HelloReply","warnings":[]}
+  ```
+
+- It answers the calls of its Session before the gRPC Stubs from the
+  files, and counts for their [Near miss](#the-near-miss-trailer). HTTP
+  requests never reach it, and gRPC calls never reach an Ephemeral HTTP
+  Stub.
+- It is not read again at a reload ([Reloads](#reloads)). While the Mock's
+  set does not have its method as a unary method, it answers no call, and
+  a call to the method gets the answer from its HEADERS
+  ([Calls answered from their HEADERS](#calls-answered-from-their-headers)).
+  Once a reload brings the method back, it answers again.
+- Its reply was encoded with the set served when it was added. After a
+  reload, smock encodes it on each call, and a reply that no longer fits
+  the output type gets INTERNAL `template failed`, with a `templateError`
+  in the call's Journal entry that says why
+  ([The reply](#the-reply)).
+
 ## How smock serves a call
 
 smock tells a gRPC call by its content type
@@ -241,6 +349,10 @@ the call gets the answer its HEADERS would get then
 ([Calls answered from their HEADERS](#calls-answered-from-their-headers)).
 A set that fails to load keeps the whole current definition set served.
 
+A reload does not read [Ephemeral gRPC Stubs](#ephemeral-grpc-stubs)
+again. One answers calls while the new set has its method as a unary
+method, and its reply is encoded with the new output type.
+
 ### The call the Stubs see
 
 A gRPC Stub sees a call as a request:
@@ -253,13 +365,14 @@ A gRPC Stub sees a call as a request:
   ([The request message as JSON](#the-request-message-as-json)). So the
   message `name: "Tom"` is `{"name":"Tom"}`.
 
-A call is matched only against the gRPC Stubs on its method, in the order
-Stubs are tried, never against an HTTP Stub, even one whose conditions it
-meets. A call that none of them matches gets UNIMPLEMENTED
-([Unmatched calls](#unmatched-calls)). A `json` body condition matches the
-decoded message, as it matches a JSON body, once smock has checked it
-against the input type and rewritten it into the same form
-([Conditions on the message](#conditions-on-the-message)):
+A call is matched only against the gRPC Stubs on its method, never
+against an HTTP Stub, even one whose conditions it meets: first its
+Session's [Ephemeral gRPC Stubs](#ephemeral-grpc-stubs), then those of the
+files, in the order Stubs are tried. A call that none of them matches
+gets UNIMPLEMENTED ([Unmatched calls](#unmatched-calls)). A `json` body
+condition matches the decoded message, as it matches a JSON body, once
+smock has checked it against the input type and rewritten it into the
+same form ([Conditions on the message](#conditions-on-the-message)):
 
 ```yaml
 request:
@@ -292,6 +405,11 @@ the `.proto` file gives it a `json_name`. Each type prints as follows:
 | a repeated field | an array of its values, in order | `["a","b"]` |
 | a map | an object with a member per key, in key order; integer keys in decimal and bool keys as `"true"` and `"false"`, as strings | `{"1":3,"2":5,"10":1}` |
 | a oneof | the member the message holds, under its own JSON name, and no other | `"word":"w"` |
+| `google.protobuf.Timestamp` | a string of the date and time in UTC, with 0, 3, 6 or 9 fractional digits, then `Z` | `"1970-01-01T00:00:01.500Z"` |
+| `google.protobuf.Duration` | a string of seconds, with 0, 3, 6 or 9 fractional digits, then `s` | `"1.500s"`, `"-0.250s"` |
+| `google.protobuf.FieldMask` | a string of its paths in lowerCamelCase, joined by commas | `"userName,address.city"` |
+| a wrapper, such as `google.protobuf.Int32Value` | the value it wraps, printed as its type is: `Int64Value` and `UInt64Value` as numbers, `FloatValue` as a `float`, `BytesValue` in base64 | `5`, `9.99`, `"Tom"` |
+| `google.protobuf.Empty` | an empty object | `{}` |
 
 So the message `id: 9223372036854775807 price: 9.99 status: ACTIVE
 address { city: "Kyoto" }` is:
@@ -344,13 +462,74 @@ the Near miss, whichever client sent it. The message
 {"tags":["a","b"],"counts":{"1":3,"2":5,"10":1}}
 ```
 
-For now, smock does not decode the well-known types, such as
-`google.protobuf.Timestamp`, or groups. It answers with replies of every
-type of a proto3 or a proto2 file but the well-known types, groups and
-types that an extension extends ([The reply](#the-reply),
-[proto2 types](#proto2-types)). The
+For now, smock does not decode the well-known types
+`google.protobuf.Any`, `Struct`, `Value`, `ListValue` and `NullValue`,
+or groups. It answers with replies of every type of a proto3 or a proto2
+file but those, groups and types that an extension extends
+([The reply](#the-reply), [proto2 types](#proto2-types)). The
 [Definition-file reference](definition-files.md#grpc-stubs) lists what a
 gRPC Stub cannot hold yet.
+
+### Well-known types
+
+protobuf's well-known types Timestamp, Duration, FieldMask, the wrappers
+and Empty print in their ProtoJSON forms, as grpcurl shows them, not as
+objects of their fields ([the table above](#the-request-message-as-json)).
+With this message:
+
+```proto
+message Lease {
+  google.protobuf.Timestamp created_at = 1;
+  google.protobuf.Duration ttl = 2;
+}
+```
+
+a call with a Timestamp 1.5 s after the epoch and a Duration of 1.5 s is
+journaled as:
+
+```json
+{"createdAt":"1970-01-01T00:00:01.500Z","ttl":"1.500s"}
+```
+
+A Timestamp and a Duration print the fewest fractional digits of 0, 3, 6
+and 9 that hold their nanoseconds: `"1s"`, `"1.500s"`, `"0.000120s"`,
+`"0.000000001s"`. A negative Duration starts with `-`, such as `"-0.500s"`.
+
+A field of a well-known type is a message field. It prints only when the
+message holds it, and then even at its default: a Timestamp of the epoch
+prints `"1970-01-01T00:00:00Z"`, a Duration of 0 `"0s"`, a FieldMask
+without paths `""`, and an `Int32Value` that holds 0 prints `0`. So, on an
+`Int32Value` field `count`, the condition `{count: {$exists: false}}`
+tells a message that leaves `count` out from one that holds 0.
+
+A condition on one of these types is written in its printed form
+([Printed forms](#printed-forms)): `{ttl: "1.5s"}` is a problem that names
+`"1.500s"`. A reply reads every form that ProtoJSON reads, offsets and
+other fraction lengths included ([The reply](#the-reply)). A reply value
+out of its type's range is a problem, or INTERNAL `template failed` when
+the reply is templated.
+
+A method's whole input or output may be a well-known type, too. A call
+that sends `google.protobuf.Empty` is `{}`, and one that sends a
+`google.protobuf.Duration` is the string, such as `"1.500s"`. A Stub's
+`json` condition, and its reply, are then that value:
+
+```yaml
+- id: wait
+  mock: leases
+  request:
+    path: /wellknown.Leases/Wait            # takes a google.protobuf.Duration
+    body: { json: "1.500s" }
+  response: {}                              # returns google.protobuf.Empty
+```
+
+A message whose Timestamp is outside the range from
+0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, whose Duration
+is longer than 315,576,000,000 seconds either way or has seconds and
+nanoseconds of opposite signs, or whose FieldMask has a path with no
+lowerCamelCase form, such as `user__name`, cannot be printed, so it does
+not decode: the call gets INTERNAL, as a message that does not parse
+does.
 
 ### Conditions on the message
 
@@ -395,7 +574,8 @@ smock rewrites:
   value has stays a number, as smock prints it for an open enum, and is a
   problem for a closed enum, which never prints it
   ([proto2 types](#proto2-types));
-- a `float` into the nearest 32-bit float, in the form smock prints it:
+- a `float`, or the value of a `google.protobuf.FloatValue`, into the
+  nearest 32-bit float, in the form smock prints it:
 
   | Written | Matched as | Meets a call of |
   |---|---|---|
@@ -461,15 +641,22 @@ refuses them when the files load, with the form to write:
 | `bytes`, in base64 without its padding | `token: "+/8"` | `"+/8="` |
 | `bytes`, in URL-safe base64 | `token: "-_8="` | `"+/8="` |
 | An integer map key not in decimal | `labels: {"007": seven}` | `"7"` |
+| `google.protobuf.Duration` | `ttl: "1.5s"` | `"1.500s"` |
+| `google.protobuf.Timestamp`, with an offset other than `Z` | `createdAt: "1970-01-01T09:00:01.500+09:00"` | `"1970-01-01T00:00:01.500Z"` |
+| `google.protobuf.Timestamp`, with other fractional digits | `createdAt: "1970-01-01T00:00:01.5Z"` | `"1970-01-01T00:00:01.500Z"` |
 
 ```text
 users.yaml: /stubs/0/request/body/json/user_id: must be written 42, as smock prints it: the field user_id of users.Query has the type int64
 users.yaml: /stubs/1/request/body/json/labels/007: must be written "7", as smock prints it: the keys of the map field labels of users.Query have the type int32
+leases.yaml: /stubs/0/request/body/json/ttl: must be written "1.500s", as smock prints it: the field ttl of wellknown.Lease has the type google.protobuf.Duration
 ```
 
 The same holds for bytes whose base64 has bits after its last octet, such
-as `"QR=="`, which smock prints `"QQ=="`, and for an integer key such as
-`"-0"` or `"1e3"`.
+as `"QR=="`, which smock prints `"QQ=="`, for an integer key such as
+`"-0"` or `"1e3"`, and for a wrapper's value as for its type's: an
+`Int64Value` written `"42"` names `42`. A FieldMask's paths are data,
+which smock does not check against any type, so its printed form is the
+one ProtoJSON reads: lowerCamelCase paths, joined by commas.
 
 ### The reply
 
@@ -491,18 +678,25 @@ is:
 | A repeated field | An array. `null` in it is a problem. |
 | A map | An object whose keys are the map's keys as strings: integers in decimal, such as `"-1"`, and `"true"` and `"false"`. A `null` value is a problem. |
 | A oneof | One of its members. Two members in one object are a problem, but a member that is `null` does not count. |
+| `google.protobuf.Timestamp` | A string in RFC 3339 form, with 0 to 9 fractional digits, then `Z` or an offset such as `+09:00`: `"1970-01-01T09:00:01.5+09:00"`. From 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, once the offset is taken off. |
+| `google.protobuf.Duration` | A string of seconds, with 0 to 9 fractional digits, then `s`: `"1.5s"`, `"-0.25s"`. At most `315576000000.999999999s` either way. |
+| `google.protobuf.FieldMask` | A string of paths in lowerCamelCase, joined by commas: `"userName,address.city"`. An underscore in it is a problem. |
+| A wrapper | The value it wraps, as its type reads it: `5` or `"5"` for an `Int64Value`. |
+| `google.protobuf.Empty` | `{}`. |
 
 `null` leaves a field unset. A key that names no field is a problem. A
 Stub without `json` answers an empty message, with every field at its
 default.
 
 The reply's output type may be any message of a proto3 or a proto2 file,
-with any of these fields, but for the well-known types, such as
-`google.protobuf.Timestamp`, which smock does not serve yet: a Stub on a
-method whose output type is one, or reaches one through its fields, is a
-problem at its `path`, as is one whose output type reaches a group, a type
-that an extension extends, a type of an editions file or a MessageSet
-([proto2 types](#proto2-types)).
+with any of these fields, a well-known type such as
+`google.protobuf.Timestamp` included, whose value is then the whole
+`json`, such as `json: "1970-01-01T00:00:01.5Z"`. smock does not serve the
+well-known types `google.protobuf.Any`, `Struct`, `Value`, `ListValue`
+and `NullValue` yet: a Stub on a method whose output type is one, or
+reaches one through its fields, is a problem at its `path`, as is one
+whose output type reaches a group, a type that an extension extends, a
+type of an editions file or a MessageSet ([proto2 types](#proto2-types)).
 
 A reply without `template` is read and encoded once, when the files load.
 A reply that is not a message of the output type is a problem at the JSON
@@ -951,7 +1145,9 @@ with the octets of its message as its body's `size`
 
 The Near miss is the gRPC Stub of the call's Mock that failed the fewest
 conditions, the one tried first on a tie, as on HTTP
-([When no Stub matches](definition-files.md#when-no-stub-matches)). A
+([When no Stub matches](definition-files.md#when-no-stub-matches)). The
+call's Session's [Ephemeral gRPC Stubs](#ephemeral-grpc-stubs) count, and
+are tried first, but not one whose method a reload took away. A
 Stub on another method fails the `path` condition, so a call to a method
 that no Stub is on, or that the set lacks, has a Near miss too. smock
 sends it in the `smock-near-miss` field of the answer, in the form of the
@@ -992,14 +1188,16 @@ request metrics count them as rejected requests, with `mock=""` and
 |---|---|
 | Its method is not `POST` | `the method must be POST` |
 | Its body is not one uncompressed message | `the request is not one uncompressed message` |
-| Its message does not parse, or its type has a field that smock does not decode yet | `the request message cannot be decoded` |
+| Its message does not parse, holds a value that smock cannot print, or its type has a field that smock does not decode yet | `the request message cannot be decoded` |
 
 A message does not parse, as protobuf's parsers refuse it, when it holds a
 proto3 string that is not UTF-8, field number 0 or one above 2^29-1, wire
 type 6 or 7, a varint, a fixed-size value or a length cut short, a packed
 field included, or messages nested deeper than 100, each map entry
 counting as a message, or when it lacks a proto2 required field
-([proto2 types](#proto2-types)).
+([proto2 types](#proto2-types)). smock cannot print a Timestamp, a
+Duration or a FieldMask path out of its range or form
+([Well-known types](#well-known-types)).
 
 These calls reach the Stubs. The Journal records each with the
 `grpcStatus` `INTERNAL`, and with the HTTP status planned for it: 500 or

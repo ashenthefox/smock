@@ -1,0 +1,23 @@
+# Every type, each with a value other than its default: a Timestamp with 6
+# fractional digits, a negative Duration, a FieldMask of two paths, each
+# wrapper, Empty, and Timestamps and Durations at the ends of their ranges
+# and with 0 and 3 fractional digits.
+at { seconds: 1763112600 nanos: 123456000 }
+ttl { seconds: -3 nanos: -250000000 }
+mask { paths: "user_name" paths: "address.city_name" }
+a_double { value: 1.5 }
+a_float { value: 9.99 }
+an_int64 { value: 9223372036854775807 }
+a_uint64 { value: 18446744073709551615 }
+an_int32 { value: -2147483648 }
+a_uint32 { value: 4294967295 }
+a_bool { value: true }
+a_string { value: "Tom" }
+a_bytes { value: "\373\377" }
+nothing {}
+history { seconds: -62135596800 }
+history { seconds: 253402300799 nanos: 999999999 }
+limits { key: "read" value { seconds: 315576000000 nanos: 999999999 } }
+limits { key: "write" value { nanos: 1000 } }
+ids { value: 1 }
+ids {}

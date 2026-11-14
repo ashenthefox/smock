@@ -198,12 +198,12 @@ of each GitHub release include its section
   Mock, and the Default Mock answers with its own set. A call is looked up
   again when its request ends, so a reload never makes a call decoded with
   one version of a set and answered with another. For now smock serves
-  replies of every proto3 and proto2 type but the well-known types,
-  groups and extended types, and answers the
-  calls it does not serve yet with Trailers-Only INTERNAL and a fixed
-  message. The new `smock/grpc` module frames messages, names gRPC's
-  status codes, percent-encodes status messages and checks reply
-  metadata, and `smock/protobuf` decodes and encodes messages. See
+  replies of every proto3 and proto2 type but the well-known types Any,
+  Struct, Value, ListValue and NullValue, groups and extended types, and
+  answers the calls it does not serve yet with Trailers-Only INTERNAL and
+  a fixed message. The new `smock/grpc` module frames messages, names gRPC's
+  status codes, percent-encodes status messages and checks reply metadata,
+  and `smock/protobuf` decodes and encodes messages. See
   [gRPC](docs/grpc.md).
 - `grpcStatus` in the Journal. A gRPC call's entry records the name of the
   gRPC status the call got, such as `OK` or `UNIMPLEMENTED`, beside its
@@ -225,8 +225,8 @@ of each GitHub release include its section
   unpacked, a later oneof member replacing an earlier one, and the values
   of a message field merged. So a message gives one text, whatever order
   its client encoded it in. A message that does not parse gets INTERNAL
-  and counts as rejected traffic. The well-known types are not served
-  yet. See
+  and counts as rejected traffic. The well-known types Any, Struct, Value,
+  ListValue and NullValue are not served yet. See
   [The request message as JSON](docs/grpc.md#the-request-message-as-json).
 - `response.grpc`: a gRPC Stub's reply, or each of its `responses`, gives
   the gRPC status it ends with by name, from `OK` to `UNAUTHENTICATED`,
@@ -281,6 +281,39 @@ of each GitHub release include its section
   load error that says why, per method, so files that no Stub uses still
   load. Groups and types that an extension extends are not served yet. See
   [proto2 types](docs/grpc.md#proto2-types).
+- protobuf's well-known types Timestamp, Duration, FieldMask, the wrappers
+  and Empty in their ProtoJSON forms, as grpcurl shows them, in request
+  messages, conditions and replies, at any place, a method's whole input
+  or output included. A request prints a Timestamp in UTC with `Z`, and a
+  Duration with `s`, each with 0, 3, 6 or 9 fractional digits, such as
+  `"1970-01-01T00:00:01.500Z"` and `"1.500s"`; a FieldMask as its paths in
+  lowerCamelCase, joined by commas; a wrapper as the value it wraps, an
+  Int64Value or a UInt64Value as a number and a FloatValue as a `float`;
+  and Empty as `{}`. A reply reads every form ProtoJSON reads, offsets and
+  other fraction lengths included, and a value out of its type's range is
+  a load error, or INTERNAL `template failed` when the reply is templated.
+  A condition is written in the printed form: a Duration of `"1.5s"` is a
+  load error that names `"1.500s"`, and a Timestamp with an offset other
+  than `Z`, such as `+09:00`, names its time in UTC. A FloatValue in a
+  condition is rounded as a `float` is. See
+  [Well-known types](docs/grpc.md#well-known-types).
+- A gRPC Stub's fields that make no sense for gRPC are load errors that
+  say why: `query` and `cookies` conditions, a body condition other than
+  `json`, and `status`, `body`, `bodyFile`, `events` and `llm` in a reply.
+  `method` may be left out, and when given, must be `POST`. A CRUD Stub
+  stays an HTTP Stub whatever its path. `smock check` warns about an HTTP
+  Stub of a Mock with a set whose exact path has the form
+  `/package.Service/Method` but names no method of the set, which gRPC
+  calls never reach. See [gRPC Stubs](docs/grpc.md#grpc-stubs).
+- Ephemeral gRPC Stubs. An Ephemeral Stub whose exact path names a method
+  of its Mock's set is a gRPC Stub, checked against the set and normalised
+  as a Stub in a Definition file is, or refused with 400 `invalid_stub` and
+  each problem's JSON Pointer. A call tries its Session's Ephemeral gRPC
+  Stubs first. They are not read again at a reload: while the new set
+  lacks their method as a unary method, they answer no call, and a reply
+  that no longer fits the output type gets INTERNAL, with a
+  `templateError`. See
+  [Ephemeral gRPC Stubs](docs/grpc.md#ephemeral-grpc-stubs).
 
 ### Changed
 
@@ -362,6 +395,9 @@ of each GitHub release include its section
   `templateError` says that a gRPC call got INTERNAL instead of 500, and
   that, for a gRPC call, it also says why a templated reply, once
   rendered, is not a message of the method's output type.
+- The Admin API document's `EphemeralStubInput` says that an Ephemeral
+  Stub may be a gRPC Stub, checked against its Mock's set, and what a
+  reload does to it.
 
 ### Fixed
 

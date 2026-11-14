@@ -3,8 +3,9 @@
 // service `helloworld.Greeter`. It is an ordinary Stub that carries its
 // method. HTTP requests never match it, and it is shadowed only by gRPC
 // Stubs. It is checked against its method's types when the files load,
-// what the branch cannot serve yet is refused, and its static replies are
-// encoded with its output type.
+// the fields that make no sense on it, and those the branch cannot serve
+// yet, are refused, and its static replies are encoded with its output
+// type.
 
 ///|
 /// The Descriptor sets that the Mocks of the parsed files name, each decoded
@@ -133,8 +134,8 @@ priv struct ServedTypes {
 
 ///|
 /// Checks the gRPC Stub `stub`, at `pointer`, against `named`, the method
-/// its exact path names. Its fields must be served, as
-/// `File::refuse_unserved` says. The method must be unary. Its input type
+/// its exact path names. Its fields must make sense on a gRPC Stub and be
+/// served, as `File::refuse_fields` says. The method must be unary. Its input type
 /// must be served, as `File::check_input` says, and its output type, as
 /// `File::check_output` says. Returns each of them that is served, and
 /// neither for a streaming method.
@@ -144,7 +145,7 @@ fn File::check_grpc_stub(
   stub : Map[String, Json],
   named : NamedMethod,
 ) -> ServedTypes {
-  self.refuse_unserved(pointer, stub)
+  self.refuse_fields(pointer, stub)
   let rpc = named.rpc
   let path = child_pointer(child_pointer(pointer, "request"), "path")
   let streaming = match (rpc.client_streaming, rpc.server_streaming) {
@@ -208,11 +209,17 @@ fn File::encode_reply(
 }
 
 ///|
+/// What a problem says of the well-known types that gRPC Stubs do not serve
+/// yet, after the field or the type that has one.
+let unserved_well_known : String = "and gRPC Stubs serve no Any, Struct, Value, ListValue or NullValue so far"
+
+///|
 /// Reports at `pointer`, a gRPC Stub's path, what gRPC Stubs do not serve
 /// of `output`, the output type of its method, a message of `set`, and of
 /// each type it reaches through its fields, each once, a map's values
 /// included: what `File::check_reached` and `File::check_field` refuse,
-/// and each field of a well-known type. Every other field is served, as
+/// and a well-known type that `@protobuf.is_unserved_well_known` names, as
+/// the type itself or as a field's. Every other field is served, as
 /// `File::check_input` words its problems. Returns whether every type it
 /// reaches is served.
 fn File::check_output(
@@ -222,10 +229,10 @@ fn File::check_output(
   output : @protobuf.MessageDescriptor,
 ) -> Bool {
   let not_served = "the output type \{output.full_name} is not served yet"
-  if @protobuf.is_well_known(output.full_name) {
+  if @protobuf.is_unserved_well_known(output.full_name) {
     self.error(
       pointer,
-      "\{not_served}: it is a well-known type, and gRPC Stubs serve no well-known types so far",
+      "\{not_served}: it is a well-known type, \{unserved_well_known}",
     )
     return false
   }
@@ -256,7 +263,7 @@ fn File::check_output(
         (_, Some(type_)) => type_.full_name
         _ => continue
       }
-      if !@protobuf.is_well_known(name) {
+      if !@protobuf.is_unserved_well_known(name) {
         if type_ is Some(type_) && !seen.contains(name) {
           seen.add(name)
           reached_types.push(type_)
@@ -270,7 +277,7 @@ fn File::check_output(
       }
       self.error(
         pointer,
-        "\{not_served}: \{field_name} has the well-known type \{name}, and gRPC Stubs serve no well-known types so far",
+        "\{not_served}: \{field_name} has the well-known type \{name}, \{unserved_well_known}",
       )
       served = false
     }
@@ -386,11 +393,13 @@ fn File::check_field(
 /// Reports at `pointer`, a gRPC Stub's path, what gRPC Stubs do not serve
 /// of `input`, the input type of its method, a message of `set`, and of
 /// each type it reaches through its fields, a map's values included, each
-/// once: what `File::check_reached` and `File::check_field` refuse, and
-/// each field of a well-known type, or a map whose values have one. Every
-/// other field is served, singular or repeated, a map or in a oneof: one of
-/// any scalar type, of an enum, or of a message, which is checked in turn.
-/// Returns whether every type it reaches is served.
+/// once: what `File::check_reached` and `File::check_field` refuse, and a
+/// well-known type that `@protobuf.is_unserved_well_known` names, as the
+/// type itself, as a field's, or as a map's values. Every other field is
+/// served, singular or repeated, a map or in a oneof: one of any scalar
+/// type, of an enum, or of a message, which is checked in turn, the other
+/// well-known types included. Returns whether every type it reaches is
+/// served.
 fn File::check_input(
   self : File,
   pointer : String,
@@ -398,7 +407,13 @@ fn File::check_input(
   input : @protobuf.MessageDescriptor,
 ) -> Bool {
   let not_served = "the input type \{input.full_name} is not served yet"
-  let later = "and gRPC Stubs serve no well-known types so far"
+  if @protobuf.is_unserved_well_known(input.full_name) {
+    self.error(
+      pointer,
+      "\{not_served}: it is a well-known type, \{unserved_well_known}",
+    )
+    return false
+  }
   let mut served = true
   let seen : Set[String] = Set([input.full_name])
   let pending = [input]
@@ -428,7 +443,7 @@ fn File::check_input(
         (_, Some(type_)) => type_.full_name
         _ => continue
       }
-      if !@protobuf.is_well_known(name) {
+      if !@protobuf.is_unserved_well_known(name) {
         if set.message_of(value) is Some(type_) && !seen.contains(name) {
           seen.add(name)
           reached_types.push(type_)
@@ -445,7 +460,10 @@ fn File::check_input(
       } else {
         "has the well-known type \{name}"
       }
-      self.error(pointer, "\{not_served}: \{field_name} \{problem}, \{later}")
+      self.error(
+        pointer,
+        "\{not_served}: \{field_name} \{problem}, \{unserved_well_known}",
+      )
       served = false
     }
     // The types this one reaches are checked next, in the order of its
@@ -458,13 +476,18 @@ fn File::check_input(
 }
 
 ///|
-/// Reports each member of the gRPC Stub `stub`, at `pointer`, that gRPC
-/// Stubs do not serve yet. They serve `id`, `mock`, `priority`, `scenario`,
-/// `variables`, `dataWrites`, `fault.seed`, `request.method`,
-/// `request.path`, `request.headers`, a `json` body condition, and
-/// `headers`, `json`, `grpc`, `template` and `weight` in a reply. A member that no Stub has is
-/// reported as unknown where it is read.
-fn File::refuse_unserved(
+/// Reports each member of the gRPC Stub `stub`, at `pointer`, that a gRPC
+/// Stub cannot give, or that gRPC Stubs do not serve yet. They serve `id`,
+/// `mock`, `priority`, `scenario`, `variables`, `dataWrites`, `fault.seed`,
+/// `request.method` when it is `POST`, `request.path`, `request.headers`,
+/// a `json` body condition, and `headers`, `json`, `grpc`, `template` and
+/// `weight` in a reply. `query`, `cookies`, every other body condition,
+/// another method, and a reply's `status`, `body`, `bodyFile`, `events`
+/// and `llm` make no sense on a gRPC Stub (`File::refuse_reply`);
+/// `fault.delay` and `fault.connection` are not served yet. A member that
+/// no Stub has is reported as unknown where it is read, and a method that
+/// is not an HTTP token as such.
+fn File::refuse_fields(
   self : File,
   pointer : String,
   stub : Map[String, Json],
@@ -482,28 +505,35 @@ fn File::refuse_unserved(
         for name, condition in request {
           let field = child_pointer(at, name)
           match (name, condition) {
-            ("query" | "cookies", _) => self.not_served(field)
+            ("method", String(meth)) if meth != "POST" && @http1.is_token(meth) =>
+              self.error(
+                field, "must be POST on a gRPC Stub, or left out: a gRPC call is always a POST",
+              )
+            ("query", _) =>
+              self.no_sense(field, "a gRPC call's path has no query")
+            ("cookies", _) =>
+              self.no_sense(
+                field, "a gRPC call sends metadata, which headers conditions match, not cookies",
+              )
             ("body", String(_)) =>
               self.error(
-                field, "an exact-text condition is not served on gRPC Stubs yet",
+                field,
+                "an exact-text condition makes no sense on a gRPC Stub: \{matched_as_json}",
               )
             ("body", Object(body)) =>
               for kind, _ in body {
                 if kind is ("pattern" | "form" | "xml") {
-                  self.not_served(child_pointer(field, kind))
+                  self.no_sense(child_pointer(field, kind), matched_as_json)
                 }
               }
             _ => ()
           }
         }
-      ("response", Object(response)) => self.refuse_unserved_reply(at, response)
+      ("response", Object(response)) => self.refuse_reply(at, response)
       ("responses", Array(responses)) =>
         for i, response in responses {
           if response is Object(response) {
-            self.refuse_unserved_reply(
-              child_pointer(at, i.to_string()),
-              response,
-            )
+            self.refuse_reply(child_pointer(at, i.to_string()), response)
           }
         }
       _ => ()
@@ -512,19 +542,48 @@ fn File::refuse_unserved(
 }
 
 ///|
+/// Why a body condition other than `json` makes no sense on a gRPC Stub.
+let matched_as_json : String = "a call's message is matched as JSON, with a json condition"
+
+///|
 /// Reports each member of `response`, a reply of a gRPC Stub at `pointer`,
-/// that gRPC Stubs do not serve yet: all but `headers`, `json`, `grpc`,
-/// `template` and `weight`.
-fn File::refuse_unserved_reply(
+/// that it cannot give: `status`, `body`, `bodyFile`, `events` and `llm`,
+/// which make no sense on a gRPC Stub. It may give `headers`, its initial
+/// metadata, `json`, `grpc`, `template` and `weight`.
+fn File::refuse_reply(
   self : File,
   pointer : String,
   response : Map[String, Json],
 ) -> Unit {
   for name, _ in response {
-    if name is ("status" | "body" | "bodyFile" | "events" | "llm") {
-      self.not_served(child_pointer(pointer, name))
+    let field = child_pointer(pointer, name)
+    match name {
+      "status" =>
+        self.no_sense(
+          field, "a gRPC reply's HTTP status is always 200, and grpc.status gives its gRPC status",
+        )
+      "body" | "bodyFile" =>
+        self.no_sense(
+          field, "its reply message is json, which smock encodes with the method's output type",
+        )
+      "events" =>
+        self.no_sense(
+          field, "a unary call gets one reply message, not an event stream",
+        )
+      "llm" =>
+        self.no_sense(
+          field, "an LLM reply is written in an LLM API's HTTP wire form",
+        )
+      _ => ()
     }
   }
+}
+
+///|
+/// Reports that the member at `pointer` makes no sense on a gRPC Stub, for
+/// the reason `why`.
+fn File::no_sense(self : File, pointer : String, why : String) -> Unit {
+  self.error(pointer, "makes no sense on a gRPC Stub: \{why}")
 }
 
 ///|

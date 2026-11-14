@@ -5,7 +5,8 @@
 // becomes its JSON name. A literal must be a value of its field's type as
 // smock prints it (`@protobuf.DescriptorSet::printed_value`): an enum
 // number or alias becomes the enum's first name, and a float is rounded to
-// 32 bits. Map keys are data, never rewritten, and must be printed keys.
+// 32 bits. A well-known type with a form of its own, such as a Duration,
+// must be in its printed form, `"1.500s"`, not `"1.5s"`. Map keys are data, never rewritten, and must be printed keys.
 // Patterns and operators are allowed in any place. So matching a call
 // costs nothing more than matching a JSON body.
 
@@ -98,17 +99,21 @@ fn File::grpc_condition(
     }
   }
   match place {
+    // A well-known type with a form of its own is checked in that form.
     Whole(message) =>
-      match json {
-        Object(members) =>
-          self.message_condition(pointer, set, message, members)
-        _ => {
-          self.error(
+      try set.printed_message(message, json) catch {
+        error => {
+          self.printed_error(
             pointer,
-            "must be an object: the message is a \{message.full_name}",
+            error,
+            "the message is a \{message.full_name}",
           )
           None
         }
+      } noraise {
+        Object(members) =>
+          self.message_condition(pointer, set, message, members)
+        value => Some(value)
       }
     Of(message, field) =>
       match map_fields(set, field) {
@@ -278,8 +283,8 @@ fn File::map_condition(
 /// `json`, the value at `pointer` of a condition on one value of `field`,
 /// a field of a type of `set`, checked and normalised: an object of a
 /// message field is a condition on its message; any other value is a
-/// literal, in its printed form. `subject` says what the value is a value
-/// of, as a problem says it.
+/// literal, in its printed form, a well-known type's value included.
+/// `subject` says what the value is a value of, as a problem says it.
 fn File::value_condition(
   self : File,
   pointer : String,
@@ -288,23 +293,35 @@ fn File::value_condition(
   json : Json,
   subject : String,
 ) -> Json? {
-  if json is Object(members) && set.message_of(field) is Some(message) {
-    return self.message_condition(pointer, set, message, members)
-  }
   try set.printed_value(field, json) catch {
-    NotOfType(wanted~) => {
-      self.error(pointer, "must be \{wanted}: \{subject}")
+    error => {
+      self.printed_error(pointer, error, subject)
       None
     }
-    NotPrinted(printed~) => {
+  } noraise {
+    Object(members) if set.message_of(field) is Some(message) =>
+      self.message_condition(pointer, set, message, members)
+    value => Some(value)
+  }
+}
+
+///|
+/// Reports at `pointer` that a value of a condition is not in the form
+/// smock prints it, as `error` says, where `subject` says what the value
+/// is a value of.
+fn File::printed_error(
+  self : File,
+  pointer : String,
+  error : @protobuf.PrintedError,
+  subject : String,
+) -> Unit {
+  match error {
+    NotOfType(wanted~) => self.error(pointer, "must be \{wanted}: \{subject}")
+    NotPrinted(printed~) =>
       self.error(
         pointer,
         "must be written \{printed}, as smock prints it: \{subject}",
       )
-      None
-    }
-  } noraise {
-    value => Some(value)
   }
 }
 

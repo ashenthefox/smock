@@ -20,9 +20,10 @@ such as Mock, Stub and Session.
   and behind a load balancer. It says what a Stub and the Journal see of
   an HTTP/2 request, and how smock bounds what one connection can cost.
 - [grpc.md](grpc.md) says how a Mock stands in for a gRPC service: a
-  first call, how smock serves a unary call and answers it, and how to
-  build the Descriptor set that the Mock names, what smock checks in it
-  and what it keeps.
+  first call, what a gRPC Stub can hold, Ephemeral ones included, how
+  smock serves a unary call and answers it, and how to build the
+  Descriptor set that the Mock names, what smock checks in it and what it
+  keeps.
 - [importing-openapi.md](importing-openapi.md) turns an OpenAPI document
   into a Definition file with `smock import-openapi`, and says what is
   generated and how to regenerate it.

@@ -1,8 +1,10 @@
 // The `check` warnings: problems that do not make a definition set invalid.
-// There are two: a shadowed Stub, which can never match because an earlier
-// Stub of the same Mock and of the same kind, gRPC or HTTP, always matches
-// first; and a Stub that requires a state of a Scenario that no Stub in
-// the files moves to. A warning is only reported when it can be proven, so
+// There are three: a shadowed Stub, which can never match because an
+// earlier Stub of the same Mock and of the same kind, gRPC or HTTP, always
+// matches first; a Stub that requires a state of a Scenario that no Stub in
+// the files moves to; and an HTTP Stub whose path looks like a gRPC
+// method's but names no method of its Mock's Descriptor set, which gRPC
+// calls never reach. A warning is only reported when it can be proven, so
 // it is never a false positive.
 
 ///|
@@ -34,6 +36,10 @@ pub fn Warning::to_string(self : Warning) -> String {
 ///
 /// - if an earlier Stub of its Mock shadows it, a warning at the Stub that
 ///   names the first one that does;
+/// - if its Mock has a Descriptor set, and it is an HTTP Stub whose exact
+///   path has the form of a gRPC method's, `/package.Service/Method`
+///   (`has_method_form`), but names no method of the set, a warning at its
+///   path: it may be a gRPC Stub with a typo, which gRPC calls never reach;
 /// - if it requires a state other than `initial_state` that no Stub of its
 ///   Mock moves its Scenario to, a warning at its `requires`. The state is
 ///   not proven unreachable, since the Admin API or an Ephemeral Stub can
@@ -59,6 +65,23 @@ pub fn Snapshot::warnings(self : Snapshot) -> Array[Warning] {
           message: "the Stub \{stub.id.escape()} can never match: the Stub \{earlier.id.escape()} at \{earlier_at} is tried first and matches every request this one would",
         })
       }
+      if mock.descriptor_set is Some(set) &&
+        stub.serves
+        is Ordinary(
+          {
+            grpc_method: None,
+            request: { path: Some(Has(Exact(path))), .. },
+            ..
+          }
+        ) &&
+        has_method_form(path) &&
+        set.find_method(path) is None {
+        out.push({
+          file,
+          pointer: "\{pointer}/request/path",
+          message: "the Stub \{stub.id.escape()} is an HTTP Stub that gRPC calls never reach: its path has the form of a gRPC method, /package.Service/Method, but the Mock's Descriptor set has no method \{path[1:]}",
+        })
+      }
       guard stub.scenario() is Some({ name, requires: Some(state), .. }) &&
         state != initial_state &&
         !(moves.get(name) is Some(states) && states.contains(state)) else {
@@ -72,6 +95,34 @@ pub fn Snapshot::warnings(self : Snapshot) -> Array[Warning] {
     }
   }
   out
+}
+
+///|
+/// Whether `path` has the form of the path of a gRPC call,
+/// `/package.Service/Method`: `/`, the full name of a service in a package,
+/// `/` and the name of a method. The full name is two or more names joined
+/// by `.`, and each name is a protobuf identifier (`is_identifier`). So
+/// `/users/1` and `/v1.2/items` do not have it.
+fn has_method_form(path : String) -> Bool {
+  guard path.has_prefix("/") else { return false }
+  let names = path[1:].split("/").collect()
+  guard names is [service, rpc] else { return false }
+  let parts = service.split(".").collect()
+  parts.length() >= 2 && parts.all(is_identifier) && is_identifier(rpc)
+}
+
+///|
+/// Whether `name` is a protobuf identifier: a letter or `_`, then letters,
+/// digits and `_`.
+fn is_identifier(name : StringView) -> Bool {
+  let mut first = true
+  for c in name {
+    guard c is ('a'..<='z' | 'A'..<='Z' | '_') || (!first && c is ('0'..<='9')) else {
+      return false
+    }
+    first = false
+  }
+  !first
 }
 
 ///|
