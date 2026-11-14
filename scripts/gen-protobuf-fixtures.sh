@@ -308,12 +308,14 @@ message extensions shop.proto shop.Order order
 message extensions shop.proto shop.Order order-full
 message extensions shop.proto shop.Itinerary itinerary
 descriptor_set extensions edition.binpb edition.proto
+descriptor_set extensions reach.binpb reach.proto
 hex_test extensions/shop.binpb extensions_set "The Descriptor set of fixtures/protobuf/extensions/shop.proto, fixtures/protobuf/extensions/shop.binpb, in hex." protobuf
 hex_test extensions/shop.binpb extensions_set "The Descriptor set of fixtures/protobuf/extensions/shop.proto, fixtures/protobuf/extensions/shop.binpb, in hex." definitions
 hex_test extensions/order-full.binpb order_full "An Order with every field and every extension set, as protoc encodes it: fixtures/protobuf/extensions/order-full.binpb, in hex." protobuf
 hex_test extensions/itinerary.binpb itinerary "An Itinerary with groups nested in groups, as protoc encodes it: fixtures/protobuf/extensions/itinerary.binpb, in hex." protobuf
 hex_test extensions/edition.binpb edition_extensions_set "The Descriptor set of fixtures/protobuf/extensions/edition.proto and shop.proto, which it imports, fixtures/protobuf/extensions/edition.binpb, in hex." protobuf
 hex_test extensions/edition.binpb edition_extensions_set "The Descriptor set of fixtures/protobuf/extensions/edition.proto and shop.proto, which it imports, fixtures/protobuf/extensions/edition.binpb, in hex." definitions
+hex_test extensions/reach.binpb reach_extensions_set "The Descriptor set of fixtures/protobuf/extensions/reach.proto and its imports, fixtures/protobuf/extensions/reach.binpb, in hex." definitions
 
 # The end of the list of fixtures. With --check: every file the script
 # wrote, compared with the committed one.

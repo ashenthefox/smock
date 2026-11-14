@@ -1,0 +1,13 @@
+// Written for smock's tests: a proto2 extension of shop.Order whose type is
+// a message of note.proto, an editions file, so that a method whose types
+// reach shop.Order reaches it through the extension.
+syntax = "proto2";
+
+package shop.reach;
+
+import "shop.proto";
+import "note.proto";
+
+extend shop.Order {
+  optional shop.note.Note note = 130;
+}

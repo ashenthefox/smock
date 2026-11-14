@@ -4,11 +4,13 @@
 // its place; groups are checked as messages. The sets are
 // fixtures/protobuf/extensions/shop.proto (extensions_set_test.mbt) and
 // edition.proto, which extends shop.Order from an editions file
-// (edition_extensions_set_test.mbt).
+// (edition_extensions_set_test.mbt), and reach.proto, whose extension of
+// shop.Order has a type of an editions file (reach_extensions_set_test.mbt).
 
 ///|
 /// Loads `a.yaml`, which declares the Mock `shop`, whose set is shop.proto,
-/// and the Mock `edition`, whose set is edition.proto's, and then `stubs`,
+/// the Mock `edition`, whose set is edition.proto's, and the Mock `reach`,
+/// whose set is reach.proto's, and then `stubs`,
 /// the lines of its `stubs` array. Renders what the loader makes of them:
 /// every problem, one per line, as `smock check` prints it; or, for a valid
 /// set, each Stub's `json` body condition as matching sees it.
@@ -17,6 +19,7 @@ fn shop_conditions(stubs : String) -> String raise {
     #|mocks:
     #|  - { name: shop, grpc: { descriptorSet: shop.binpb } }
     #|  - { name: edition, grpc: { descriptorSet: edition.binpb } }
+    #|  - { name: reach, grpc: { descriptorSet: reach.binpb } }
     #|stubs:
     #|
   match
@@ -25,6 +28,7 @@ fn shop_conditions(stubs : String) -> String raise {
       body_files: [
         ("shop.binpb", set_bytes(extensions_set)),
         ("edition.binpb", set_bytes(edition_extensions_set)),
+        ("reach.binpb", set_bytes(reach_extensions_set)),
       ],
     }) {
     Ok(snapshot) => {
@@ -148,6 +152,26 @@ test "a method whose types are extended from an editions file is a load error, a
     content=(
       #|a.yaml: /stubs/0/request/path: the input type shop.Order is not served yet: edition.proto, which declares shop.edition.counts, an extension of it, is an editions file, and editions come in a later spec
       #|a.yaml: /stubs/0/request/path: the output type shop.Order is not served yet: edition.proto, which declares shop.edition.counts, an extension of it, is an editions file, and editions come in a later spec
+    ),
+  )
+}
+
+///|
+test "the types that an extension reaches are checked as a field's are" {
+  // reach.proto extends shop.Order with shop.reach.note, a shop.note.Note,
+  // a message of note.proto, an editions file.
+  inspect(
+    shop_conditions(
+      (
+        #|  - id: place
+        #|    mock: reach
+        #|    request: { path: /shop.Orders/Place }
+        #|    response: { json: { id: 7 } }
+      ),
+    ),
+    content=(
+      #|a.yaml: /stubs/0/request/path: the input type shop.Order is not served yet: note.proto, which defines shop.note.Note, a type it reaches, is an editions file, and editions come in a later spec
+      #|a.yaml: /stubs/0/request/path: the output type shop.Order is not served yet: note.proto, which defines shop.note.Note, a type it reaches, is an editions file, and editions come in a later spec
     ),
   )
 }
