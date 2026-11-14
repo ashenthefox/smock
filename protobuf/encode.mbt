@@ -159,8 +159,16 @@ fn DescriptorSet::write_message(
   let order = message.by_number
   for n in 0..<order.length() {
     let index = order[n]
-    guard values[index] is Some(value) else { continue }
     let field = fields[index]
+    guard values[index] is Some(value) && !(value is Null) else {
+      if field.label is Required {
+        raise EncodeError(
+          pointer="",
+          message="lacks the required field \{field.name} of \{message.full_name}",
+        )
+      }
+      continue
+    }
     self.write_field(writer, message, field, value, depth) catch {
       EncodeError(pointer~, message=why) =>
         raise EncodeError(
@@ -711,8 +719,15 @@ fn DescriptorSet::scalar_bits(
             Some(value) => value.number.to_int64().reinterpret_as_uint64()
             None => raise Unfit
           }
-        // Any number of an open enum, as a proto3 enum is.
-        _ => integer_bits(json, signed=true, wide=false)
+        _ => {
+          let bits = integer_bits(json, signed=true, wide=false)
+          // Any number of an open enum, as a proto3 enum is, but only a
+          // number that a closed enum, as a proto2 enum is, defines.
+          if type_.syntax is Proto2 && !type_.defines(bits) {
+            raise Unfit
+          }
+          bits
+        }
       }
     }
     String | Bytes | Message | Group => raise Unfit
@@ -757,6 +772,8 @@ fn DescriptorSet::wanted(
     Bytes => "a string in base64, standard or URL-safe, with or without padding"
     Enum =>
       match self.enum_of(field) {
+        Some(type_) if type_.syntax is Proto2 =>
+          "the name or the number of a value of \{type_.full_name}"
         Some(type_) =>
           "the name of a value of \{type_.full_name}, or an integer from -2147483648 to 2147483647"
         None => "an enum value"

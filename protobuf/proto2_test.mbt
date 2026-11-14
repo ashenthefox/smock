@@ -186,3 +186,48 @@ test "a type of an editions file, and a MessageSet, are not encoded" {
     content="error: /bag: smock does not encode shipping.Bag: it is a MessageSet, whose extensions use another wire form",
   )
 }
+
+///|
+test "a reply without a required field is not a message of its type, nested ones, list elements and map values included" {
+  inspect(
+    shipped("shipping.Order", "{\"note\": \"x\"}"),
+    content="error: lacks the required field id of shipping.Order",
+  )
+  inspect(
+    shipped("shipping.Order", "{\"id\": null}"),
+    content="error: lacks the required field id of shipping.Order",
+  )
+  inspect(
+    shipped("shipping.Parcel", "{\"order\": {}}"),
+    content="error: /order: lacks the required field id of shipping.Order",
+  )
+  inspect(
+    shipped("shipping.Parcel", "{\"orders\": [{\"id\": 1}, {}]}"),
+    content="error: /orders/1: lacks the required field id of shipping.Order",
+  )
+  inspect(
+    shipped("shipping.Parcel", "{\"by_id\": {\"2\": {\"note\": \"\"}}}"),
+    content="error: /by_id/2: lacks the required field id of shipping.Order",
+  )
+}
+
+///|
+test "a number that a closed enum does not define is not a value of it, singular, in a list, as a map's value or in a oneof" {
+  inspect(shipped("shipping.Parcel", "{\"state\": 1}"), content="0801")
+  inspect(
+    shipped("shipping.Parcel", "{\"state\": 9}"),
+    content="error: /state: must be the name or the number of a value of shipping.State: the field state of shipping.Parcel has the type shipping.State",
+  )
+  inspect(
+    shipped("shipping.Parcel", "{\"history\": [0, -1]}"),
+    content="error: /history/1: must be the name or the number of a value of shipping.State: the elements of the field history of shipping.Parcel have the type shipping.State",
+  )
+  inspect(
+    shipped("shipping.Parcel", "{\"states\": {\"a\": 3}}"),
+    content="error: /states/a: must be the name or the number of a value of shipping.State: the values of the map field states of shipping.Parcel have the type shipping.State",
+  )
+  inspect(
+    shipped("shipping.Parcel", "{\"carrierState\": 7}"),
+    content="error: /carrierState: must be the name or the number of a value of shipping.State: the field carrier_state of shipping.Parcel has the type shipping.State",
+  )
+}
