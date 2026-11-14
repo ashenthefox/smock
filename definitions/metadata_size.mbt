@@ -14,6 +14,12 @@
 pub let default_header_size_limit : Int32 = 16384
 
 ///|
+/// 8 KiB, the size gRPC lets a client limit each block of a reply's
+/// metadata to (gRPC's PROTOCOL-HTTP2.md): `smock check` warns about a
+/// static reply with a larger block.
+let grpc_client_metadata_size : Int32 = 8192
+
+///|
 /// The octets a field whose name takes `name` octets and whose value takes
 /// `value` costs in a header list (RFC 7541, section 4.1).
 fn field_cost(name : Int32, value : Int32) -> Int32 {

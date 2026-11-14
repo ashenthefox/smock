@@ -1,11 +1,12 @@
 // The `check` warnings: problems that do not make a definition set invalid.
-// There are three: a shadowed Stub, which can never match because an
+// There are four: a shadowed Stub, which can never match because an
 // earlier Stub of the same Mock and of the same kind, gRPC or HTTP, always
 // matches first; a Stub that requires a state of a Scenario that no Stub in
-// the files moves to; and an HTTP Stub whose path looks like a gRPC
-// method's but names no method of its Mock's Descriptor set, which gRPC
-// calls never reach. A warning is only reported when it can be proven, so
-// it is never a false positive.
+// the files moves to; an HTTP Stub whose path looks like a gRPC method's
+// but names no method of its Mock's Descriptor set, which gRPC calls never
+// reach; and a gRPC Stub's static reply with a block of metadata over
+// 8 KiB, which a gRPC client may refuse. A warning is only reported when it
+// can be proven, so it is never a false positive.
 
 ///|
 /// A warning about a valid definition set: the file it is in, a JSON
@@ -40,6 +41,9 @@ pub fn Warning::to_string(self : Warning) -> String {
 ///   path has the form of a gRPC method's, `/package.Service/Method`
 ///   (`has_method_form`), but names no method of the set, a warning at its
 ///   path: it may be a gRPC Stub with a typo, which gRPC calls never reach;
+/// - if it is a gRPC Stub, a warning at each static reply of it with a
+///   block of metadata over `grpc_client_metadata_size`, 8 KiB, counted as
+///   `metadata_blocks` counts it: gRPC lets a client refuse such a block;
 /// - if it requires a state other than `initial_state` that no Stub of its
 ///   Mock moves its Scenario to, a warning at its `requires`. The state is
 ///   not proven unreachable, since the Admin API or an Ephemeral Stub can
@@ -81,6 +85,27 @@ pub fn Snapshot::warnings(self : Snapshot) -> Array[Warning] {
           pointer: "\{pointer}/request/path",
           message: "the Stub \{stub.id.escape()} is an HTTP Stub that gRPC calls never reach: its path has the form of a gRPC method, /package.Service/Method, but the Mock's Descriptor set has no method \{path[1:]}",
         })
+      }
+      if stub.serves
+        is Ordinary({ grpc_method: Some(_), responses, total_weight, .. }) {
+        for j, weighted in responses {
+          let at = match total_weight {
+            Some(_) => "\{pointer}/responses/\{j}"
+            None => "\{pointer}/response"
+          }
+          guard metadata_blocks(weighted.response) is Some(blocks) else {
+            continue
+          }
+          for block in blocks {
+            if block.size > grpc_client_metadata_size {
+              out.push({
+                file,
+                pointer: at,
+                message: "the reply's \{block.name} would take \{block.size} bytes, over \{grpc_client_metadata_size}, the size gRPC lets a client limit each block of a reply's metadata to: such a client fails the call",
+              })
+            }
+          }
+        }
       }
       guard stub.scenario() is Some({ name, requires: Some(state), .. }) &&
         state != initial_state &&

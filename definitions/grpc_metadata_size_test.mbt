@@ -134,3 +134,41 @@ test "a date the metadata gives goes out in place of smock's, and values count o
     content="a.yaml: /stubs/0/response: the reply's Trailers-Only block would take 301 bytes, over --header-size-limit, 300: each block of a gRPC reply's metadata counts as RFC 7541 counts a header list, each field's name and value plus 32, smock's own fields included",
   )
 }
+
+///|
+test "the ticket's example: under the default limit of 16 KiB, a static reply whose trailers hold 20 KiB of metadata is a problem, and one of 9 KiB loads with a warning" {
+  let error = (n : Int32) => {
+    "{ grpc: { status: NOT_FOUND, trailers: { x-trace: \{"a".repeat(n)} } } }"
+  }
+  inspect(
+    sized_replies(sized_stub("large", error(20 * 1024))),
+    content="a.yaml: /stubs/0/response: the reply's Trailers-Only block would take 20730 bytes, over --header-size-limit, 16384: each block of a gRPC reply's metadata counts as RFC 7541 counts a header list, each field's name and value plus 32, smock's own fields included",
+  )
+  inspect(
+    sized_replies(sized_stub("big", error(9 * 1024))),
+    content=(
+      #|loaded
+      #|a.yaml: /stubs/0/response: warning: the reply's Trailers-Only block would take 9466 bytes, over 8192, the size gRPC lets a client limit each block of a reply's metadata to: such a client fails the call
+    ),
+  )
+  // Trailers-Only takes 250 + n octets (the first test): 8192 exactly
+  // gets no warning, one octet more does.
+  inspect(sized_replies(sized_stub("at-8-kib", error(7942))), content="loaded")
+  inspect(
+    sized_replies(
+      (
+        $|  - id: templated
+        $|    mock: greeter
+        $|    request: { path: /helloworld.Greeter/SayHello, headers: { x-case: t } }
+        $|    responses:
+        $|      - { json: { message: Hi } }
+        $|      - { template: true, grpc: { status: NOT_FOUND, trailers: { x-trace: \{"a".repeat(9000)} } } }
+        $|\{sized_stub("over-8-kib", error(7943))}
+      ),
+    ),
+    content=(
+      #|loaded
+      #|a.yaml: /stubs/1/response: warning: the reply's Trailers-Only block would take 8193 bytes, over 8192, the size gRPC lets a client limit each block of a reply's metadata to: such a client fails the call
+    ),
+  )
+}
