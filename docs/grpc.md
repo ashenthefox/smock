@@ -34,6 +34,7 @@ Mock's `grpc` field and gRPC Stubs.
   - [The status](#the-status)
   - [The message](#the-message)
   - [Metadata](#metadata)
+  - [Metadata size](#metadata-size)
   - [Trailers-Only](#trailers-only)
 - [Unmatched calls](#unmatched-calls)
   - [Calls answered from their HEADERS](#calls-answered-from-their-headers)
@@ -1104,6 +1105,69 @@ then trailers with the status, the message and the trailing metadata, as
 the example above shows. An error without initial metadata is sent as
 [Trailers-Only](#trailers-only). `smock-mock`, which smock adds when the
 Default Mock answers, does not count as initial metadata.
+
+### Metadata size
+
+A reply goes out in blocks of header fields: its HEADERS, then its
+trailers, or one [Trailers-Only](#trailers-only) block. smock counts each
+block as RFC 7541 counts a header list, the way HTTP/2 counts
+SETTINGS_MAX_HEADER_LIST_SIZE: each field's name and value, in octets,
+plus 32. smock's own fields count too: `:status`, `content-type`,
+`grpc-status`, `grpc-message` once percent-encoded, `smock-mock` and
+`date`. So the Trailers-Only answer of `try again ☺` takes 275 octets:
+
+| Field | Octets |
+|---|---|
+| `:status: 200` | 7 + 3 + 32 = 42 |
+| `content-type: application/grpc` | 12 + 16 + 32 = 60 |
+| `grpc-status: 14` | 11 + 2 + 32 = 45 |
+| `grpc-message: try again %E2%98%BA` | 12 + 19 + 32 = 63 |
+| `date: Sat, 14 Nov 2026 07:00:00 GMT` | 4 + 29 + 32 = 65 |
+
+Each block may take at most `--header-size-limit`, 16 KiB by default, the
+flag that also bounds request heads:
+
+- A static reply, without `template: true`, with a larger block is a
+  problem when the files load, at the reply's JSON Pointer. The load
+  counts `date` at its 29 octets, and leaves out `smock-mock`, which only
+  an answer of the Default Mock to a Host of another Mock carries.
+
+  ```text
+  greeter.yaml: /stubs/0/response: the reply's Trailers-Only block would take 20730 bytes, over --header-size-limit, 16384: each block of a gRPC reply's metadata counts as RFC 7541 counts a header list, each field's name and value plus 32, smock's own fields included
+  ```
+
+- `smock check` warns about a static reply with a block over 8 KiB: gRPC
+  lets a client limit each block to that size, so such a client fails
+  the call.
+
+  ```text
+  greeter.yaml: /stubs/0/response: warning: the reply's Trailers-Only block would take 9466 bytes, over 8192, the size gRPC lets a client limit each block of a reply's metadata to: such a client fails the call
+  ```
+
+- smock counts the blocks of each reply it sends before it sends any of
+  them, once a templated reply is rendered. A block over
+  `--header-size-limit`, or over the SETTINGS_MAX_HEADER_LIST_SIZE that
+  the client advertised, would make the client fail the call in its
+  framing layer. So the call gets Trailers-Only INTERNAL `reply metadata
+  too large` instead, and its Journal entry records INTERNAL and says
+  why in `templateError`, at the reply's JSON Pointer:
+
+  ```json
+  {
+    "at": "/response",
+    "message": "the reply's trailers would take 4179 bytes, over the 1024 that the client allows in its SETTINGS_MAX_HEADER_LIST_SIZE"
+  }
+  ```
+
+  A static reply can get this too: from a client that advertised a small
+  SETTINGS_MAX_HEADER_LIST_SIZE, or when `smock-mock` takes its block
+  over the flag.
+- smock's own answers, such as UNIMPLEMENTED with its Near miss trailer,
+  are sent as they are.
+
+`smock check` and `smock render` take `--header-size-limit` too, and its
+variable `SMOCK_HEADER_SIZE_LIMIT`, so they load a directory as
+`smock serve` does. Give them the limit `smock serve` gets.
 
 ### Trailers-Only
 

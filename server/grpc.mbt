@@ -33,7 +33,11 @@
 // Metadata goes out as spec E sends header fields: names in lower case,
 // values trimmed, and the fields HTTP/2 forbids left out. A `grpc-message`
 // is the status message percent-encoded, so any Unicode text fits in the
-// field (`@grpc.percent_encode`). An answer sent before the client has
+// field (`@grpc.percent_encode`). Both blocks of a Stub's reply are built
+// before either is sent, and a reply with a block over
+// `--header-size-limit`, or over the SETTINGS_MAX_HEADER_LIST_SIZE the
+// client advertised, gets Trailers-Only INTERNAL `reply metadata too large`
+// instead (`answer_too_large`). An answer sent before the client has
 // ended its request is followed by RST_STREAM NO_ERROR (`end_early`). What
 // the layer refuses, or cannot serve yet, gets Trailers-Only too, with its
 // `grpc-status` and a fixed ASCII `grpc-message`. A call that does not
@@ -151,6 +155,7 @@ fn H2Connection::end_early(self : H2Connection, stream : Int32) -> Unit {
 /// looked up again first, and a call that cannot reach a gRPC Stub now is
 /// answered as from its HEADERS (`answer_unserved`). A plan whose gRPC
 /// status is not OK is sent as Trailers-Only, with its gRPC part. A reply
+/// too large to send gets INTERNAL instead (`answer_too_large`). A reply
 /// whose framed message fits the windows is queued at once; the rest of a
 /// larger one is sent in a task of its own (`write_slowly`), which writes
 /// to `out`, with the trailers after it.

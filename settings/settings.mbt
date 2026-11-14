@@ -464,9 +464,9 @@ pub fn check_command() -> @argparse.Command {
 
 ///|
 /// The `render` subcommand: the Stub ID as its argument, the definitions
-/// directory, the body-file subdirectory and the environment variables
-/// templates may read as `smock serve` takes them, and the sample request,
-/// the time, the seed and the response.
+/// directory, the body-file subdirectory, the environment variables
+/// templates may read and the header size limit as `smock serve` takes
+/// them, and the sample request, the time, the seed and the response.
 pub fn render_command() -> @argparse.Command {
   @argparse.Command(
     "render",
