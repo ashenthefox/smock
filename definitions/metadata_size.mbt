@@ -61,53 +61,45 @@ priv struct MetadataBlock {
 fn metadata_blocks(response : Response) -> Array[MetadataBlock]? {
   guard response.headers is Written(headers) else { return None }
   let (status, message, trailers) = match response.grpc {
-    None => (@grpc.Status::Ok, 0, 0)
-    Some({ status, message, trailers, }) => {
-      guard trailers is Written(trailers) else { return None }
+    None => (@grpc.Status::Ok, 0, no_metadata)
+    Some({ status, message, trailers: Written(trailers), }) => {
       let message = match message {
         Some(Written(text)) =>
           field_cost(12, @grpc.percent_encode(text).length())
         Some(Templated(_)) => return None
         None => 0
       }
-      (status, message, metadata_cost(trailers))
+      (status, message, trailers)
     }
+    Some({ trailers: Templated(_), .. }) => return None
   }
   let code = status.code()
   let ending = field_cost(11, if code < 10 { 1 } else { 2 }) +
     message +
-    trailers
+    metadata_cost(trailers)
   if status is Ok || headers.length() > 0 {
-    let head = reply_head_cost + metadata_cost(headers)
     Some([
       {
         name: "header block",
-        size: if gives_date(headers) {
-          head
-        } else {
-          head + date_cost
-        },
+        size: reply_head_cost +
+        metadata_cost(headers) +
+        smock_date_cost(headers),
       },
       { name: "trailers", size: ending, },
     ])
   } else {
-    let only = reply_head_cost + ending
-    let given = match response.grpc {
-      Some({ trailers: Written(trailers), .. }) => gives_date(trailers)
-      _ => false
-    }
     Some([
       {
         name: "Trailers-Only block",
-        size: if given {
-          only
-        } else {
-          only + date_cost
-        },
+        size: reply_head_cost + ending + smock_date_cost(trailers),
       },
     ])
   }
 }
+
+///|
+/// No metadata: the trailing metadata of a reply without `grpc`.
+let no_metadata : ReadOnlyArray[(String, String)] = ReadOnlyArray::from_array([])
 
 ///|
 /// The octets `fields`, metadata as written, cost in a header list, each
@@ -136,15 +128,16 @@ fn trimmed_length(value : String) -> Int32 {
 }
 
 ///|
-/// Whether `fields`, metadata with names in lower case, give a `date`,
-/// which then goes out in place of smock's.
-fn gives_date(fields : ReadOnlyArray[(String, String)]) -> Bool {
+/// The octets smock's `date` field adds to a block whose metadata is
+/// `fields`, names in lower case: `date_cost`, or none when `fields` give a
+/// `date`, which goes out in its place.
+fn smock_date_cost(fields : ReadOnlyArray[(String, String)]) -> Int32 {
   for i in 0..<fields.length() {
     if fields[i].0 == "date" {
-      return true
+      return 0
     }
   }
-  false
+  date_cost
 }
 
 ///|
