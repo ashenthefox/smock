@@ -91,3 +91,23 @@ fn check_head(request : H2Request, body_limit : Int32) -> CallRefusal? {
   }
   None
 }
+
+///|
+/// What smock refuses in `data`, the next DATA octets of a gRPC call whose
+/// framing `deframer` reads, or `None`: a message whose prefix announces a
+/// length that takes the body over `--body-limit`, as soon as the prefix
+/// arrives, before the message does.
+fn H2Connection::check_messages(
+  self : H2Connection,
+  deframer : @grpc.Deframer,
+  data : Bytes,
+) -> CallRefusal? {
+  let mut rest = data[:]
+  while deframer.take(rest) is Prefix(body_length~, rest=after, ..) {
+    if body_length > self.body_limit.to_int64() {
+      return Some(OverBodyLimit)
+    }
+    rest = after
+  }
+  None
+}

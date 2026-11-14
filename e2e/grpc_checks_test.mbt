@@ -237,3 +237,79 @@ async test "on HEADERS, a method other than POST gets :status 405 and a malforme
     })
   })
 }
+
+///|
+async test "a body over --body-limit, its prefix included, gets RESOURCE_EXHAUSTED as soon as it shows, in content-length, in a prefix's length or in the octets received, then RST_STREAM NO_ERROR while the client still sends; a body at the limit is served" {
+  with_greeter_set([("greeter.yaml", checks_example)], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0", "--body-limit", "10"], smock => {
+      let raw = smock.raw_h2()
+      defer raw.close()
+      let out = [raw.acknowledge_settings()]
+      // The framed HelloRequest, 10 octets: the limit.
+      let hello = framed(@fs.read_file(hello_request_path).binary())
+      raw.send([
+        headers_frame(
+          1,
+          raw.block(checked_call("POST", more=[("content-length", "11")])),
+          end_stream=false,
+        ),
+        // A prefix that announces 6 octets, alone.
+        headers_frame(3, raw.block(checked_call("POST")), end_stream=false),
+        Data(
+          stream_id=3,
+          data=b"\x00\x00\x00\x00\x06",
+          end_stream=false,
+          padding=0,
+        ),
+        // One octet past a whole message.
+        headers_frame(5, raw.block(checked_call("POST")), end_stream=false),
+        Data(stream_id=5, data=hello, end_stream=false, padding=0),
+        Data(stream_id=5, data=b"\x00", end_stream=false, padding=0),
+        // The same, in the DATA that ends the request.
+        headers_frame(7, raw.block(checked_call("POST")), end_stream=false),
+        Data(stream_id=7, data=hello, end_stream=false, padding=0),
+        Data(stream_id=7, data=b"\x00", end_stream=true, padding=0),
+        Ping(payload=b"\x00\x00\x00\x00\x00\x00\x00\x01", ack=false),
+      ])
+      out.push(
+        "A content-length of 11, a prefix of 6 octets, one octet past a message, and that octet ending the request:",
+      )
+      out.push(raw.frames_until_ping_ack())
+      raw.send([
+        // Sent before the client learnt of the answer, as a client does:
+        // ignored.
+        Data(stream_id=3, data=b"\x0a\x04Anne", end_stream=true, padding=0),
+        headers_frame(9, raw.block(checked_call("POST")), end_stream=false),
+        Data(stream_id=9, data=hello, end_stream=true, padding=0),
+      ])
+      out.push("The rest of the 6 octets, then a call of 10 octets:")
+      out.push(raw.frames_until_stream_ends(9))
+      out.push("Journal:")
+      out.push(checked_journaled(smock))
+      out.push(smock.metric("smock_requests_total"))
+      inspect(
+        out.join("\n"),
+        content=(
+          #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
+          #|A content-length of 11, a prefix of 6 octets, one octet past a message, and that octet ending the request:
+          #|SETTINGS ACK
+          #|HEADERS 1 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 8, grpc-message: the request is over the body limit, date: <now>]
+          #|RST_STREAM 1 NO_ERROR
+          #|HEADERS 3 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 8, grpc-message: the request is over the body limit, date: <now>]
+          #|RST_STREAM 3 NO_ERROR
+          #|HEADERS 5 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 8, grpc-message: the request is over the body limit, date: <now>]
+          #|RST_STREAM 5 NO_ERROR
+          #|HEADERS 7 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 8, grpc-message: the request is over the body limit, date: <now>]
+          #|The rest of the 6 octets, then a call of 10 octets:
+          #|HEADERS 9 END_HEADERS [:status: 200, content-type: application/grpc, smock-mock: greeter; via=default, date: <now>]
+          #|DATA 9 16 octets
+          #|HEADERS 9 END_STREAM END_HEADERS [grpc-status: 0]
+          #|Journal:
+          #|/helloworld.Greeter/SayHello "OK" grpc-timeout -
+          #|smock_requests_total{mock="",stub=""} 4
+          #|smock_requests_total{mock="greeter",stub="hello"} 1
+        ),
+      )
+    })
+  })
+}

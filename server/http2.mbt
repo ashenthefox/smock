@@ -609,10 +609,19 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
         // DATA on a stream whose request has gone to the engine, as a
         // CONNECT's has once its HEADERS arrived, is discarded.
         if self.requests.get(stream) is Some(request) {
-          // A body that passes the limit is refused before it is kept.
+          // A body that passes the limit is refused before it is kept, and
+          // so is a gRPC call's message whose prefix gRPC's rules refuse.
           if data.length() > self.body_limit - request.received() {
             self.requests.remove(stream)
-            self.will_refuse(stream, 413)
+            if request.grpc {
+              self.will_refuse_call(stream, OverBodyLimit)
+            } else {
+              self.will_refuse(stream, 413)
+            }
+          } else if request.deframer is Some(deframer) &&
+            self.check_messages(deframer, data) is Some(refusal) {
+            self.requests.remove(stream)
+            self.will_refuse_call(stream, refusal)
           } else {
             request.receive(data)
           }

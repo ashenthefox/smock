@@ -45,6 +45,9 @@ priv struct H2Request {
   /// any but none or `proto`, such as `json`. Of several `content-type`
   /// fields that make it a call, the last decides, as in grpc-go.
   unserved_subtype : Bool
+  /// For a gRPC call, how far the framing of its messages is read, as its
+  /// body arrives; `None` for an HTTP request.
+  deframer : @grpc.Deframer?
 }
 
 ///|
@@ -207,6 +210,11 @@ fn H2Request::new(
     deadline,
     grpc,
     unserved_subtype,
+    deframer: if grpc {
+      Some(@grpc.Deframer())
+    } else {
+      None
+    },
   }
 }
 
