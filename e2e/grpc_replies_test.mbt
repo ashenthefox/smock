@@ -12,7 +12,7 @@ let replies_set_path : String = "fixtures/protobuf/replies/replies.binpb"
 
 ///|
 /// The set of fixtures/protobuf/unserved/unserved.proto, whose output types
-/// reach types that gRPC Stubs do not serve yet.
+/// reach Struct and Value, which gRPC Stubs once did not serve.
 let unserved_set_path : String = "fixtures/protobuf/unserved/unserved.binpb"
 
 ///|
@@ -278,7 +278,7 @@ async test "a templated reply that does not fit the output type gets Trailers-On
 }
 
 ///|
-async test "smock check reports a static reply that is not a message of the output type at the value at fault, and output types that reach types not served yet at the path" {
+async test "smock check reports a static reply that is not a message of the output type at the value at fault, and accepts output types that reach Struct and Value, at the top or through nested messages" {
   let stubs =
     #|  - id: null-in-a-list
     #|    mock: accounts
@@ -330,9 +330,6 @@ async test "smock check reports a static reply that is not a message of the outp
         #|replies.yaml: /stubs/2/responses/0/json/userId: names the field user_id of replies.User, as "user_id" does: give a field once, by its proto name or its JSON name
         #|replies.yaml: /stubs/3/response/json/userid: is not a field of replies.User
         #|replies.yaml: /stubs/4/response/json/nested/recursive/anInt32: must be an integer from -2147483648 to 2147483647: the field an_int32 of replies.Everything has the type int32
-        #|replies.yaml: /stubs/5/request/path: the output type unserved.TimeReply is not served yet: its field at has the well-known type google.protobuf.Value, and gRPC Stubs serve no Any, Struct, Value, ListValue or NullValue so far
-        #|replies.yaml: /stubs/6/request/path: the output type unserved.ScheduleReply is not served yet: the field start of unserved.ScheduleReply.Slot, a type it reaches, has the well-known type google.protobuf.Struct, and gRPC Stubs serve no Any, Struct, Value, ListValue or NullValue so far
-        #|replies.yaml: /stubs/7/request/path: the output type google.protobuf.Struct is not served yet: it is a well-known type, and gRPC Stubs serve no Any, Struct, Value, ListValue or NullValue so far
         #|
       ),
     )

@@ -1,0 +1,2 @@
+# An Any that holds an Empty, whose value has no octets.
+[type.googleapis.com/google.protobuf.Empty] {}

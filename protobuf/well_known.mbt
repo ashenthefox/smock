@@ -1,10 +1,10 @@
 // The well-known types that ProtoJSON prints in forms of their own
 // (https://protobuf.dev/programming-guides/json/): Timestamp, Duration and
-// FieldMask as strings, and the wrappers as the values they wrap. Empty is
-// printed as the object it is, `{}`. Any, Struct, Value, ListValue and
-// NullValue are not served yet. A type is known by its full name, and a
-// Timestamp, a Duration and a FieldMask are read and written by their field
-// numbers, as protobuf's own code does.
+// FieldMask as strings, the wrappers as the values they wrap, Struct,
+// Value and ListValue as the JSON values they hold, and NullValue as
+// `null`. Empty is printed as the object it is, `{}`. A type is known by
+// its full name, and a Timestamp, a Duration and a FieldMask are read and
+// written by their field numbers, as protobuf's own code does.
 
 ///|
 /// A well-known type that ProtoJSON prints in a form of its own, not as an
@@ -22,6 +22,60 @@ priv enum WellKnown {
   /// A wrapper, such as google.protobuf.Int32Value: the value of its field
   /// `value`, numbered 1, whose index in the message's fields this is.
   Wrapper(Int32)
+  /// google.protobuf.Struct: an object, the map of Values that is its field
+  /// `fields`, numbered 1, whose index in the message's fields this is.
+  Struct(Int32)
+  /// google.protobuf.ListValue: an array, the list of Values that is its
+  /// field `values`, numbered 1, whose index in the message's fields this
+  /// is.
+  ListValue(Int32)
+  /// google.protobuf.Value: the JSON value that the member of its oneof
+  /// `kind` holds: `null`, a number, a string, a bool, a Struct or a
+  /// ListValue.
+  Value
+  /// google.protobuf.Any: an object of its type URL as `@type`, then the
+  /// message it holds, a type of the set: its fields, or its form as
+  /// `value` when it is a well-known type that has one.
+  Any
+}
+
+///|
+/// How ProtoJSON writes a message of a type: what a value of it is, and so
+/// what a condition on it is checked as.
+#derive(Debug, Eq)
+pub(all) enum JsonForm {
+  /// An object of its fields, under their JSON names, Empty included.
+  Fields
+  /// A string or a number, as `DescriptorSet::printed_message` checks it:
+  /// a Timestamp, a Duration, a FieldMask or a wrapper.
+  Scalar
+  /// google.protobuf.Struct: an object whose keys are data, and whose
+  /// members are any JSON values, as a Value is.
+  Struct
+  /// google.protobuf.ListValue: an array of any JSON values, as a Value
+  /// is.
+  ListValue
+  /// google.protobuf.Value: any JSON value. Its object is a Struct, its
+  /// array a ListValue.
+  Value
+  /// google.protobuf.Any: an object of the type URL of the message it
+  /// holds, a type of the set, as `@type`, and that message: its fields, or
+  /// its form as `value` when it is a well-known type that has one, as a
+  /// `json_form` other than `Fields` says.
+  Any
+}
+
+///|
+/// How ProtoJSON writes a message of this type.
+pub fn MessageDescriptor::json_form(self : MessageDescriptor) -> JsonForm {
+  match well_known_form(self) {
+    None => Fields
+    Some(Timestamp | Duration | FieldMask | Wrapper(_)) => Scalar
+    Some(Struct(_)) => Struct
+    Some(ListValue(_)) => ListValue
+    Some(Value) => Value
+    Some(Any) => Any
+  }
 }
 
 ///|
@@ -67,23 +121,23 @@ fn well_known_form(message : MessageDescriptor) -> WellKnown? {
         None
       }
     }
+    "google.protobuf.Struct" | "google.protobuf.ListValue" => {
+      let index = message.field_index(1)
+      guard index >= 0 &&
+        message.fields[index].label is Repeated &&
+        message.fields[index].type_ is Message else {
+        return None
+      }
+      if name == "google.protobuf.Struct" {
+        Some(Struct(index))
+      } else {
+        Some(ListValue(index))
+      }
+    }
+    "google.protobuf.Value" => Some(Value)
+    "google.protobuf.Any" => Some(Any)
     _ => None
   }
-}
-
-///|
-/// Whether `full_name`, a full name without a leading dot, is one of the
-/// well-known types that `decode_json` and `DescriptorSet::encode_json` do
-/// not serve yet: Any, Struct, Value, ListValue and NullValue, whose JSON
-/// forms hold any JSON value or a message of another type.
-pub fn is_unserved_well_known(full_name : String) -> Bool {
-  full_name.has_prefix("google.protobuf.") &&
-  full_name
-  is ("google.protobuf.Any"
-  | "google.protobuf.Struct"
-  | "google.protobuf.Value"
-  | "google.protobuf.ListValue"
-  | "google.protobuf.NullValue")
 }
 
 ///|
@@ -91,12 +145,16 @@ pub fn is_unserved_well_known(full_name : String) -> Bool {
 /// whose form is `form`, whose records are `records`, merged in order,
 /// `depth` messages deep, as ProtoJSON prints it. A Timestamp's or a
 /// Duration's last seconds and nanos win, and a FieldMask's paths are
-/// joined, as protobuf's parsers merge them.
+/// joined, as protobuf's parsers merge them. A Struct prints as a map is
+/// printed, in key order, a ListValue as a list, a Value as the JSON value
+/// of the member of its oneof that it holds, and an Any as `print_any`
+/// says.
 ///
 /// Raises `DecodeError` for a value that ProtoJSON cannot print: a
 /// Timestamp or a Duration out of its range, or a Duration whose seconds
-/// and nanos have opposite signs, and a FieldMask path that has no
-/// lowerCamelCase form.
+/// and nanos have opposite signs, a FieldMask path that has no
+/// lowerCamelCase form, a Value that holds nothing, NaN or an infinity, at
+/// any depth, and an Any that `print_any` cannot print.
 fn DescriptorSet::print_well_known(
   self : DescriptorSet,
   out : @buffer.Buffer,
@@ -170,6 +228,145 @@ fn DescriptorSet::print_well_known(
       let values = self.scan(message, records)
       self.print_value(out, message.fields[index], values[index], depth)
     }
+    Struct(index) | ListValue(index) => {
+      let values = self.scan(message, records)
+      self.print_repeated(out, message.fields[index], values[index], depth)
+    }
+    Value => {
+      let values = self.scan(message, records)
+      // The member of the oneof `kind` that the Value holds: the last one
+      // of its fields by number, as the oneof keeps one.
+      let mut held = -1
+      for index in message.by_number {
+        if values[index] is Some(_) {
+          held = index
+        }
+      }
+      guard held >= 0 else {
+        raise DecodeError(
+          position~,
+          message="the Value holds no value, which ProtoJSON cannot print: it must hold null, a number, a string, a bool, a Struct or a ListValue",
+        )
+      }
+      let field = message.fields[held]
+      if field.number == 2 && values[held] is Some(Number(bits)) {
+        let number = bits.reinterpret_as_double()
+        if number.is_nan() || number.is_inf() {
+          raise DecodeError(
+            position~,
+            message="the Value holds the number \{number}, which a JSON number cannot be, and ProtoJSON does not print it as a string",
+          )
+        }
+      }
+      self.print_value(out, field, values[held], depth)
+    }
+    Any => self.print_any(out, records, depth)
+  }
+}
+
+///|
+/// The full name of the type that `url`, an Any's type URL, names: the
+/// text after its last `/`, such as `helloworld.HelloRequest` for
+/// `type.googleapis.com/helloworld.HelloRequest`. `None` when it has no `/`,
+/// or nothing after its last one.
+pub fn type_name_of_url(url : String) -> String? {
+  let mut i = url.length()
+  while i > 0 && url[i - 1] != '/' {
+    i = i - 1
+  }
+  if i == 0 || i == url.length() {
+    None
+  } else {
+    Some(url[i:].to_owned())
+  }
+}
+
+///|
+/// Prints to `out` the Any whose records are `records`, merged in order,
+/// `depth` messages deep, as ProtoJSON prints it: `{}` when it is empty,
+/// or else an object of its type URL as `@type`, then the message it holds
+/// one message deeper, a type of the set that the URL names: its fields,
+/// or its form as `value` when it is a well-known type that has one. Its
+/// last type URL and its last value win, as protobuf's parsers keep them.
+///
+/// Raises `DecodeError` for an Any that ProtoJSON cannot print: one with a
+/// value but no type URL, one whose type URL names no type, or a type the
+/// set does not define, and one whose message does not decode.
+fn DescriptorSet::print_any(
+  self : DescriptorSet,
+  out : @buffer.Buffer,
+  records : Array[BytesView],
+  depth : Int32,
+) -> Unit raise DecodeError {
+  let position = records[0].start_offset()
+  let mut url = records[0][0:0]
+  let mut value = records[0][0:0]
+  for r in 0..<records.length() {
+    let reader = Reader(records[r])
+    while !reader.at_end() {
+      let number = reader.tag()
+      match (number, reader.wire_type()) {
+        (1, Len) => {
+          let at = reader.pos
+          url = reader.length_delimited()
+          if !is_utf8(url) {
+            raise reader.error(
+              at, "the field type_url holds octets that are not UTF-8",
+            )
+          }
+        }
+        (2, Len) => value = reader.length_delimited()
+        _ => reader.skip()
+      }
+    }
+  }
+  if url.length() == 0 {
+    if value.length() > 0 {
+      raise DecodeError(
+        position~,
+        message="the Any has a value but no type URL, so it cannot be printed",
+      )
+    }
+    out.write_bytes(b"{}")
+    return
+  }
+  let text = @utf8.decode_lossy(url)
+  guard type_name_of_url(text) is Some(name) else {
+    raise DecodeError(
+      position~,
+      message="the Any's type URL \{text.escape()} names no type: it must end in / and the type's full name, such as \"type.googleapis.com/helloworld.HelloRequest\"",
+    )
+  }
+  guard self.find_message(name) is Some(held) else {
+    raise DecodeError(
+      position~,
+      message="the Any holds the type \{name}, which the Descriptor set does not define, so it cannot be printed",
+    )
+  }
+  if depth >= max_depth {
+    raise DecodeError(
+      position~,
+      message="messages nest deeper than \{max_depth}",
+    )
+  }
+  out.write_bytes(b"{\"@type\":")
+  write_json_string(out, url)
+  if well_known_form(held) is Some(_) {
+    out.write_bytes(b",\"value\":")
+    self.print_message(out, held, [value], depth + 1)
+    out.write_byte(b'}')
+    return
+  }
+  // The message's fields follow `@type` in the Any's object: the message
+  // is printed on its own, then its object's members are taken.
+  let fields = @buffer.Buffer(size_hint=2 * value.length() + 16)
+  self.print_message(fields, held, [value], depth + 1)
+  let printed = fields.to_bytes()
+  if printed.length() > 2 {
+    out.write_byte(b',')
+    out.write_bytes(printed[1:])
+  } else {
+    out.write_byte(b'}')
   }
 }
 
@@ -341,8 +538,11 @@ fn write_path(out : @buffer.Buffer, path : BytesView) -> Bool {
 /// fields, as protoc writes them, reading `json` as ProtoJSON reads it: a
 /// Timestamp, a Duration or a FieldMask from a string, as
 /// `write_timestamp_of`, `write_duration_of` and `write_field_mask_of` say,
-/// and a wrapper from the value it wraps, which is left out at its
-/// default. Raises `Unfit` when `json` is not such a message.
+/// a wrapper from the value it wraps, which is left out at its default, a
+/// Struct from an object, a ListValue from an array and a Value from any
+/// JSON value, `null` included, and an Any as `write_any` says. Raises
+/// `Unfit` when `json` is not such a message, and `EncodeError` when a
+/// message it holds does not fit its type.
 fn DescriptorSet::write_well_known(
   self : DescriptorSet,
   writer : Writer,
@@ -372,6 +572,131 @@ fn DescriptorSet::write_well_known(
         depth,
         present=false,
       )
+    Struct(index) => {
+      guard json is Object(_) else { raise Unfit }
+      self.write_field(writer, message, message.fields[index], json, depth)
+    }
+    ListValue(index) => {
+      guard json is Array(_) else { raise Unfit }
+      self.write_field(writer, message, message.fields[index], json, depth)
+    }
+    Value => {
+      // The member of the oneof `kind` that holds such a JSON value.
+      let number = match json {
+        Null => 1
+        Number(_) => 2
+        String(_) => 3
+        True | False => 4
+        Object(_) => 5
+        Array(_) => 6
+      }
+      let index = message.field_index(number)
+      guard index >= 0 else { raise Unfit }
+      self.write_value(writer, message.fields[index], json, depth, present=true)
+    }
+    Any => self.write_any(writer, json, depth)
+  }
+}
+
+///|
+/// Writes `json`, an Any nested `depth` messages deep, as the records of
+/// its fields, as protoc writes them, reading `json` as ProtoJSON reads an
+/// Any: an object whose `@type` is a type URL that names a type of the
+/// set, and whose other members are the fields of the message it holds,
+/// one message deeper, or its form as `value` when it is a well-known type
+/// that has one. An Empty may give `value` as `{}`, as protobuf-go prints
+/// it. `{}` is an empty Any. Raises `Unfit` when `json` is not an object,
+/// and `EncodeError`, at the JSON Pointer of the value at fault, when the
+/// type URL names no type of the set, or the members do not fit the type.
+fn DescriptorSet::write_any(
+  self : DescriptorSet,
+  writer : Writer,
+  json : Json,
+  depth : Int32,
+) -> Unit raise {
+  guard json is Object(members) else { raise Unfit }
+  guard members.get("@type") is Some(type_url) else {
+    if members.is_empty() {
+      return
+    }
+    raise EncodeError(
+      pointer="",
+      message="must give \"@type\", the type URL of the message the Any holds, such as \"type.googleapis.com/helloworld.HelloRequest\"",
+    )
+  }
+  let not_a_url = EncodeError(
+    pointer="/@type",
+    message="must be a type URL: / and the full name of a type of the set at its end, such as \"type.googleapis.com/helloworld.HelloRequest\"",
+  )
+  guard type_url is String(url) && type_name_of_url(url) is Some(name) else {
+    raise not_a_url
+  }
+  guard self.find_message(name) is Some(held) else {
+    raise EncodeError(
+      pointer="/@type",
+      message="names the type \{name}, which the Descriptor set does not define",
+    )
+  }
+  if not_encoded(held) is Some(why) {
+    raise EncodeError(pointer="/@type", message=why)
+  }
+  if depth >= max_depth {
+    raise EncodeError(
+      pointer="",
+      message="nests messages deeper than \{max_depth}",
+    )
+  }
+  let inner = Writer()
+  match well_known_form(held) {
+    Some(form) => {
+      for key, _ in members {
+        if !(key is ("@type" | "value")) {
+          raise EncodeError(
+            pointer=pointer_of(key),
+            message="is not a member of an Any that holds a \{held.full_name}: give the \{held.full_name} as \"value\"",
+          )
+        }
+      }
+      guard members.get("value") is Some(value) else {
+        raise EncodeError(
+          pointer="",
+          message="must give \"value\", the \{held.full_name} that the Any holds",
+        )
+      }
+      self.write_well_known(inner, held, form, value, depth + 1) catch {
+        Unfit =>
+          raise EncodeError(
+            pointer="/value",
+            message="must be \{self.wanted_message(held)}: the Any holds a \{held.full_name}",
+          )
+        error => raise nested(error, "/value")
+      }
+    }
+    None => {
+      let fields : Map[String, Json] = Map([])
+      for key, value in members {
+        if key == "@type" ||
+          (
+            key == "value" &&
+            held.full_name == "google.protobuf.Empty" &&
+            value is Object(empty) &&
+            empty.is_empty()
+          ) {
+          continue
+        }
+        fields[key] = value
+      }
+      self.write_message(inner, held, fields, depth + 1)
+    }
+  }
+  writer.tag(1, Len)
+  writer.utf8(url) catch {
+    _ => raise not_a_url
+  }
+  let value = inner.to_bytes()
+  if value.length() > 0 {
+    writer.tag(2, Len)
+    writer.length_delimited(value)
   }
 }
 
@@ -390,6 +715,12 @@ fn DescriptorSet::wanted_message(
     Some(FieldMask) =>
       "a string of field paths in lowerCamelCase, joined by commas, such as \"userName,address.city\""
     Some(Wrapper(index)) => self.wanted(message.fields[index])
+    Some(Struct(_)) => "an object, whose members are any JSON values"
+    Some(ListValue(_)) => "an array, whose elements are any JSON values"
+    Some(Value) =>
+      "a JSON value: null, a number within the range of a double, a string, true or false, an object or an array"
+    Some(Any) =>
+      "an object that gives the type URL of the message it holds as \"@type\""
     None => "an object"
   }
 }

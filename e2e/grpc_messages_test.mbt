@@ -237,7 +237,7 @@ async test "a request message that does not parse, such as one whose string is n
 }
 
 ///|
-async test "smock check accepts a gRPC Stub whose input type has Timestamps, singular, repeated or as a map's values, and refuses one whose input type has fields of Struct, Value or ListValue, which are not served yet" {
+async test "smock check accepts a gRPC Stub whose input type has Timestamps, singular, repeated or as a map's values, and one whose input type has fields of Struct, Value or ListValue" {
   let yaml =
     #|mocks:
     #|  - name: clock
@@ -268,10 +268,7 @@ async test "smock check accepts a gRPC Stub whose input type has Timestamps, sin
     inspect(
       check([dir]),
       content=(
-        #|status 1
-        #|clock.yaml: /stubs/1/request/path: the input type unserved.Described is not served yet: its field labels has the well-known type google.protobuf.Struct, and gRPC Stubs serve no Any, Struct, Value, ListValue or NullValue so far
-        #|clock.yaml: /stubs/1/request/path: the input type unserved.Described is not served yet: its field values has the well-known type google.protobuf.Value, and gRPC Stubs serve no Any, Struct, Value, ListValue or NullValue so far
-        #|clock.yaml: /stubs/1/request/path: the input type unserved.Described is not served yet: its field lists is a map whose values have the well-known type google.protobuf.ListValue, and gRPC Stubs serve no Any, Struct, Value, ListValue or NullValue so far
+        #|status 0
         #|
       ),
     )
