@@ -322,7 +322,10 @@ fn DescriptorSet::print_any(
     )
   }
   if depth >= max_depth {
-    raise DecodeError(position~, message="messages nest deeper than \{max_depth}")
+    raise DecodeError(
+      position~,
+      message="messages nest deeper than \{max_depth}",
+    )
   }
   out.write_bytes(b"{\"@type\":")
   write_json_string(out, url)
@@ -544,7 +547,131 @@ fn DescriptorSet::write_well_known(
         depth,
         present=false,
       )
-    Struct(_) | ListValue(_) | Value | Any => raise Unfit
+    Struct(index) => {
+      guard json is Object(_) else { raise Unfit }
+      self.write_field(writer, message, message.fields[index], json, depth)
+    }
+    ListValue(index) => {
+      guard json is Array(_) else { raise Unfit }
+      self.write_field(writer, message, message.fields[index], json, depth)
+    }
+    Value => {
+      // The member of the oneof `kind` that holds such a JSON value.
+      let number = match json {
+        Null => 1
+        Number(_) => 2
+        String(_) => 3
+        True | False => 4
+        Object(_) => 5
+        Array(_) => 6
+      }
+      let index = message.field_index(number)
+      guard index >= 0 else { raise Unfit }
+      self.write_value(writer, message.fields[index], json, depth, present=true)
+    }
+    Any => self.write_any(writer, json, depth)
+  }
+}
+
+///|
+/// Writes `json`, an Any nested `depth` messages deep, as the records of
+/// its fields, as protoc writes them, reading `json` as ProtoJSON reads an
+/// Any: an object whose `@type` is a type URL that names a type of the
+/// set, and whose other members are the fields of the message it holds,
+/// one message deeper, or its form as `value` when it is a well-known type
+/// that has one. An Empty may give `value` as `{}`, as protobuf-go prints
+/// it. `{}` is an empty Any. Raises `Unfit` when `json` is not an object,
+/// and `EncodeError`, at the JSON Pointer of the value at fault, when the
+/// type URL names no type of the set, or the members do not fit the type.
+fn DescriptorSet::write_any(
+  self : DescriptorSet,
+  writer : Writer,
+  json : Json,
+  depth : Int32,
+) -> Unit raise {
+  guard json is Object(members) else { raise Unfit }
+  guard members.get("@type") is Some(type_url) else {
+    if members.is_empty() {
+      return
+    }
+    raise EncodeError(
+      pointer="",
+      message="must give \"@type\", the type URL of the message the Any holds, such as \"type.googleapis.com/helloworld.HelloRequest\"",
+    )
+  }
+  let not_a_url = EncodeError(
+    pointer="/@type",
+    message="must be a type URL: / and the full name of a type of the set at its end, such as \"type.googleapis.com/helloworld.HelloRequest\"",
+  )
+  guard type_url is String(url) && type_name_of_url(url) is Some(name) else {
+    raise not_a_url
+  }
+  guard self.find_message(name) is Some(held) else {
+    raise EncodeError(
+      pointer="/@type",
+      message="names the type \{name}, which the Descriptor set does not define",
+    )
+  }
+  if not_encoded(held) is Some(why) {
+    raise EncodeError(pointer="/@type", message=why)
+  }
+  if depth >= max_depth {
+    raise EncodeError(
+      pointer="",
+      message="nests messages deeper than \{max_depth}",
+    )
+  }
+  let inner = Writer()
+  match well_known_form(held) {
+    Some(form) => {
+      for key, _ in members {
+        if !(key is ("@type" | "value")) {
+          raise EncodeError(
+            pointer=pointer_of(key),
+            message="is not a member of an Any that holds a \{held.full_name}: give the \{held.full_name} as \"value\"",
+          )
+        }
+      }
+      guard members.get("value") is Some(value) else {
+        raise EncodeError(
+          pointer="",
+          message="must give \"value\", the \{held.full_name} that the Any holds",
+        )
+      }
+      self.write_well_known(inner, held, form, value, depth + 1) catch {
+        Unfit =>
+          raise EncodeError(
+            pointer="/value",
+            message="must be \{self.wanted_message(held)}: the Any holds a \{held.full_name}",
+          )
+        error => raise nested(error, "/value")
+      }
+    }
+    None => {
+      let fields : Map[String, Json] = Map([])
+      for key, value in members {
+        if key == "@type" ||
+          (
+            key == "value" &&
+            held.full_name == "google.protobuf.Empty" &&
+            value is Object(empty) &&
+            empty.is_empty()
+          ) {
+          continue
+        }
+        fields[key] = value
+      }
+      self.write_message(inner, held, fields, depth + 1)
+    }
+  }
+  writer.tag(1, Len)
+  writer.utf8(url) catch {
+    _ => raise not_a_url
+  }
+  let value = inner.to_bytes()
+  if value.length() > 0 {
+    writer.tag(2, Len)
+    writer.length_delimited(value)
   }
 }
 
@@ -563,8 +690,13 @@ fn DescriptorSet::wanted_message(
     Some(FieldMask) =>
       "a string of field paths in lowerCamelCase, joined by commas, such as \"userName,address.city\""
     Some(Wrapper(index)) => self.wanted(message.fields[index])
-    Some(Struct(_)) | Some(ListValue(_)) | Some(Value) | Some(Any) | None =>
-      "an object"
+    Some(Struct(_)) => "an object, whose members are any JSON values"
+    Some(ListValue(_)) => "an array, whose elements are any JSON values"
+    Some(Value) =>
+      "a JSON value: null, a number within the range of a double, a string, true or false, an object or an array"
+    Some(Any) =>
+      "an object that gives the type URL of the message it holds as \"@type\""
+    None => "an object"
   }
 }
 

@@ -43,7 +43,11 @@ fn struct_of(entries : Array[(String, Bytes)]) -> Bytes {
 ///|
 /// A ListValue of the octets of `values`, written by hand.
 fn list_of(values : Array[Bytes]) -> Bytes {
-  nested(w => for value in values { message_field(w, 1, value) })
+  nested(w => {
+    for value in values {
+      message_field(w, 1, value)
+    }
+  })
 }
 
 ///|
@@ -189,7 +193,6 @@ test "an Any that holds a type the set lacks, or whose type URL names no type, c
       #|{}
       #|{"@type":"example.com/types/helloworld.HelloRequest","name":"Tom"}
       #|error: octet 48: a length of 5 runs past the end of the input, which has 3 octets left
-
     ),
   )
 }
@@ -208,6 +211,166 @@ test "every type at every place: a Struct in key order with values of each kind,
     dynamic("dynamic.Document", b""),
     content=(
       #|{"nothing":null,"values":[],"byName":{},"attachments":[],"nothings":[]}
+    ),
+  )
+}
+
+///|
+test "replies of every type have protoc's bytes, Struct entries sorted by key, in either spelling of a field and with NullValue by name or number" {
+  assert_eq(
+    encoded(dynamic_set, "dynamic.Document", {
+      "nothings": [null, "NULL_VALUE"],
+      "maybe": 0,
+      "none": null,
+      "attachments": [
+        {
+          "@type": "type.googleapis.com/google.protobuf.Duration",
+          "value": "1.5s",
+        },
+        { "@type": "type.googleapis.com/google.protobuf.Empty" },
+        { "@type": "type.googleapis.com/google.protobuf.Value", "value": 2 },
+        {
+          "@type": "type.googleapis.com/google.protobuf.Struct",
+          "value": { "k": true },
+        },
+        {
+          "@type": "type.googleapis.com/google.protobuf.Any",
+          "value": {
+            "name": "Ann",
+            "@type": "type.googleapis.com/helloworld.HelloRequest",
+          },
+        },
+      ],
+      "attachment": {
+        "@type": "type.googleapis.com/helloworld.HelloRequest",
+        "name": "Tom",
+      },
+      "by_name": { "b": "B", "a": null },
+      "values": ["a\"b", 0],
+      "nothing": "NULL_VALUE",
+      "list": [-0.25, false],
+      "value": ["x", null, []],
+      "labels": {
+        "team": "core",
+        "on": true,
+        "none": null,
+        "nested": { "sizes": [1.5, 1.0e21], "empty": {} },
+        "count": 3,
+      },
+    }),
+    @hex.encode(fixture(document)),
+  )
+}
+
+///|
+test "a reply's null sets null_value in a Value, in a Struct's and a ListValue's values and in a NullValue field, and leaves other fields unset" {
+  assert_eq(
+    encoded(dynamic_set, "dynamic.Document", {
+      "labels": { "gone": null },
+      "value": null,
+      "list": [null],
+      "nothing": null,
+      "values": [null],
+      "byName": { "gone": null },
+      "attachment": null,
+      "attachments": null,
+      "none": null,
+      "maybe": null,
+      "nothings": [null],
+    }),
+    @hex.encode(fixture(document_nulls)),
+  )
+}
+
+///|
+test "the ticket's example: an Any is read with its type from the set, a message's fields beside @type, and a well-known type's form as value; an Empty may give value {} or no value" {
+  let any = json => encoded(dynamic_set, "google.protobuf.Any", json)
+  assert_eq(
+    any({
+      "@type": "type.googleapis.com/helloworld.HelloRequest",
+      "name": "Tom",
+    }),
+    @hex.encode(fixture(any_hello)),
+  )
+  assert_eq(
+    any({
+      "@type": "type.googleapis.com/google.protobuf.Duration",
+      "value": "1.500s",
+    }),
+    @hex.encode(fixture(any_duration)),
+  )
+  assert_eq(
+    any({ "@type": "type.googleapis.com/google.protobuf.Empty" }),
+    @hex.encode(fixture(any_empty)),
+  )
+  assert_eq(
+    any({ "@type": "type.googleapis.com/google.protobuf.Empty", "value": {} }),
+    @hex.encode(fixture(any_empty)),
+  )
+  // An empty Any.
+  inspect(any({}), content="")
+}
+
+///|
+test "an Any whose type the set lacks, or whose members do not fit the type it names, is not encoded, with the JSON Pointer of the value at fault" {
+  let any = json => encoded(dynamic_set, "google.protobuf.Any", json)
+  let document = json => encoded(dynamic_set, "dynamic.Document", json)
+  let lines = [
+    any({ "@type": "type.googleapis.com/missing.Greeting", "name": "Tom" }),
+    any({ "@type": "helloworld.HelloRequest" }),
+    any({ "@type": 42 }),
+    any({ "name": "Tom" }),
+    any({
+      "@type": "type.googleapis.com/helloworld.HelloRequest",
+      "nmae": "Tom",
+    }),
+    any({
+      "@type": "type.googleapis.com/helloworld.HelloRequest",
+      "value": { "name": "Tom" },
+    }),
+    any({ "@type": "type.googleapis.com/google.protobuf.Duration" }),
+    any({
+      "@type": "type.googleapis.com/google.protobuf.Duration",
+      "value": "1.5",
+    }),
+    any({
+      "@type": "type.googleapis.com/google.protobuf.Duration",
+      "value": "1s",
+      "seconds": 1,
+    }),
+    any("type.googleapis.com/helloworld.HelloRequest"),
+    document({ "attachments": [{ "@type": "type.googleapis.com/x.Y" }] }),
+    document({ "labels": [] }),
+    document({ "list": {} }),
+    document({ "nothing": "NOTHING" }),
+  ]
+  inspect(
+    lines.join("\n"),
+    content=(
+      #|error: /@type: names the type missing.Greeting, which the Descriptor set does not define
+      #|error: /@type: must be a type URL: / and the full name of a type of the set at its end, such as "type.googleapis.com/helloworld.HelloRequest"
+      #|error: /@type: must be a type URL: / and the full name of a type of the set at its end, such as "type.googleapis.com/helloworld.HelloRequest"
+      #|error: must give "@type", the type URL of the message the Any holds, such as "type.googleapis.com/helloworld.HelloRequest"
+      #|error: /nmae: is not a field of helloworld.HelloRequest
+      #|error: /value: is not a field of helloworld.HelloRequest
+      #|error: must give "value", the google.protobuf.Duration that the Any holds
+      #|error: /value: must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s": the Any holds a google.protobuf.Duration
+      #|error: /seconds: is not a member of an Any that holds a google.protobuf.Duration: give the google.protobuf.Duration as "value"
+      #|error: must be an object that gives the type URL of the message it holds as "@type": the message is a google.protobuf.Any
+      #|error: /attachments/0/@type: names the type x.Y, which the Descriptor set does not define
+      #|error: /labels: must be an object, whose members are any JSON values: the field labels of dynamic.Document has the type google.protobuf.Struct
+      #|error: /list: must be an array, whose elements are any JSON values: the field list of dynamic.Document has the type google.protobuf.ListValue
+      #|error: /nothing: must be null: the field nothing of dynamic.Document has the type google.protobuf.NullValue
+    ),
+  )
+  // A Struct's keys are data, `@type` included: a Struct is no Any.
+  let labels = encoded(dynamic_set, "dynamic.Document", {
+    "labels": { "a": { "b": [1, { "@type": 5 }] } },
+  })
+  inspect(
+    dynamic("dynamic.Document", @hex.decode(labels)),
+    content=(
+      #|{"labels":{"a":{"b":[1,{"@type":5}]}},"nothing":null,"values":[],"byName":{},"attachments":[],"nothings":[]}
     ),
   )
 }
