@@ -24,6 +24,7 @@ Mock's `grpc` field and gRPC Stubs.
   - [Conditions on the message](#conditions-on-the-message)
   - [Printed forms](#printed-forms)
   - [The reply](#the-reply)
+  - [proto2 types](#proto2-types)
   - [The Journal and the metrics](#the-journal-and-the-metrics)
 - [Status and message](#status-and-message)
   - [The status](#the-status)
@@ -285,7 +286,7 @@ the `.proto` file gives it a `json_name`. Each type prints as follows:
 | `bool` | `true` or `false` | `true` |
 | `string` | a string | `"Kyoto"` |
 | `bytes` | a string of standard base64, with padding | `"AAH7/w=="` |
-| an enum | the name of its value, the first name when aliases share the number, or the number of a value the enum does not define | `"ACTIVE"`, `7` |
+| an enum | the name of its value, the first name when aliases share the number, or the number of a value the enum does not define, for an open enum, as a proto3 enum is ([proto2 types](#proto2-types)) | `"ACTIVE"`, `7` |
 | a message | an object in the same form | `{"city":"Kyoto"}` |
 | a repeated field | an array of its values, in order | `["a","b"]` |
 | a map | an object with a member per key, in key order; integer keys in decimal and bool keys as `"true"` and `"false"`, as strings | `{"1":3,"2":5,"10":1}` |
@@ -309,9 +310,10 @@ Which fields print depends on whether a field has presence:
   `false`, `""`, or an enum's value numbered 0. A repeated field prints
   `[]` and a map `{}`. So `{count: 0}`, `{name: ""}` and `{tags: []}`
   match a message that leaves `count`, `name` or `tags` out.
-- A proto3 `optional` field, a member of a oneof and a message field
-  print only when the message holds them, even at their default. So the
-  condition `{maybeCount: {$exists: false}}` tells a message that leaves
+- A proto3 `optional` field, a member of a oneof, a message field and
+  every singular field of a proto2 message print only when the message
+  holds them, even at their default. So the condition
+  `{maybeCount: {$exists: false}}` tells a message that leaves
   `maybe_count` out from one that holds 0.
 
 smock reads a message as protobuf's parsers read it:
@@ -342,8 +344,10 @@ the Near miss, whichever client sent it. The message
 ```
 
 For now, smock does not decode the well-known types, such as
-`google.protobuf.Timestamp`. It answers with replies of every proto3 type
-but the well-known types ([The reply](#the-reply)). The
+`google.protobuf.Timestamp`, or groups. It answers with replies of every
+type of a proto3 or a proto2 file but the well-known types, groups and
+types that an extension extends ([The reply](#the-reply),
+[proto2 types](#proto2-types)). The
 [Definition-file reference](definition-files.md#grpc-stubs) lists what a
 gRPC Stub cannot hold yet.
 
@@ -387,7 +391,9 @@ smock rewrites:
   `userId`, at every depth;
 - an enum's number, or an alias, into the first name of its number:
   `status: 1` and `status: ENABLED` into `status: ACTIVE`. A number that no
-  value has stays a number, as smock prints it for an open enum;
+  value has stays a number, as smock prints it for an open enum, and is a
+  problem for a closed enum, which never prints it
+  ([proto2 types](#proto2-types));
 - a `float` into the nearest 32-bit float, in the form smock prints it:
 
   | Written | Matched as | Meets a call of |
@@ -479,7 +485,7 @@ is:
 | `bool` | `true` or `false`. |
 | `string` | A string. |
 | `bytes` | A string in base64, standard or URL-safe, with or without its padding. |
-| An enum | The name of a value, such as `ACTIVE`, or a number, which may name no value, as an open enum allows. |
+| An enum | The name of a value, such as `ACTIVE`, or a number, which may name no value, as an open enum allows. A closed enum, as a proto2 enum is, takes only the numbers it defines. |
 | A message | An object. |
 | A repeated field | An array. `null` in it is a problem. |
 | A map | An object whose keys are the map's keys as strings: integers in decimal, such as `"-1"`, and `"true"` and `"false"`. A `null` value is a problem. |
@@ -489,11 +495,13 @@ is:
 Stub without `json` answers an empty message, with every field at its
 default.
 
-The reply's output type may be any proto3 message, with any of these
-fields, but for the well-known types, such as `google.protobuf.Timestamp`,
-which smock does not serve yet: a Stub on a method whose output type is
-one, or reaches one through its fields, is a problem at its `path`, as is
-one whose output type reaches a type of a proto2 or an editions file.
+The reply's output type may be any message of a proto3 or a proto2 file,
+with any of these fields, but for the well-known types, such as
+`google.protobuf.Timestamp`, which smock does not serve yet: a Stub on a
+method whose output type is one, or reaches one through its fields, is a
+problem at its `path`, as is one whose output type reaches a group, a type
+that an extension extends, a type of an editions file or a MessageSet
+([proto2 types](#proto2-types)).
 
 A reply without `template` is read and encoded once, when the files load.
 A reply that is not a message of the output type is a problem at the JSON
@@ -519,10 +527,12 @@ Stub:
 
 smock encodes the reply as protoc encodes it: fields in field-number
 order; a field without presence left out at its default, while a message
-field, a member of a oneof and a proto3 `optional` field are written
-whenever they are set; repeated scalars packed, unless the field says
-`packed = false`; and map entries sorted by key, each with its key and
-its value. It sends what a gRPC server sends:
+field, a member of a oneof, a proto3 `optional` field and every singular
+field of a proto2 message are written whenever they are set; repeated
+scalars of a proto3 message packed, unless the field says
+`packed = false`, and those of a proto2 message packed only when the
+field says `packed = true`; and map entries sorted by key, each with its
+key and its value. It sends what a gRPC server sends:
 
 - HEADERS with `:status` 200, `content-type: application/grpc`,
   `smock-mock` when the Default Mock answered, and `date`;
@@ -533,6 +543,88 @@ its value. It sends what a gRPC server sends:
 
 A reply larger than the client's flow-control windows goes out as the
 client widens them, and the trailers follow it.
+
+### proto2 types
+
+gRPC Stubs serve the types of proto2 files as they serve those of proto3
+files, with proto2's own rules. With this file:
+
+```proto
+syntax = "proto2";
+
+package shipping;
+
+message Order {
+  required int64 id = 1;
+  optional string note = 2;
+}
+```
+
+a call to a method that takes an `Order`, with `id` 7 and no `note`, is
+journaled as `{"id":7}`, and a call without `id` gets INTERNAL.
+
+- **Presence.** Every singular field of a proto2 message has presence. It
+  prints only when the message holds it, even at its default, and a reply
+  writes it whenever the reply gives it, `0`, `false` and `""` included.
+  Repeated fields and maps still print `[]` and `{}`. So
+  `{note: {$exists: false}}` tells a call without a note from one with an
+  empty note. A field's `default` option never shows, since a field the
+  message leaves out does not print.
+- **Required fields.** A request message that lacks a required field, at
+  any depth, does not parse, as protobuf's parsers refuse it. The call
+  gets Trailers-Only INTERNAL `the request message cannot be decoded`,
+  never reaches the Stubs, and counts as a rejected request
+  ([Calls smock does not serve yet](#calls-smock-does-not-serve-yet)). A
+  static reply that lacks one is a problem at the JSON Pointer of the
+  message that lacks it:
+
+  ```text
+  shipping.yaml: /stubs/0/response/json: lacks the required field id of shipping.Order
+  ```
+
+  A templated reply that lacks one gets INTERNAL `template failed`, and
+  its Journal entry's `templateError` says the same.
+- **Closed enums.** An enum of a proto2 file is closed: a number it does
+  not define is kept as an unknown field, as protobuf keeps it, so it
+  never prints. A singular field keeps the value it had, a repeated field
+  leaves the number out, a map leaves the entry out, and a oneof keeps the
+  member it had. Matching never sees such a number, so a condition that
+  names one is a problem, and so is a reply that gives one:
+
+  ```text
+  shipping.yaml: /stubs/0/request/body/json/state: must be the name or the number of a value of shipping.State: the field state of shipping.Parcel has the type shipping.State
+  ```
+
+- **Packing.** A reply packs the repeated numbers, bools and enums of a
+  proto2 message only when the field says `packed = true`, as protoc
+  does. A request may send them packed or not, as for proto3.
+- **Text.** A proto2 string need not be UTF-8. One that is not prints
+  with U+FFFD for each bad sequence, as smock reads header values: the
+  octets `61 c3 28 62` print as `"a�(b"`. Two map keys that print alike
+  are one key, and the last entry wins.
+
+Two kinds of type are not served, each a problem at the `path` of a Stub
+whose method's input or output type is, or reaches, one:
+
+- a type of an editions file, such as a file with `edition = "2023"`, an
+  enum included. Editions come in a later spec;
+- a MessageSet, a message with the option `message_set_wire_format`,
+  whose extensions use another wire form.
+
+```text
+shipping.yaml: /stubs/0/request/path: the input type labels.Label is not served yet: labels.proto, which defines it, is an editions file, and editions come in a later spec
+shipping.yaml: /stubs/1/request/path: the input type shipping.Crate is not served: shipping.Bag, a type it reaches, is a MessageSet, whose extensions use another wire form, and smock serves no MessageSet types
+```
+
+The check is per method, so a set whose editions files and MessageSets no
+Stub's method reaches loads quietly. A call to such a method never reaches
+a Stub: it gets UNIMPLEMENTED ([Unmatched calls](#unmatched-calls)), or
+INTERNAL when its message holds a value of such a type, which smock does
+not decode.
+
+Groups, and types that an extension in the set extends, are not served
+yet. A Stub whose method's types have or reach one is a problem at its
+`path` too.
 
 ### The Journal and the metrics
 
@@ -820,7 +912,8 @@ A message does not parse, as protobuf's parsers refuse it, when it holds a
 proto3 string that is not UTF-8, field number 0 or one above 2^29-1, wire
 type 6 or 7, a varint, a fixed-size value or a length cut short, a packed
 field included, or messages nested deeper than 100, each map entry
-counting as a message.
+counting as a message, or when it lacks a proto2 required field
+([proto2 types](#proto2-types)).
 
 These calls reach the Stubs. The Journal records each with the
 `grpcStatus` `INTERNAL`, and with the HTTP status planned for it: 500 or
@@ -919,7 +1012,9 @@ It drops the rest, so it costs nothing:
 
 So a set built with `buf build -o` and its defaults, which is a Buf image
 with source info, loads as it is. Files written in proto2, in proto3 or in
-an edition all load.
+an edition all load. gRPC Stubs serve the types of proto3 and proto2
+files; a Stub whose method reaches a type of an editions file, or a
+MessageSet, is a problem ([proto2 types](#proto2-types)).
 
 ### One set per Mock
 

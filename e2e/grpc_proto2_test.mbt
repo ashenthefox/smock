@@ -75,10 +75,7 @@ async test "the ticket's example: an Order with the id 7 and no note is journale
         ),
       )
       // The reply is protoc's encoding of order.txtpb, id 7.
-      inspect(
-        reply.data == [framed(shipping_message("order"))],
-        content="true",
-      )
+      inspect(reply.data == [framed(shipping_message("order"))], content="true")
       inspect(
         smock.bodies(),
         content=(

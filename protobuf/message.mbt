@@ -1,7 +1,7 @@
 // Messages decoded from their descriptors into smock's decoded form, the
 // JSON text the engine, the Journal and templates see. For now the decoder
-// serves every field but groups and those of the well-known types.
-// encode.mbt encodes messages from JSON.
+// serves every field of the types of proto3 and proto2 files but groups and
+// those of the well-known types. encode.mbt encodes messages from JSON.
 
 ///|
 /// The index in `fields` of the message's field numbered `number`, or -1,
@@ -68,7 +68,10 @@ let no_runs : Array[BytesView] = []
 /// - A bool is `true` or `false`, a string is a JSON string, and bytes are
 ///   a string of standard base64 with padding.
 /// - An enum value is printed by its name, the first one of an alias, or
-///   by its number when the enum does not define it.
+///   by its number when an open enum, as a proto3 enum is, does not define
+///   it. A closed enum, as a proto2 enum is, keeps such a number as an
+///   unknown field, as protobuf's parsers keep it: a field or a oneof keeps
+///   the value it had, a list leaves the number out, and a map its entry.
 /// - A nested message is an object in the same form.
 /// - A repeated field is an array of its values, in order, and a map an
 ///   object with a member per key, in key order: integer keys by value,
@@ -76,8 +79,11 @@ let no_runs : Array[BytesView] = []
 ///   An integer key prints in decimal, as a string.
 /// - A field without presence that the message leaves out is printed at
 ///   its default: `0`, `false`, `""`, an enum's value 0, `[]` or `{}`. A
-///   proto3 `optional` field, a member of a oneof and a message field are
-///   printed only when the message holds them.
+///   proto3 `optional` field, a member of a oneof, a message field and
+///   every singular field of a proto2 message are printed only when the
+///   message holds them.
+/// - A proto2 string need not be UTF-8: one that is not is printed with
+///   U+FFFD for each bad sequence.
 ///
 /// It reads the message as protobuf's parsers read it: the last value of a
 /// scalar or an enum field wins, the values of a message field are merged,
@@ -87,11 +93,13 @@ let no_runs : Array[BytesView] = []
 /// repeats, the last entry wins. Unknown fields, and fields sent with
 /// another wire type than their type's, are skipped.
 ///
-/// Raises `DecodeError` when the input is not protobuf, when a string is
-/// not UTF-8, as a proto3 string must be, when messages nest deeper than
-/// 100, a map entry counting as a message, and when a message it prints
-/// has a field that it does not decode yet: a group, or a field of a
-/// well-known type, a map's values included.
+/// Raises `DecodeError` when the input is not protobuf, when a proto3
+/// string is not UTF-8, when a message lacks a proto2 required field, as
+/// protobuf's parsers refuse it, when messages nest deeper than 100, a map
+/// entry counting as a message, when a message it prints is a type of an
+/// editions file or a MessageSet, and when a message it prints has a field
+/// that it does not decode yet: a group, or a field of a well-known type,
+/// a map's values included.
 pub fn decode_json(
   set : DescriptorSet,
   message : MessageDescriptor,
