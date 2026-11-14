@@ -33,6 +33,10 @@ priv enum WellKnown {
   /// `kind` holds: `null`, a number, a string, a bool, a Struct or a
   /// ListValue.
   Value
+  /// google.protobuf.Any: an object of its type URL as `@type`, then the
+  /// message it holds, a type of the set: its fields, or its form as
+  /// `value` when it is a well-known type that has one.
+  Any
 }
 
 ///|
@@ -92,6 +96,7 @@ fn well_known_form(message : MessageDescriptor) -> WellKnown? {
       }
     }
     "google.protobuf.Value" => Some(Value)
+    "google.protobuf.Any" => Some(Any)
     _ => None
   }
 }
@@ -233,6 +238,110 @@ fn DescriptorSet::print_well_known(
       }
       self.print_value(out, field, values[held], depth)
     }
+    Any => self.print_any(out, records, depth)
+  }
+}
+
+///|
+/// The full name of the type that `url`, an Any's type URL, names: the
+/// text after its last `/`, such as `helloworld.HelloRequest` for
+/// `type.googleapis.com/helloworld.HelloRequest`. `None` when it has no `/`,
+/// or nothing after its last one.
+pub fn type_name_of_url(url : String) -> String? {
+  let mut i = url.length()
+  while i > 0 && url[i - 1] != '/' {
+    i = i - 1
+  }
+  if i == 0 || i == url.length() {
+    None
+  } else {
+    Some(url[i:].to_owned())
+  }
+}
+
+///|
+/// Prints to `out` the Any whose records are `records`, merged in order,
+/// `depth` messages deep, as ProtoJSON prints it: `{}` when it is empty,
+/// or else an object of its type URL as `@type`, then the message it holds
+/// one message deeper, a type of the set that the URL names: its fields,
+/// or its form as `value` when it is a well-known type that has one. Its
+/// last type URL and its last value win, as protobuf's parsers keep them.
+///
+/// Raises `DecodeError` for an Any that ProtoJSON cannot print: one with a
+/// value but no type URL, one whose type URL names no type, or a type the
+/// set does not define, and one whose message does not decode.
+fn DescriptorSet::print_any(
+  self : DescriptorSet,
+  out : @buffer.Buffer,
+  records : Array[BytesView],
+  depth : Int32,
+) -> Unit raise DecodeError {
+  let position = records[0].start_offset()
+  let mut url = records[0][0:0]
+  let mut value = records[0][0:0]
+  for r in 0..<records.length() {
+    let reader = Reader(records[r])
+    while !reader.at_end() {
+      let number = reader.tag()
+      match (number, reader.wire_type()) {
+        (1, Len) => {
+          let at = reader.pos
+          url = reader.length_delimited()
+          if !is_utf8(url) {
+            raise reader.error(
+              at, "the field type_url holds octets that are not UTF-8",
+            )
+          }
+        }
+        (2, Len) => value = reader.length_delimited()
+        _ => reader.skip()
+      }
+    }
+  }
+  if url.length() == 0 {
+    if value.length() > 0 {
+      raise DecodeError(
+        position~,
+        message="the Any has a value but no type URL, so it cannot be printed",
+      )
+    }
+    out.write_bytes(b"{}")
+    return
+  }
+  let text = @utf8.decode_lossy(url)
+  guard type_name_of_url(text) is Some(name) else {
+    raise DecodeError(
+      position~,
+      message="the Any's type URL \{text.escape()} names no type: it must end in / and the type's full name, such as \"type.googleapis.com/helloworld.HelloRequest\"",
+    )
+  }
+  guard self.find_message(name) is Some(held) else {
+    raise DecodeError(
+      position~,
+      message="the Any holds the type \{name}, which the Descriptor set does not define, so it cannot be printed",
+    )
+  }
+  if depth >= max_depth {
+    raise DecodeError(position~, message="messages nest deeper than \{max_depth}")
+  }
+  out.write_bytes(b"{\"@type\":")
+  write_json_string(out, url)
+  if well_known_form(held) is Some(_) {
+    out.write_bytes(b",\"value\":")
+    self.print_message(out, held, [value], depth + 1)
+    out.write_byte(b'}')
+    return
+  }
+  // The message's fields follow `@type` in the Any's object: the message
+  // is printed on its own, then its object's members are taken.
+  let fields = @buffer.Buffer(size_hint=2 * value.length() + 16)
+  self.print_message(fields, held, [value], depth + 1)
+  let printed = fields.to_bytes()
+  if printed.length() > 2 {
+    out.write_byte(b',')
+    out.write_bytes(printed[1:])
+  } else {
+    out.write_byte(b'}')
   }
 }
 
@@ -435,7 +544,7 @@ fn DescriptorSet::write_well_known(
         depth,
         present=false,
       )
-    Struct(_) | ListValue(_) | Value => raise Unfit
+    Struct(_) | ListValue(_) | Value | Any => raise Unfit
   }
 }
 
@@ -454,7 +563,8 @@ fn DescriptorSet::wanted_message(
     Some(FieldMask) =>
       "a string of field paths in lowerCamelCase, joined by commas, such as \"userName,address.city\""
     Some(Wrapper(index)) => self.wanted(message.fields[index])
-    Some(Struct(_)) | Some(ListValue(_)) | Some(Value) | None => "an object"
+    Some(Struct(_)) | Some(ListValue(_)) | Some(Value) | Some(Any) | None =>
+      "an object"
   }
 }
 
