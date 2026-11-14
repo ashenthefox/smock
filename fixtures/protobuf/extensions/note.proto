@@ -1,0 +1,9 @@
+// Written for smock's tests: a message of an editions file, which
+// reach.proto's extension of shop.Order reaches.
+edition = "2023";
+
+package shop.note;
+
+message Note {
+  string text = 1;
+}

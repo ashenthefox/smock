@@ -102,10 +102,19 @@ pub struct MessageDescriptor {
   priv by_name : FixedArray[Int32]
   /// The indexes of its fields, by JSON name.
   priv by_json_name : FixedArray[Int32]
-  /// The extensions of the set that extend it, by number, once the set is
-  /// checked; `None` when none does.
-  priv mut extended_by : Map[Int32, FieldDescriptor]?
+  /// The extensions of the set that extend it, in field-number order, once
+  /// the set is checked.
+  priv mut extended_by : ReadOnlyArray[FieldDescriptor]
+  /// The indexes of its fields and of the extensions that extend it, in
+  /// field-number order: a field's index in `fields`, and an extension's
+  /// index in `extended_by` plus the length of `fields`. The same array as
+  /// `by_number` when no extension extends it.
+  priv mut numbered : FixedArray[Int32]
 }
+
+///|
+/// No extensions, for a message that none extends.
+let no_extensions : ReadOnlyArray[FieldDescriptor] = ReadOnlyArray::from_array([])
 
 ///|
 /// A oneof of a message: a OneofDescriptorProto.
@@ -137,6 +146,11 @@ pub struct FieldDescriptor {
   full_name : String
   /// Its field number.
   number : Int32
+  /// The name of the file that declares it.
+  file_name : String
+  /// The syntax of the file that declares it. An extension's may differ
+  /// from the syntax of the message it extends.
+  syntax : Syntax
   /// Whether it is optional, required or repeated.
   label : Label
   /// Its type. When the set gives none, it is `Message` or `Enum`, as the
@@ -533,6 +547,9 @@ fn read_message(
   for view in extension_views {
     extensions.push(read_field(view, inner))
   }
+  let by_number = sorted(fields.length(), (a, b) => {
+    fields[a].number.compare(fields[b].number)
+  })
   {
     name,
     full_name,
@@ -546,16 +563,15 @@ fn read_message(
     extension_ranges: ReadOnlyArray::from_array(extension_ranges),
     map_entry,
     message_set_wire_format,
-    by_number: sorted(fields.length(), (a, b) => {
-      fields[a].number.compare(fields[b].number)
-    }),
+    by_number,
     by_name: sorted(fields.length(), (a, b) => {
       fields[a].name.compare(fields[b].name)
     }),
     by_json_name: sorted(fields.length(), (a, b) => {
       fields[a].json_name.compare(fields[b].json_name)
     }),
-    extended_by: None,
+    extended_by: no_extensions,
+    numbered: by_number,
   }
 }
 
@@ -670,6 +686,8 @@ fn read_field(
     name,
     full_name: scope.full_name(name),
     number,
+    file_name: scope.file_name,
+    syntax: scope.syntax,
     label,
     type_: type_.unwrap_or(Message),
     type_name,

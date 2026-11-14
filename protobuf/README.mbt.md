@@ -18,7 +18,8 @@ number and a wire type, then a value encoded as the wire type says
 - `@protobuf.Reader(input)` reads a message in place, a record at a time:
   `tag()` reads a tag and returns its field number, and `wire_type()`
   gives its wire type. Then `varint()`, `fixed64()`, `length_delimited()`
-  or `fixed32()` reads the value, or `skip()` skips it, groups included.
+  or `fixed32()` reads the value, `group()` the records of a group up to
+  its end tag, or `skip()` skips it, groups included.
   `expect(wire_type)` checks the tag's wire type before a value is read.
   `at_end()` tells when every record is read.
 - `@protobuf.Writer()` writes the same: `tag(field, wire_type)`, then the
@@ -57,6 +58,21 @@ test "write the same message" {
 }
 ```
 
+```mbt check
+///|
+test "read a group's records" {
+  // Field 1 is a group, which holds field 2, the varint 7; then field 3.
+  let reader = @protobuf.Reader(b"\x0b\x10\x07\x0c\x18\x01"[:])
+  inspect(reader.tag(), content="1")
+  let records = reader.group()
+  inspect(records.length(), content="2")
+  let inner = @protobuf.Reader(records)
+  inspect(inner.tag(), content="2")
+  inspect(inner.varint(), content="7")
+  inspect(reader.tag(), content="3")
+}
+```
+
 A length-delimited value is a view of the input, so reading allocates
 nothing for it. Every length is checked against the octets left before
 anything is read. Input that is not protobuf raises `DecodeError`, which
@@ -67,9 +83,9 @@ shows as `octet <n>: <message>`:
 - a tag longer than 5 octets, field number 0 or one over 2^29 - 1, and wire
   types 6 and 7;
 - a tag whose wire type is not the one `expect` asks for;
-- when skipping, a group that the input ends inside, that ends with the
-  end tag of another field, that ends where none started, or that nests
-  deeper than 100.
+- when reading or skipping a group, a group that the input ends inside,
+  that ends with the end tag of another field, that ends where none
+  started, or that nests deeper than 100.
 
 The offset is in the bytes the reader's input is a view of, so a reader of
 a nested message, made from a view, reports where the problem is in the
@@ -197,7 +213,8 @@ index built when the set is read, so none walks the set.
   `message.find_field_by_json_name(name)` and
   `message.find_field_by_number(number)`: a field by its proto name, its
   JSON name or its number. `message.find_extension(number)`: the extension
-  of the set that extends the message with that number.
+  of the set that extends the message with that number, and
+  `message.extended_by()` all of them, in field-number order.
 - `enum.find_value_by_name(name)` and `enum.find_value_by_number(number)`:
   a value by its name, or by its number, which gives its first name when
   aliases share the number.
@@ -245,6 +262,10 @@ order, under the field's JSON name, as `json_name` gives it.
   default, `[]` and `{}` included. A proto3 `optional` field, a member of
   a oneof, a message field and every singular field of a proto2 message
   are printed only when the message holds them.
+- A group is printed as a message. An extension of the set that extends
+  the message is printed under its full name in brackets, as ProtoJSON
+  writes it, such as `"[shop.priority]":3`, among the fields in
+  field-number order, and only when the message holds it.
 
 So a message gives one text, whatever order its records come in.
 
@@ -257,13 +278,14 @@ a key repeats, the last entry wins. A number that a closed enum, as a
 proto2 enum is, does not define is skipped, as protobuf's parsers keep it
 as an unknown field: a list leaves it out, a map leaves its entry out, and
 a field or a oneof keeps the value it had. A proto2 string that is not
-UTF-8 prints with U+FFFD for each bad sequence. It raises `DecodeError`
-when the input is not protobuf, a proto3 string is not UTF-8, a message
-lacks a proto2 required field, or messages nest deeper than 100, a map
-entry counting as a message. It does not decode groups and the well-known
-types Any, Struct, Value, ListValue and NullValue yet, nor types of
-editions files and MessageSets, and raises its error for a message that is
-or has one. The other well-known types print in their ProtoJSON forms
+UTF-8 prints with U+FFFD for each bad sequence; an extension follows the
+syntax of the file that declares it. It raises `DecodeError` when the
+input is not protobuf, a proto3 string is not UTF-8, a group's end tag
+does not match, a message lacks a proto2 required field, or messages nest
+deeper than 100, a map entry and a group counting as a message. It does
+not decode the well-known types Any, Struct, Value, ListValue and
+NullValue yet, nor types of editions files, extensions declared in one,
+and MessageSets, and raises its error for a message that is or has one. The other well-known types print in their ProtoJSON forms
 ([below](#well-known-types)).
 
 `set.encode_json(message, json)` encodes JSON, a message of the type
@@ -272,17 +294,20 @@ it: fields in field-number order, a field without presence left out at its
 default, every singular field of a proto2 message written whenever it is
 set, repeated scalars of a proto3 message packed unless the field says
 `packed = false` and those of a proto2 message only when it says
-`packed = true`, and map entries sorted by key. It reads JSON as ProtoJSON reads it: a key
-may be the field's proto name or its JSON name, `null` leaves a field
+`packed = true`, map entries sorted by key, extensions among the fields
+and groups between their start and end tags. It reads JSON as ProtoJSON
+reads it: a key may be the field's proto name or its JSON name, or an
+extension's full name in brackets, `null` leaves a field
 unset, an enum is a name or a number, a 64-bit integer a number or a
 string, exact at any size, a float `"NaN"`, `"Infinity"` or `"-Infinity"`
 too, and bytes are base64, standard or URL-safe, with or without padding.
 It raises `EncodeError`, which names the JSON Pointer of the value at
 fault, for JSON that is not a message of the type, a message that lacks a
 proto2 required field and a number that a closed enum does not define
-included, and for the types it does not encode: the well-known types Any,
-Struct, Value, ListValue and NullValue, and types of editions files, not
-yet, and MessageSets.
+included, a key in brackets that names no extension of the set that
+extends the message, and for the types it does not encode: the
+well-known types Any, Struct, Value, ListValue and NullValue, and types
+and extensions of editions files, not yet, and MessageSets.
 `@protobuf.is_well_known(full_name)` tells the well-known types, and
 `@protobuf.is_unserved_well_known(full_name)` those not served yet.
 

@@ -1,8 +1,8 @@
 // Written for smock's tests of proto2 types: required and optional fields,
-// closed enums, and repeated scalars with and without `packed = true`,
-// which smock serves; a MessageSet, which it does not serve; a group and a
-// type that an extension extends, which it does not serve yet; and methods
-// that reach types of labels.proto, an editions file.
+// closed enums, repeated scalars with and without `packed = true`, a group
+// and a type that an extension extends, which smock serves; a MessageSet,
+// which it does not serve; and methods that reach types of labels.proto,
+// an editions file.
 syntax = "proto2";
 
 package shipping;

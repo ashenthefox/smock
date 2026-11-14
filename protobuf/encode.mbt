@@ -134,8 +134,12 @@ fn DescriptorSet::write_message(
   depth : Int32,
 ) -> Unit raise EncodeError {
   let fields = message.fields
-  // The value of each field, by its index in `fields`.
-  let values : FixedArray[Json?] = FixedArray::make(fields.length(), None)
+  // The value of each field, by its index in `fields`, and of each
+  // extension after them, as `field_or_extension` says.
+  let values : FixedArray[Json?] = FixedArray::make(
+    fields.length() + message.extended_by.length(),
+    None,
+  )
   // The index of the field that sets each oneof, or -1.
   let oneofs = if message.oneofs.length() == 0 {
     no_oneofs
@@ -144,13 +148,18 @@ fn DescriptorSet::write_message(
   }
   for key, value in members {
     let index = message.position_of(key)
+    let index = if index >= 0 {
+      index
+    } else {
+      self.extension_position(message, key)
+    }
     if index < 0 {
       raise EncodeError(
         pointer=pointer_of(key),
         message="is not a field of \{message.full_name}",
       )
     }
-    let field = fields[index]
+    let field = message.field_or_extension(index)
     if values[index] is Some(_) {
       let other = if key == field.json_name {
         field.name
@@ -174,12 +183,14 @@ fn DescriptorSet::write_message(
     }
     values[index] = Some(value)
   }
-  let order = message.by_number
+  // The fields, and the extensions that extend the message, in
+  // field-number order.
+  let order = message.numbered
   for n in 0..<order.length() {
     let index = order[n]
-    let field = fields[index]
+    let field = message.field_or_extension(index)
     guard values[index] is Some(value) && !(value is Null) else {
-      if field.label is Required {
+      if field.label is Required && index < fields.length() {
         raise EncodeError(
           pointer="",
           message="lacks the required field \{field.name} of \{message.full_name}",
@@ -213,9 +224,51 @@ fn MessageDescriptor::position_of(
 }
 
 ///|
+/// The index, as `field_or_extension` takes it, of the extension that
+/// `key`, a key of an object that is a message of the type `message`, names
+/// as ProtoJSON writes it: its full name in brackets, such as
+/// `[shop.priority]`; -1 when `key` is not in brackets. Raises at the
+/// key's JSON Pointer when the set has no extension of that name, when the
+/// extension extends another type, and when it is declared in an editions
+/// file.
+fn DescriptorSet::extension_position(
+  self : DescriptorSet,
+  message : MessageDescriptor,
+  key : String,
+) -> Int32 raise EncodeError {
+  guard key.length() > 2 && key.has_prefix("[") && key.has_suffix("]") else {
+    return -1
+  }
+  let name = key[1:key.length() - 1].to_owned()
+  guard self.find_extension(name) is Some(extension) else {
+    raise EncodeError(
+      pointer=pointer_of(key),
+      message="is not an extension of \{message.full_name}: the Descriptor set has no extension \{name}",
+    )
+  }
+  let index = message.extension_index(extension.number)
+  if index < 0 || !physical_equal(message.extended_by[index], extension) {
+    raise EncodeError(
+      pointer=pointer_of(key),
+      message="is not an extension of \{message.full_name}: \{name} extends \{without_dot(extension.extendee)}",
+    )
+  }
+  if extension.syntax is Editions {
+    raise EncodeError(
+      pointer=pointer_of(key),
+      message="smock does not encode the extension \{name} yet: it is declared in an editions file",
+    )
+  }
+  message.fields.length() + index
+}
+
+///|
 /// The key that gives `field` among `members`: its JSON name, or else its
-/// proto name.
+/// proto name; or, for an extension, its full name in brackets.
 fn key_of(members : Map[String, Json], field : FieldDescriptor) -> String {
+  if field.extendee != "" {
+    return "[\{field.full_name}]"
+  }
   if members.contains(field.json_name) {
     field.json_name
   } else {
@@ -253,17 +306,18 @@ fn DescriptorSet::write_field(
     }
     return
   }
-  // A message field, a member of a oneof, a proto3 `optional` field
-  // included, and every singular field of a proto2 message have presence:
-  // they are written whenever they are set.
+  // A message or a group field, a member of a oneof, a proto3 `optional`
+  // field included, every singular field of a proto2 message and every
+  // extension have presence: they are written whenever they are set.
   let present = message.syntax is Proto2 ||
     field.oneof_index is Some(_) ||
-    field.type_ is Message
+    field.type_ is (Message | Group) ||
+    field.extendee != ""
   self.write_value(writer, field, json, depth, present~) catch {
     Unfit =>
       raise EncodeError(
         pointer="",
-        message="must be \{self.wanted(field)}: the field \{field.name} of \{message.full_name} has the type \{type_of(field)}",
+        message="must be \{self.wanted(field)}: the \{field_text(field, message)} has the type \{type_of(field)}",
       )
     error => raise nested(error, "")
   }
@@ -294,7 +348,7 @@ fn DescriptorSet::write_value(
   present~ : Bool,
 ) -> Unit raise {
   match field.type_ {
-    Message => {
+    Message | Group => {
       guard self.message_of(field) is Some(type_) else { raise Unfit }
       let message = match well_known_form(type_) {
         Some(form) => self.encoded_well_known(type_, form, json, depth)
@@ -303,8 +357,15 @@ fn DescriptorSet::write_value(
           self.encoded_message(type_, members, depth)
         }
       }
-      writer.tag(field.number, Len)
-      writer.length_delimited(message)
+      if field.type_ is Group {
+        // A group is delimited by its start and end tags, not a length.
+        writer.tag(field.number, StartGroup)
+        writer.out.write_bytes(message)
+        writer.tag(field.number, EndGroup)
+      } else {
+        writer.tag(field.number, Len)
+        writer.length_delimited(message)
+      }
     }
     String => {
       guard json is String(text) else { raise Unfit }
@@ -321,7 +382,6 @@ fn DescriptorSet::write_value(
         writer.length_delimited(octets)
       }
     }
-    Group => raise Unfit
     type_ => {
       let bits = self.scalar_bits(field, json)
       if bits != 0 || present {
@@ -395,18 +455,19 @@ fn DescriptorSet::write_list(
   guard json is Array(items) else {
     raise EncodeError(
       pointer="",
-      message="must be an array: the field \{field.name} of \{message.full_name} is repeated",
+      message="must be an array: the \{field_text(field, message)} is repeated",
     )
   }
   if items.is_empty() {
     return
   }
   // proto3 packs repeated scalars unless the field says otherwise, and
-  // proto2 only when it says so.
+  // proto2 only when it says so. An extension follows the syntax of the
+  // file that declares it.
   let packed = !(field.type_ is (String | Bytes | Message | Group)) &&
     (
       field.packed is Some(true) ||
-      (field.packed is None && message.syntax is Proto3)
+      (field.packed is None && field.syntax is Proto3)
     )
   let out = if packed { Writer() } else { writer }
   // An element's JSON Pointer is made only for an error.
@@ -414,7 +475,7 @@ fn DescriptorSet::write_list(
     if item is Null {
       raise EncodeError(
         pointer="/\{i}",
-        message="cannot be null: it is an element of the repeated field \{field.name} of \{message.full_name}",
+        message="cannot be null: it is an element of the repeated \{field_text(field, message)}",
       )
     }
     if packed {
@@ -445,7 +506,7 @@ fn DescriptorSet::unfit_element(
 ) -> EncodeError {
   EncodeError(
     pointer=at,
-    message="must be \{self.wanted(field)}: the elements of the field \{field.name} of \{message.full_name} have the type \{type_of(field)}",
+    message="must be \{self.wanted(field)}: the elements of the \{field_text(field, message)} have the type \{type_of(field)}",
   )
 }
 
@@ -841,6 +902,19 @@ fn DescriptorSet::wanted_key(
   match field.type_ {
     Bool => "\"true\" or \"false\""
     _ => self.wanted(field)
+  }
+}
+
+///|
+/// `field`, a field of `message` or an extension that extends it, as an
+/// error names it: `field` and its name, such as `field id of shop.Order`,
+/// or `extension` and its full name, such as `extension shop.priority of
+/// shop.Order`.
+fn field_text(field : FieldDescriptor, message : MessageDescriptor) -> String {
+  if field.extendee != "" {
+    "extension \{field.full_name} of \{message.full_name}"
+  } else {
+    "field \{field.name} of \{message.full_name}"
   }
 }
 
