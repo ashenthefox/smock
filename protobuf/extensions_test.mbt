@@ -304,3 +304,72 @@ test "an extension declared in an editions file is neither decoded nor encoded, 
     content="0807a00603",
   )
 }
+
+///|
+/// A set of `g.proto`, proto2, whose message `G` has the group `g`, field
+/// 1, of the type `G` itself. protoc writes a group of a type of its own,
+/// but a set may hold any.
+fn nesting_groups() -> @protobuf.DescriptorSet {
+  let file = nested(w => {
+    string_field(w, 1, "g.proto")
+    message_field(
+      w,
+      4,
+      message_proto("G", body=w => {
+        message_field(w, 2, field_proto("g", 1, 10, type_name=".G"))
+      }),
+    )
+  })
+  @protobuf.read_descriptor_set(set_of([file])) catch {
+    err => abort("not a set: \{err}")
+  }
+}
+
+///|
+test "groups count as messages toward the depth of 100, decoded and encoded" {
+  let set = nesting_groups()
+  guard set.find_message("G") is Some(g) else { fail("no G") }
+  // `depth` groups, each in the one before.
+  let groups = (depth : Int32) => {
+    let out = @buffer.Buffer()
+    for _ in 0..<depth {
+      out.write_byte(b'\x0b')
+    }
+    for _ in 0..<depth {
+      out.write_byte(b'\x0c')
+    }
+    out.to_bytes()
+  }
+  let decoded = (input : Bytes) => {
+    @utf8.decode(@protobuf.decode_json(set, g, input[:])) catch {
+      err => "error: \{err}"
+    }
+  }
+  // `{"g":` 100 times, the innermost G's `{}`, then 100 `}`.
+  let text = decoded(groups(100))
+  inspect(
+    "\{text.length()} \{text[:20]}",
+    content=(
+      #|602 {"g":{"g":{"g":{"g":
+    ),
+  )
+  inspect(
+    decoded(groups(101)),
+    content="error: octet 100: groups nest deeper than 100",
+  )
+  // The JSON of 100 groups encodes back to the same octets; 101 do not.
+  let json = @json.parse(text)
+  inspect(set.encode_json(g, json) == groups(100), content="true")
+  let deeper = @json.parse("{\"g\":" + text + "}")
+  let error = try set.encode_json(g, deeper) catch {
+    err => err.to_string()
+  } noraise {
+    _ => "encoded"
+  }
+  // The 101st group, at the pointer of the value that holds it.
+  let pointer = StringBuilder::new()
+  for _ in 0..<101 {
+    pointer.write_string("/g")
+  }
+  assert_eq(error, "\{pointer.to_string()}: nests messages deeper than 100")
+}
