@@ -118,3 +118,22 @@ test "a proto2 string that is not UTF-8 is valid protobuf, and prints with U+FFF
     ),
   )
 }
+
+///|
+test "a message of an editions file, and a MessageSet, are not decoded" {
+  inspect(
+    decoded(shipping_set, "labels.Label", b"\x0a\x01a"),
+    content="error: octet 0: the message labels.Label is a type of an editions file, which smock does not decode",
+  )
+  // A Crate whose bag, a MessageSet, is set; and one without it.
+  inspect(
+    decoded(shipping_set, "shipping.Crate", b"\x0a\x00"),
+    content="error: octet 2: the message shipping.Bag is a MessageSet, which smock does not decode",
+  )
+  inspect(
+    decoded(shipping_set, "shipping.Crate", b""),
+    content=(
+      #|{}
+    ),
+  )
+}

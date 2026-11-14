@@ -267,6 +267,18 @@ fn DescriptorSet::print_message(
   records : Array[BytesView],
   depth : Int32,
 ) -> Unit raise DecodeError {
+  if message.syntax is Editions {
+    raise DecodeError(
+      position=records[0].start_offset(),
+      message="the message \{message.full_name} is a type of an editions file, which smock does not decode",
+    )
+  }
+  if message.message_set_wire_format {
+    raise DecodeError(
+      position=records[0].start_offset(),
+      message="the message \{message.full_name} is a MessageSet, which smock does not decode",
+    )
+  }
   let fields = message.fields
   let values = self.scan(message, records)
   out.write_byte(b'{')
