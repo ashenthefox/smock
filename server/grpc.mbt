@@ -53,11 +53,6 @@ fn is_served_subtype(subtype : BytesView) -> Bool {
 }
 
 ///|
-/// The fixed `grpc-message` of the UNIMPLEMENTED answer to a gRPC call
-/// whose content subtype smock does not serve, such as `json`.
-let unserved_subtype_message : String = "only the proto content subtype is served"
-
-///|
 /// The unary method that a gRPC call to `path` calls in `set`, the
 /// Descriptor set of the call's Mock, or `None` when `path` names no method
 /// of the set, or names a streaming method: such a call cannot reach a gRPC
@@ -162,15 +157,6 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
 ) -> Unit {
   let ports = self.ports
   let incoming = request.to_engine()
-  if incoming.meth != "POST" {
-    self.refuse_call(
-      stream,
-      @grpc.Internal,
-      "the method must be POST",
-      ended=true,
-    )
-    return
-  }
   // The second lookup, from the definition set served now: a reload since
   // the HEADERS may have changed the Mock, its set or the method.
   guard ports.engine.mock_for_call(incoming, authority?=request.authority)
@@ -183,12 +169,7 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
   guard deframer.take(incoming.body) is Prefix(flag=b'\x00', rest~, ..) &&
     deframer.take(rest) is All &&
     deframer.ending() is Whole(messages=1) else {
-    self.refuse_call(
-      stream,
-      @grpc.Internal,
-      "the request is not one uncompressed message",
-      ended=true,
-    )
+    self.refuse_call(stream, NotOneMessage, ended=true)
     return
   }
   // A message that does not parse, or whose type has a field that smock
@@ -196,12 +177,7 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
   let message = incoming.body[@grpc.prefix_length:]
   let json = @protobuf.decode_json(set, set.input_of(rpc), message) catch {
     _ => {
-      self.refuse_call(
-        stream,
-        @grpc.Internal,
-        "the request message cannot be decoded",
-        ended=true,
-      )
+      self.refuse_call(stream, Undecodable, ended=true)
       return
     }
   }
@@ -471,25 +447,24 @@ fn H2Connection::end_with_trailers(
 }
 
 ///|
-/// Answers `stream`, a gRPC call that this layer refuses, with Trailers-Only,
-/// the gRPC status `status` and the fixed ASCII `message`, and counts it as
-/// rejected traffic, with `mock=""` and `stub=""`: one whose content
-/// subtype smock does not serve, from its HEADERS, or one that this layer
-/// cannot serve, once its request has ended. It never reached the engine,
-/// so it has no Journal entry. A call whose request has not `ended` then
-/// gets RST_STREAM NO_ERROR (`end_early`).
+/// Answers `stream`, a gRPC call that this layer refuses for `refusal`,
+/// with Trailers-Only, the refusal's `:status`, gRPC status and fixed
+/// `grpc-message`, and counts it as rejected traffic, with `mock=""` and
+/// `stub=""`. It never reached the engine, so it has no Journal entry. A
+/// call whose request has not `ended` then gets RST_STREAM NO_ERROR
+/// (`end_early`).
 fn H2Connection::refuse_call(
   self : H2Connection,
   stream : Int32,
-  status : @grpc.Status,
-  message : String,
+  refusal : CallRefusal,
   ended~ : Bool,
 ) -> Unit {
   let fields = trailers_only(
-    status,
-    Some(message),
+    refusal.status(),
+    Some(refusal.message()),
     None,
     date=self.ports.dates.at(self.now),
+    http_status=refusal.http_status(),
   )
   self.conn.headers(stream, fields, end=true) catch {
     _ => {
@@ -582,7 +557,8 @@ fn push_metadata(
 
 ///|
 /// The fields of a Trailers-Only answer, one HEADERS block that ends the
-/// stream: `:status` 200, `content-type: application/grpc`, `grpc-status`
+/// stream: `:status` `http_status`, by default 200, `content-type:
+/// application/grpc`, `grpc-status`
 /// with the code of `status`, `grpc-message` when `message` gives its text,
 /// percent-encoded, then `smock-mock` when `mock` gives its value, each of
 /// `trailers`, the trailing metadata or smock's own fields such as
@@ -594,9 +570,10 @@ fn trailers_only(
   mock : String?,
   date~ : String,
   trailers~ : ReadOnlyArray[(String, String)] = [],
+  http_status~ : Bytes = b"200",
 ) -> Array[@header.Header] {
   let fields = Array(capacity=trailers.length() + 6)
-  fields.push(@header.Header::{ name: b":status", value: b"200", })
+  fields.push(@header.Header::{ name: b":status", value: http_status, })
   fields.push({ name: b"content-type", value: grpc_content_type, })
   fields.push({ name: b"grpc-status", value: decimal(status.code()), })
   if message is Some(text) {
