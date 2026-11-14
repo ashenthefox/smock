@@ -5,8 +5,9 @@
 // packed unless the field says `packed = false` and those of proto2 only
 // when it says `packed = true`, and map entries sorted by key, each with
 // its key and its value, as protoc's deterministic output writes them.
-// Types of proto3 and proto2 files are encoded, but for the well-known
-// types and MessageSets.
+// Types of proto3 and proto2 files are encoded, the well-known types in
+// their ProtoJSON forms (well_known.mbt), but for MessageSets and the
+// well-known types that is_unserved_well_known names.
 
 ///|
 /// Why JSON is not a message of the type it is encoded as. `pointer` is the
@@ -72,13 +73,24 @@ pub fn DescriptorSet::encode_json(
   if not_encoded(message) is Some(why) {
     raise EncodeError(pointer="", message=why)
   }
+  let writer = Writer()
+  if well_known_form(message) is Some(form) {
+    self.write_well_known(writer, message, form, json, 0) catch {
+      Unfit =>
+        raise EncodeError(
+          pointer="",
+          message="must be \{self.wanted_message(message)}: the message is a \{message.full_name}",
+        )
+      error => raise nested(error, "")
+    }
+    return writer.to_bytes()
+  }
   guard json is Object(members) else {
     raise EncodeError(
       pointer="",
       message="must be an object: the message is a \{message.full_name}",
     )
   }
-  let writer = Writer()
   // The top message is at depth 0, so 100 levels may nest in it, as the
   // decoder allows.
   self.write_message(writer, message, members, 0)
@@ -90,7 +102,7 @@ pub fn DescriptorSet::encode_json(
 /// `None` when it does: a well-known type and a type of an editions file
 /// are not encoded yet, and a MessageSet is not encoded.
 fn not_encoded(message : MessageDescriptor) -> String? {
-  if is_well_known(message.full_name) {
+  if is_unserved_well_known(message.full_name) {
     return Some(
       "smock does not encode \{message.full_name} yet: it is a well-known type",
     )
@@ -283,10 +295,14 @@ fn DescriptorSet::write_value(
 ) -> Unit raise {
   match field.type_ {
     Message => {
-      guard self.message_of(field) is Some(type_) && json is Object(members) else {
-        raise Unfit
+      guard self.message_of(field) is Some(type_) else { raise Unfit }
+      let message = match well_known_form(type_) {
+        Some(form) => self.encoded_well_known(type_, form, json, depth)
+        None => {
+          guard json is Object(members) else { raise Unfit }
+          self.encoded_message(type_, members, depth)
+        }
       }
-      let message = self.encoded_message(type_, members, depth)
       writer.tag(field.number, Len)
       writer.length_delimited(message)
     }
@@ -337,6 +353,29 @@ fn DescriptorSet::encoded_message(
   }
   let nested = Writer()
   self.write_message(nested, message, members, depth + 1)
+  nested.to_bytes()
+}
+
+///|
+/// `json`, a message of the type `message`, a well-known type whose form is
+/// `form`, nested at depth `depth`, encoded, as `write_well_known` reads
+/// it. Raises `Unfit` when it is not such a message, and `EncodeError` when
+/// it nests too deep.
+fn DescriptorSet::encoded_well_known(
+  self : DescriptorSet,
+  message : MessageDescriptor,
+  form : WellKnown,
+  json : Json,
+  depth : Int32,
+) -> Bytes raise {
+  if depth >= max_depth {
+    raise EncodeError(
+      pointer="",
+      message="nests messages deeper than \{max_depth}",
+    )
+  }
+  let nested = Writer()
+  self.write_well_known(nested, message, form, json, depth + 1)
   nested.to_bytes()
 }
 
@@ -784,7 +823,11 @@ fn DescriptorSet::wanted(
           "the name of a value of \{type_.full_name}, or an integer from -2147483648 to 2147483647"
         None => "an enum value"
       }
-    Message | Group => "an object"
+    Message | Group =>
+      match self.message_of(field) {
+        Some(type_) => self.wanted_message(type_)
+        None => "an object"
+      }
   }
 }
 

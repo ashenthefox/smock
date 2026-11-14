@@ -1,8 +1,8 @@
 // Replies encoded from ProtoJSON through the public interface, for every
-// proto3 field type but the well-known types. The bytes they are compared
-// with are protoc's encodings of the same messages, written in protobuf's
-// text format (fixtures/protobuf/replies/), so the encoder is never
-// checked against itself.
+// proto3 field type; well_known_test.mbt has the well-known types. The
+// bytes they are compared with are protoc's encodings of the same
+// messages, written in protobuf's text format (fixtures/protobuf/replies/),
+// so the encoder is never checked against itself.
 
 ///|
 /// The Descriptor set of fixtures/protobuf/replies/replies.proto.
@@ -503,24 +503,24 @@ test "messages may nest 100 deep in the top one, and no deeper" {
 }
 
 ///|
-test "a well-known type is not encoded yet" {
-  // google/protobuf/empty.proto: package google.protobuf, message Empty.
+test "a well-known type that is not served yet, such as Struct, is not encoded" {
+  // google/protobuf/struct.proto: package google.protobuf, message Struct.
   let writer = @protobuf.Writer()
   let file = @protobuf.Writer()
   file.tag(1, Len)
-  file.length_delimited(@utf8.encode("google/protobuf/empty.proto"))
+  file.length_delimited(@utf8.encode("google/protobuf/struct.proto"))
   file.tag(2, Len)
   file.length_delimited(@utf8.encode("google.protobuf"))
   file.tag(4, Len)
-  file.length_delimited(b"\x0a\x05Empty")
+  file.length_delimited(b"\x0a\x06Struct")
   file.tag(12, Len)
   file.length_delimited(@utf8.encode("proto3"))
   writer.tag(1, Len)
   writer.length_delimited(file.to_bytes())
   inspect(
-    encoded(@hex.encode(writer.to_bytes()), "google.protobuf.Empty", {}),
+    encoded(@hex.encode(writer.to_bytes()), "google.protobuf.Struct", {}),
     content=(
-      #|error: smock does not encode google.protobuf.Empty yet: it is a well-known type
+      #|error: smock does not encode google.protobuf.Struct yet: it is a well-known type
     ),
   )
 }

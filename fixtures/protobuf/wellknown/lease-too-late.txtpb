@@ -1,0 +1,3 @@
+# A Lease whose Timestamp is in the year 10000, out of the range that
+# ProtoJSON prints.
+created_at { seconds: 253402300800 }

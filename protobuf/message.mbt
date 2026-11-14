@@ -1,7 +1,9 @@
 // Messages decoded from their descriptors into smock's decoded form, the
 // JSON text the engine, the Journal and templates see. For now the decoder
 // serves every field of the types of proto3 and proto2 files but groups and
-// those of the well-known types. encode.mbt encodes messages from JSON.
+// those of the well-known types that is_unserved_well_known names
+// (well_known.mbt prints the others). encode.mbt encodes messages from
+// JSON.
 
 ///|
 /// The index in `fields` of the message's field numbered `number`, or -1,
@@ -93,18 +95,34 @@ let no_runs : Array[BytesView] = []
 /// repeats, the last entry wins. Unknown fields, and fields sent with
 /// another wire type than their type's, are skipped.
 ///
+/// The well-known types Timestamp, Duration, FieldMask, the wrappers and
+/// Empty are printed in their ProtoJSON forms, at any place, the whole
+/// message included: a Timestamp as a string of the date and time in UTC,
+/// such as `"1970-01-01T00:00:01.500Z"`, a Duration as a string of
+/// seconds, such as `"1.500s"`, each with 0, 3, 6 or 9 fractional digits; a
+/// FieldMask as its paths in lowerCamelCase, joined by commas; a wrapper as
+/// the value it wraps, an Int64Value or a UInt64Value as a number, a
+/// FloatValue as a float; and Empty as `{}`.
+///
 /// Raises `DecodeError` when the input is not protobuf, when a proto3
 /// string is not UTF-8, when a message lacks a proto2 required field, as
 /// protobuf's parsers refuse it, when messages nest deeper than 100, a map
-/// entry counting as a message, when a message it prints is a type of an
-/// editions file or a MessageSet, and when a message it prints has a field
-/// that it does not decode yet: a group, or a field of a well-known type,
-/// a map's values included.
+/// entry counting as a message, when a Timestamp, a Duration or a FieldMask
+/// has a value that ProtoJSON cannot print, when a message it prints is a
+/// type of an editions file or a MessageSet, and when a message it prints
+/// is or has a field that it does not decode yet: a group, or a well-known
+/// type that `is_unserved_well_known` names, a map's values included.
 pub fn decode_json(
   set : DescriptorSet,
   message : MessageDescriptor,
   input : BytesView,
 ) -> Bytes raise DecodeError {
+  if is_unserved_well_known(message.full_name) {
+    raise DecodeError(
+      position=input.start_offset(),
+      message="the message is of the well-known type \{message.full_name}, which smock does not decode yet",
+    )
+  }
   let out = @buffer.Buffer(size_hint=2 * input.length() + 16)
   set.print_message(out, message, [input], 0)
   out.to_bytes()
@@ -286,6 +304,10 @@ fn DescriptorSet::print_message(
       position=records[0].start_offset(),
       message="the message \{message.full_name} is a MessageSet, which smock does not decode",
     )
+  }
+  if well_known_form(message) is Some(form) {
+    self.print_well_known(out, message, form, records, depth)
+    return
   }
   let fields = message.fields
   let values = self.scan(message, records)
@@ -840,9 +862,9 @@ fn EnumDescriptor::defines(self : EnumDescriptor, bits : UInt64) -> Bool {
 
 ///|
 /// Why `decode_json` does not decode `field` yet, a field of a message of
-/// this set, or `None` when it does: it is a group, or of a well-known
-/// type, which ProtoJSON prints in a form of its own, or a map whose
-/// values are.
+/// this set, or `None` when it does: it is a group, or of a well-known type
+/// that it does not serve yet, as `is_unserved_well_known` says, or a map
+/// whose values are.
 fn DescriptorSet::not_decoded(
   self : DescriptorSet,
   field : FieldDescriptor,
@@ -854,13 +876,14 @@ fn DescriptorSet::not_decoded(
     self.message_of(field) is Some(entry) &&
     entry.map_entry &&
     is_map_entry(entry) {
-    return match self.well_known_of(entry.fields[entry.field_index(2)]) {
+    return match
+      self.unserved_well_known_of(entry.fields[entry.field_index(2)]) {
       Some(name) =>
         Some("is a map whose values have the well-known type \{name}")
       None => None
     }
   }
-  match self.well_known_of(field) {
+  match self.unserved_well_known_of(field) {
     Some(name) => Some("has the well-known type \{name}")
     None => None
   }
@@ -868,8 +891,9 @@ fn DescriptorSet::not_decoded(
 
 ///|
 /// The full name of the type of `field`, a field of a message of this set,
-/// when it is a well-known type, as `is_well_known` says.
-fn DescriptorSet::well_known_of(
+/// when it is a well-known type that the module does not serve yet, as
+/// `is_unserved_well_known` says.
+fn DescriptorSet::unserved_well_known_of(
   self : DescriptorSet,
   field : FieldDescriptor,
 ) -> String? {
@@ -878,7 +902,7 @@ fn DescriptorSet::well_known_of(
     (_, Some(type_)) => type_.full_name
     _ => return None
   }
-  if is_well_known(name) {
+  if is_unserved_well_known(name) {
     Some(name)
   } else {
     None
