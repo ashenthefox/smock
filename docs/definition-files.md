@@ -5878,14 +5878,14 @@ what is not served yet:
 - A method whose input or output type comes from a file that is not
   proto3, such as a proto2 or an editions file, or whose input or output
   type reaches a type of such a file.
-- A method whose input type has a field of a well-known type, such as
-  `google.protobuf.Timestamp`, singular, repeated or as a map's values, or
-  reaches a message type that has one. Fields of every scalar type, enums,
-  nested messages, proto3 `optional` fields, repeated fields, maps and
-  oneofs are served.
-- A method whose output type is a well-known type, or has, or reaches, a
-  field of one. Every other proto3 output type is served, with fields of
-  every type.
+- A method whose input or output type is one of the well-known types
+  `google.protobuf.Any`, `Struct`, `Value`, `ListValue` and `NullValue`,
+  or has, or reaches, a field of one, singular, repeated or as a map's
+  values. Every other proto3 type is served on both sides, with fields of
+  every type: scalars, enums, nested messages, proto3 `optional` fields,
+  repeated fields, maps, oneofs, and the well-known types Timestamp,
+  Duration, FieldMask, the wrappers and Empty, in their ProtoJSON forms
+  ([Well-known types](grpc.md#well-known-types)).
 - Any field of the Stub other than `id`, `mock`, `priority`, `scenario`,
   `variables`, `dataWrites`, `fault.seed`, `request.method`,
   `request.path`, `request.headers`, a `json` body condition, and `json`,
@@ -5969,16 +5969,20 @@ request:
 - An enum number or alias becomes the enum's first name for that number,
   such as `ACTIVE` for `1` or for its alias `ENABLED`. A number that no
   value has stays a number, as smock prints it for an open enum.
-- A `float` literal is rounded to the nearest 32-bit float and kept in the
-  form smock prints it, so `{ratio: 0.1}` matches a float of 0.1, and
-  `16777217` becomes `16777216`, which is what a call of 16777217 prints. A
-  `float` literal outside the float range is a problem.
+- A `float` literal, and a `google.protobuf.FloatValue`'s, is rounded to
+  the nearest 32-bit float and kept in the form smock prints it, so
+  `{ratio: 0.1}` matches a float of 0.1, and `16777217` becomes
+  `16777216`, which is what a call of 16777217 prints. A `float` literal
+  outside the float range is a problem.
 - A value that ProtoJSON reads but smock never prints is a problem that
   names the printed form: a 64-bit integer written as a string, such as
   `"42"`, which suggests `42`; any number written as a string; bytes in
   URL-safe base64, without their padding, or with bits after their last
-  octet; and an integer map key that is not in decimal, such as `"007"`,
-  which suggests `"7"`.
+  octet; an integer map key that is not in decimal, such as `"007"`,
+  which suggests `"7"`; a Duration with other fractional digits, such as
+  `"1.5s"`, which suggests `"1.500s"`; and a Timestamp with an offset other
+  than `Z`, such as `+09:00`, which suggests its time in UTC
+  ([Well-known types](grpc.md#well-known-types)).
 - Map keys are data: they are never rewritten, `$$` for a key that starts
   with `$` included.
 - Patterns and operators are allowed in any place. An operator's

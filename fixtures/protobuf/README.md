@@ -58,11 +58,12 @@ working tree; CI runs it in the same job.
 | `buf-image/` | Buf's `buf/alpha/image/v1/image.proto`, as it is at bufbuild/buf tag `v1.75.0` (commit `1a3a05a3e0fa350c4b814b7f48aa0e64e9a906bd`), and `greeter.txtpb`, the image that `buf build -o` (1.75.0) writes with its defaults for `helloworld/helloworld.proto`, decoded as text | `greeter.binpb`: that image, with source info and Buf's field 8042 in each file, byte for byte as buf writes it |
 | `oneofs/` | `oneofs.proto`, written for smock's tests: a method whose types hold a oneof and a proto3 `optional` field | `oneofs.binpb`, its set. The script writes it in hex to `oneofs_set_test.mbt` in `definitions/` and `protobuf/`. |
 | `scalars/` | `scalars.proto`, written for smock's tests of request messages, which imports `legacy.proto`, a proto2 file: a field of every scalar type, an enum with an alias, nested messages, proto3 `optional` fields, a message that nests itself, and types that reach a repeated field, a map and a oneof. Messages in text, of its types `Order`, `Every` and `OrderOnTheWire`, which stands in for an `Order` with what protoc would never write for one: a field twice, an enum number `Status` does not define, a string that is not UTF-8, and fields `Order` lacks. | `scalars.binpb`, its set. The script writes it in hex to `scalars_set_test.mbt` in `protobuf/` and `definitions/`. A `.binpb` of each message, protoc's encoding of its `.txtpb`; `order.binpb`, `every-max.binpb` and `every-min.binpb` are also written in hex to `protobuf/`. |
-| `stamped/` | `stamped.proto`, written for smock's tests: a method whose input type has fields of the well-known type `google.protobuf.Timestamp`, singular, repeated and as a map's values | `stamped.binpb`, its set, which holds protobuf's `timestamp.proto`, so protobuf's `LICENSE` is beside it |
+| `stamped/` | `stamped.proto`, written for smock's tests: a method whose input type has fields of the well-known type `google.protobuf.Timestamp`, singular, repeated and as a map's values | `stamped.binpb`, its set, which holds protoc's copy of protobuf's `timestamp.proto`, so protobuf's `LICENSE` is beside it |
 | `replies/` | `replies.proto`, written for smock's tests of gRPC replies: output types that hold every proto3 field type but the well-known types, and replies of them in text, `user.txtpb` for `GetUser`, and `maxima`, `minima`, `specials`, `lists`, `maps`, `choice` and `inner` for `GetEverything` | `replies.binpb`, its set, which the script writes in hex to `replies_set_test.mbt` in `protobuf/`. A `.binpb` of each reply, which the script writes in hex to `protobuf/`, as `user_reply_test.mbt` and `everything_<name>_test.mbt`. |
-| `unserved/` | `unserved.proto`, written for smock's tests: methods whose output types reach types that gRPC Stubs do not serve yet, protobuf's well-known `google.protobuf.Timestamp` and a type of `old.proto`, a proto2 file | `unserved.binpb`, its set, which holds protobuf's `timestamp.proto`, so protobuf's `LICENSE` is beside it |
+| `unserved/` | `unserved.proto`, written for smock's tests: methods whose output types reach types that gRPC Stubs do not serve yet, protobuf's well-known `google.protobuf.Struct` and `google.protobuf.Value` and a type of `old.proto`, a proto2 file, and a method whose input type has fields of `Struct`, `Value` and `ListValue`, singular, repeated and as a map's values | `unserved.binpb`, its set, which holds protoc's copy of protobuf's `struct.proto`, so protobuf's `LICENSE` is beside it |
 | `collections/` | `collections.proto`, written for smock's tests of request messages: repeated fields of each kind of value, maps with keys of each kind, a oneof and a message field. Messages in text, of its types `Tagged`, `Lists` and `Choice`, and of the types whose names end in `OnTheWire`, which stand in for them with what protoc never writes for them: map entries in any order, without a key or a value, or with a key twice; repeated scalars unpacked; and every member of a oneof. | `collections.binpb`, its set. The script writes it in hex to `collections_set_test.mbt` in `protobuf/`. A `.binpb` of each message, protoc's encoding of its `.txtpb`; `tagged.binpb`, `lists.binpb` and `lists-on-the-wire.binpb` are also written in hex to `protobuf/`. |
 | `users/` | `users.proto`, written for smock's tests of gRPC Stubs' conditions: the fields of the ticket's example, `user_id` and an enum with an alias, a `float`, `bytes`, a map with integer keys, a repeated enum, and nested messages, singular and repeated, with a map whose keys are strings. Requests in text, of its type `Query`: `query.txtpb`, and `ratio-9-99.txtpb` and `ratio-16777217.txtpb`, whose floats conditions meet once rounded. | `users.binpb`, its set. The script writes it in hex to `users_set_test.mbt` in `definitions/`. A `.binpb` of each request, protoc's encoding of its `.txtpb`. |
+| `wellknown/` | `wellknown.proto`, written for smock's tests: methods whose types hold the well-known types Timestamp, Duration, FieldMask, the wrappers and Empty, singular, repeated, as a map's values and as a method's whole input or output. protobuf's `google/protobuf/timestamp.proto`, `duration.proto`, `field_mask.proto`, `wrappers.proto` and `empty.proto`, as they come with protoc 36.2, beside it, with protobuf's `LICENSE` in `google/protobuf/`. Messages in text: `lease.txtpb` (the ticket's example), `known.txtpb` (every type), `known-defaults.txtpb` (each set at its default), `lease-too-late.txtpb` (a Timestamp in the year 10000), and `now.txtpb`, `wait.txtpb` and `scale.txtpb`, a whole Timestamp, Duration and FloatValue. | `wellknown.binpb`, its set, built from the files beside it, with protobuf's `LICENSE` beside it too. The script writes it in hex to `wellknown_set_test.mbt` in `protobuf/` and `definitions/`, each of which names the licence in its header. A `.binpb` of each message; `lease.binpb`, `known.binpb` and `known-defaults.binpb` are also written in hex to `protobuf/`. |
 | `invalid/` | FileDescriptorSets written as text, which protoc would never write: `twice.txtpb` holds a file twice, `duplicate-name.txtpb` defines a message in two files, and `unresolved.txtpb` names types it does not define | A `.binpb` of each. The script copies `duplicate-name.binpb` to `schema/v1/fixtures/body-files/`. |
 
 ## Adding a set
@@ -96,7 +97,14 @@ finds among the well-known types.
 
 A test that reads no files, such as a test of a protocol module or of a
 package that does no I/O, gets a set as a MoonBit constant: add a `hex_test`
-line, as for `helloworld/`.
+line, as for `helloworld/`. For a set that holds files under another
+licence, give `hex_test` a fifth argument, a sentence that names it, as
+for `wellknown/`.
+
+A set's imports are found first in its own directory, then among the
+well-known types that come with protoc. `wellknown/` holds protobuf's
+files under `google/protobuf/`, so its set is built from those, which are
+committed and checked like any other source.
 
 ## Adding a message
 
@@ -136,4 +144,8 @@ Take protobuf's `LICENSE` from the release that protoc comes from:
 `6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d`.
 `annotated/` holds one, since its set holds protobuf's
 `descriptor.proto`, comments included, and so do `stamped/` and
-`unserved/`, whose sets hold protobuf's `timestamp.proto`.
+`unserved/`, whose sets hold protobuf's `timestamp.proto` and
+`struct.proto`. `wellknown/` holds protobuf's files themselves, so it has
+the `LICENSE` twice: in `google/protobuf/`, beside them, and beside the set
+built from them. Its `hex_test` files pass the script a sentence that names
+the licence, which goes in their header.

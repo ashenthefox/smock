@@ -256,7 +256,9 @@ skipped. A map entry without a key or a value takes the default, and when
 a key repeats, the last entry wins. It raises `DecodeError` when the input
 is not protobuf, a string is not UTF-8, or messages nest deeper than 100,
 a map entry counting as a message. It does not decode groups and the
-well-known types yet, and raises its error for a message that has one.
+well-known types Any, Struct, Value, ListValue and NullValue yet, and
+raises its error for a message that is or has one. The other well-known
+types print in their ProtoJSON forms ([below](#well-known-types)).
 
 `set.encode_json(message, json)` encodes JSON, a message of the type
 `message`, a type of `set`, as ProtoJSON writes it, the way protoc encodes
@@ -269,9 +271,10 @@ string, exact at any size, a float `"NaN"`, `"Infinity"` or `"-Infinity"`
 too, and bytes are base64, standard or URL-safe, with or without padding.
 It raises `EncodeError`, which names the JSON Pointer of the value at
 fault, for JSON that is not a message of the type, and for the types it
-does not encode yet: the well-known types, such as
-`google.protobuf.Timestamp`, and types of files that are not proto3.
-`@protobuf.is_well_known(full_name)` tells the well-known types.
+does not encode yet: the well-known types Any, Struct, Value, ListValue
+and NullValue, and types of files that are not proto3.
+`@protobuf.is_well_known(full_name)` tells the well-known types, and
+`@protobuf.is_unserved_well_known(full_name)` those not served yet.
 
 ```mbt check
 ///|
@@ -288,6 +291,62 @@ test "decode a message, and encode one" {
     b"\x0a\x02A1\x10\x01",
     content="true",
   )
+}
+```
+
+## Well-known types
+
+`decode_json` and `encode_json` give protobuf's well-known types
+Timestamp, Duration, FieldMask, the wrappers and Empty their ProtoJSON
+forms, at any place, a message's whole type included. A type is known by
+its full name, such as `google.protobuf.Duration`.
+
+- A Timestamp prints as a string of the date and time in UTC, with 0, 3,
+  6 or 9 fractional digits, then `Z`, such as `"1970-01-01T00:00:01.500Z"`,
+  and reads with any offset, such as `+09:00`, and 0 to 9 fractional
+  digits. It is from 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z.
+- A Duration prints as a string of seconds, with 0, 3, 6 or 9 fractional
+  digits, then `s`, such as `"1.500s"`, and reads with 0 to 9 fractional
+  digits. It is at most 315,576,000,000 seconds and 999,999,999
+  nanoseconds either way, and its seconds and nanoseconds never have
+  opposite signs.
+- A FieldMask prints as its paths in lowerCamelCase, joined by commas,
+  such as `"userName,address.city"`.
+- A wrapper prints as the value it wraps, as its type prints: an
+  Int64Value as a number, a FloatValue as a float.
+- Empty prints as `{}`.
+
+A value that ProtoJSON cannot print, such as a Timestamp in the year
+10000, is a `DecodeError`, and a value out of range in JSON an
+`EncodeError`. `set.printed_message(message, json)` checks a whole message
+as `printed_value` checks a field's value ([below](#printed-values)):
+`"1.5s"` for a Duration gives `NotPrinted` with `"1.500s"`.
+
+```mbt check
+///|
+test "a Duration in its ProtoJSON form" {
+  // google.protobuf.Duration { int64 seconds = 1; int32 nanos = 2; }
+  let set = @protobuf.read_descriptor_set(
+    b"\x0a\x55\x0a\x0eduration.proto\x12\x0fgoogle.protobuf\x22\x2a\x0a\x08Duration\x12\x0f\x0a\x07seconds\x18\x01\x20\x01\x28\x03\x12\x0d\x0a\x05nanos\x18\x02\x20\x01\x28\x05\x62\x06proto3"[:],
+  )
+  let duration = set.files[0].messages[0]
+  let json = @protobuf.decode_json(
+    set,
+    duration,
+    b"\x08\x01\x10\x80\xca\xb5\xee\x01"[:],
+  )
+  inspect(@utf8.decode(json), content="\"1.500s\"")
+  inspect(
+    set.encode_json(duration, "1.5s") == b"\x08\x01\x10\x80\xca\xb5\xee\x01",
+    content="true",
+  )
+  let suggested = try set.printed_message(duration, "1.5s") catch {
+    NotPrinted(printed~) => "write \{printed}"
+    NotOfType(wanted~) => "must be \{wanted}"
+  } noraise {
+    _ => "kept"
+  }
+  inspect(suggested, content="write \"1.500s\"")
 }
 ```
 
