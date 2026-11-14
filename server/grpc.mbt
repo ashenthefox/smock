@@ -464,6 +464,7 @@ fn H2Connection::refuse_call(
     Some(refusal.message()),
     None,
     date=self.ports.dates.at(self.now),
+    trailers=refusal.fields(),
     http_status=refusal.http_status(),
   )
   self.conn.headers(stream, fields, end=true) catch {

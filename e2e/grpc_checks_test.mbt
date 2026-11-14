@@ -313,3 +313,128 @@ async test "a body over --body-limit, its prefix included, gets RESOURCE_EXHAUST
     })
   })
 }
+
+///|
+/// `message` framed with the flag `flag`.
+fn flagged(flag : Byte, message : Bytes) -> Bytes {
+  let out = framed(message).to_array()
+  out[0] = flag
+  Bytes::from_array(out)
+}
+
+///|
+async test "a message's prefix is checked as soon as it arrives: a flag other than 0 or 1, and 1 without a grpc-encoding other than identity, get INTERNAL; 1 with another grpc-encoding gets UNIMPLEMENTED with grpc-accept-encoding: identity and a message that names both; 0 is served whatever grpc-encoding says" {
+  with_greeter_set([("greeter.yaml", checks_example)], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let raw = smock.raw_h2()
+      defer raw.close()
+      let out = [raw.acknowledge_settings()]
+      let message = @fs.read_file(hello_request_path).binary()
+      let hello = framed(message)
+      let encoding = (value : String) => [("grpc-encoding", value)]
+      raw.send([
+        // A prefix with the flag 2, alone.
+        headers_frame(1, raw.block(checked_call("POST")), end_stream=false),
+        Data(
+          stream_id=1,
+          data=b"\x02\x00\x00\x00\x05",
+          end_stream=false,
+          padding=0,
+        ),
+        headers_frame(3, raw.block(checked_call("POST")), end_stream=false),
+        Data(
+          stream_id=3,
+          data=flagged(b'\x01', message),
+          end_stream=false,
+          padding=0,
+        ),
+        headers_frame(
+          5,
+          raw.block(checked_call("POST", more=encoding("identity"))),
+          end_stream=false,
+        ),
+        Data(
+          stream_id=5,
+          data=flagged(b'\x01', message),
+          end_stream=true,
+          padding=0,
+        ),
+        headers_frame(
+          7,
+          raw.block(checked_call("POST", more=encoding("gzip"))),
+          end_stream=false,
+        ),
+        Data(
+          stream_id=7,
+          data=flagged(b'\x01', message),
+          end_stream=false,
+          padding=0,
+        ),
+        headers_frame(
+          9,
+          raw.block(checked_call("POST", more=encoding("x%zip"))),
+          end_stream=false,
+        ),
+        Data(
+          stream_id=9,
+          data=flagged(b'\x01', message),
+          end_stream=true,
+          padding=0,
+        ),
+        // A first message as it is, then a second whose flag is 2.
+        headers_frame(11, raw.block(checked_call("POST")), end_stream=false),
+        Data(stream_id=11, data=hello, end_stream=false, padding=0),
+        Data(
+          stream_id=11,
+          data=flagged(b'\x02', message),
+          end_stream=false,
+          padding=0,
+        ),
+        Ping(payload=b"\x00\x00\x00\x00\x00\x00\x00\x01", ack=false),
+      ])
+      out.push(
+        "Flag 2, flag 1 without grpc-encoding, flag 1 under identity, gzip and x%zip, and flag 2 after a message:",
+      )
+      out.push(raw.frames_until_ping_ack())
+      raw.send([
+        headers_frame(
+          13,
+          raw.block(checked_call("POST", more=encoding("gzip"))),
+          end_stream=false,
+        ),
+        Data(stream_id=13, data=hello, end_stream=true, padding=0),
+      ])
+      out.push("Flag 0 under gzip:")
+      out.push(raw.frames_until_stream_ends(13))
+      out.push("Journal:")
+      out.push(checked_journaled(smock))
+      out.push(smock.metric("smock_requests_total"))
+      inspect(
+        out.join("\n"),
+        content=(
+          #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
+          #|Flag 2, flag 1 without grpc-encoding, flag 1 under identity, gzip and x%zip, and flag 2 after a message:
+          #|SETTINGS ACK
+          #|HEADERS 1 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 13, grpc-message: a message flag is neither 0 nor 1, date: <now>]
+          #|RST_STREAM 1 NO_ERROR
+          #|HEADERS 3 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 13, grpc-message: a compressed message needs a grpc-encoding other than identity, date: <now>]
+          #|RST_STREAM 3 NO_ERROR
+          #|HEADERS 5 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 13, grpc-message: a compressed message needs a grpc-encoding other than identity, date: <now>]
+          #|HEADERS 7 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 12, grpc-message: the grpc-encoding gzip is not served, only identity, grpc-accept-encoding: identity, date: <now>]
+          #|RST_STREAM 7 NO_ERROR
+          #|HEADERS 9 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 12, grpc-message: the grpc-encoding x%25zip is not served, only identity, grpc-accept-encoding: identity, date: <now>]
+          #|HEADERS 11 END_STREAM END_HEADERS [:status: 200, content-type: application/grpc, grpc-status: 13, grpc-message: a message flag is neither 0 nor 1, date: <now>]
+          #|RST_STREAM 11 NO_ERROR
+          #|Flag 0 under gzip:
+          #|HEADERS 13 END_HEADERS [:status: 200, content-type: application/grpc, smock-mock: greeter; via=default, date: <now>]
+          #|DATA 13 16 octets
+          #|HEADERS 13 END_STREAM END_HEADERS [grpc-status: 0]
+          #|Journal:
+          #|/helloworld.Greeter/SayHello "OK" grpc-timeout -
+          #|smock_requests_total{mock="",stub=""} 6
+          #|smock_requests_total{mock="greeter",stub="hello"} 1
+        ),
+      )
+    })
+  })
+}

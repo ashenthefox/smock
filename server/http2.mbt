@@ -619,7 +619,7 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
               self.will_refuse(stream, 413)
             }
           } else if request.deframer is Some(deframer) &&
-            self.check_messages(deframer, data) is Some(refusal) {
+            self.check_messages(request, deframer, data) is Some(refusal) {
             self.requests.remove(stream)
             self.will_refuse_call(stream, refusal)
           } else {

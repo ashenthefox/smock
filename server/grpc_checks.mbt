@@ -30,6 +30,15 @@ priv enum CallRefusal {
   MalformedTimeout
   /// A body over `--body-limit`, its prefixes included: RESOURCE_EXHAUSTED.
   OverBodyLimit
+  /// A message whose flag is neither 0 nor 1: INTERNAL.
+  UnknownFlag
+  /// A compressed message, flag 1, with no `grpc-encoding`, or with
+  /// `identity`: INTERNAL.
+  CompressedWithoutEncoding
+  /// A message compressed with the `grpc-encoding` it names, which smock
+  /// never decompresses: UNIMPLEMENTED, with `grpc-accept-encoding:
+  /// identity`.
+  Compressed(String)
   /// A body that is not one uncompressed message: INTERNAL.
   NotOneMessage
   /// A message that does not parse, or that smock cannot print: INTERNAL.
@@ -50,8 +59,13 @@ fn CallRefusal::http_status(self : CallRefusal) -> Bytes {
 /// The gRPC status of the answer.
 fn CallRefusal::status(self : CallRefusal) -> @grpc.Status {
   match self {
-    NotPost | MalformedTimeout | NotOneMessage | Undecodable => Internal
-    UnservedSubtype => Unimplemented
+    NotPost
+    | MalformedTimeout
+    | UnknownFlag
+    | CompressedWithoutEncoding
+    | NotOneMessage
+    | Undecodable => Internal
+    UnservedSubtype | Compressed(_) => Unimplemented
     OverBodyLimit => ResourceExhausted
   }
 }
@@ -64,8 +78,24 @@ fn CallRefusal::message(self : CallRefusal) -> String {
     UnservedSubtype => "only the proto content subtype is served"
     MalformedTimeout => "the grpc-timeout is malformed"
     OverBodyLimit => "the request is over the body limit"
+    UnknownFlag => "a message flag is neither 0 nor 1"
+    CompressedWithoutEncoding =>
+      "a compressed message needs a grpc-encoding other than identity"
+    Compressed(encoding) =>
+      "the grpc-encoding \{encoding} is not served, only identity"
     NotOneMessage => "the request is not one uncompressed message"
     Undecodable => "the request message cannot be decoded"
+  }
+}
+
+///|
+/// The answer's other fields: `grpc-accept-encoding: identity` for a
+/// compressed message, as gRPC's rules of compression ask, which tells the
+/// client that smock takes only uncompressed messages.
+fn CallRefusal::fields(self : CallRefusal) -> ReadOnlyArray[(String, String)] {
+  match self {
+    Compressed(_) => [("grpc-accept-encoding", "identity")]
+    _ => []
   }
 }
 
@@ -93,21 +123,46 @@ fn check_head(request : H2Request, body_limit : Int32) -> CallRefusal? {
 }
 
 ///|
-/// What smock refuses in `data`, the next DATA octets of a gRPC call whose
-/// framing `deframer` reads, or `None`: a message whose prefix announces a
-/// length that takes the body over `--body-limit`, as soon as the prefix
-/// arrives, before the message does.
+/// What smock refuses in `data`, the next DATA octets of `request`, a gRPC
+/// call whose framing `deframer` reads, or `None`. Each message's prefix
+/// is checked as soon as it arrives, before the message does: a length
+/// that takes the body over `--body-limit`, then the flag. Flag 0 is
+/// served whatever `grpc-encoding` says, and any other flag is refused,
+/// since smock never decompresses.
 fn H2Connection::check_messages(
   self : H2Connection,
+  request : H2Request,
   deframer : @grpc.Deframer,
   data : Bytes,
 ) -> CallRefusal? {
   let mut rest = data[:]
-  while deframer.take(rest) is Prefix(body_length~, rest=after, ..) {
+  while deframer.take(rest) is Prefix(flag~, body_length~, rest=after, ..) {
     if body_length > self.body_limit.to_int64() {
       return Some(OverBodyLimit)
+    }
+    match flag {
+      b'\x00' => ()
+      b'\x01' =>
+        return match encoding_of(request) {
+          None | Some("" | "identity") => Some(CompressedWithoutEncoding)
+          Some(encoding) => Some(Compressed(encoding))
+        }
+      _ => return Some(UnknownFlag)
     }
     rest = after
   }
   None
+}
+
+///|
+/// The value of the `grpc-encoding` field of `request`, the compression of
+/// its messages, or `None` without one. Of several, the last.
+fn encoding_of(request : H2Request) -> String? {
+  let mut encoding = None
+  for header in request.headers {
+    if header.0 == "grpc-encoding" {
+      encoding = Some(header.1)
+    }
+  }
+  encoding
 }
