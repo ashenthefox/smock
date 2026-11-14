@@ -241,6 +241,7 @@ async fn run(
         settings.dir,
         body_file_dir=settings.body_file_dir,
         env=template_env,
+        header_size_limit=settings.header_size_limit,
       ) {
       Ok(snapshot) => snapshot
       Err(diagnostics) => {
@@ -259,6 +260,7 @@ async fn run(
       journal~,
       env=template_env,
       state_max_bytes~,
+      header_size_limit=settings.header_size_limit,
     )
     lifecycle.started(engine)
     // The Mockoon-equivalent lines exist only in the mockoon log format.

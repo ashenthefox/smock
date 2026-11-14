@@ -116,9 +116,10 @@ pub(all) struct TlsFiles {
 
 ///|
 /// The settings of `smock check`. The definitions directory is its
-/// argument. The body-file subdirectory and the environment variables
-/// templates may read are the `smock serve` settings of the same names,
-/// flags and variables, so that both load a directory the same way.
+/// argument. The body-file subdirectory, the environment variables
+/// templates may read and the header size limit are the `smock serve`
+/// settings of the same names, flags and variables, so that both load a
+/// directory the same way.
 #derive(Debug)
 pub(all) struct CheckSettings {
   /// The definitions directory.
@@ -128,13 +129,16 @@ pub(all) struct CheckSettings {
   /// The environment variables templates may read, as `--template-env`
   /// lists them: each name once, in the order given.
   template_env : Array[String]
+  /// `--header-size-limit`: the most octets each block of a static gRPC
+  /// reply's metadata may take.
+  header_size_limit : Int32
 }
 
 ///|
 /// The settings of `smock render`. The definitions directory, the
-/// body-file subdirectory and the environment variables templates may read
-/// are the `smock serve` settings of the same names, flags and variables,
-/// so that both load a directory the same way. The Stub ID is its argument,
+/// body-file subdirectory, the environment variables templates may read and
+/// the header size limit are the `smock serve` settings of the same names,
+/// flags and variables, so that both load a directory the same way. The Stub ID is its argument,
 /// and the sample request, the time, the seed and the response are flags of
 /// its own, without variables: they belong to one rendering, not to a
 /// process.
@@ -147,6 +151,9 @@ pub(all) struct RenderSettings {
   /// The environment variables templates may read, as `--template-env`
   /// lists them: each name once, in the order given.
   template_env : Array[String]
+  /// `--header-size-limit`: the most octets each block of a static gRPC
+  /// reply's metadata may take.
+  header_size_limit : Int32
   /// The ID of the Stub to render.
   stub : String
   /// The file that holds the sample request, as JSON.
@@ -257,6 +264,16 @@ let template_env_setting : Setting = {
 }
 
 ///|
+/// The most bytes a request head may take, and each block of a gRPC
+/// reply's metadata: a setting of smock serve that smock check and smock
+/// render share, since a static reply over it does not load.
+let header_size_limit_setting : Setting = {
+  name: "header-size-limit",
+  about: "The most bytes a request head (request line and header fields) may take. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection. It also bounds each block of a gRPC reply's metadata, its header block and its trailers, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL instead.",
+  default: Some("16384"),
+}
+
+///|
 let serve_settings : Array[Setting] = [
   {
     name: "dir",
@@ -330,11 +347,7 @@ let serve_settings : Array[Setting] = [
   },
   body_file_dir_setting,
   template_env_setting,
-  {
-    name: "header-size-limit",
-    about: "The most bytes a request head (request line and header fields) may take. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection.",
-    default: Some("16384"),
-  },
+  header_size_limit_setting,
   {
     name: "header-count-limit",
     about: "The most header fields a request may have. More get 431.",
@@ -411,7 +424,7 @@ let journal_defaults : @engine.JournalSettings = @engine.JournalSettings()
 /// The settings of `smock check`: those of `smock serve` that decide how
 /// the definitions directory is loaded.
 let check_settings : Array[Setting] = [
-  body_file_dir_setting, template_env_setting,
+  body_file_dir_setting, template_env_setting, header_size_limit_setting,
 ]
 
 ///|
@@ -451,9 +464,9 @@ pub fn check_command() -> @argparse.Command {
 
 ///|
 /// The `render` subcommand: the Stub ID as its argument, the definitions
-/// directory, the body-file subdirectory and the environment variables
-/// templates may read as `smock serve` takes them, and the sample request,
-/// the time, the seed and the response.
+/// directory, the body-file subdirectory, the environment variables
+/// templates may read and the header size limit as `smock serve` takes
+/// them, and the sample request, the time, the seed and the response.
 pub fn render_command() -> @argparse.Command {
   @argparse.Command(
     "render",
@@ -475,6 +488,7 @@ pub fn render_command() -> @argparse.Command {
       ),
       option(body_file_dir_setting),
       option(template_env_setting),
+      option(header_size_limit_setting),
       @argparse.OptionArg(
         "request",
         long="request",
@@ -667,12 +681,7 @@ pub fn ServeSettings::from_matches(
     log_format,
     body_file_dir,
     template_env: template_env_value(matches),
-    header_size_limit: int_value(
-      matches,
-      "header-size-limit",
-      min=1,
-      max=max_size,
-    ),
+    header_size_limit: header_size_limit_value(matches),
     header_count_limit: int_value(
       matches,
       "header-count-limit",
@@ -895,6 +904,7 @@ pub fn CheckSettings::from_matches(
     dir,
     body_file_dir: body_file_dir(matches),
     template_env: template_env_value(matches),
+    header_size_limit: header_size_limit_value(matches),
   }
 }
 
@@ -954,6 +964,7 @@ pub fn RenderSettings::from_matches(
     dir,
     body_file_dir: body_file_dir(matches),
     template_env: template_env_value(matches),
+    header_size_limit: header_size_limit_value(matches),
     stub: value(matches, "stub-id").unwrap_or(""),
     request_file,
     time,
@@ -1286,6 +1297,14 @@ fn file_value(
     Some("") => raise invalid_value(name, "", "must not be empty")
     other => other
   }
+}
+
+///|
+/// The value of `--header-size-limit`, from 1 to `max_size`.
+fn header_size_limit_value(
+  matches : @argparse.Matches,
+) -> Int32 raise InvalidSetting {
+  int_value(matches, header_size_limit_setting.name, min=1, max=max_size)
 }
 
 ///|

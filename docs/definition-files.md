@@ -6087,6 +6087,15 @@ stubs:
   error without it goes out as Trailers-Only, with the trailing metadata
   in its one block. `smock-mock`, which smock adds when the Default Mock
   answers, does not count as initial metadata.
+- Each block a reply goes out in, its HEADERS and its trailers, or its
+  Trailers-Only block, may take at most `--header-size-limit`, counted as
+  RFC 7541 counts a header list: each field's name and value plus 32
+  octets, smock's own fields included. A static reply with a larger block
+  is a problem at the reply, and `smock check` warns about one with a
+  block over 8 KiB. A templated reply with a larger block once rendered,
+  and any reply with a block over the client's own limit, gets INTERNAL
+  `reply metadata too large`, and the call's Journal entry says why in
+  `templateError` ([Metadata size](grpc.md#metadata-size)).
 
 The [gRPC guide](grpc.md#metadata) shows the reply on the wire.
 
@@ -6474,7 +6483,9 @@ A directory that does not exist is an empty definition set, as for
 `smock serve`, so it passes too; `smock check` then says on stderr that the
 directory does not exist, so that a mistyped path is noticed. Give it the
 `--template-env` that `smock serve` gets, with the same variables set, so
-that it accepts the same [templates](#environment-variables).
+that it accepts the same [templates](#environment-variables), and the same
+`--header-size-limit`, which bounds a
+[gRPC reply's metadata](grpc.md#metadata-size).
 
 ```console
 $ smock check defs
@@ -6507,10 +6518,11 @@ In CI, run it as a step that fails the build:
 
 ### Warnings
 
-For a valid directory, `smock check` also warns about three things that
+For a valid directory, `smock check` also warns about four things that
 do not stop the directory from loading: a Stub that can never match, a
-Stub that requires a state that no Stub moves to, and an HTTP Stub whose
-path looks like a gRPC method that its Mock's set lacks. Each warning is
+Stub that requires a state that no Stub moves to, an HTTP Stub whose path
+looks like a gRPC method that its Mock's set lacks, and a gRPC reply whose
+metadata some clients refuse. Each warning is
 one line, marked `warning:`, with the file and a JSON Pointer. Warnings do
 not change the exit status:
 
@@ -6613,6 +6625,22 @@ greeter.yaml: /stubs/1/request/path: warning: the Stub "hello-typo" is an HTTP S
 - A path pattern, a CRUD Stub and a Stub of a Mock without a set get none.
 - The warning states a fact. The Stub may be an HTTP Stub on purpose, for
   clients that call its path over HTTP/1.1.
+
+#### gRPC reply metadata over 8 KiB
+
+gRPC lets a client limit each block of a reply's metadata, its HEADERS and
+its trailers, or its Trailers-Only block, to 8 KiB. smock warns about a
+[gRPC Stub](#grpc-stubs)'s static reply with a larger block, counted as
+the load counts it against `--header-size-limit`
+([gRPC reply metadata](#grpc-reply-metadata)). The warning points at the
+reply:
+
+```text
+greeter.yaml: /stubs/0/response: warning: the reply's Trailers-Only block would take 9466 bytes, over 8192, the size gRPC lets a client limit each block of a reply's metadata to: such a client fails the call
+```
+
+A templated reply gets no warning, since its size is known only once
+rendered.
 
 ## Editor support
 

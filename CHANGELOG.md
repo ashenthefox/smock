@@ -433,10 +433,24 @@ of each GitHub release include its section
 - The Admin API document's description of a Journal entry's
   `templateError` says that a gRPC call got INTERNAL instead of 500, and
   that, for a gRPC call, it also says why a templated reply, once
-  rendered, is not a message of the method's output type.
+  rendered, is not a message of the method's output type, and why a
+  reply's metadata is too large to send.
 - The Admin API document's `EphemeralStubInput` says that an Ephemeral
   Stub may be a gRPC Stub, checked against its Mock's set, and what a
   reload does to it.
+- `--header-size-limit` also bounds a gRPC reply's metadata. Each block a
+  reply goes out in, its HEADERS and its trailers, or its one
+  Trailers-Only block, may take at most the limit, counted as RFC 7541
+  counts a header list, smock's own fields included. A static reply over
+  it is a load error, and `smock check` warns about one over 8 KiB, the
+  size gRPC lets a client limit each block to. A templated reply over it
+  once rendered, and any reply over the SETTINGS_MAX_HEADER_LIST_SIZE the
+  client advertised, gets Trailers-Only INTERNAL `reply metadata too
+  large` instead, so the client does not fail in its framing layer, and
+  `templateError` says why. `smock check` and `smock render` take
+  `--header-size-limit` and `SMOCK_HEADER_SIZE_LIMIT` too, so they load a
+  directory as `smock serve` does. See
+  [Metadata size](docs/grpc.md#metadata-size).
 
 ### Fixed
 

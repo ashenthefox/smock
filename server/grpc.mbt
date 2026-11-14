@@ -33,7 +33,11 @@
 // Metadata goes out as spec E sends header fields: names in lower case,
 // values trimmed, and the fields HTTP/2 forbids left out. A `grpc-message`
 // is the status message percent-encoded, so any Unicode text fits in the
-// field (`@grpc.percent_encode`). An answer sent before the client has
+// field (`@grpc.percent_encode`). Both blocks of a Stub's reply are built
+// before either is sent, and a reply with a block over
+// `--header-size-limit`, or over the SETTINGS_MAX_HEADER_LIST_SIZE the
+// client advertised, gets Trailers-Only INTERNAL `reply metadata too large`
+// instead (`answer_too_large`). An answer sent before the client has
 // ended its request is followed by RST_STREAM NO_ERROR (`end_early`). What
 // gRPC's rules refuse in a call, checked as soon as it arrives, and what the
 // layer cannot serve yet, get Trailers-Only too, with their `grpc-status`
@@ -149,6 +153,7 @@ fn H2Connection::end_early(self : H2Connection, stream : Int32) -> Unit {
 /// set are looked up again first, and a call that cannot reach a gRPC Stub
 /// now is answered as from its HEADERS (`answer_unserved`). A plan whose gRPC
 /// status is not OK is sent as Trailers-Only, with its gRPC part. A reply
+/// too large to send gets INTERNAL instead (`answer_too_large`). A reply
 /// whose framed message fits the windows is queued at once; the rest of a
 /// larger one is sent in a task of its own (`write_slowly`), which writes
 /// to `out`, with the trailers after it.
@@ -240,10 +245,21 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
         }
       }
   }
+  let head = reply_head(plan.headers, date~)
   let trailers = status_trailers(Ok, part.message, part.trailers)
+  if self.answer_too_large(
+      stream,
+      request,
+      outcome,
+      Some(head),
+      trailers,
+      date~,
+    ) {
+    return
+  }
   let rest = self.queue_reply(
     stream,
-    reply_head(plan.headers, date~),
+    head,
     @grpc.frame(reply),
     trailers,
     outcome.journal,
@@ -263,7 +279,9 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
 /// than smock's own, gets HEADERS with them, as a reply that succeeded
 /// does, then trailers with the part's status, message and trailing
 /// metadata. One without gets Trailers-Only, one HEADERS block that
-/// carries all of these. `date` is the value of the answer's `date` field.
+/// carries all of these. A Stub's reply too large to send gets INTERNAL
+/// instead (`answer_too_large`). `date` is the value of the answer's `date`
+/// field.
 fn H2Connection::answer_status(
   self : H2Connection,
   stream : Int32,
@@ -274,12 +292,19 @@ fn H2Connection::answer_status(
 ) -> Unit {
   let headers = outcome.plan.headers
   if has_initial_metadata(headers) {
-    self.head_then_trailers(
-      stream,
-      reply_head(headers, date~),
-      status_trailers(part.status, part.message, part.trailers),
-      outcome.journal,
-    )
+    let head = reply_head(headers, date~)
+    let trailers = status_trailers(part.status, part.message, part.trailers)
+    if self.answer_too_large(
+        stream,
+        request,
+        outcome,
+        Some(head),
+        trailers,
+        date~,
+      ) {
+      return
+    }
+    self.head_then_trailers(stream, head, trailers, outcome.journal)
   } else {
     let fields = trailers_only(
       part.status,
@@ -288,9 +313,99 @@ fn H2Connection::answer_status(
       date~,
       trailers=part.trailers,
     )
+    if self.answer_too_large(stream, request, outcome, None, fields, date~) {
+      return
+    }
     self.headers_only(stream, fields, outcome.journal, partial=false)
   }
   self.ended_in_place(request, outcome)
+}
+
+///|
+/// The fixed `grpc-message` of the INTERNAL that replaces a reply too large
+/// to send.
+let too_large_message : String = "reply metadata too large"
+
+///|
+/// Answers `stream`, a gRPC call that the engine decided `outcome` for,
+/// with Trailers-Only INTERNAL `reply metadata too large` in place of the
+/// reply of the Stub that matched it, when one of the blocks the reply
+/// would go out in is too large to send, and returns whether it did. The
+/// blocks are `head`, its header block, and `last`, its trailers, or its
+/// one Trailers-Only block when `head` is `None`. Each is counted as RFC
+/// 7541, section 4.1, counts a header list, and is too large when it takes
+/// more than `--header-size-limit`, or than the SETTINGS_MAX_HEADER_LIST_SIZE
+/// the client advertised, which it would refuse in its framing layer. Both
+/// blocks are built before anything is sent, so the swap is always
+/// possible. The call's Journal entry records INTERNAL, with the reason in
+/// its `templateError`, at the reply's JSON Pointer. smock's own answers,
+/// such as an unmatched call's, are sent as they are.
+fn H2Connection::answer_too_large(
+  self : H2Connection,
+  stream : Int32,
+  request : H2Request,
+  outcome : @engine.Outcome,
+  head : Array[@header.Header]?,
+  last : Array[@header.Header],
+  date~ : String,
+) -> Bool {
+  guard outcome.matched is Some(_) else { return false }
+  let why = match head {
+    Some(head) =>
+      match self.too_large("header block", head) {
+        Some(why) => Some(why)
+        None => self.too_large("trailers", last)
+      }
+    None => self.too_large("Trailers-Only block", last)
+  }
+  guard why is Some(message) else { return false }
+  let template_error = match outcome.journal {
+    Some(entry) =>
+      Some(@engine.TemplateError::{
+        at: reply_at(entry.response_index),
+        message,
+      })
+    None => None
+  }
+  self.answer_internal(
+    stream,
+    request,
+    outcome,
+    too_large_message,
+    date~,
+    template_error?,
+  )
+  true
+}
+
+///|
+/// Why `fields`, the block of a gRPC reply that `block` names, is too large
+/// to send, or `None` when it is not: when it takes more octets, counted
+/// as RFC 7541, section 4.1, counts a header list, than
+/// `--header-size-limit` or than the client's SETTINGS_MAX_HEADER_LIST_SIZE.
+/// The reason names the smaller of the two, and the flag when they are
+/// equal.
+fn H2Connection::too_large(
+  self : H2Connection,
+  block : String,
+  fields : Array[@header.Header],
+) -> String? {
+  let mut size = 0
+  for field in fields {
+    size += field.cost()
+  }
+  let limit = self.header_size_limit
+  match self.conn.peer_settings().max_header_list_size {
+    Some(client) if client < limit && size > client =>
+      Some(
+        "the reply's \{block} would take \{size} bytes, over the \{client} that the client allows in its SETTINGS_MAX_HEADER_LIST_SIZE",
+      )
+    _ if size > limit =>
+      Some(
+        "the reply's \{block} would take \{size} bytes, over --header-size-limit, \{limit}",
+      )
+    _ => None
+  }
 }
 
 ///|
@@ -381,12 +496,19 @@ fn encode_reply(
 
 ///|
 /// The JSON Pointer, within its Stub, of the `json` of the reply that the
-/// Stub's pick chose: of its `response`, when `index` is `None`, or else of
-/// that element of its `responses`.
+/// Stub's pick chose (`reply_at`).
 fn reply_pointer(index : Int32?) -> String {
+  reply_at(index) + "/json"
+}
+
+///|
+/// The JSON Pointer, within its Stub, of the reply that the Stub's pick
+/// chose: its `response`, when `index` is `None`, or else that element of
+/// its `responses`.
+fn reply_at(index : Int32?) -> String {
   match index {
-    Some(index) => "/responses/\{index}/json"
-    None => "/response/json"
+    Some(index) => "/responses/\{index}"
+    None => "/response"
   }
 }
 

@@ -144,7 +144,7 @@ lists the settings:
 | `--log-format` | `SMOCK_LOG_FORMAT` | `json` by default (stderr, smock's own shape), or `mockoon` (stdout, the Mockoon CLI's shape, [for Mockoon users](docs/migrating-from-mockoon.md#logs)) |
 | `--body-file-dir` | `SMOCK_BODY_FILE_DIR` | `files` |
 | `--template-env` | `SMOCK_TEMPLATE_ENV` | none: templates read no environment variable; a comma-separated list of names lets them read those as `env.NAME`, with values read once at startup ([Environment variables](docs/definition-files.md#environment-variables)) |
-| `--header-size-limit` | `SMOCK_HEADER_SIZE_LIMIT` | 16384 bytes (16 KiB): larger request heads get 431; over HTTP/2, a larger header list, counted as RFC 7541 counts it, gets 431 on its stream, and a header block over twice the limit closes the connection ([Header lists](docs/http2.md#header-lists)) |
+| `--header-size-limit` | `SMOCK_HEADER_SIZE_LIMIT` | 16384 bytes (16 KiB): larger request heads get 431; over HTTP/2, a larger header list, counted as RFC 7541 counts it, gets 431 on its stream, and a header block over twice the limit closes the connection ([Header lists](docs/http2.md#header-lists)); it also bounds each block of a gRPC reply's metadata, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL ([Metadata size](docs/grpc.md#metadata-size)) |
 | `--header-count-limit` | `SMOCK_HEADER_COUNT_LIMIT` | 100 header fields: more get 431 |
 | `--body-limit` | `SMOCK_BODY_LIMIT` | 10485760 bytes (10 MiB): longer bodies get 413; over HTTP/2, per stream, on that stream alone ([Request bodies](docs/http2.md#request-bodies)) |
 | `--http2-max-concurrent-streams` | `SMOCK_HTTP2_MAX_CONCURRENT_STREAMS` | 100, from 1 to 1000: the most streams an HTTP/2 connection may have in progress at once; a stream past it gets RST_STREAM `REFUSED_STREAM` ([Limits and timeouts](docs/http2.md#limits-and-timeouts)) |
@@ -558,9 +558,9 @@ Pointer, and exits with status 1 if there is any. It also warns about Stubs
 that can never match, because an earlier Stub always matches first, and
 about a [state that a Stub requires but no Stub moves its Scenario
 to](docs/definition-files.md#a-state-that-no-stub-moves-to); warnings do
-not change the exit status. It takes `--body-file-dir` and
-`--template-env` as `smock serve` does, and reads the listed environment
-variables from its own environment.
+not change the exit status. It takes `--body-file-dir`, `--template-env`
+and `--header-size-limit` as `smock serve` does, and reads the listed
+environment variables from its own environment.
 
 `smock render --dir defs get-user --request sample.json` shows what a Stub
 returns for a sample request before a test relies on it. The sample is JSON,
@@ -577,9 +577,9 @@ a rendering never reads the live Variables. `data` maps the name of each
 [Data bucket](docs/definition-files.md#data-buckets) of the Stub's Mock
 to the value templates read in place of its initial value; a rendering
 never reads a Session's copy. smock reads the directory as
-`smock serve` does, body files included. It takes `--body-file-dir` and
-`--template-env` as `smock serve` does, and reads the listed environment
-variables from its own environment. It prints the rendering as JSON, the
+`smock serve` does, body files included. It takes `--body-file-dir`,
+`--template-env` and `--header-size-limit` as `smock serve` does, and
+reads the listed environment variables from its own environment. It prints the rendering as JSON, the
 same as the Admin render operation's result without its `warnings`: the
 Stub's status, headers and body (`utf-8` text, or `base64`) or its
 Server-Sent Events, and the conditions the sample fails, with expected and

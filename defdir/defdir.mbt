@@ -3,21 +3,23 @@
 /// snapshot, or returns every problem: those reading the directory, then
 /// those in the definition set. `smock serve` and `smock check` both load
 /// definitions this way, so a set that one accepts, the other accepts too.
-/// Templates may read the environment variables `env`. A valid set's
-/// digest is computed by `digest`, so that other tasks, such as the admin
-/// port's probes, run while it is.
+/// Templates may read the environment variables `env`, and each block of a
+/// static gRPC reply's metadata may take `header_size_limit` octets,
+/// `--header-size-limit`. A valid set's digest is computed by `digest`, so
+/// that other tasks, such as the admin port's probes, run while it is.
 ///
 /// Without a directory, the definition set is empty.
 pub async fn load(
   dir : String?,
   body_file_dir~ : String,
   env~ : @template.Env,
+  header_size_limit~ : Int32 = @definitions.default_header_size_limit,
 ) -> Result[@definitions.Snapshot, Array[@definitions.Diagnostic]] {
   let (set, read_problems) = match dir {
     Some(dir) => read(dir, body_file_dir~)
     None => ({ files: [], body_files: [], }, [])
   }
-  load_set(set, read_problems~, env~)
+  load_set(set, read_problems~, env~, header_size_limit~)
 }
 
 ///|
@@ -29,8 +31,9 @@ async fn load_set(
   set : @definitions.DefinitionSet,
   read_problems~ : Array[@definitions.Diagnostic],
   env~ : @template.Env,
+  header_size_limit~ : Int32 = @definitions.default_header_size_limit,
 ) -> Result[@definitions.Snapshot, Array[@definitions.Diagnostic]] {
-  match @definitions.validate(set, read_problems~, env~) {
+  match @definitions.validate(set, read_problems~, env~, header_size_limit~) {
     Ok(valid) => Ok(valid.snapshot(digest=digest(set)))
     Err(problems) => Err(problems)
   }

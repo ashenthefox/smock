@@ -8,7 +8,8 @@
 /// default, none. `descriptor_set` is the Mock's Descriptor set, if it has
 /// one: a Stub whose exact path names one of its methods is a gRPC Stub,
 /// checked against the set and normalised as a gRPC Stub in a Definition
-/// file is.
+/// file is. Each block of its static reply's metadata may take at most
+/// `header_size_limit` octets, `--header-size-limit`.
 ///
 /// Returns the Stub, or every problem found, with the messages a Stub in a
 /// Definition file gets. A problem has no file (`""`), and its JSON Pointer
@@ -20,6 +21,7 @@ pub fn ephemeral_stub(
   env~ : @template.Env = @template.no_env,
   buckets~ : ReadOnlyArray[DataBucket] = ReadOnlyArray::from_array([]),
   descriptor_set? : @protobuf.DescriptorSet,
+  header_size_limit~ : Int32 = default_header_size_limit,
 ) -> Result[Stub, Array[Diagnostic]] {
   let diagnostics = []
   let keys = Map([])
@@ -40,6 +42,7 @@ pub fn ephemeral_stub(
         { by_path: Map([]), by_mock: Map::from_array([(mock, set)]), }
       None => no_declared_sets
     },
+    header_size_limit,
   }
   guard json is Object(fields) else {
     file.error("", "must be an object")
