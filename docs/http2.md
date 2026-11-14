@@ -663,7 +663,8 @@ and then reads again gets every response.
 ### Request bodies
 
 `--body-limit` applies to each stream alone, as it applies to each request
-over HTTP/1.1.
+over HTTP/1.1. A gRPC call over it gets RESOURCE_EXHAUSTED, the way gRPC
+says so, instead of 413 ([The body limit](grpc.md#the-body-limit)).
 
 - A `content-length` over the limit gets `413 Content Too Large` at once,
   before any of the body is read.
