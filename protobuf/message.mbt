@@ -117,12 +117,6 @@ pub fn decode_json(
   message : MessageDescriptor,
   input : BytesView,
 ) -> Bytes raise DecodeError {
-  if is_unserved_well_known(message.full_name) {
-    raise DecodeError(
-      position=input.start_offset(),
-      message="the message is of the well-known type \{message.full_name}, which smock does not decode yet",
-    )
-  }
   let out = @buffer.Buffer(size_hint=2 * input.length() + 16)
   set.print_message(out, message, [input], 0)
   out.to_bytes()
@@ -344,20 +338,36 @@ fn DescriptorSet::print_message(
     write_json_name(out, field.json_name)
     out.write_byte(b':')
     if field.label is Repeated {
-      let runs = match value {
-        Some(Elements(runs)) => runs
-        _ => no_runs
-      }
-      match self.message_of(field) {
-        Some(entry) if entry.map_entry && is_map_entry(entry) =>
-          self.print_map(out, entry, runs, depth)
-        _ => self.print_list(out, field, runs, depth, proto2~)
-      }
+      self.print_repeated(out, field, value, depth, proto2~)
     } else {
       self.print_value(out, field, value, depth)
     }
   }
   out.write_byte(b'}')
+}
+
+///|
+/// Prints to `out` the value `value` of `field`, a repeated field of a
+/// message `depth` messages deep: a map as an object, or else a list as an
+/// array. The message is of a proto2 file when `proto2`, so its strings may
+/// not be UTF-8.
+fn DescriptorSet::print_repeated(
+  self : DescriptorSet,
+  out : @buffer.Buffer,
+  field : FieldDescriptor,
+  value : Value?,
+  depth : Int32,
+  proto2~ : Bool,
+) -> Unit raise DecodeError {
+  let runs = match value {
+    Some(Elements(runs)) => runs
+    _ => no_runs
+  }
+  match self.message_of(field) {
+    Some(entry) if entry.map_entry && is_map_entry(entry) =>
+      self.print_map(out, entry, runs, depth)
+    _ => self.print_list(out, field, runs, depth, proto2~)
+  }
 }
 
 ///|
@@ -826,6 +836,10 @@ fn DescriptorSet::print_number(
     Enum => {
       let number = bits.to_uint().reinterpret_as_int()
       match self.enum_of(field) {
+        // NullValue, whose one value ProtoJSON prints as `null`, whatever
+        // its number.
+        Some(type_) if type_.full_name == "google.protobuf.NullValue" =>
+          out.write_bytes(b"null")
         Some(type_) =>
           match type_.find_value_by_number(number) {
             Some(value) => write_json_name(out, value.name)
@@ -862,48 +876,14 @@ fn EnumDescriptor::defines(self : EnumDescriptor, bits : UInt64) -> Bool {
 
 ///|
 /// Why `decode_json` does not decode `field` yet, a field of a message of
-/// this set, or `None` when it does: it is a group, or of a well-known type
-/// that it does not serve yet, as `is_unserved_well_known` says, or a map
-/// whose values are.
+/// this set, or `None` when it does: it is a group.
 fn DescriptorSet::not_decoded(
   self : DescriptorSet,
   field : FieldDescriptor,
 ) -> String? {
+  ignore(self)
   if field.type_ is Group {
-    return Some("is a group")
-  }
-  if field.label is Repeated &&
-    self.message_of(field) is Some(entry) &&
-    entry.map_entry &&
-    is_map_entry(entry) {
-    return match
-      self.unserved_well_known_of(entry.fields[entry.field_index(2)]) {
-      Some(name) =>
-        Some("is a map whose values have the well-known type \{name}")
-      None => None
-    }
-  }
-  match self.unserved_well_known_of(field) {
-    Some(name) => Some("has the well-known type \{name}")
-    None => None
-  }
-}
-
-///|
-/// The full name of the type of `field`, a field of a message of this set,
-/// when it is a well-known type that the module does not serve yet, as
-/// `is_unserved_well_known` says.
-fn DescriptorSet::unserved_well_known_of(
-  self : DescriptorSet,
-  field : FieldDescriptor,
-) -> String? {
-  let name = match (self.message_of(field), self.enum_of(field)) {
-    (Some(type_), _) => type_.full_name
-    (_, Some(type_)) => type_.full_name
-    _ => return None
-  }
-  if is_unserved_well_known(name) {
-    Some(name)
+    Some("is a group")
   } else {
     None
   }

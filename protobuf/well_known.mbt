@@ -1,10 +1,10 @@
 // The well-known types that ProtoJSON prints in forms of their own
 // (https://protobuf.dev/programming-guides/json/): Timestamp, Duration and
-// FieldMask as strings, and the wrappers as the values they wrap. Empty is
-// printed as the object it is, `{}`. Any, Struct, Value, ListValue and
-// NullValue are not served yet. A type is known by its full name, and a
-// Timestamp, a Duration and a FieldMask are read and written by their field
-// numbers, as protobuf's own code does.
+// FieldMask as strings, the wrappers as the values they wrap, Struct,
+// Value and ListValue as the JSON values they hold, and NullValue as
+// `null`. Empty is printed as the object it is, `{}`. A type is known by
+// its full name, and a Timestamp, a Duration and a FieldMask are read and
+// written by their field numbers, as protobuf's own code does.
 
 ///|
 /// A well-known type that ProtoJSON prints in a form of its own, not as an
@@ -22,6 +22,17 @@ priv enum WellKnown {
   /// A wrapper, such as google.protobuf.Int32Value: the value of its field
   /// `value`, numbered 1, whose index in the message's fields this is.
   Wrapper(Int32)
+  /// google.protobuf.Struct: an object, the map of Values that is its field
+  /// `fields`, numbered 1, whose index in the message's fields this is.
+  Struct(Int32)
+  /// google.protobuf.ListValue: an array, the list of Values that is its
+  /// field `values`, numbered 1, whose index in the message's fields this
+  /// is.
+  ListValue(Int32)
+  /// google.protobuf.Value: the JSON value that the member of its oneof
+  /// `kind` holds: `null`, a number, a string, a bool, a Struct or a
+  /// ListValue.
+  Value
 }
 
 ///|
@@ -67,6 +78,20 @@ fn well_known_form(message : MessageDescriptor) -> WellKnown? {
         None
       }
     }
+    "google.protobuf.Struct" | "google.protobuf.ListValue" => {
+      let index = message.field_index(1)
+      guard index >= 0 &&
+        message.fields[index].label is Repeated &&
+        message.fields[index].type_ is Message else {
+        return None
+      }
+      if name == "google.protobuf.Struct" {
+        Some(Struct(index))
+      } else {
+        Some(ListValue(index))
+      }
+    }
+    "google.protobuf.Value" => Some(Value)
     _ => None
   }
 }
@@ -169,6 +194,44 @@ fn DescriptorSet::print_well_known(
     Wrapper(index) => {
       let values = self.scan(message, records)
       self.print_value(out, message.fields[index], values[index], depth)
+    }
+    Struct(index) | ListValue(index) => {
+      let values = self.scan(message, records)
+      self.print_repeated(
+        out,
+        message.fields[index],
+        values[index],
+        depth,
+        proto2=false,
+      )
+    }
+    Value => {
+      let values = self.scan(message, records)
+      // The member of the oneof `kind` that the Value holds: the last one
+      // of its fields by number, as the oneof keeps one.
+      let mut held = -1
+      for index in message.by_number {
+        if values[index] is Some(_) {
+          held = index
+        }
+      }
+      guard held >= 0 else {
+        raise DecodeError(
+          position~,
+          message="the Value holds no value, which ProtoJSON cannot print: it must hold null, a number, a string, a bool, a Struct or a ListValue",
+        )
+      }
+      let field = message.fields[held]
+      if field.number == 2 && values[held] is Some(Number(bits)) {
+        let number = bits.reinterpret_as_double()
+        if number.is_nan() || number.is_inf() {
+          raise DecodeError(
+            position~,
+            message="the Value holds the number \{number}, which a JSON number cannot be, and ProtoJSON does not print it as a string",
+          )
+        }
+      }
+      self.print_value(out, field, values[held], depth)
     }
   }
 }
@@ -372,6 +435,7 @@ fn DescriptorSet::write_well_known(
         depth,
         present=false,
       )
+    Struct(_) | ListValue(_) | Value => raise Unfit
   }
 }
 
@@ -390,7 +454,7 @@ fn DescriptorSet::wanted_message(
     Some(FieldMask) =>
       "a string of field paths in lowerCamelCase, joined by commas, such as \"userName,address.city\""
     Some(Wrapper(index)) => self.wanted(message.fields[index])
-    None => "an object"
+    Some(Struct(_)) | Some(ListValue(_)) | Some(Value) | None => "an object"
   }
 }
 
