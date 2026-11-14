@@ -71,3 +71,66 @@ test "a static reply's Trailers-Only block that takes more than --header-size-li
     content="a.yaml: /stubs/0/response: the reply's Trailers-Only block would take 301 bytes, over --header-size-limit, 300: each block of a gRPC reply's metadata counts as RFC 7541 counts a header list, each field's name and value plus 32, smock's own fields included",
   )
 }
+
+///|
+test "an OK reply's header block, and the trailers of an error with initial metadata, each count on their own, the message percent-encoded" {
+  // :status, content-type, date: 42 + 60 + 65 = 167; x-a with a value of n
+  // octets: 3 + n + 32. So 202 + n in all.
+  let ok = (n : Int32) => {
+    "{ headers: { x-a: \{"a".repeat(n)} }, json: { message: Hi } }"
+  }
+  inspect(
+    sized_replies(sized_stub("at-limit", ok(98)), header_size_limit=300),
+    content="loaded",
+  )
+  inspect(
+    sized_replies(sized_stub("over", ok(99)), header_size_limit=300),
+    content="a.yaml: /stubs/0/response: the reply's header block would take 301 bytes, over --header-size-limit, 300: each block of a gRPC reply's metadata counts as RFC 7541 counts a header list, each field's name and value plus 32, smock's own fields included",
+  )
+  // The header block: 167 + x-a: b, 3 + 1 + 32, so 203. The trailers:
+  // grpc-status, 44; grpc-message, "☺" sent as %E2%98%BA, 12 + 9 + 32 =
+  // 53; x-trace with a value of n octets, 7 + n + 32. So 136 + n.
+  let error = (n : Int32) => {
+    (
+      $|    responses:
+      $|      - { json: { message: Hi } }
+      $|      - headers: { x-a: b }
+      $|        grpc: { status: NOT_FOUND, message: "☺", trailers: { x-trace: \{"a".repeat(n)} } }
+      $|
+    )
+  }
+  let stub = (id : String, n : Int32) => {
+    (
+      $|  - id: \{id}
+      $|    mock: greeter
+      $|    request: { path: /helloworld.Greeter/SayHello }
+      $|\{error(n)}
+    )
+  }
+  inspect(
+    sized_replies(stub("at-limit", 164), header_size_limit=300),
+    content="loaded",
+  )
+  inspect(
+    sized_replies(stub("over", 165), header_size_limit=300),
+    content="a.yaml: /stubs/0/responses/1: the reply's trailers would take 301 bytes, over --header-size-limit, 300: each block of a gRPC reply's metadata counts as RFC 7541 counts a header list, each field's name and value plus 32, smock's own fields included",
+  )
+}
+
+///|
+test "a date the metadata gives goes out in place of smock's, and values count once trimmed of spaces at either end" {
+  // :status, content-type, grpc-status: 42 + 60 + 44 = 146; date with a
+  // value of n octets once trimmed, 4 + n + 32, and no date of smock's. So
+  // 182 + n.
+  let error = (n : Int32) => {
+    "{ grpc: { status: NOT_FOUND, trailers: { date: \"  \{"a".repeat(n)}  \" } } }"
+  }
+  inspect(
+    sized_replies(sized_stub("at-limit", error(118)), header_size_limit=300),
+    content="loaded",
+  )
+  inspect(
+    sized_replies(sized_stub("over", error(119)), header_size_limit=300),
+    content="a.yaml: /stubs/0/response: the reply's Trailers-Only block would take 301 bytes, over --header-size-limit, 300: each block of a gRPC reply's metadata counts as RFC 7541 counts a header list, each field's name and value plus 32, smock's own fields included",
+  )
+}
