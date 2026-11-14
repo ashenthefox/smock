@@ -2,7 +2,8 @@
 
 gRPC's wire rules for MoonBit: the content type of gRPC calls, the 5-octet
 prefix that frames each message, gRPC's seventeen status codes with their
-names, and the percent-encoding of a status message. smock serves gRPC unary calls with it, beside
+names, the percent-encoding of a status message, and the rules of reply
+metadata. smock serves gRPC unary calls with it, beside
 `smock/protobuf`, which encodes the messages. The module does no I/O and
 depends only on `moonbitlang/core`. It builds for every MoonBit target and
 is tested on native and `wasm-gc`.
@@ -116,5 +117,35 @@ test "percent-encode a status message" {
     @grpc.percent_encode(" try again ☺ ") == b"%20try again %E2%98%BA%20",
     content="true",
   )
+}
+```
+
+## Metadata
+
+A reply's metadata, in its HEADERS and its trailers, follows gRPC's
+grammar. A name holds one or more of `0-9`, `a-z`, `_`, `-` and `.`, and
+gRPC keeps `content-type`, `te` and every name that starts with `grpc-` for
+itself. The value of ASCII metadata holds characters from 0x20 to 0x7E.
+Binary metadata has a name that ends with `-bin`, and its value is
+standard base64, padded or not, which gRPC sends without its padding.
+
+- `@grpc.is_metadata_name(name)` tells a name of the grammar, given in
+  lower case; `@grpc.is_reserved_name(name)` one that gRPC keeps.
+- `@grpc.is_binary_name(name)` tells the name of binary metadata.
+- `@grpc.is_ascii_value(value)` tells the value of ASCII metadata.
+- `@grpc.unpadded_base64(value)` gives the value of binary metadata without
+  its padding, or `None` when it is not base64. It copies nothing.
+
+```mbt check
+///|
+test "check reply metadata" {
+  inspect(@grpc.is_metadata_name("x-trace"), content="true")
+  inspect(@grpc.is_metadata_name("x(trace)"), content="false")
+  inspect(@grpc.is_reserved_name("grpc-foo"), content="true")
+  inspect(@grpc.is_ascii_value("caf\u{e9}"), content="false")
+  inspect(@grpc.is_binary_name("trace-bin"), content="true")
+  guard @grpc.unpadded_base64("AAE=") is Some(value) else { fail("not base64") }
+  inspect(value, content="AAE")
+  inspect(@grpc.unpadded_base64("AA=") is None, content="true")
 }
 ```
