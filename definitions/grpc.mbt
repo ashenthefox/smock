@@ -208,11 +208,17 @@ fn File::encode_reply(
 }
 
 ///|
+/// What a problem says of the well-known types that gRPC Stubs do not serve
+/// yet, after the field or the type that has one.
+let unserved_well_known : String = "and gRPC Stubs serve no Any, Struct, Value, ListValue or NullValue so far"
+
+///|
 /// Reports at `pointer`, a gRPC Stub's path, what gRPC Stubs do not serve
 /// yet of `output`, the output type of its method, a message of `set`, and
 /// of each message type it reaches through its fields, each once, a map's
-/// values included: a type of a file that is not proto3, and each field of
-/// a well-known type. Every other field is served, as `File::check_input`
+/// values included: a type of a file that is not proto3, and a well-known
+/// type that `@protobuf.is_unserved_well_known` names, as the type itself
+/// or as a field's. Every other field is served, as `File::check_input`
 /// words its problems. Returns whether every type it reaches is served.
 fn File::check_output(
   self : File,
@@ -221,10 +227,10 @@ fn File::check_output(
   output : @protobuf.MessageDescriptor,
 ) -> Bool {
   let not_served = "the output type \{output.full_name} is not served yet"
-  if @protobuf.is_well_known(output.full_name) {
+  if @protobuf.is_unserved_well_known(output.full_name) {
     self.error(
       pointer,
-      "\{not_served}: it is a well-known type, and gRPC Stubs serve no well-known types so far",
+      "\{not_served}: it is a well-known type, \{unserved_well_known}",
     )
     return false
   }
@@ -260,7 +266,7 @@ fn File::check_output(
         (_, Some(type_)) => type_.full_name
         _ => continue
       }
-      if !@protobuf.is_well_known(name) {
+      if !@protobuf.is_unserved_well_known(name) {
         if type_ is Some(type_) && !seen.contains(name) {
           seen.add(name)
           reached_types.push(type_)
@@ -274,7 +280,7 @@ fn File::check_output(
       }
       self.error(
         pointer,
-        "\{not_served}: \{field_name} has the well-known type \{name}, and gRPC Stubs serve no well-known types so far",
+        "\{not_served}: \{field_name} has the well-known type \{name}, \{unserved_well_known}",
       )
       served = false
     }
@@ -302,11 +308,13 @@ fn syntax_name(syntax : @protobuf.Syntax) -> String? {
 /// Reports at `pointer`, a gRPC Stub's path, what gRPC Stubs do not serve
 /// yet of `input`, the input type of its method, a message of `set`, and
 /// of each message type it reaches through its fields, a map's values
-/// included, each once: a type of a file that is not proto3, and each
-/// field of a well-known type, or a map whose values have one. Every other
-/// field is served, singular or repeated, a map or in a oneof: one of any
-/// scalar type, of an enum, or of a message, which is checked in turn.
-/// Returns whether every type it reaches is served.
+/// included, each once: a type of a file that is not proto3, and a
+/// well-known type that `@protobuf.is_unserved_well_known` names, as the
+/// type itself, as a field's, or as a map's values. Every other field is
+/// served, singular or repeated, a map or in a oneof: one of any scalar
+/// type, of an enum, or of a message, which is checked in turn, the other
+/// well-known types included. Returns whether every type it reaches is
+/// served.
 fn File::check_input(
   self : File,
   pointer : String,
@@ -314,7 +322,13 @@ fn File::check_input(
   input : @protobuf.MessageDescriptor,
 ) -> Bool {
   let not_served = "the input type \{input.full_name} is not served yet"
-  let later = "and gRPC Stubs serve no well-known types so far"
+  if @protobuf.is_unserved_well_known(input.full_name) {
+    self.error(
+      pointer,
+      "\{not_served}: it is a well-known type, \{unserved_well_known}",
+    )
+    return false
+  }
   let mut served = true
   let seen : Set[String] = Set([input.full_name])
   let pending = [input]
@@ -354,7 +368,7 @@ fn File::check_input(
         (_, Some(type_)) => type_.full_name
         _ => continue
       }
-      if !@protobuf.is_well_known(name) {
+      if !@protobuf.is_unserved_well_known(name) {
         if set.message_of(value) is Some(type_) && !seen.contains(name) {
           seen.add(name)
           reached_types.push(type_)
@@ -371,7 +385,10 @@ fn File::check_input(
       } else {
         "has the well-known type \{name}"
       }
-      self.error(pointer, "\{not_served}: \{field_name} \{problem}, \{later}")
+      self.error(
+        pointer,
+        "\{not_served}: \{field_name} \{problem}, \{unserved_well_known}",
+      )
       served = false
     }
     // The types this one reaches are checked next, in the order of its
