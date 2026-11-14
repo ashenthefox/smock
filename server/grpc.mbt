@@ -35,11 +35,13 @@
 // is the status message percent-encoded, so any Unicode text fits in the
 // field (`@grpc.percent_encode`). An answer sent before the client has
 // ended its request is followed by RST_STREAM NO_ERROR (`end_early`). What
-// the layer refuses, or cannot serve yet, gets Trailers-Only too, with its
-// `grpc-status` and a fixed ASCII `grpc-message`. A call that does not
-// reach the engine is counted as rejected traffic and is not journaled; one
-// that does is journaled as the engine planned it, with the gRPC status
-// INTERNAL, which the entry records before it is committed.
+// gRPC's rules refuse in a call, checked as soon as it arrives, and what the
+// layer cannot serve yet, get Trailers-Only too, with their `grpc-status`
+// and a fixed `grpc-message`, and `:status` 200 but for a method other than
+// POST and a malformed `grpc-timeout` (grpc_checks.mbt). A call that does
+// not reach the engine is counted as rejected traffic and is not
+// journaled; one that does is journaled as the engine planned it, with the
+// gRPC status INTERNAL, which the entry records before it is committed.
 
 ///|
 /// The content type of gRPC calls, as the octets of a field value.
@@ -141,10 +143,11 @@ fn H2Connection::end_early(self : H2Connection, stream : Int32) -> Unit {
 
 ///|
 /// Answers the gRPC call that has arrived in full on `stream`: through the
-/// engine, when the call can be served, or else with Trailers-Only
-/// INTERNAL, as `refuse_call` sends it. The call's Mock and its set are
-/// looked up again first, and a call that cannot reach a gRPC Stub now is
-/// answered as from its HEADERS (`answer_unserved`). A plan whose gRPC
+/// engine, when the call can be served, or else with the refusal that
+/// `refuse_call` sends, when its body is not one whole message
+/// (`check_end`) or the message does not decode. The call's Mock and its
+/// set are looked up again first, and a call that cannot reach a gRPC Stub
+/// now is answered as from its HEADERS (`answer_unserved`). A plan whose gRPC
 /// status is not OK is sent as Trailers-Only, with its gRPC part. A reply
 /// whose framed message fits the windows is queued at once; the rest of a
 /// larger one is sent in a task of its own (`write_slowly`), which writes

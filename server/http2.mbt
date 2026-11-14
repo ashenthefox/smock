@@ -103,7 +103,8 @@ fn header_list_bound(limit : Int32) -> Int32 {
 /// ends never reaches the engine, nor does one whose header list is over
 /// the header limits, which gets 431 instead, or whose request HTTP/1.1's
 /// rules refuse, which gets 400, or whose body is over `--body-limit`,
-/// which gets 413.
+/// which gets 413, nor a gRPC call that gRPC's rules refuse, which gets
+/// their answer as soon as what they refuse arrives (grpc_checks.mbt).
 ///
 /// In the mockoon log format, each stream whose request reached the engine
 /// gets its Transaction recorded line once its response has ended, written
