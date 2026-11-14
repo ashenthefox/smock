@@ -1,17 +1,20 @@
 // Written for smock's tests: methods whose output types reach types that
-// gRPC Stubs do not serve yet, a well-known type and a type of a proto2
-// file, at the top or through nested messages.
+// gRPC Stubs do not serve yet, the well-known types Struct and Value and a
+// type of a proto2 file, at the top or through nested messages, and a
+// method whose input type has fields of the well-known types Struct, Value
+// and ListValue, singular, repeated and as a map's values.
 syntax = "proto3";
 
 package unserved;
 
-import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
 import "old.proto";
 
 service Clock {
   rpc Now (TimeRequest) returns (TimeReply);
   rpc Schedule (TimeRequest) returns (ScheduleReply);
-  rpc Stamp (TimeRequest) returns (google.protobuf.Timestamp);
+  rpc Stamp (TimeRequest) returns (google.protobuf.Struct);
+  rpc Describe (Described) returns (TimeRequest);
 }
 
 message TimeRequest {
@@ -19,15 +22,21 @@ message TimeRequest {
 }
 
 message TimeReply {
-  google.protobuf.Timestamp at = 1;
+  google.protobuf.Value at = 1;
 }
 
 message ScheduleReply {
   message Slot {
-    google.protobuf.Timestamp start = 1;
+    google.protobuf.Struct start = 1;
     old.Note note = 2;
     ScheduleReply next = 3;
   }
   repeated Slot slots = 1;
   map<string, Slot> by_name = 2;
+}
+
+message Described {
+  google.protobuf.Struct labels = 1;
+  repeated google.protobuf.Value values = 2;
+  map<string, google.protobuf.ListValue> lists = 3;
 }

@@ -207,7 +207,7 @@ hex_test scalars/order.binpb order "The order of the ticket's example, as protoc
 hex_test scalars/every-max.binpb every_max "An Every with each scalar field at its largest value, as protoc encodes it: fixtures/protobuf/scalars/every-max.binpb, in hex." protobuf
 hex_test scalars/every-min.binpb every_min "An Every with each signed scalar field at its smallest value, as protoc encodes it: fixtures/protobuf/scalars/every-min.binpb, in hex." protobuf
 
-# A method whose input type has fields of a well-known type.
+# A method whose input type has fields of the well-known type Timestamp.
 descriptor_set stamped stamped.binpb stamped.proto
 
 # A service whose output types hold every proto3 field type but the
@@ -224,8 +224,9 @@ for reply in maxima minima specials lists maps choice inner; do
   hex_test "replies/$reply.binpb" "everything_$reply" "The Everything of fixtures/protobuf/replies/$reply.txtpb, as protoc encodes it, in hex." protobuf
 done
 
-# Output types that gRPC Stubs do not serve yet: a well-known type, and a
-# type of a proto2 file, at the top or through nested messages.
+# Output types that gRPC Stubs do not serve yet: well-known types, and a
+# type of a proto2 file, at the top or through nested messages; and an
+# input type with well-known types that they do not serve yet.
 descriptor_set unserved unserved.binpb unserved.proto
 
 # A request of version 2 of helloworld.proto, which carries the field
@@ -271,6 +272,7 @@ descriptor_set wellknown wellknown.binpb wellknown.proto
 message wellknown wellknown.proto wellknown.Lease lease
 message wellknown wellknown.proto wellknown.Known known
 message wellknown wellknown.proto wellknown.Known known-defaults
+message wellknown wellknown.proto wellknown.Lease lease-too-late
 message wellknown google/protobuf/timestamp.proto google.protobuf.Timestamp now
 message wellknown google/protobuf/duration.proto google.protobuf.Duration wait
 message wellknown google/protobuf/wrappers.proto google.protobuf.FloatValue scale
