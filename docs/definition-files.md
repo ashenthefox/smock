@@ -5873,14 +5873,16 @@ stubs:
   ([Calls answered from their HEADERS](grpc.md#calls-answered-from-their-headers)).
 
 Types of proto3 and proto2 files are served, proto2's required fields,
-closed enums and packing included
-([proto2 types](grpc.md#proto2-types)). Two kinds of type are never
-served by gRPC Stubs in this release, each a problem at the Stub's `path`,
-per method, so a set may hold them for methods that no Stub uses:
+closed enums, packing, groups and extensions included
+([proto2 types](grpc.md#proto2-types)). A condition or a reply gives an
+extension under its full name in brackets, such as
+`"[shop.priority]": 3`. Two kinds of type are never served by gRPC Stubs
+in this release, each a problem at the Stub's `path`, per method, so a set
+may hold them for methods that no Stub uses:
 
 - A method whose input or output type comes from an editions file, or
-  reaches a type, an enum included, of one. Editions come in a later
-  spec.
+  reaches a type, an enum included, of one, or one that an extension
+  declared in an editions file extends. Editions come in a later spec.
 - A method whose input or output type is, or reaches, a MessageSet, a
   message with the option `message_set_wire_format`, whose extensions use
   another wire form.
@@ -5888,8 +5890,6 @@ per method, so a set may hold them for methods that no Stub uses:
 What a gRPC Stub can hold is limited for now. These are problems that say
 what is not served yet:
 
-- A method whose input or output type has a group field, or is a type
-  that an extension in the set extends, or reaches one.
 - A method whose input or output type is one of the well-known types
   `google.protobuf.Any`, `Struct`, `Value`, `ListValue` and `NullValue`,
   or has, or reaches, a field of one, singular, repeated or as a map's
@@ -5972,6 +5972,10 @@ request:
   `.proto` file or its JSON name, and becomes its JSON name. A key that
   names no field is a problem, as is a field given by both its names in
   one object.
+- A proto2 extension is given by its full name in brackets, such as
+  `"[shop.priority]": 3`, which stays as written. A key in brackets that
+  names no extension of the set, or one that extends another type, is a
+  problem ([proto2 types](grpc.md#proto2-types)).
 - Each literal must be a value of its field's type as smock prints it. A
   value that can never match is a problem: a number out of its type's
   range or with a fraction for an integer field, an enum name the enum

@@ -273,6 +273,50 @@ test "groups nested deeper than 100 are an error, and 100 deep are skipped" {
 }
 
 ///|
+test "a group's records are read up to its end tag, nested groups included, and the start tag stays the last tag read" {
+  let read = (reader : @protobuf.Reader) => {
+    let out = []
+    while !reader.at_end() {
+      let field = reader.tag()
+      if reader.wire_type() is StartGroup {
+        let records = reader.group()
+        out.push(
+          "\{field} \{reader.wire_type()}: \{records.length()} octets from octet \{records.start_offset()}",
+        )
+      } else {
+        out.push("\{field} \{reader.wire_type()}")
+        reader.skip()
+      }
+    }
+    out.join(", ")
+  }
+  // Field 1, a group holding a varint and a group of field 2, then field 3.
+  inspect(
+    outcome(b"\x0b\x08\x01\x13\x10\x05\x14\x0c\x18\x07", read),
+    content="1 SGROUP: 6 octets from octet 1, 3 VARINT",
+  )
+  inspect(outcome(b"\x0b\x0c", read), content="1 SGROUP: 0 octets from octet 1")
+  // The errors of skipping a group.
+  inspect(
+    outcome(b"\x0b\x13\x0c", read),
+    content="error: octet 2: the group of field 2 ends with the tag of field 1",
+  )
+  inspect(
+    outcome(b"\x0b\x08\x01", read),
+    content="error: octet 0: the input ends inside the group of field 1",
+  )
+  // A tag that does not start a group has no group to read.
+  let not_a_group = (reader : @protobuf.Reader) => {
+    reader.tag() |> ignore
+    reader.group().length().to_string()
+  }
+  inspect(
+    outcome(b"\x0a\x00", not_a_group),
+    content="error: octet 0: field 1 has wire type LEN, not SGROUP",
+  )
+}
+
+///|
 test "a writer encodes tags and values as protobuf's documentation shows them" {
   let writer = @protobuf.Writer()
   // The documentation's example: field 1 holding the varint 150.

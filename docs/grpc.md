@@ -292,6 +292,8 @@ the `.proto` file gives it a `json_name`. Each type prints as follows:
 | a repeated field | an array of its values, in order | `["a","b"]` |
 | a map | an object with a member per key, in key order; integer keys in decimal and bool keys as `"true"` and `"false"`, as strings | `{"1":3,"2":5,"10":1}` |
 | a oneof | the member the message holds, under its own JSON name, and no other | `"word":"w"` |
+| a proto2 group | an object, as a message | `"stop":[{"city":"Paris"}]` |
+| a proto2 extension | its value, under its full name in brackets, among the fields in field-number order, only when the message holds it ([proto2 types](#proto2-types)) | `"[shop.priority]":3` |
 | `google.protobuf.Timestamp` | a string of the date and time in UTC, with 0, 3, 6 or 9 fractional digits, then `Z` | `"1970-01-01T00:00:01.500Z"` |
 | `google.protobuf.Duration` | a string of seconds, with 0, 3, 6 or 9 fractional digits, then `s` | `"1.500s"`, `"-0.250s"` |
 | `google.protobuf.FieldMask` | a string of its paths in lowerCamelCase, joined by commas | `"userName,address.city"` |
@@ -350,10 +352,9 @@ the Near miss, whichever client sent it. The message
 ```
 
 For now, smock does not decode the well-known types
-`google.protobuf.Any`, `Struct`, `Value`, `ListValue` and `NullValue`,
-or groups. It answers with replies of every type of a proto3 or a proto2
-file but those, groups and types that an extension extends
-([The reply](#the-reply), [proto2 types](#proto2-types)). The
+`google.protobuf.Any`, `Struct`, `Value`, `ListValue` and `NullValue`.
+It answers with replies of every type of a proto3 or a proto2 file but
+those ([The reply](#the-reply), [proto2 types](#proto2-types)). The
 [Definition-file reference](definition-files.md#grpc-stubs) lists what a
 gRPC Stub cannot hold yet.
 
@@ -478,10 +479,15 @@ matches the key `math_score` as written, while `profile` and its field
 `display_name` become `profile` and `displayName`. A key that starts with
 `$` is written `$$`, as in any `json` condition.
 
+An extension is written by its full name in brackets, as ProtoJSON writes
+it, such as `"[shop.priority]": 3`, and the key stays as written
+([proto2 types](#proto2-types)).
+
 smock refuses, as a problem at the JSON Pointer of the value at fault:
 
-- a key that names no field of the type at its place, and a field given
-  by both its names in one object;
+- a key that names no field of the type at its place, a key in brackets
+  that names no extension of the set that extends the type, and a field
+  given by both its names in one object;
 - a literal that is not a value of its field's type as smock prints it,
   and so can never match: an integer out of its type's range or with a
   fraction, an enum name the enum lacks, a `float` outside the float range,
@@ -565,6 +571,8 @@ is:
 | A repeated field | An array. `null` in it is a problem. |
 | A map | An object whose keys are the map's keys as strings: integers in decimal, such as `"-1"`, and `"true"` and `"false"`. A `null` value is a problem. |
 | A oneof | One of its members. Two members in one object are a problem, but a member that is `null` does not count. |
+| A proto2 group | An object, as for a message. |
+| A proto2 extension | Its full name in brackets, such as `"[shop.priority]": 3`. It must name an extension of the set that extends the type. |
 | `google.protobuf.Timestamp` | A string in RFC 3339 form, with 0 to 9 fractional digits, then `Z` or an offset such as `+09:00`: `"1970-01-01T09:00:01.5+09:00"`. From 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, once the offset is taken off. |
 | `google.protobuf.Duration` | A string of seconds, with 0 to 9 fractional digits, then `s`: `"1.5s"`, `"-0.25s"`. At most `315576000000.999999999s` either way. |
 | `google.protobuf.FieldMask` | A string of paths in lowerCamelCase, joined by commas: `"userName,address.city"`. An underscore in it is a problem. |
@@ -581,9 +589,9 @@ with any of these fields, a well-known type such as
 `json`, such as `json: "1970-01-01T00:00:01.5Z"`. smock does not serve the
 well-known types `google.protobuf.Any`, `Struct`, `Value`, `ListValue`
 and `NullValue` yet: a Stub on a method whose output type is one, or
-reaches one through its fields, is a problem at its `path`, as is one
-whose output type reaches a group, a type that an extension extends, a
-type of an editions file or a MessageSet ([proto2 types](#proto2-types)).
+reaches one through its fields or its extensions, is a problem at its
+`path`, as is one whose output type reaches a type of an editions file or
+a MessageSet ([proto2 types](#proto2-types)).
 
 A reply without `template` is read and encoded once, when the files load.
 A reply that is not a message of the output type is a problem at the JSON
@@ -613,8 +621,10 @@ field, a member of a oneof, a proto3 `optional` field and every singular
 field of a proto2 message are written whenever they are set; repeated
 scalars of a proto3 message packed, unless the field says
 `packed = false`, and those of a proto2 message packed only when the
-field says `packed = true`; and map entries sorted by key, each with its
-key and its value. It sends what a gRPC server sends:
+field says `packed = true`; map entries sorted by key, each with its
+key and its value; extensions among the fields in field-number order;
+and groups between their start and end tags. It sends what a gRPC server
+sends:
 
 - HEADERS with `:status` 200, `content-type: application/grpc`,
   `smock-mock` when the Default Mock answered, and `date`;
@@ -684,12 +694,71 @@ journaled as `{"id":7}`, and a call without `id` gets INTERNAL.
   with U+FFFD for each bad sequence, as smock reads header values: the
   octets `61 c3 28 62` print as `"a�(b"`. Two map keys that print alike
   are one key, and the last entry wins.
+- **Groups.** A group is a message field that protobuf delimits with a
+  start tag and an end tag instead of a length. smock prints, matches and
+  writes it as a message, under the JSON name of its field:
+  `repeated group Stop = 2 { optional string city = 3; }` prints as
+  `"stop":[{"city":"Paris"}]`, groups nested in groups included. A group
+  whose end tag names another field, or that the message ends inside,
+  does not parse, as protobuf's parsers refuse it: the call gets
+  INTERNAL `the request message cannot be decoded`.
 
-Two kinds of type are not served, each a problem at the `path` of a Stub
-whose method's input or output type is, or reaches, one:
+#### Extensions
+
+An extension that the set declares, at the top level of a file or in a
+message, is found by the type it extends and its field number, within the
+Mock's set. It prints under its full name in brackets, as ProtoJSON
+writes it, among the message's fields in field-number order, and only when
+the message holds it, a repeated one too. A number in an extension range
+that no extension of the set has is an unknown field, and is skipped.
+With this file:
+
+```proto
+syntax = "proto2";
+
+package shop;
+
+message Order {
+  optional int64 id = 1;
+  extensions 100 to 199;
+}
+
+extend Order {
+  optional int32 priority = 100;
+}
+```
+
+a call whose `Order` has `id` 7 and `priority` 3 is journaled as
+`{"id":7,"[shop.priority]":3}`, and meets the condition
+`{"[shop.priority]": 3}`. A reply may set the same key,
+`json: {id: 7, "[shop.priority]": 3}`, and is encoded as protoc encodes
+it. An extension declared in a message is named by its full name too,
+such as `[shop.Gift.gift]` for an extension `gift` declared in
+`shop.Gift`. Templates read one with brackets:
+`${body['[shop.priority]']}`.
+
+A key in brackets, in a condition or a reply, must name an extension of
+the set that extends the type at its place:
+
+```text
+shop.yaml: /stubs/0/request/body/json/[shop.urgency]: is not an extension of shop.Order: the Descriptor set has no extension shop.urgency
+shop.yaml: /stubs/1/request/body/json/[shop.priority]: is not an extension of shop.Itinerary: shop.priority extends shop.Order
+```
+
+An extension follows the syntax of the file that declares it. One that a
+proto3 file declares, as a custom option is, holds UTF-8 strings and
+packs its repeated numbers, though the message it extends is proto2.
+
+#### What is not served
+
+Three kinds of type are not served, each a problem at the `path` of a
+Stub whose method's input or output type is, or reaches, one through its
+fields or its extensions:
 
 - a type of an editions file, such as a file with `edition = "2023"`, an
   enum included. Editions come in a later spec;
+- a type that an extension declared in an editions file extends, since
+  what such an extension is depends on features that smock does not read;
 - a MessageSet, a message with the option `message_set_wire_format`,
   whose extensions use another wire form.
 
@@ -703,10 +772,6 @@ Stub's method reaches loads quietly. A call to such a method never reaches
 a Stub: it gets UNIMPLEMENTED ([Unmatched calls](#unmatched-calls)), or
 INTERNAL when its message is, or holds, a value of such a type, which
 smock does not decode.
-
-Groups, and types that an extension in the set extends, are not served
-yet. A Stub whose method's types have or reach one is a problem at its
-`path` too.
 
 ### The Journal and the metrics
 
@@ -993,7 +1058,8 @@ request metrics count them as rejected requests, with `mock=""` and
 A message does not parse, as protobuf's parsers refuse it, when it holds a
 proto3 string that is not UTF-8, field number 0 or one above 2^29-1, wire
 type 6 or 7, a varint, a fixed-size value or a length cut short, a packed
-field included, or messages nested deeper than 100, each map entry
+field included, a group whose end tag names another field or that it ends
+inside, or messages nested deeper than 100, each map entry and each group
 counting as a message, or when it lacks a proto2 required field
 ([proto2 types](#proto2-types)). smock cannot print a Timestamp, a
 Duration or a FieldMask path out of its range or form
