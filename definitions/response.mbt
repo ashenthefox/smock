@@ -339,7 +339,7 @@ fn File::read_response(
     }
     None => (false, false)
   }
-  {
+  let response = {
     status,
     headers,
     body,
@@ -354,6 +354,10 @@ fn File::read_response(
     encoded: None,
     grpc: grpc_reply,
   }
+  if grpc {
+    self.check_metadata_size(pointer, response)
+  }
+  response
 }
 
 ///|

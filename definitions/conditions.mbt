@@ -16,6 +16,7 @@ pub fn request_conditions(json : Json) -> Result[Conditions, Array[Diagnostic]] 
     env: @template.no_env,
     buckets: Map([]),
     sets: no_declared_sets,
+    header_size_limit: default_header_size_limit,
   }
   let conditions = file.read_conditions("", json)
   if diagnostics.is_empty() {

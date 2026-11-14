@@ -1240,9 +1240,10 @@ pub fn load(
   set : DefinitionSet,
   read_problems~ : Array[Diagnostic] = [],
   env~ : @template.Env = @template.no_env,
+  header_size_limit~ : Int32 = default_header_size_limit,
   digest? : String,
 ) -> Result[Snapshot, Array[Diagnostic]] {
-  match validate(set, read_problems~, env~) {
+  match validate(set, read_problems~, env~, header_size_limit~) {
     Ok(valid) => {
       let digest = match digest {
         Some(digest) => digest
@@ -1269,10 +1270,15 @@ pub fn load(
 /// `--template-env` lists them, with the values the caller read: by
 /// default, none. A template that reads another name is a problem. The
 /// values are not part of the digest.
+///
+/// `header_size_limit` is `--header-size-limit`, the most octets each
+/// block of a gRPC reply's metadata may take: a static reply with a larger
+/// block is a problem.
 pub fn validate(
   set : DefinitionSet,
   read_problems~ : Array[Diagnostic] = [],
   env~ : @template.Env = @template.no_env,
+  header_size_limit~ : Int32 = default_header_size_limit,
 ) -> Result[ValidSet, Array[Diagnostic]] {
   let files = sorted_by_name(set.files).map(file => {
     (file.0, parse_file(file.0, file.1))
@@ -1284,6 +1290,7 @@ pub fn validate(
     body_files~,
     env~,
     sets=declared_sets(files, body_files),
+    header_size_limit~,
   )
   for file in files {
     reader.read_file(file.0, file.1)

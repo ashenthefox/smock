@@ -135,6 +135,9 @@ priv struct Reader {
   mock_buckets : Map[String, MockBuckets]
   /// The Descriptor sets that the Mocks of any file of the set name.
   sets : DeclaredSets
+  /// The most octets each block of a static gRPC reply's metadata may
+  /// take, `--header-size-limit`.
+  header_size_limit : Int32
 }
 
 ///|
@@ -144,6 +147,7 @@ fn Reader::new(
   body_files~ : Map[String, Bytes],
   env~ : @template.Env,
   sets~ : DeclaredSets,
+  header_size_limit~ : Int32,
 ) -> Reader {
   let mock_buckets = Map([])
   for mock, keys in buckets {
@@ -156,6 +160,7 @@ fn Reader::new(
     env,
     mock_buckets,
     sets,
+    header_size_limit,
     mocks: [],
     mock_names: Map([]),
     hosts: Map([]),
@@ -284,6 +289,7 @@ fn Reader::read_file(
     env: self.env,
     buckets: self.mock_buckets,
     sets: self.sets,
+    header_size_limit: self.header_size_limit,
   }
   let top = match parsed {
     Ok(top) => top
@@ -350,6 +356,9 @@ priv struct File {
   buckets : Map[String, MockBuckets]
   /// The Descriptor sets that the Mocks name, which tell a gRPC Stub.
   sets : DeclaredSets
+  /// The most octets each block of a static gRPC reply's metadata may
+  /// take, `--header-size-limit`.
+  header_size_limit : Int32
 }
 
 ///|
