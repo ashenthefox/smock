@@ -202,7 +202,8 @@ pub fn MessageDescriptor::find_extension(
 
 ///|
 /// The extensions of the set that extend the message, in field-number
-/// order: none for a message that declares no extension range.
+/// order: none when no extension extends it, as for a message that
+/// declares no extension range.
 pub fn MessageDescriptor::extended_by(
   self : MessageDescriptor,
 ) -> ReadOnlyArray[FieldDescriptor] {
@@ -250,9 +251,9 @@ fn MessageDescriptor::field_or_extension(
 }
 
 ///|
-/// The index, as `field_or_extension` takes it, of the field of the message numbered
-/// `number`, or else of the extension of the set that extends it with that
-/// number; -1 when neither has it.
+/// The index, as `field_or_extension` takes it, of the field of the
+/// message numbered `number`, or else of the extension of the set that
+/// extends it with that number; -1 when neither has it.
 fn MessageDescriptor::field_or_extension_index(
   self : MessageDescriptor,
   number : Int32,
