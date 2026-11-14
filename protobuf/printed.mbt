@@ -101,6 +101,10 @@ pub fn DescriptorSet::printed_value(
     }
     Enum => {
       guard self.enum_of(field) is Some(type_) else { raise unfit }
+      let null_value = type_.full_name == "google.protobuf.NullValue"
+      if null_value && json is Null {
+        return json
+      }
       let number = match json {
         String(name) =>
           match type_.find_value_by_name(name) {
@@ -116,6 +120,8 @@ pub fn DescriptorSet::printed_value(
         _ => raise unfit
       }
       match type_.find_value_by_number(number) {
+        // NullValue, whose values print as null, whatever their number.
+        _ if null_value => Json::null()
         Some(value) => Json::string(value.name)
         // A closed enum, as a proto2 enum is, keeps a number it does not
         // define as an unknown field, which a message never prints.
@@ -170,10 +176,16 @@ pub fn DescriptorSet::printed_message(
     }
     raise NotOfType(wanted="an object")
   }
-  if form is Wrapper(index) {
-    return self.printed_value(message.fields[index], json)
-  }
   let unfit = NotOfType(wanted=self.wanted_message(message))
+  match (form, json) {
+    (Wrapper(index), _) =>
+      return self.printed_value(message.fields[index], json)
+    // Their members are the caller's to check, as a message's are.
+    (Struct(_) | Any, Object(_)) | (ListValue(_), Array(_)) => return json
+    (Struct(_) | Any | ListValue(_), _) => raise unfit
+    (Value, _) => return printed_json_value(json)
+    (Timestamp | Duration | FieldMask, _) => ()
+  }
   // The value as ProtoJSON reads it, encoded, then printed as
   // `decode_json` prints it.
   guard json is String(text) else { raise unfit }
@@ -192,6 +204,25 @@ pub fn DescriptorSet::printed_message(
   } else {
     raise NotPrinted(printed~)
   }
+}
+
+///|
+/// `json`, a value that a google.protobuf.Value holds, as `decode_json`
+/// prints it: a number is printed as a double is, and any other value is
+/// returned as it is. The members of an object, a Struct, and the elements
+/// of an array, a ListValue, are Values too, and the caller's to check.
+///
+/// Raises `NotOfType` for a number beyond the range of a double, which no
+/// Value holds.
+pub fn printed_json_value(json : Json) -> Json raise PrintedError {
+  guard json is Number(_) else { return json }
+  let n = floating(json) catch {
+    _ =>
+      raise NotOfType(
+        wanted="a JSON value: null, a number within the range of a double, a string, true or false, an object or an array",
+      )
+  }
+  number_of(n.to_string())
 }
 
 ///|

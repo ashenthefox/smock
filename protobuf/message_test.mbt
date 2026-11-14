@@ -270,51 +270,6 @@ test "messages may nest 100 deep, and no deeper" {
 }
 
 ///|
-test "a field of a well-known type that is not served yet, such as Struct, and such a type as the whole message, are not decoded" {
-  let struct_ = file_proto(
-    "google/protobuf/struct.proto",
-    package_name="google.protobuf",
-    body=w => message_field(w, 4, message_proto("Struct")),
-  )
-  let stamped = file_proto(
-    "stamped.proto",
-    package_name="stamped",
-    dependencies=["google/protobuf/struct.proto"],
-    body=w => {
-      message_field(
-        w,
-        4,
-        message_proto("Stamped", body=w => {
-          message_field(
-            w,
-            2,
-            field_proto("at", 1, 11, type_name=".google.protobuf.Struct"),
-          )
-        }),
-      )
-    },
-  )
-  let set = @protobuf.read_descriptor_set(set_of([struct_, stamped])) catch {
-    err => fail("not a set: \{err}")
-  }
-  let errors = ["stamped.Stamped", "google.protobuf.Struct"].map(name => {
-    guard set.find_message(name) is Some(message) else { abort("no \{name}") }
-    try @protobuf.decode_json(set, message, b""[:]) catch {
-      err => err.to_string()
-    } noraise {
-      _ => "decoded"
-    }
-  })
-  inspect(
-    errors.join("\n"),
-    content=(
-      #|octet 0: the field at has the well-known type google.protobuf.Struct, which smock does not decode yet
-      #|octet 0: the message is of the well-known type google.protobuf.Struct, which smock does not decode yet
-    ),
-  )
-}
-
-///|
 test "a message is decoded into compact JSON, each field under its JSON name" {
   inspect(
     decoded(greeter_set, "helloworld.HelloRequest", fixture(hello_request)),

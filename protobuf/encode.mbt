@@ -6,8 +6,7 @@
 // when it says `packed = true`, and map entries sorted by key, each with
 // its key and its value, as protoc's deterministic output writes them.
 // Types of proto3 and proto2 files are encoded, the well-known types in
-// their ProtoJSON forms (well_known.mbt), but for MessageSets and the
-// well-known types that is_unserved_well_known names.
+// their ProtoJSON forms (well_known.mbt), but for MessageSets.
 
 ///|
 /// Why JSON is not a message of the type it is encoded as. `pointer` is the
@@ -45,7 +44,8 @@ let no_oneofs : FixedArray[Int32] = []
 /// it.
 ///
 /// It reads JSON as ProtoJSON reads it. A member's key is the field's
-/// proto name or its JSON name. `null` leaves a field unset. Integers are
+/// proto name or its JSON name. `null` leaves a field unset, but sets
+/// `null_value` in a google.protobuf.Value, and a NullValue. Integers are
 /// numbers or strings, in decimal, with an exponent or a fraction of
 /// zeros if need be, and 64-bit integers are exact at any size. Floats
 /// and doubles are numbers or strings, or `"NaN"`, `"Infinity"` and
@@ -55,16 +55,19 @@ let no_oneofs : FixedArray[Int32] = []
 /// enum, as a proto2 enum is, defines. A map is an object whose keys are
 /// the map's keys written as strings: integers in decimal, and `true` and
 /// `false`. Every singular field of a proto2 message is written whenever
-/// it is set, and a message must give each of its required fields.
+/// it is set, and a message must give each of its required fields. The
+/// well-known types are read in their ProtoJSON forms; an Any's type is
+/// the type of this set that its `@type` names.
 ///
 /// Raises `EncodeError`, at the JSON Pointer of the value at fault, for
 /// JSON that is not such a message: one that is not an object, a key that
 /// names no field, a field given by both its names, two members of one
-/// oneof, `null` in a repeated field or as a map value, a value of the
-/// wrong type or out of its type's range, a message without one of its
-/// required fields, and messages nested deeper than 100. It also raises
-/// for a type it does not encode: a well-known type or a type of an
-/// editions file, not yet, and a MessageSet.
+/// oneof, `null` in a repeated field or as a map value but of a Value or a
+/// NullValue, a value of the wrong type or out of its type's range, a
+/// message without one of its required fields, an Any whose type this set
+/// does not define, and messages nested deeper than 100. It also raises
+/// for a type it does not encode: a type of an editions file, not yet, and
+/// a MessageSet.
 pub fn DescriptorSet::encode_json(
   self : DescriptorSet,
   message : MessageDescriptor,
@@ -99,14 +102,9 @@ pub fn DescriptorSet::encode_json(
 
 ///|
 /// Why the encoder does not encode messages of the type `message`, or
-/// `None` when it does: a well-known type and a type of an editions file
-/// are not encoded yet, and a MessageSet is not encoded.
+/// `None` when it does: a type of an editions file is not encoded yet, and
+/// a MessageSet is not encoded.
 fn not_encoded(message : MessageDescriptor) -> String? {
-  if is_unserved_well_known(message.full_name) {
-    return Some(
-      "smock does not encode \{message.full_name} yet: it is a well-known type",
-    )
-  }
   if message.message_set_wire_format {
     return Some(
       "smock does not encode \{message.full_name}: it is a MessageSet, whose extensions use another wire form",
@@ -171,7 +169,8 @@ fn DescriptorSet::write_message(
         message="names the field \{field.name} of \{message.full_name}, as \"\{other}\" does: give a field once, by its proto name or its JSON name",
       )
     }
-    if field.oneof_index is Some(oneof) && !(value is Null) {
+    if field.oneof_index is Some(oneof) &&
+      (!(value is Null) || self.takes_null(field)) {
       let earlier = oneofs[oneof]
       if earlier >= 0 {
         raise EncodeError(
@@ -189,7 +188,11 @@ fn DescriptorSet::write_message(
   for n in 0..<order.length() {
     let index = order[n]
     let field = message.field_or_extension(index)
-    guard values[index] is Some(value) && !(value is Null) else {
+    guard values[index] is Some(value) &&
+      (
+        !(value is Null) ||
+        (self.takes_null(field) && !(field.label is Repeated))
+      ) else {
       if field.label is Required && index < fields.length() {
         raise EncodeError(
           pointer="",
@@ -295,7 +298,8 @@ fn DescriptorSet::write_field(
   json : Json,
   depth : Int32,
 ) -> Unit raise EncodeError {
-  if json is Null {
+  // `null` leaves a field unset, but sets a Value or a NullValue.
+  if json is Null && (field.label is Repeated || !self.takes_null(field)) {
     return
   }
   if field.label is Repeated {
@@ -320,6 +324,25 @@ fn DescriptorSet::write_field(
         message="must be \{self.wanted(field)}: the \{field_text(field, message)} has the type \{type_of(field)}",
       )
     error => raise nested(error, "")
+  }
+}
+
+///|
+/// Whether `null` is a value of `field`, a field of a message of this set,
+/// or of each of its elements or map values: a google.protobuf.Value, in
+/// which it sets `null_value`, or a google.protobuf.NullValue.
+fn DescriptorSet::takes_null(
+  self : DescriptorSet,
+  field : FieldDescriptor,
+) -> Bool {
+  match field.type_ {
+    Enum =>
+      self.enum_of(field) is Some(type_) &&
+      type_.full_name == "google.protobuf.NullValue"
+    Message =>
+      self.message_of(field) is Some(type_) &&
+      well_known_form(type_) is Some(Value)
+    _ => false
   }
 }
 
@@ -472,7 +495,7 @@ fn DescriptorSet::write_list(
   let out = if packed { Writer() } else { writer }
   // An element's JSON Pointer is made only for an error.
   for i, item in items {
-    if item is Null {
+    if item is Null && !self.takes_null(field) {
       raise EncodeError(
         pointer="/\{i}",
         message="cannot be null: it is an element of the repeated \{field_text(field, message)}",
@@ -576,7 +599,7 @@ fn DescriptorSet::write_map(
     let index = order[i]
     let key = keys[index]
     let value = values[index]
-    if value is Null {
+    if value is Null && !self.takes_null(value_field) {
       raise EncodeError(
         pointer=pointer_of(key),
         message="cannot be null: it is a value of the map field \{field.name} of \{message.full_name}",
@@ -815,11 +838,10 @@ fn DescriptorSet::scalar_bits(
       }
     }
     Enum => {
-      guard self.enum_of(field) is Some(type_) &&
-        !is_well_known(type_.full_name) else {
-        raise Unfit
-      }
+      guard self.enum_of(field) is Some(type_) else { raise Unfit }
       match json {
+        // NullValue's one value, as ProtoJSON writes it.
+        Null if type_.full_name == "google.protobuf.NullValue" => 0
         String(name) =>
           match type_.find_value_by_name(name) {
             Some(value) => value.number.to_int64().reinterpret_as_uint64()
@@ -878,6 +900,7 @@ fn DescriptorSet::wanted(
     Bytes => "a string in base64, standard or URL-safe, with or without padding"
     Enum =>
       match self.enum_of(field) {
+        Some(type_) if type_.full_name == "google.protobuf.NullValue" => "null"
         Some(type_) if type_.syntax is Proto2 =>
           "the name or the number of a value of \{type_.full_name}"
         Some(type_) =>

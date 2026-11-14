@@ -1,9 +1,9 @@
-// Written for smock's tests: methods whose output types reach types that
-// gRPC Stubs do not serve yet, the well-known types Struct and Value, at
-// the top or through nested messages, and a type of a proto2 file, which
-// they serve; and a method whose input type has fields of the well-known
-// types Struct, Value and ListValue, singular, repeated and as a map's
-// values.
+// Written for smock's tests: methods whose output types reach the
+// well-known types Struct and Value, at the top or through nested
+// messages, and a type of a proto2 file; and a method whose input type
+// has fields of the well-known types Struct, Value and ListValue,
+// singular, repeated and as a map's values. gRPC Stubs serve all of them
+// now; the directory's name is from when they did not.
 syntax = "proto3";
 
 package unserved;

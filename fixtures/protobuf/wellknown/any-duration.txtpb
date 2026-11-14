@@ -1,0 +1,2 @@
+# The ticket's example: an Any that holds a Duration of 1.5 s.
+[type.googleapis.com/google.protobuf.Duration] { seconds: 1 nanos: 500000000 }

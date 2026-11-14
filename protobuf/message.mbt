@@ -1,9 +1,8 @@
 // Messages decoded from their descriptors into smock's decoded form, the
 // JSON text the engine, the Journal and templates see. For now the decoder
-// serves every field of the types of proto3 and proto2 files but groups and
-// those of the well-known types that is_unserved_well_known names
-// (well_known.mbt prints the others). encode.mbt encodes messages from
-// JSON.
+// serves every field of the types of proto3 and proto2 files but groups;
+// well_known.mbt prints the well-known types. encode.mbt encodes messages
+// from JSON.
 
 ///|
 /// The index in `fields` of the message's field numbered `number`, or -1,
@@ -95,34 +94,33 @@ let no_runs : Array[BytesView] = []
 /// repeats, the last entry wins. Unknown fields, and fields sent with
 /// another wire type than their type's, are skipped.
 ///
-/// The well-known types Timestamp, Duration, FieldMask, the wrappers and
-/// Empty are printed in their ProtoJSON forms, at any place, the whole
-/// message included: a Timestamp as a string of the date and time in UTC,
-/// such as `"1970-01-01T00:00:01.500Z"`, a Duration as a string of
-/// seconds, such as `"1.500s"`, each with 0, 3, 6 or 9 fractional digits; a
-/// FieldMask as its paths in lowerCamelCase, joined by commas; a wrapper as
-/// the value it wraps, an Int64Value or a UInt64Value as a number, a
-/// FloatValue as a float; and Empty as `{}`.
+/// The well-known types are printed in their ProtoJSON forms, at any
+/// place, the whole message included: a Timestamp as a string of the date
+/// and time in UTC, such as `"1970-01-01T00:00:01.500Z"`, a Duration as a
+/// string of seconds, such as `"1.500s"`, each with 0, 3, 6 or 9 fractional
+/// digits; a FieldMask as its paths in lowerCamelCase, joined by commas; a
+/// wrapper as the value it wraps, an Int64Value or a UInt64Value as a
+/// number, a FloatValue as a float; Empty as `{}`; a Struct, a Value and a
+/// ListValue as the JSON values they hold, a Struct's keys in order, and a
+/// NullValue as `null`; and an Any as an object of its type URL as
+/// `@type`, then the fields of the message it holds, a type of the set
+/// that the URL names, or its form as `value` when it is a well-known type
+/// that has one, an Empty's object of no fields included.
 ///
 /// Raises `DecodeError` when the input is not protobuf, when a proto3
 /// string is not UTF-8, when a message lacks a proto2 required field, as
 /// protobuf's parsers refuse it, when messages nest deeper than 100, a map
-/// entry counting as a message, when a Timestamp, a Duration or a FieldMask
-/// has a value that ProtoJSON cannot print, when a message it prints is a
-/// type of an editions file or a MessageSet, and when a message it prints
-/// is or has a field that it does not decode yet: a group, or a well-known
-/// type that `is_unserved_well_known` names, a map's values included.
+/// entry counting as a message, when a well-known type has a value that
+/// ProtoJSON cannot print, such as a Timestamp out of range, a Value that
+/// holds nothing or NaN, or an Any whose type the set lacks, when a message
+/// it prints is a type of an editions file or a MessageSet, and when a
+/// message it prints is or has a field that it does not decode yet: a
+/// group.
 pub fn decode_json(
   set : DescriptorSet,
   message : MessageDescriptor,
   input : BytesView,
 ) -> Bytes raise DecodeError {
-  if is_unserved_well_known(message.full_name) {
-    raise DecodeError(
-      position=input.start_offset(),
-      message="the message is of the well-known type \{message.full_name}, which smock does not decode yet",
-    )
-  }
   let out = @buffer.Buffer(size_hint=2 * input.length() + 16)
   set.print_message(out, message, [input], 0)
   out.to_bytes()
@@ -376,20 +374,34 @@ fn DescriptorSet::print_message(
     }
     out.write_byte(b':')
     if field.label is Repeated {
-      let runs = match value {
-        Some(Elements(runs)) => runs
-        _ => no_runs
-      }
-      match self.message_of(field) {
-        Some(entry) if entry.map_entry && is_map_entry(entry) =>
-          self.print_map(out, entry, runs, depth)
-        _ => self.print_list(out, field, runs, depth)
-      }
+      self.print_repeated(out, field, value, depth)
     } else {
       self.print_value(out, field, value, depth)
     }
   }
   out.write_byte(b'}')
+}
+
+///|
+/// Prints to `out` the value `value` of `field`, a repeated field of a
+/// message `depth` messages deep: a map as an object, or else a list as an
+/// array.
+fn DescriptorSet::print_repeated(
+  self : DescriptorSet,
+  out : @buffer.Buffer,
+  field : FieldDescriptor,
+  value : Value?,
+  depth : Int32,
+) -> Unit raise DecodeError {
+  let runs = match value {
+    Some(Elements(runs)) => runs
+    _ => no_runs
+  }
+  match self.message_of(field) {
+    Some(entry) if entry.map_entry && is_map_entry(entry) =>
+      self.print_map(out, entry, runs, depth)
+    _ => self.print_list(out, field, runs, depth)
+  }
 }
 
 ///|
@@ -863,6 +875,10 @@ fn DescriptorSet::print_number(
     Enum => {
       let number = bits.to_uint().reinterpret_as_int()
       match self.enum_of(field) {
+        // NullValue, whose one value ProtoJSON prints as `null`, whatever
+        // its number.
+        Some(type_) if type_.full_name == "google.protobuf.NullValue" =>
+          out.write_bytes(b"null")
         Some(type_) =>
           match type_.find_value_by_number(number) {
             Some(value) => write_json_name(out, value.name)
@@ -900,48 +916,14 @@ fn EnumDescriptor::defines(self : EnumDescriptor, bits : UInt64) -> Bool {
 ///|
 /// Why `decode_json` does not decode `field` yet, a field of a message of
 /// this set or an extension that extends one, or `None` when it does: it
-/// is declared in an editions file, as an extension may be, or is of a
-/// well-known type that it does not serve yet, as `is_unserved_well_known`
-/// says, or a map whose values are.
+/// is declared in an editions file, as an extension may be.
 fn DescriptorSet::not_decoded(
   self : DescriptorSet,
   field : FieldDescriptor,
 ) -> String? {
+  ignore(self)
   if field.syntax is Editions {
-    return Some("is declared in an editions file")
-  }
-  if field.label is Repeated &&
-    self.message_of(field) is Some(entry) &&
-    entry.map_entry &&
-    is_map_entry(entry) {
-    return match
-      self.unserved_well_known_of(entry.fields[entry.field_index(2)]) {
-      Some(name) =>
-        Some("is a map whose values have the well-known type \{name}")
-      None => None
-    }
-  }
-  match self.unserved_well_known_of(field) {
-    Some(name) => Some("has the well-known type \{name}")
-    None => None
-  }
-}
-
-///|
-/// The full name of the type of `field`, a field of a message of this set,
-/// when it is a well-known type that the module does not serve yet, as
-/// `is_unserved_well_known` says.
-fn DescriptorSet::unserved_well_known_of(
-  self : DescriptorSet,
-  field : FieldDescriptor,
-) -> String? {
-  let name = match (self.message_of(field), self.enum_of(field)) {
-    (Some(type_), _) => type_.full_name
-    (_, Some(type_)) => type_.full_name
-    _ => return None
-  }
-  if is_unserved_well_known(name) {
-    Some(name)
+    Some("is declared in an editions file")
   } else {
     None
   }

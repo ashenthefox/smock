@@ -318,6 +318,26 @@ hex_test extensions/edition.binpb edition_extensions_set "The Descriptor set of 
 hex_test extensions/edition.binpb edition_extensions_set "The Descriptor set of fixtures/protobuf/extensions/edition.proto and shop.proto, which it imports, fixtures/protobuf/extensions/edition.binpb, in hex." definitions
 hex_test extensions/reach.binpb reach_extensions_set "The Descriptor set of fixtures/protobuf/extensions/reach.proto and its imports, fixtures/protobuf/extensions/reach.binpb, in hex." definitions
 
+# Methods whose types hold Struct, Value, ListValue, NullValue and Any,
+# built from protobuf's files and gRPC's helloworld.proto beside them, and
+# requests and replies of them.
+descriptor_set wellknown dynamic.binpb dynamic.proto
+for name in any-hello any-duration any-empty any-missing; do
+  message wellknown dynamic.proto google.protobuf.Any "$name"
+done
+message wellknown dynamic.proto dynamic.Document document
+message wellknown dynamic.proto dynamic.Document document-nulls
+message wellknown dynamic.proto google.protobuf.Struct struct
+message wellknown dynamic.proto google.protobuf.Value value
+message wellknown dynamic.proto google.protobuf.ListValue list
+hex_test wellknown/dynamic.binpb dynamic_set "The Descriptor set of fixtures/protobuf/wellknown/dynamic.proto, fixtures/protobuf/wellknown/dynamic.binpb, in hex." protobuf "$wellknown_licence"
+hex_test wellknown/dynamic.binpb dynamic_set "The Descriptor set of fixtures/protobuf/wellknown/dynamic.proto, fixtures/protobuf/wellknown/dynamic.binpb, in hex." definitions "$wellknown_licence"
+hex_test wellknown/document.binpb document "A Document with every field set, as protoc encodes it: fixtures/protobuf/wellknown/document.binpb, in hex." protobuf
+hex_test wellknown/document-nulls.binpb document_nulls "A Document of what a reply's nulls set, as protoc encodes it: fixtures/protobuf/wellknown/document-nulls.binpb, in hex." protobuf
+for name in any-hello any-duration any-empty any-missing; do
+  hex_test "wellknown/$name.binpb" "$(echo "$name" | tr - _)" "The Any of fixtures/protobuf/wellknown/$name.txtpb, as protoc encodes it, in hex." protobuf
+done
+
 # The end of the list of fixtures. With --check: every file the script
 # wrote, compared with the committed one.
 if [ -n "$check" ]; then

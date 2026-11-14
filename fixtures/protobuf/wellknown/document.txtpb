@@ -1,0 +1,34 @@
+# Every field set: a Struct with a value of each kind, nested Structs and
+# ListValues, Values of each kind, NullValue fields, and Anys that hold a
+# message, a Duration, an Empty, a Value and an Any.
+labels {
+  fields { key: "team" value { string_value: "core" } }
+  fields { key: "count" value { number_value: 3 } }
+  fields { key: "none" value { null_value: NULL_VALUE } }
+  fields { key: "on" value { bool_value: true } }
+  fields {
+    key: "nested"
+    value {
+      struct_value {
+        fields { key: "sizes" value { list_value { values { number_value: 1.5 } values { number_value: 1e21 } } } }
+        fields { key: "empty" value { struct_value {} } }
+      }
+    }
+  }
+}
+value { list_value { values { string_value: "x" } values { null_value: NULL_VALUE } values { list_value {} } } }
+list { values { number_value: -0.25 } values { bool_value: false } }
+nothing: NULL_VALUE
+values { string_value: "a\"b" }
+values { number_value: 0 }
+by_name { key: "b" value { string_value: "B" } }
+by_name { key: "a" value { null_value: NULL_VALUE } }
+attachment { [type.googleapis.com/helloworld.HelloRequest] { name: "Tom" } }
+attachments { [type.googleapis.com/google.protobuf.Duration] { seconds: 1 nanos: 500000000 } }
+attachments { [type.googleapis.com/google.protobuf.Empty] {} }
+attachments { [type.googleapis.com/google.protobuf.Value] { number_value: 2 } }
+attachments { [type.googleapis.com/google.protobuf.Struct] { fields { key: "k" value { bool_value: true } } } }
+attachments { [type.googleapis.com/google.protobuf.Any] { [type.googleapis.com/helloworld.HelloRequest] { name: "Ann" } } }
+none: NULL_VALUE
+maybe: NULL_VALUE
+nothings: [NULL_VALUE, NULL_VALUE]

@@ -209,39 +209,23 @@ fn File::encode_reply(
 }
 
 ///|
-/// What a problem says of the well-known types that gRPC Stubs do not serve
-/// yet, after the field or the type that has one.
-let unserved_well_known : String = "and gRPC Stubs serve no Any, Struct, Value, ListValue or NullValue so far"
-
-///|
 /// Reports at `pointer`, a gRPC Stub's path, what gRPC Stubs do not serve
 /// of `output`, the output type of its method, a message of `set`, and of
 /// each type it reaches through its fields and the extensions that extend
 /// it, each once, a map's values included: what `File::check_reached` and
-/// `File::check_field` refuse, and a well-known type that
-/// `@protobuf.is_unserved_well_known` names, as the type itself or as a
-/// field's or an extension's. Every other field is served, groups
-/// included, as `File::check_input` words its problems. Returns whether
-/// every type it reaches is served.
+/// `File::check_field` refuse. Every other field is served, groups and the
+/// well-known types included, as `File::check_input` words its problems.
+/// Returns whether every type it reaches is served.
 fn File::check_output(
   self : File,
   pointer : String,
   set : @protobuf.DescriptorSet,
   output : @protobuf.MessageDescriptor,
 ) -> Bool {
-  let not_served = "the output type \{output.full_name} is not served yet"
-  if @protobuf.is_unserved_well_known(output.full_name) {
-    self.error(
-      pointer,
-      "\{not_served}: it is a well-known type, \{unserved_well_known}",
-    )
-    return false
-  }
   let mut served = true
   let seen : Set[String] = Set([output.full_name])
   let pending = [output]
   while pending.pop() is Some(message) {
-    let reached = message.full_name != output.full_name
     if !self.check_reached(pointer, "output", output, message) {
       served = false
       continue
@@ -258,24 +242,10 @@ fn File::check_output(
           entry.find_field_by_number(2).unwrap_or(field)
         _ => field
       }
-      let type_ = set.message_of(value)
-      let name = match (type_, set.enum_of(value)) {
-        (Some(type_), _) => type_.full_name
-        (_, Some(type_)) => type_.full_name
-        _ => continue
+      if set.message_of(value) is Some(type_) && !seen.contains(type_.full_name) {
+        seen.add(type_.full_name)
+        reached_types.push(type_)
       }
-      if !@protobuf.is_unserved_well_known(name) {
-        if type_ is Some(type_) && !seen.contains(name) {
-          seen.add(name)
-          reached_types.push(type_)
-        }
-        continue
-      }
-      self.error(
-        pointer,
-        "\{not_served}: \{field_subject(field, message, reached~)} has the well-known type \{name}, \{unserved_well_known}",
-      )
-      served = false
     }
     // The types this one reaches are checked next, in the order of its
     // fields.
@@ -384,32 +354,21 @@ fn File::check_field(
 /// of `input`, the input type of its method, a message of `set`, and of
 /// each type it reaches through its fields and the extensions that extend
 /// it, a map's values included, each once: what `File::check_reached` and
-/// `File::check_field` refuse, and a well-known type that
-/// `@protobuf.is_unserved_well_known` names, as the type itself, as a
-/// field's or an extension's, or as a map's values. Every other field or
-/// extension is served, singular or repeated, a map or in a oneof: one of
-/// any scalar type, of an enum, or of a message or a group, which is
-/// checked in turn, the other well-known types included. Returns whether
-/// every type it reaches is served.
+/// `File::check_field` refuse. Every other field or extension is served,
+/// singular or repeated, a map or in a oneof: one of any scalar type, of an
+/// enum, or of a message or a group, which is checked in turn, the
+/// well-known types included. Returns whether every type it reaches is
+/// served.
 fn File::check_input(
   self : File,
   pointer : String,
   set : @protobuf.DescriptorSet,
   input : @protobuf.MessageDescriptor,
 ) -> Bool {
-  let not_served = "the input type \{input.full_name} is not served yet"
-  if @protobuf.is_unserved_well_known(input.full_name) {
-    self.error(
-      pointer,
-      "\{not_served}: it is a well-known type, \{unserved_well_known}",
-    )
-    return false
-  }
   let mut served = true
   let seen : Set[String] = Set([input.full_name])
   let pending = [input]
   while pending.pop() is Some(message) {
-    let reached = message.full_name != input.full_name
     if !self.check_reached(pointer, "input", input, message) {
       served = false
       continue
@@ -421,37 +380,15 @@ fn File::check_input(
         continue
       }
       // A map's values are checked as the field's own values are.
-      let (value, map) = match set.message_of(field) {
+      let value = match set.message_of(field) {
         Some(entry) if field.label is Repeated && entry.map_entry =>
-          match entry.find_field_by_number(2) {
-            Some(value) => (value, true)
-            None => (field, false)
-          }
-        _ => (field, false)
+          entry.find_field_by_number(2).unwrap_or(field)
+        _ => field
       }
-      let name = match (set.message_of(value), set.enum_of(value)) {
-        (Some(type_), _) => type_.full_name
-        (_, Some(type_)) => type_.full_name
-        _ => continue
+      if set.message_of(value) is Some(type_) && !seen.contains(type_.full_name) {
+        seen.add(type_.full_name)
+        reached_types.push(type_)
       }
-      if !@protobuf.is_unserved_well_known(name) {
-        if set.message_of(value) is Some(type_) && !seen.contains(name) {
-          seen.add(name)
-          reached_types.push(type_)
-        }
-        continue
-      }
-      let field_name = field_subject(field, message, reached~)
-      let problem = if map {
-        "is a map whose values have the well-known type \{name}"
-      } else {
-        "has the well-known type \{name}"
-      }
-      self.error(
-        pointer,
-        "\{not_served}: \{field_name} \{problem}, \{unserved_well_known}",
-      )
-      served = false
     }
     // The types this one reaches are checked next, in the order of its
     // fields.
@@ -476,29 +413,6 @@ fn fields_and_extensions(
     all.push(extension)
   }
   all
-}
-
-///|
-/// `field`, a field of `message` or an extension that extends it, as a
-/// problem names it: `its field` and its name, or `its extension` and its
-/// full name, when `message` is a method's type; or, when it is a `reached`
-/// type, the field or the extension of the type, followed by `a type it
-/// reaches,`.
-fn field_subject(
-  field : @protobuf.FieldDescriptor,
-  message : @protobuf.MessageDescriptor,
-  reached~ : Bool,
-) -> String {
-  let what = if field.extendee != "" {
-    "extension \{field.full_name}"
-  } else {
-    "field \{field.name}"
-  }
-  if reached {
-    "the \{what} of \{message.full_name}, a type it reaches,"
-  } else {
-    "its \{what}"
-  }
 }
 
 ///|
