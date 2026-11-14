@@ -234,3 +234,70 @@ async test "the ticket's example: a templated reply that renders 4 KiB of traile
     })
   })
 }
+
+///|
+/// The gRPC status of `reply` as the client reads it, from its trailers or
+/// its Trailers-Only block: `grpc-status`, then `grpc-message` if any.
+fn grpc_status_of(reply : GrpcReply) -> String {
+  let fields = reply.trailers.unwrap_or(reply.head)
+  let shown = []
+  for field in fields {
+    if field.0 is ("grpc-status" | "grpc-message") {
+      shown.push("\{field.0}: \{field.1}")
+    }
+  }
+  shown.join(", ")
+}
+
+///|
+async test "a templated reply whose trailers or header block render over --header-size-limit gets INTERNAL, and a static reply that takes the limit exactly is served, unless smock-mock pushes it over" {
+  // A static Trailers-Only block of 250 + 1798 = 2048 octets.
+  let stubs = pad_stubs(copies=3, n=1798)
+  with_greeter_set([("greeter.yaml", stubs)], dir => {
+    let _ = with_smock(
+      ["--dir", dir, "--port", "0", "--header-size-limit", "2048"],
+      smock => {
+        let client = smock.h2c()
+        defer client.close()
+        let call = (case : String, pad : Int32, authority : String) => {
+          let reply = client.call("/helloworld.Greeter/SayHello", authority~, headers=[
+            ("x-case", case),
+            ("x-pad", "p".repeat(pad)),
+          ])
+          "\{case}, x-pad of \{pad}, to \{authority}: \{grpc_status_of(reply)}"
+        }
+        inspect(
+          [
+            call("trailers", 1000, "localhost"),
+            call("headers", 1000, "localhost"),
+            call("headers", 10, "localhost"),
+            call("static", 0, "localhost"),
+            call("static", 0, "other.svc"),
+          ].join("\n"),
+          content=(
+            #|trailers, x-pad of 1000, to localhost: grpc-status: 13, grpc-message: reply metadata too large
+            #|headers, x-pad of 1000, to localhost: grpc-status: 13, grpc-message: reply metadata too large
+            #|headers, x-pad of 10, to localhost: grpc-status: 0
+            #|static, x-pad of 0, to localhost: grpc-status: 5
+            #|static, x-pad of 0, to other.svc: grpc-status: 13, grpc-message: reply metadata too large
+          ),
+        )
+        // The trailers: grpc-status: 0, 44, and three x-trace, 7 + 1000 +
+        // 32 each. The header block: :status, content-type and date, 167,
+        // and the same three. Through the Default Mock, smock-mock:
+        // greeter; via=default takes 10 + 20 + 32 more.
+        let (_, page) = smock.journal()
+        inspect(
+          answers(page),
+          content=(
+            #|"trailers" 200 "INTERNAL" templateError={"at":"/response","message":"the reply's trailers would take 3161 bytes, over --header-size-limit, 2048"}
+            #|"headers" 200 "INTERNAL" templateError={"at":"/response","message":"the reply's header block would take 3284 bytes, over --header-size-limit, 2048"}
+            #|"headers" 200 "OK"
+            #|"static" 200 "NOT_FOUND"
+            #|"static" 200 "INTERNAL" templateError={"at":"/response","message":"the reply's Trailers-Only block would take 2110 bytes, over --header-size-limit, 2048"}
+          ),
+        )
+      },
+    )
+  })
+}
