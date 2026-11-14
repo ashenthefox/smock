@@ -15,3 +15,41 @@ test "the ticket's example: an Order with the id 7 and no note decodes as {\"id\
     ),
   )
 }
+
+///|
+test "a message without a required field does not parse, nested ones and a map's values included, as protobuf's parsers refuse it" {
+  // An Order without its id, as protoc encodes draft.txtpb.
+  inspect(
+    decoded(shipping_set, "shipping.Order", b"\x12\x05no id"),
+    content="error: octet 0: the message shipping.Order lacks its required field id",
+  )
+  // A Parcel whose order lacks its id, as protoc encodes
+  // parcel-without-ids.txtpb: the error is at the nested message.
+  inspect(
+    decoded(shipping_set, "shipping.Parcel", b"\x2a\x08\x12\x06nested"),
+    content="error: octet 2: the message shipping.Order lacks its required field id",
+  )
+  // The same in an element of orders, and in a value of by_id.
+  inspect(
+    decoded(shipping_set, "shipping.Parcel", b"\x32\x02\x08\x01\x32\x00"),
+    content="error: octet 6: the message shipping.Order lacks its required field id",
+  )
+  inspect(
+    decoded(shipping_set, "shipping.Parcel", b"\x7a\x04\x08\x01\x12\x00"),
+    content="error: octet 6: the message shipping.Order lacks its required field id",
+  )
+  // An entry of by_id without a value holds an Order without an id too.
+  inspect(
+    decoded(shipping_set, "shipping.Parcel", b"\x7a\x02\x08\x01"),
+    content="error: octet 2: the message shipping.Order lacks its required field id",
+  )
+  // Each one with its id parses.
+  inspect(
+    decoded(
+      shipping_set, "shipping.Parcel", b"\x2a\x02\x08\x01\x32\x02\x08\x02\x7a\x06\x08\x01\x12\x02\x08\x03",
+    ),
+    content=(
+      #|{"history":[],"weights":[],"sizes":[],"order":{"id":1},"orders":[{"id":2}],"states":{},"tags":[],"notes":{},"byId":{"1":{"id":3}}}
+    ),
+  )
+}

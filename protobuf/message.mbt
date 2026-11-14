@@ -267,6 +267,12 @@ fn DescriptorSet::print_message(
       )
     }
     let value = values[index]
+    if value is None && field.label is Required {
+      raise DecodeError(
+        position=records[0].start_offset(),
+        message="the message \{message.full_name} lacks its required field \{field.name}",
+      )
+    }
     if value is None &&
       !(field.label is Repeated) &&
       (proto2 || field.oneof_index is Some(_) || field.type_ is Message) {
