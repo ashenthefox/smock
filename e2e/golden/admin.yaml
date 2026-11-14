@@ -844,6 +844,7 @@ stubs:
               grpc:
                 status: OK
                 message: string
+                trailers: {}
             responses:
               - weight: 1
                 status: 200
@@ -899,6 +900,7 @@ stubs:
                 grpc:
                   status: OK
                   message: string
+                  trailers: {}
             variables: {}
             dataWrites:
               - op: set
@@ -1085,6 +1087,7 @@ stubs:
             grpc:
               status: OK
               message: string
+              trailers: {}
           responses:
             - weight: 1
               status: 200
@@ -1140,6 +1143,7 @@ stubs:
               grpc:
                 status: OK
                 message: string
+                trailers: {}
           variables: {}
           dataWrites:
             - op: set
