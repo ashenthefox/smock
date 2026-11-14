@@ -442,3 +442,130 @@ test "a value that ProtoJSON does not read as its type, or that is out of its ra
     ),
   )
 }
+
+///|
+/// What `printed_value` makes of each of `texts`, JSON text, as a value of
+/// the field `name` of wellknown.Known, one per line: the text, then what it
+/// gives.
+fn known_values(name : String, texts : Array[String]) -> String {
+  texts
+  .map(text => {
+    "\{text} -> \{printed_form(wellknown_set, "wellknown.Known", name, text)}"
+  })
+  .join("\n")
+}
+
+///|
+test "a Duration or a Timestamp in a condition must be written as smock prints it: \"1.5s\" names \"1.500s\", and an offset other than Z names the time in UTC" {
+  inspect(
+    known_values("ttl", [
+      "\"1.500s\"", "\"1.5s\"", "\"1.000000000s\"", "\"-0.5s\"", "\"01s\"", "\"0s\"",
+      "\"-0s\"", "\"1\"", "1.5", "\"315576000001s\"", "null",
+    ]),
+    content=(
+      #|"1.500s" -> "1.500s"
+      #|"1.5s" -> must be written "1.500s"
+      #|"1.000000000s" -> must be written "1s"
+      #|"-0.5s" -> must be written "-0.500s"
+      #|"01s" -> must be written "1s"
+      #|"0s" -> "0s"
+      #|"-0s" -> must be written "0s"
+      #|"1" -> must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s"
+      #|1.5 -> must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s"
+      #|"315576000001s" -> must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s"
+      #|null -> must be a duration from "-315576000000.999999999s" to "315576000000.999999999s": seconds, with at most 9 fractional digits, then "s", such as "1.500s"
+    ),
+  )
+  inspect(
+    known_values("at", [
+      "\"1970-01-01T00:00:01.500Z\"", "\"1970-01-01T09:00:01.5+09:00\"", "\"1970-01-01T00:00:01.5Z\"",
+      "\"1970-01-01T00:00:00.000Z\"", "\"1970-01-01T00:00:00+00:00\"", "\"1969-12-31T19:00:00-05:00\"",
+      "\"1970-01-01T00:00:00\"", "0",
+    ]),
+    content=(
+      #|"1970-01-01T00:00:01.500Z" -> "1970-01-01T00:00:01.500Z"
+      #|"1970-01-01T09:00:01.5+09:00" -> must be written "1970-01-01T00:00:01.500Z"
+      #|"1970-01-01T00:00:01.5Z" -> must be written "1970-01-01T00:00:01.500Z"
+      #|"1970-01-01T00:00:00.000Z" -> must be written "1970-01-01T00:00:00Z"
+      #|"1970-01-01T00:00:00+00:00" -> must be written "1970-01-01T00:00:00Z"
+      #|"1969-12-31T19:00:00-05:00" -> must be written "1970-01-01T00:00:00Z"
+      #|"1970-01-01T00:00:00" -> must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z"
+      #|0 -> must be a date and time in RFC 3339 form, from "0001-01-01T00:00:00Z" to "9999-12-31T23:59:59.999999999Z", such as "1970-01-01T00:00:01.500Z"
+    ),
+  )
+}
+
+///|
+test "a FieldMask, the wrappers and Empty in a condition: a FloatValue is rounded as a float is, 64-bit integers are numbers, and bytes are standard base64 with padding" {
+  inspect(
+    [
+      known_values("mask", [
+        "\"userName,address.cityName\"", "\"\"", "\"user_name\"", "[\"a\"]",
+      ]),
+      known_values("a_float", ["0.1", "9.99", "16777217", "\"9.99\"", "1e39"]),
+      known_values("an_int64", ["9223372036854775807", "\"42\""]),
+      known_values("a_bytes", ["\"+/8=\"", "\"-_8\""]),
+      known_values("a_bool", ["true", "1"]),
+      known_values("nothing", ["{}", "{\"x\":1}", "[]"]),
+      known_values("history", ["\"1970-01-01T00:00:01.5Z\""]),
+      known_values("ids", ["\"1\""]),
+    ].join("\n"),
+    content=(
+      #|"userName,address.cityName" -> "userName,address.cityName"
+      #|"" -> ""
+      #|"user_name" -> must be a string of field paths in lowerCamelCase, joined by commas, such as "userName,address.city"
+      #|["a"] -> must be a string of field paths in lowerCamelCase, joined by commas, such as "userName,address.city"
+      #|0.1 -> 0.1
+      #|9.99 -> 9.99
+      #|16777217 -> 16777216
+      #|"9.99" -> must be written 9.99
+      #|1e39 -> must be a number within the range of a float, or "NaN", "Infinity" or "-Infinity"
+      #|9223372036854775807 -> 9223372036854775807
+      #|"42" -> must be written 42
+      #|"+/8=" -> "+/8="
+      #|"-_8" -> must be written "+/8="
+      #|true -> true
+      #|1 -> must be true or false
+      #|{} -> {}
+      #|{"x":1} -> {"x":1}
+      #|[] -> must be an object
+      #|"1970-01-01T00:00:01.5Z" -> must be written "1970-01-01T00:00:01.500Z"
+      #|"1" -> must be written 1
+    ),
+  )
+}
+
+///|
+test "a condition on a method's whole input of a well-known type is checked in its printed form too, and one on another message must be an object, its members left to the caller" {
+  let set = hex_set(wellknown_set)
+  let lines = []
+  for
+    case in [
+      ("google.protobuf.Duration", "\"1.5s\""),
+      ("google.protobuf.Timestamp", "\"1970-01-01T09:00:00+09:00\""),
+      ("google.protobuf.FloatValue", "16777217"),
+      ("google.protobuf.Empty", "{}"),
+      ("wellknown.Lease", "{\"ttl\":\"1.5s\"}"),
+      ("wellknown.Lease", "\"x\""),
+    ] {
+    let (name, text) = case
+    guard set.find_message(name) is Some(message) else { fail("no \{name}") }
+    let json = @json.parse(text) catch { err => fail("not JSON: \{err}") }
+    let printed = set.printed_message(message, json).stringify() catch {
+        NotOfType(wanted~) => "must be \{wanted}"
+        NotPrinted(printed~) => "must be written \{printed}"
+      }
+    lines.push("\{name} \{text} -> \{printed}")
+  }
+  inspect(
+    lines.join("\n"),
+    content=(
+      #|google.protobuf.Duration "1.5s" -> must be written "1.500s"
+      #|google.protobuf.Timestamp "1970-01-01T09:00:00+09:00" -> must be written "1970-01-01T00:00:00Z"
+      #|google.protobuf.FloatValue 16777217 -> 16777216
+      #|google.protobuf.Empty {} -> {}
+      #|wellknown.Lease {"ttl":"1.5s"} -> {"ttl":"1.5s"}
+      #|wellknown.Lease "x" -> must be an object
+    ),
+  )
+}
