@@ -103,7 +103,8 @@ fn header_list_bound(limit : Int32) -> Int32 {
 /// ends never reaches the engine, nor does one whose header list is over
 /// the header limits, which gets 431 instead, or whose request HTTP/1.1's
 /// rules refuse, which gets 400, or whose body is over `--body-limit`,
-/// which gets 413.
+/// which gets 413, nor a gRPC call that gRPC's rules refuse, which gets
+/// their answer as soon as what they refuse arrives (grpc_checks.mbt).
 ///
 /// In the mockoon log format, each stream whose request reached the engine
 /// gets its Transaction recorded line once its response has ended, written
@@ -575,21 +576,16 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
           self.will_refuse(stream, 400)
           continue
         }
-        // Refused before any of the body is read, as on HTTP/1.1.
-        if request.declared > self.body_limit.to_int64() {
+        if request.grpc {
+          // gRPC's own checks of a call, after spec E's: a body over the
+          // limit by its `content-length` comes last among them.
+          if check_head(request, self.body_limit) is Some(refusal) {
+            self.will_refuse_call(stream, refusal)
+            continue
+          }
+        } else if request.declared > self.body_limit.to_int64() {
+          // Refused before any of the body is read, as on HTTP/1.1.
           self.will_refuse(stream, 413)
-          continue
-        }
-        // A gRPC call whose content subtype smock does not serve, such as
-        // `json`, is refused from its HEADERS, after spec E's checks. A
-        // method other than POST is refused before that, when the request
-        // ends.
-        if request.unserved_subtype && request.meth == "POST" {
-          self.will_refuse_call(
-            stream,
-            @grpc.Unimplemented,
-            unserved_subtype_message,
-          )
           continue
         }
         if request.continues {
@@ -600,15 +596,13 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
         self.requests[stream] = request
         // A CONNECT goes to the engine when its HEADERS arrive, as soon as
         // it is known that they brought no reset (RFC 9113, section 8.5). A
-        // gRPC call waits for its request to end, whatever its method.
-        if request.meth == "CONNECT" && !request.grpc {
+        // gRPC call is refused before that.
+        if request.meth == "CONNECT" {
           self.connect = stream
         }
         // A gRPC call is looked up as soon as its HEADERS are known to bring
-        // no reset, and answered then when it cannot reach a gRPC Stub. A
-        // method other than POST is refused before that, when the request
-        // ends.
-        if request.grpc && request.meth == "POST" {
+        // no reset, and answered then when it cannot reach a gRPC Stub.
+        if request.grpc {
           self.call_begun = stream
         }
       }
@@ -616,10 +610,19 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
         // DATA on a stream whose request has gone to the engine, as a
         // CONNECT's has once its HEADERS arrived, is discarded.
         if self.requests.get(stream) is Some(request) {
-          // A body that passes the limit is refused before it is kept.
+          // A body that passes the limit is refused before it is kept, and
+          // so is a gRPC call's message whose prefix gRPC's rules refuse.
           if data.length() > self.body_limit - request.received() {
             self.requests.remove(stream)
-            self.will_refuse(stream, 413)
+            if request.grpc {
+              self.will_refuse_call(stream, OverBodyLimit)
+            } else {
+              self.will_refuse(stream, 413)
+            }
+          } else if request.deframer is Some(deframer) &&
+            self.check_messages(request, deframer, data) is Some(refusal) {
+            self.requests.remove(stream)
+            self.will_refuse_call(stream, refusal)
           } else {
             request.receive(data)
           }
@@ -1483,9 +1486,8 @@ fn H2Connection::headers_only(
 priv enum Refusal {
   /// The status, with no body, as HTTP/1.1 answers such a request.
   Status(Int32)
-  /// Trailers-Only with `:status` 200, the gRPC status and its fixed ASCII
-  /// `grpc-message`, for a gRPC call smock refuses.
-  Call(@grpc.Status, String)
+  /// The answer to a gRPC call smock refuses, as `refuse_call` sends it.
+  Call(CallRefusal)
 }
 
 ///|
@@ -1502,18 +1504,16 @@ fn H2Connection::will_refuse(
 }
 
 ///|
-/// The gRPC call on `stream` is refused with Trailers-Only, the gRPC status
-/// `status` and the fixed ASCII `message`, once it is known whether the
-/// frame being handled ended the stream, as `will_refuse` refuses a
-/// request.
+/// The gRPC call on `stream` is refused for `refusal`, once it is known
+/// whether the frame being handled ended the stream, as `will_refuse`
+/// refuses a request.
 fn H2Connection::will_refuse_call(
   self : H2Connection,
   stream : Int32,
-  status : @grpc.Status,
-  message : String,
+  refusal : CallRefusal,
 ) -> Unit {
   self.refused = stream
-  self.refusal = Call(status, message)
+  self.refusal = Call(refusal)
 }
 
 ///|
@@ -1560,7 +1560,7 @@ fn H2Connection::refuse(
       }
       self.ports.rejected(self.last_read)
     }
-    Call(status, message) => self.refuse_call(stream, status, message, ended~)
+    Call(refusal) => self.refuse_call(stream, refusal, ended~)
   }
   self.end_stream()
 }

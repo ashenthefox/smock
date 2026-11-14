@@ -5,8 +5,8 @@ Descriptor set, the compiled form of its `.proto` files, and smock reads
 and checks the set when it loads the Definition files. Its gRPC Stubs then
 answer unary calls, on the plain port over h2c and on the TLS port over
 h2. This guide shows a first call, says which requests are gRPC calls, how
-a call reaches a Stub and how smock answers it, and how to build a set
-that smock reads. The
+a call reaches a Stub and how smock answers it, which calls gRPC's rules
+refuse, and how to build a set that smock reads. The
 [Definition-file reference](definition-files.md#grpc) describes the
 Mock's `grpc` field and gRPC Stubs.
 
@@ -40,6 +40,11 @@ Mock's `grpc` field and gRPC Stubs.
 - [Unmatched calls](#unmatched-calls)
   - [Calls answered from their HEADERS](#calls-answered-from-their-headers)
   - [The Near miss trailer](#the-near-miss-trailer)
+- [Protocol checks and limits](#protocol-checks-and-limits)
+  - [The order of the checks](#the-order-of-the-checks)
+  - [Timeouts](#timeouts)
+  - [The body limit](#the-body-limit)
+- [Compression](#compression)
 - [Calls smock does not serve yet](#calls-smock-does-not-serve-yet)
 - [Building a set](#building-a-set)
   - [Self-contained sets](#self-contained-sets)
@@ -164,8 +169,8 @@ sending its request, RST_STREAM `NO_ERROR` follows and tells it to stop.
 
 The call never reaches the Stubs. It is not in the Journal, and the
 request metrics count it as a rejected request, with `mock=""` and
-`stub=""`. A call whose method is not `POST` gets that method's answer
-instead ([Calls smock does not serve yet](#calls-smock-does-not-serve-yet)).
+`stub=""`. A call whose method is not `POST` gets the method's answer,
+405, instead ([Protocol checks and limits](#protocol-checks-and-limits)).
 
 ### Requests that are not gRPC calls
 
@@ -288,8 +293,10 @@ call without the Session still gets the reply of the Stub from the files.
 ## How smock serves a call
 
 smock tells a gRPC call by its content type
-([Ports and detection](#ports-and-detection)). When the call's HEADERS
-arrive, smock finds the call's Mock
+([Ports and detection](#ports-and-detection)), and refuses a call that
+gRPC's rules refuse as soon as it shows
+([Protocol checks and limits](#protocol-checks-and-limits)). When the
+call's HEADERS arrive, smock finds the call's Mock
 ([The call's Mock](#the-calls-mock)) and the method that the call's
 `:path`, such as `/helloworld.Greeter/SayHello`, names in the Mock's set.
 A call that cannot reach a gRPC Stub, since there is no such Mock, set or
@@ -300,7 +307,7 @@ When the call's request has ended, smock:
 
 1. finds the call's Mock and its method again, from the Definition files
    it serves then;
-2. takes the call's one message from its body;
+2. takes the call's one message from its body, which must hold one;
 3. decodes the message into JSON with the method's input type;
 4. matches the call against the Mock's gRPC Stubs on that method;
 5. encodes the reply with the method's output type, and sends it.
@@ -883,7 +890,7 @@ journaled as `{"id":7}`, and a call without `id` gets INTERNAL.
   any depth, does not parse, as protobuf's parsers refuse it. The call
   gets Trailers-Only INTERNAL `the request message cannot be decoded`,
   never reaches the Stubs, and counts as a rejected request
-  ([Calls smock does not serve yet](#calls-smock-does-not-serve-yet)). A
+  ([Protocol checks and limits](#protocol-checks-and-limits)). A
   static reply that lacks one is a problem at the JSON Pointer of the
   message that lacks it:
 
@@ -1232,7 +1239,7 @@ date: Sat, 14 Nov 2026 07:00:00 GMT
 ```
 
 No gRPC reply carries `content-length` or `grpc-encoding`: smock never
-compresses a reply. A gRPC client reads every field of a Trailers-Only
+compresses a reply ([Compression](#compression)). A gRPC client reads every field of a Trailers-Only
 answer as trailing metadata.
 
 ## Unmatched calls
@@ -1341,22 +1348,36 @@ its Host reaches no Mock, or its Mock has no gRPC Stub, which a Mock
 without a set never has. An HTTP Stub is never a call's Near miss, even one whose
 path pattern takes the call's path.
 
-## Calls smock does not serve yet
+## Protocol checks and limits
 
-smock answers the calls it does not serve yet with Trailers-Only: one
-HEADERS block that ends the stream, with `:status` 200,
-`content-type: application/grpc`, `grpc-status: 13` (INTERNAL) and a fixed
-`grpc-message`. A gRPC client reports INTERNAL with that message.
+smock refuses a call that gRPC's rules refuse before the call reaches
+the Stubs, and answers it as gRPC servers answer it. The answer is
+[Trailers-Only](#trailers-only), with `:status` 200, its gRPC status and
+a fixed `grpc-message`, except for two that get another `:status`, as
+grpc-go answers them: 405 for a method other than `POST`, and 400 for a
+malformed `grpc-timeout`. Both carry `grpc-status: 13` (INTERNAL).
 
-These calls never reach the Stubs. They are not in the Journal, and the
-request metrics count them as rejected requests, with `mock=""` and
-`stub=""`:
+| The call | Checked | `:status` | gRPC status | `grpc-message` |
+|---|---|---|---|---|
+| Its method is not `POST` | on HEADERS | 405 | INTERNAL | `the method must be POST` |
+| Its subtype is neither none nor `proto` ([Other subtypes](#other-subtypes)) | on HEADERS | 200 | UNIMPLEMENTED | `only the proto content subtype is served` |
+| Its `grpc-timeout` is malformed ([Timeouts](#timeouts)) | on HEADERS | 400 | INTERNAL | `the grpc-timeout is malformed` |
+| Its body is over `--body-limit` ([The body limit](#the-body-limit)) | as soon as it shows | 200 | RESOURCE_EXHAUSTED | `the request is over the body limit` |
+| A message's flag is neither 0 nor 1 | on the message's prefix | 200 | INTERNAL | `a message flag is neither 0 nor 1` |
+| A message is compressed, with no `grpc-encoding` or with `identity` ([Compression](#compression)) | on the message's prefix | 200 | INTERNAL | `a compressed message needs a grpc-encoding other than identity` |
+| A message is compressed with another `grpc-encoding` ([Compression](#compression)) | on the message's prefix | 200 | UNIMPLEMENTED | `the grpc-encoding gzip is not served, only identity`, with the encoding received |
+| The request ends inside a message's prefix | at the end | 200 | INTERNAL | `the request ends inside a message prefix` |
+| The request ends inside a message | at the end | 200 | INTERNAL | `the request ends inside a message` |
+| The request has no message | at the end | 200 | UNIMPLEMENTED | `the request has no message` |
+| The request has more than one message | at the end | 200 | UNIMPLEMENTED | `the request has more than one message` |
+| Its message does not parse, or holds a value that smock cannot print | at the end | 200 | INTERNAL | `the request message cannot be decoded` |
 
-| The call | `grpc-message` |
-|---|---|
-| Its method is not `POST` | `the method must be POST` |
-| Its body is not one uncompressed message | `the request is not one uncompressed message` |
-| Its message does not parse, holds a value that smock cannot print, or its type has a field that smock does not decode yet | `the request message cannot be decoded` |
+A message is the 5-octet prefix, a flag and a length, then the octets
+the length announces. A message of zero octets, `00 00 00 00 00`, is one
+message, with every field at its default, so a call to a method that
+takes `google.protobuf.Empty` is served. A unary method takes exactly one
+message, so a request with none or with several is refused, as gRPC
+libraries refuse it.
 
 A message does not parse, as protobuf's parsers refuse it, when it holds a
 proto3 string that is not UTF-8, field number 0 or one above 2^29-1, wire
@@ -1370,6 +1391,138 @@ Duration or a FieldMask path out of its range or form
 or an infinity
 ([JSON values](#json-values-struct-value-listvalue-and-nullvalue)), or an
 Any whose type the set lacks ([Any](#any)).
+
+A refused call never reaches the Stubs. It is not in the Journal, it
+moves no Scenario, and the request metrics count it as a rejected
+request, with `mock=""` and `stub=""`, not as an unmatched request. When
+smock refuses a call before the client has sent all of its request,
+RST_STREAM `NO_ERROR` follows the answer and tells the client to stop
+sending. Frames that still arrive on that stream are ignored. A call
+whose request has ended gets the answer alone. So a `GET` with
+`content-type: application/grpc` gets:
+
+```text
+:status: 405
+content-type: application/grpc
+grpc-status: 13
+grpc-message: the method must be POST
+date: Sat, 14 Nov 2026 07:00:00 GMT
+```
+
+then RST_STREAM `NO_ERROR` if the call has not ended.
+
+smock does not check `te: trailers`. gRPC clients send it, but grpc-go
+does not require it, and a mock should accept every real client, so a
+call without it is served.
+
+### The order of the checks
+
+A call that breaks several rules gets the answer of the first check it
+fails. On its HEADERS, smock checks, in this order:
+
+1. smock's checks of every HTTP/2 request: a header list over
+   `--header-size-limit` or with more fields than `--header-count-limit`
+   gets 431, and a request that HTTP/1.1's rules refuse gets 400, with no
+   gRPC status ([Ports and detection](#ports-and-detection));
+2. the method, which must be `POST`;
+3. the subtype;
+4. each `grpc-timeout`;
+5. the body limit, by `content-length`;
+6. the call's Mock, its set and its method
+   ([Calls answered from their HEADERS](#calls-answered-from-their-headers)).
+
+So a `PUT` with `content-type: application/grpc+json` gets 405, and a
+call with a malformed `grpc-timeout` to a method that the set lacks gets
+400. Each message's prefix is checked as it arrives, first by the length
+it announces, then by its flag. Once the request has ended, smock looks
+the call's Mock and method up again, then checks that the body ends after
+a whole message, then that it holds exactly one, then decodes it.
+
+### Timeouts
+
+A client gives a call its time in `grpc-timeout`: 1 to 8 digits, then
+the unit, `H` hours, `M` minutes, `S` seconds, `m` milliseconds, `u`
+microseconds or `n` nanoseconds, such as `250m` or `5S`. Any other value
+is malformed, and gets 400 with INTERNAL: `1x`, `1.5S`, `250ms`, nine
+digits, a sign, a space. Eight digits of any unit are read, `99999999H`
+included, and so is a timeout of 0 in any unit, such as `0m`. Of several
+`grpc-timeout` fields, each must be well formed.
+
+For now smock only checks the timeout's form: it does not end a call at
+its deadline.
+
+### The body limit
+
+`--body-limit`, 10 MiB by default, bounds a call's body, the 5-octet
+prefix of each message included. A body over it gets RESOURCE_EXHAUSTED,
+the status gRPC gives a message over a server's limit, with `:status`
+200, instead of the 413 that an HTTP request gets
+([Request bodies](http2.md#request-bodies)). smock answers as soon as the
+excess shows, before it reads the rest:
+
+- on HEADERS, when `content-length` declares more octets than the limit;
+- on a message's prefix, when the length it announces takes the body
+  over the limit, before any octet of the message arrives;
+- on a DATA frame, when the octets received pass the limit. smock keeps
+  none of them.
+
+So with `--body-limit 10`, a call whose framed message takes 10 octets is
+served, and a prefix that announces 6 octets gets RESOURCE_EXHAUSTED at
+once, then RST_STREAM `NO_ERROR`.
+
+## Compression
+
+smock never decompresses a message and never compresses a reply, so a
+compressed request cannot use up its memory. gRPC clients send their
+messages uncompressed unless told otherwise.
+
+A message's flag says whether it is compressed: 0 for a message as it is,
+1 for a compressed one, with the compression that `grpc-encoding` names.
+
+- A message with flag 0 is served, whatever `grpc-encoding` says. So a
+  client that announces `grpc-encoding: gzip` but sends its message as it
+  is gets its reply.
+- A message with flag 1 and a `grpc-encoding` other than `identity`, such
+  as `gzip`, gets UNIMPLEMENTED, as gRPC's rules of compression ask of a
+  server that does not take that compression. The answer carries
+  `grpc-accept-encoding: identity`, which tells the client to send its
+  messages uncompressed, and a message that names the compression
+  received, percent-encoded, and `identity`:
+
+  ```text
+  :status: 200
+  content-type: application/grpc
+  grpc-status: 12
+  grpc-message: the grpc-encoding gzip is not served, only identity
+  grpc-accept-encoding: identity
+  date: Sat, 14 Nov 2026 07:00:00 GMT
+  ```
+
+- A message with flag 1 and no `grpc-encoding`, or `identity`, breaks
+  gRPC's rules, and gets INTERNAL.
+- Any other flag gets INTERNAL.
+
+smock checks the flag as soon as the message's prefix arrives. A reply
+never carries `grpc-encoding`, and its message always has flag 0. A
+client's `grpc-accept-encoding` changes nothing.
+
+## Calls smock does not serve yet
+
+smock answers the calls it does not serve yet with Trailers-Only: one
+HEADERS block that ends the stream, with `:status` 200,
+`content-type: application/grpc`, `grpc-status: 13` (INTERNAL) and a fixed
+`grpc-message`. A gRPC client reports INTERNAL with that message.
+
+These calls never reach the Stubs. They are not in the Journal, and the
+request metrics count them as rejected requests, with `mock=""` and
+`stub=""`:
+
+| The call | `grpc-message` |
+|---|---|
+| Its message's type has a field that smock does not decode yet | `the request message cannot be decoded` |
+
+The calls that gRPC's rules refuse are answered as
+[Protocol checks and limits](#protocol-checks-and-limits) says.
 
 These calls reach the Stubs. The Journal records each with the
 `grpcStatus` `INTERNAL`, and with the HTTP status planned for it: 500 or

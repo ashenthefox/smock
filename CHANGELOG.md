@@ -332,6 +332,25 @@ of each GitHub release include its section
   that no longer fits the output type gets INTERNAL, with a
   `templateError`. See
   [Ephemeral gRPC Stubs](docs/grpc.md#ephemeral-grpc-stubs).
+- gRPC's protocol checks. smock refuses a call that gRPC's rules refuse
+  as gRPC servers do, before it reaches the Stubs: a method other than
+  `POST` gets `:status` 405 and a malformed `grpc-timeout` 400, both with
+  INTERNAL, on HEADERS, after the 431 and 400 of HTTP/2 and before the
+  Mock's own checks. A body over `--body-limit`, its prefixes included,
+  gets RESOURCE_EXHAUSTED instead of 413, as soon as `content-length`, a
+  message's prefix or the octets received show it. A message's flag
+  other than 0 or 1, or 1 with no `grpc-encoding` or `identity`, gets
+  INTERNAL; flag 1 under another `grpc-encoding` gets UNIMPLEMENTED with
+  `grpc-accept-encoding: identity`, since smock never decompresses, and
+  flag 0 is served whatever `grpc-encoding` says. A request that ends
+  inside a message gets INTERNAL, and one with no message or several
+  UNIMPLEMENTED; a message of zero octets is one message. `te: trailers`
+  is not required. Each refusal has a fixed message, is followed by
+  RST_STREAM `NO_ERROR` while the client still sends, is not journaled,
+  and counts as rejected traffic. `smock/grpc` reads `grpc-timeout`, and
+  reads framed messages as they arrive, in pieces split anywhere. See
+  [Protocol checks and limits](docs/grpc.md#protocol-checks-and-limits)
+  and [Compression](docs/grpc.md#compression).
 
 ### Changed
 
@@ -348,7 +367,9 @@ of each GitHub release include its section
 - The help texts of `smock_requests_total`,
   `smock_request_duration_seconds` and `smock_unmatched_requests_total`
   speak of a request the protocol layer rejects, and name HTTP/2's
-  statuses beside HTTP/1.1's: 400, 413 and 431 on its stream.
+  statuses beside HTTP/1.1's: 400, 413 and 431 on its stream. They also
+  name gRPC's refusals: 405, 400, or 200 with the gRPC status
+  UNIMPLEMENTED, INTERNAL or RESOURCE_EXHAUSTED.
 - The help texts of `--header-size-limit` and `--read-timeout-ms` give
   their meaning over HTTP/2. A header list is counted as RFC 7541 counts
   it, each field with 32 octets more, and a larger one gets 431 on its

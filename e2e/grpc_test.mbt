@@ -160,7 +160,7 @@ async test "an unmatched call gets Trailers-Only UNIMPLEMENTED, and is journaled
 }
 
 ///|
-async test "calls this branch cannot serve yet get Trailers-Only INTERNAL with a fixed message, are not journaled, and count as rejected traffic" {
+async test "a call whose message does not decode gets Trailers-Only INTERNAL with a fixed message, is not journaled, and counts as rejected traffic" {
   let yaml =
     #|mocks:
     #|  - name: greeter
@@ -175,23 +175,12 @@ async test "calls this branch cannot serve yet get Trailers-Only INTERNAL with a
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let client = smock.h2c()
       defer client.close()
-      let hello = framed(@fs.read_file(hello_request_path).binary())
+      // The framing of a call is checked first: e2e/grpc_checks_test.mbt.
       let calls : Array[(String, String, String, Bytes)] = [
         (
           "a message that does not parse", "greeter.svc", "/helloworld.Greeter/SayHello",
           b"\x00\x00\x00\x00\x03\x0a\x05T",
         ),
-        (
-          "a body that ends inside a message", "greeter.svc", "/helloworld.Greeter/SayHello",
-          b"\x00\x00\x00\x00\x05\x0a\x03T",
-        ),
-        (
-          "two messages",
-          "greeter.svc",
-          "/helloworld.Greeter/SayHello",
-          hello + hello,
-        ),
-        ("no message", "greeter.svc", "/helloworld.Greeter/SayHello", b""),
       ]
       let out = []
       for call in calls {
@@ -213,11 +202,8 @@ async test "calls this branch cannot serve yet get Trailers-Only INTERNAL with a
         out.join("\n"),
         content=(
           #|a message that does not parse: :status: 200, grpc-status: 13, grpc-message: the request message cannot be decoded (end)
-          #|a body that ends inside a message: :status: 200, grpc-status: 13, grpc-message: the request is not one uncompressed message (end)
-          #|two messages: :status: 200, grpc-status: 13, grpc-message: the request is not one uncompressed message (end)
-          #|no message: :status: 200, grpc-status: 13, grpc-message: the request is not one uncompressed message (end)
           #|journal: no entry
-          #|smock_requests_total{mock="",stub=""} 4
+          #|smock_requests_total{mock="",stub=""} 1
         ),
       )
     })
