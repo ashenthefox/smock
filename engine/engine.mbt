@@ -590,7 +590,7 @@ pub fn Engine::handle(
       }
       match e.stub.serves {
         Ordinary(ordinary) =>
-          if incoming.meets(ordinary.request) {
+          if on_method(ordinary, grpc) && incoming.meets(ordinary.request) {
             if ordinary.scenario is Some(_) && !states_known {
               states = self.scenarios.of(e.mock, session)
               states_known = true
@@ -925,6 +925,21 @@ pub fn Engine::handle(
     matched: source,
     scenario,
     content_error,
+  }
+}
+
+///|
+/// Whether the ordinary Stub `ordinary` may answer `call`: when it is a
+/// gRPC call, the Stub's exact path is the call's `:path` as sent, as for
+/// the file gRPC Stubs a call is matched against
+/// (`@definitions.Mock::grpc_candidates`), so a path with a query or an
+/// encoded octet, which names no method, reaches no Ephemeral gRPC Stub
+/// either. An HTTP request, with no `call`, may reach any.
+fn on_method(ordinary : @definitions.Ordinary, call : GrpcCall?) -> Bool {
+  match call {
+    None => true
+    Some(call) =>
+      ordinary.request.path is Some(Has(Exact(path))) && path == call.path
   }
 }
 

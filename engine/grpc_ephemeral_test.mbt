@@ -324,3 +324,51 @@ test "an Ephemeral gRPC Stub is not read again at a reload: it stops answering w
     ),
   )
 }
+
+///|
+test "an Ephemeral gRPC Stub answers only a call whose :path is its exact path, as a file gRPC Stub does: not one with a query or an encoded octet" {
+  let h = harness(
+    greeter_with_set("greeter.binpb"),
+    body_files=ephemeral_body_files(),
+  )
+  let _ = h.add(
+    "greeter",
+    None,
+    (
+      #|{ "request": { "path": "/helloworld.Greeter/SayHello" },
+      #|  "response": { "json": { "message": "Hello" } } }
+    ),
+  )
+  let lines = []
+  for
+    path in [
+      "/helloworld.Greeter/SayHello", "/helloworld.Greeter/SayHello?x=1", "/helloworld.Greeter/Say%48ello",
+    ] {
+    let outcome = h.engine.handle(
+      {
+        meth: "POST",
+        target: path,
+        version: "HTTP/2",
+        headers: [],
+        body: b"{\"name\":\"Tom\"}",
+      },
+      grpc={ path, octets: 5, },
+      session=None,
+      now=h.now,
+      rand=h.rand,
+    )
+    let part = match outcome.plan.grpc {
+      Some(part) => part.message.unwrap_or(part.status.name())
+      None => "none"
+    }
+    lines.push("\{path}: \{matched_id(outcome).unwrap_or("none")}, \{part}")
+  }
+  inspect(
+    lines.join("\n"),
+    content=(
+      #|/helloworld.Greeter/SayHello: eph-1, OK
+      #|/helloworld.Greeter/SayHello?x=1: none, unknown method
+      #|/helloworld.Greeter/Say%48ello: none, unknown method
+    ),
+  )
+}

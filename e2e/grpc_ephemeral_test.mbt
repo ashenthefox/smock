@@ -52,6 +52,12 @@ async test "an Ephemeral gRPC Stub added through the Admin API answers the calls
         "/users.Users/Find",
         body=users_message("query"),
       )
+      // A :path with a query names no method, so it reaches no gRPC Stub.
+      let with_query = client.call(
+        "/users.Users/Find?x=1",
+        headers=[baggage("test-a")],
+        body=users_message("query"),
+      )
       let http = smock.send("POST", "/users.Users/Find", headers=[
         ("Content-Type", "application/grpc"),
         baggage("test-a"),
@@ -62,6 +68,7 @@ async test "an Ephemeral gRPC Stub added through the Admin API answers the calls
           "test-a:",
           of_test_a.render(),
           "no Session: \{without.status()}",
+          "test-a, with a query: \{with_query.status()}",
           "HTTP/1.1 of test-a: \{http.split("\n").next().unwrap_or("")}",
           "Journal of test-a:",
           smock.calls_of(session="test-a"),
@@ -81,9 +88,11 @@ async test "an Ephemeral gRPC Stub added through the Admin API answers the calls
           #|  grpc-status: 0
           #|(end)
           #|no Session: 0
+          #|test-a, with a query: 12
           #|HTTP/1.1 of test-a: HTTP/1.1 404 Not Found
           #|Journal of test-a:
           #|"eph-1" 200 "OK"
+          #|null 200 "UNIMPLEMENTED"
           #|null 404 -
           #|Journal of the no-Session space:
           #|"found" 200 "OK"
