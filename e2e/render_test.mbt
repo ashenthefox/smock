@@ -755,14 +755,15 @@ async test "smock render --help names its argument, its inputs and the settings 
       #|  stub-id  The ID of a Stub from the Definition files.
       #|
       #|Options:
-      #|  -h, --help                       Show help information.
-      #|  --dir <dir>                      The definitions directory, read as smock serve reads it. [env: SMOCK_DIR]
-      #|  --body-file-dir <body-file-dir>  The body-file subdirectory of the definitions directory. [env: SMOCK_BODY_FILE_DIR] [default: files]
-      #|  --template-env <template-env>    The environment variables templates may read as env.NAME, separated by commas, such as REGION,API_BASE. Their values are read once, at startup. A listed value can show in responses, renderings and template error messages, so list only values that may be shown. A name is letters, digits and _, starting with a letter or _, and cannot start with SMOCK_. None by default. [env: SMOCK_TEMPLATE_ENV]
-      #|  --request <request>              A file that holds the sample request as JSON: {method, path, query, headers, body, session, vars, data}, each optional.
-      #|  --time <time>                    The time the sample request is received at, as an RFC 3339 date-time such as 2026-10-12T14:30:05Z. Default: now.
-      #|  --seed <seed>                    The seed of the random source the rendering draws from, from 0 to 9007199254740991. Default: the Stub's fault.seed, or a fresh seed when it has none.
-      #|  --response <response>            The index of the response to render among the Stub's responses, from 0. A Stub with response takes 0 only. Default: the response the seed picks.
+      #|  -h, --help                               Show help information.
+      #|  --dir <dir>                              The definitions directory, read as smock serve reads it. [env: SMOCK_DIR]
+      #|  --body-file-dir <body-file-dir>          The body-file subdirectory of the definitions directory. [env: SMOCK_BODY_FILE_DIR] [default: files]
+      #|  --template-env <template-env>            The environment variables templates may read as env.NAME, separated by commas, such as REGION,API_BASE. Their values are read once, at startup. A listed value can show in responses, renderings and template error messages, so list only values that may be shown. A name is letters, digits and _, starting with a letter or _, and cannot start with SMOCK_. None by default. [env: SMOCK_TEMPLATE_ENV]
+      #|  --header-size-limit <header-size-limit>  The most bytes a request head (request line and header fields) may take. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection. It also bounds each block of a gRPC reply's metadata, its header block and its trailers, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL instead. [env: SMOCK_HEADER_SIZE_LIMIT] [default: 16384]
+      #|  --request <request>                      A file that holds the sample request as JSON: {method, path, query, headers, body, session, vars, data}, each optional.
+      #|  --time <time>                            The time the sample request is received at, as an RFC 3339 date-time such as 2026-10-12T14:30:05Z. Default: now.
+      #|  --seed <seed>                            The seed of the random source the rendering draws from, from 0 to 9007199254740991. Default: the Stub's fault.seed, or a fresh seed when it has none.
+      #|  --response <response>                    The index of the response to render among the Stub's responses, from 0. A Stub with response takes 0 only. Default: the response the seed picks.
       #|
     ),
   )

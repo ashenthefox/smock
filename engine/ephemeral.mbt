@@ -125,7 +125,8 @@ fn EphemeralStubs::of(
 /// environment variables the engine was created with, and it may read and
 /// write the Data buckets the Mock declares. A Stub whose exact path names
 /// a method of the Mock's Descriptor set is a gRPC Stub, checked against
-/// the set and normalised as a file Stub is. It gets the next ID,
+/// the set and normalised as a file Stub is, its static reply's metadata
+/// held to the engine's header size limit. It gets the next ID,
 /// `eph-<n>`. A Stub with a seed gets its own generator, from its seed.
 ///
 /// Raises `UnknownMock` when no Mock has the name `mock`, and
@@ -148,6 +149,7 @@ pub fn Engine::add_ephemeral_stub(
       env=self.env,
       buckets=declared.buckets,
       descriptor_set?=declared.descriptor_set,
+      header_size_limit=self.header_size_limit,
     ) {
     Ok(compiled) => compiled
     Err(problems) => raise InvalidStub(problems)

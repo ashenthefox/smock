@@ -29,6 +29,10 @@ pub struct Engine {
   /// The environment variables templates may read, with the values read
   /// at startup: every reload and Ephemeral Stub is read with them.
   priv env : @template.Env
+  /// `--header-size-limit`, the most octets each block of a static gRPC
+  /// reply's metadata may take: every reload and Ephemeral Stub is read
+  /// with it.
+  priv header_size_limit : Int32
 }
 
 ///|
@@ -261,12 +265,18 @@ pub(all) enum Body {
 ///
 /// `state_max_bytes` bounds the per-Session state of the whole process, as
 /// it counts it: by default, `default_state_max_bytes` (64 MiB).
+///
+/// `header_size_limit` is `--header-size-limit`, the limit `snapshot` was
+/// loaded with: by default, 16 KiB. Each block of a static gRPC reply's
+/// metadata of a reload or an Ephemeral Stub may take at most that many
+/// octets.
 pub fn Engine::Engine(
   snapshot : @definitions.Snapshot,
   match_index~ : Bool = true,
   journal~ : JournalSettings = JournalSettings(),
   env~ : @template.Env = @template.no_env,
   state_max_bytes~ : Int32 = default_state_max_bytes,
+  header_size_limit~ : Int32 = @definitions.default_header_size_limit,
 ) -> Engine {
   let state = StateBound::new(state_max_bytes)
   {
@@ -280,6 +290,7 @@ pub fn Engine::Engine(
     state,
     journal: Journal::new(journal),
     env,
+    header_size_limit,
   }
 }
 
@@ -433,8 +444,9 @@ pub fn ReloadOutcome::name(self : ReloadOutcome) -> String {
 /// `read_problems`, at the time `at` (milliseconds since the Unix epoch).
 /// `digest` is the set's digest when the caller has computed it already,
 /// as `@definitions.load` takes it. Templates read the environment
-/// variables the engine was created with. Every file is validated and a
-/// whole new snapshot is built:
+/// variables the engine was created with, and static gRPC replies are held
+/// to its header size limit. Every file is validated and a whole new
+/// snapshot is built:
 ///
 /// - When it is valid and its digest differs from the served one, it
 ///   replaces the served snapshot at once, and each Stub with a seed gets a
@@ -466,7 +478,13 @@ pub fn Engine::reload(
   let mut scenario_states_reset = 0
   let mut data_buckets_reset = 0
   let (result, errors) : (ReloadOutcome, Array[@definitions.Diagnostic]) = match
-    @definitions.load(set, read_problems~, env=self.env, digest?) {
+    @definitions.load(
+      set,
+      read_problems~,
+      env=self.env,
+      header_size_limit=self.header_size_limit,
+      digest?,
+    ) {
     Ok(snapshot) if snapshot.digest == old_digest => (Unchanged, [])
     Ok(snapshot) => {
       self.snapshot = snapshot

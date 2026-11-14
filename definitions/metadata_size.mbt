@@ -62,7 +62,7 @@ fn metadata_blocks(response : Response) -> Array[MetadataBlock]? {
   guard response.headers is Written(headers) else { return None }
   let (status, message, trailers) = match response.grpc {
     None => (@grpc.Status::Ok, 0, 0)
-    Some({ status, message, trailers }) => {
+    Some({ status, message, trailers, }) => {
       guard trailers is Written(trailers) else { return None }
       let message = match message {
         Some(Written(text)) =>
@@ -82,9 +82,13 @@ fn metadata_blocks(response : Response) -> Array[MetadataBlock]? {
     Some([
       {
         name: "header block",
-        size: if gives_date(headers) { head } else { head + date_cost },
+        size: if gives_date(headers) {
+          head
+        } else {
+          head + date_cost
+        },
       },
-      { name: "trailers", size: ending },
+      { name: "trailers", size: ending, },
     ])
   } else {
     let only = reply_head_cost + ending
@@ -95,7 +99,11 @@ fn metadata_blocks(response : Response) -> Array[MetadataBlock]? {
     Some([
       {
         name: "Trailers-Only block",
-        size: if given { only } else { only + date_cost },
+        size: if given {
+          only
+        } else {
+          only + date_cost
+        },
       },
     ])
   }
