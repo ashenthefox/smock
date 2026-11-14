@@ -183,12 +183,7 @@ pub fn DescriptorSet::printed_message(
     // Their members are the caller's to check, as a message's are.
     (Struct(_) | Any, Object(_)) | (ListValue(_), Array(_)) => return json
     (Struct(_) | Any | ListValue(_), _) => raise unfit
-    // A number of a Value is printed as a double is.
-    (Value, Number(_)) => {
-      let n = floating(json) catch { _ => raise unfit }
-      return number_of(n.to_string())
-    }
-    (Value, _) => return json
+    (Value, _) => return printed_json_value(json)
     (Timestamp | Duration | FieldMask, _) => ()
   }
   // The value as ProtoJSON reads it, encoded, then printed as
@@ -209,6 +204,25 @@ pub fn DescriptorSet::printed_message(
   } else {
     raise NotPrinted(printed~)
   }
+}
+
+///|
+/// `json`, a value that a google.protobuf.Value holds, as `decode_json`
+/// prints it: a number is printed as a double is, and any other value is
+/// returned as it is. The members of an object, a Struct, and the elements
+/// of an array, a ListValue, are Values too, and the caller's to check.
+///
+/// Raises `NotOfType` for a number beyond the range of a double, which no
+/// Value holds.
+pub fn printed_json_value(json : Json) -> Json raise PrintedError {
+  guard json is Number(_) else { return json }
+  let n = floating(json) catch {
+    _ =>
+      raise NotOfType(
+        wanted="a JSON value: null, a number within the range of a double, a string, true or false, an object or an array",
+      )
+  }
+  number_of(n.to_string())
 }
 
 ///|

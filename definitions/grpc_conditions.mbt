@@ -28,6 +28,10 @@ priv enum Place {
     @protobuf.FieldDescriptor,
     @protobuf.FieldDescriptor
   )
+  /// A value that a google.protobuf.Value holds, as a Struct's members
+  /// and a ListValue's elements are: any JSON value, whose numbers are
+  /// printed as doubles. An object's keys are data.
+  Data
 }
 
 ///|
@@ -111,9 +115,7 @@ fn File::grpc_condition(
           None
         }
       } noraise {
-        Object(members) =>
-          self.message_condition(pointer, set, message, members)
-        value => Some(value)
+        printed => self.form_condition(pointer, set, message, printed)
       }
     Of(message, field) =>
       match map_fields(set, field) {
@@ -177,6 +179,198 @@ fn File::grpc_condition(
         json,
         "the values of the map field \{field.name} of \{message.full_name} have the type \{type_text(value_field)}",
       )
+    Data =>
+      match json {
+        Object(members) => self.data_object(pointer, set, members)
+        Array(items) => self.data_array(pointer, set, items)
+        _ =>
+          try @protobuf.printed_json_value(json) catch {
+            error => {
+              self.printed_error(
+                pointer, error, "it is a value of a google.protobuf.Value",
+              )
+              None
+            }
+          } noraise {
+            value => Some(value)
+          }
+      }
+  }
+}
+
+///|
+/// `printed`, the value at `pointer` of a condition on a message of the
+/// type `message`, a type of `set`, in the form `printed_message` or
+/// `printed_value` returned it, with its members checked and normalised as
+/// the type's JSON form says: an object of fields as a message, a Struct's
+/// members and a ListValue's elements as values that a Value holds, a
+/// Value's object and array as a Struct and a ListValue, and an Any as
+/// `File::any_condition` says. Any other value is returned as it is.
+fn File::form_condition(
+  self : File,
+  pointer : String,
+  set : @protobuf.DescriptorSet,
+  message : @protobuf.MessageDescriptor,
+  printed : Json,
+) -> Json? {
+  match (message.json_form(), printed) {
+    (Fields, Object(members)) =>
+      self.message_condition(pointer, set, message, members)
+    (Struct | Value, Object(members)) => self.data_object(pointer, set, members)
+    (ListValue | Value, Array(items)) => self.data_array(pointer, set, items)
+    (Any, Object(members)) => self.any_condition(pointer, set, members)
+    (_, value) => Some(value)
+  }
+}
+
+///|
+/// `members`, the object at `pointer` that is a condition on a Struct, a
+/// type of `set`, with each value checked and normalised as a value that a
+/// Value holds. Its keys are data and are kept as written, `$$` included.
+fn File::data_object(
+  self : File,
+  pointer : String,
+  set : @protobuf.DescriptorSet,
+  members : Map[String, Json],
+) -> Json? {
+  let out : Map[String, Json] = Map([])
+  let mut valid = true
+  for key, value in members {
+    match self.grpc_condition(child_pointer(pointer, key), set, Data, value) {
+      Some(value) => out[key] = value
+      None => valid = false
+    }
+  }
+  if valid {
+    Some(Json::object(out))
+  } else {
+    None
+  }
+}
+
+///|
+/// `items`, the array at `pointer` that is a condition on a ListValue, a
+/// type of `set`, with each element checked and normalised as a value that
+/// a Value holds.
+fn File::data_array(
+  self : File,
+  pointer : String,
+  set : @protobuf.DescriptorSet,
+  items : Array[Json],
+) -> Json? {
+  let out = []
+  for i, item in items {
+    if self.grpc_condition(
+        child_pointer(pointer, i.to_string()),
+        set,
+        Data,
+        item,
+      )
+      is Some(item) {
+      out.push(item)
+    }
+  }
+  guard out.length() == items.length() else { return None }
+  Some(Json::array(out))
+}
+
+///|
+/// `members`, the object at `pointer` that is a condition on an Any, a type
+/// of `set`, checked and normalised against the type that its `@type`
+/// names, as smock prints an Any: `@type` is a type URL, kept as written,
+/// whose type is a type of the set; the other members are the fields of a
+/// message of that type, or its form as `value` when it is a well-known
+/// type that has one. `{}` is kept. `@type` may be a pattern or an operator
+/// only when it is the only member, since the other members are checked
+/// against the type it names.
+fn File::any_condition(
+  self : File,
+  pointer : String,
+  set : @protobuf.DescriptorSet,
+  members : Map[String, Json],
+) -> Json? {
+  let at_type = child_pointer(pointer, "@type")
+  let a_url = "a type URL: / and the full name of a type of the set at its end, such as \"type.googleapis.com/helloworld.HelloRequest\""
+  guard members.get("@type") is Some(type_url) else {
+    if members.is_empty() {
+      return Some(Json::object(members))
+    }
+    self.error(
+      pointer, "must give \"@type\", the type URL of the message the Any holds, so that its other members can be checked against its type",
+    )
+    return None
+  }
+  guard type_url is String(url) else {
+    if members.length() > 1 {
+      self.error(
+        at_type,
+        "must be \{a_url}, when the Any gives other members: they are checked against the type it names",
+      )
+      return None
+    }
+    if type_url is Object(_) {
+      // A pattern or an operator, which the condition reads.
+      return Some(Json::object(members))
+    }
+    self.error(at_type, "must be \{a_url}")
+    return None
+  }
+  guard @protobuf.type_name_of_url(url) is Some(name) else {
+    self.error(at_type, "must be \{a_url}")
+    return None
+  }
+  guard set.find_message(name) is Some(held) else {
+    self.error(
+      at_type,
+      "names the type \{name}, which the Descriptor set does not define",
+    )
+    return None
+  }
+  let out : Map[String, Json] = Map([("@type", type_url)])
+  if held.json_form() is Fields {
+    let fields : Map[String, Json] = Map([])
+    for key, value in members {
+      if key != "@type" {
+        fields[key] = value
+      }
+    }
+    guard self.message_condition(pointer, set, held, fields)
+      is Some(Object(normalised)) else {
+      return None
+    }
+    for key, value in normalised {
+      out[key] = value
+    }
+    return Some(Json::object(out))
+  }
+  let mut valid = true
+  for key, value in members {
+    match key {
+      "@type" => ()
+      "value" =>
+        match
+          self.grpc_condition(
+            child_pointer(pointer, key),
+            set,
+            Whole(held),
+            value,
+          ) {
+          Some(value) => out[key] = value
+          None => valid = false
+        }
+      _ => {
+        self.error(
+          child_pointer(pointer, key),
+          "is not a member of an Any that holds a \{held.full_name}: give the \{held.full_name} as \"value\"",
+        )
+        valid = false
+      }
+    }
+  }
+  if valid {
+    Some(Json::object(out))
+  } else {
+    None
   }
 }
 
@@ -299,9 +493,11 @@ fn File::value_condition(
       None
     }
   } noraise {
-    Object(members) if set.message_of(field) is Some(message) =>
-      self.message_condition(pointer, set, message, members)
-    value => Some(value)
+    printed =>
+      match set.message_of(field) {
+        Some(message) => self.form_condition(pointer, set, message, printed)
+        None => Some(printed)
+      }
   }
 }
 
