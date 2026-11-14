@@ -1,9 +1,10 @@
 # smock/grpc
 
 gRPC's wire rules for MoonBit: the content type of gRPC calls, the 5-octet
-prefix that frames each message, gRPC's seventeen status codes with their
-names, the percent-encoding of a status message, and the rules of reply
-metadata. smock serves gRPC unary calls with it, beside
+prefix that frames each message, read as a body arrives, the
+`grpc-timeout` a client gives a call, gRPC's seventeen status codes with
+their names, the percent-encoding of a status message, and the rules of
+reply metadata. smock serves gRPC unary calls with it, beside
 `smock/protobuf`, which encodes the messages. The module does no I/O and
 depends only on `moonbitlang/core`. It builds for every MoonBit target and
 is tested on native and `wasm-gc`.
@@ -45,32 +46,41 @@ after a 5-octet prefix: a flag octet, 1 when the message is
 compressed, then the message's length in 4 octets, big-endian
 ([gRPC over HTTP/2](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md)).
 
-- `@grpc.next_message(body)` gives the message at the start of `body`,
-  with its flag and the octets after it, or tells how the body ends:
-  `Done` when nothing is left, `InPrefix` when it ends inside a prefix, and
-  `InMessage(length~)` when it ends inside a message. It copies nothing.
+- `@grpc.Deframer()` reads a body as it arrives, in pieces split
+  anywhere. `take(piece)` tells the next prefix the piece ends, with its
+  flag, its message's length, the length of the body through that message
+  and the octets of the piece after it; or `All` when the piece ends no
+  prefix. Each prefix is known as soon as its last octet arrives, so a
+  length over a limit can be refused before the message arrives.
+  `ending()` tells how the body ends: after `Whole(messages~)` messages,
+  `InPrefix` or `InMessage(length~)`. It copies nothing and keeps no
+  octet of a message.
 - `@grpc.frame(message)` frames a message, uncompressed.
 
 ```mbt check
 ///|
-test "take the one message of a call's body" {
-  // HelloRequest { name: "Tom" }, framed.
-  let body = b"\x00\x00\x00\x00\x05\x0a\x03Tom"
-  guard @grpc.next_message(body[:]) is Message(flag~, message~, rest~) else {
-    fail("no message")
+test "read the one message of a call's body as it arrives" {
+  // HelloRequest { name: "Tom" }, framed, in two pieces.
+  let deframer = @grpc.Deframer()
+  inspect(deframer.take(b"\x00\x00\x00"[:]) is All, content="true")
+  guard deframer.take(b"\x00\x05\x0a\x03Tom"[:])
+    is Prefix(flag~, length~, body_length~, rest~) else {
+    fail("no prefix")
   }
   inspect(flag, content="b'\\x00'")
-  inspect(message.length(), content="5")
-  inspect(@grpc.next_message(rest) is Done, content="true")
+  inspect(length, content="5")
+  inspect(body_length, content="10")
+  inspect(deframer.take(rest) is All, content="true")
+  debug_inspect(deframer.ending(), content="Whole(messages=1)")
 }
 
 ///|
 test "a body that ends early is told apart" {
-  inspect(@grpc.next_message(b"\x00\x00\x00"[:]) is InPrefix, content="true")
-  debug_inspect(
-    @grpc.next_message(b"\x00\x00\x00\x00\x05\x0a"[:]),
-    content="InMessage(length=5)",
-  )
+  let deframer = @grpc.Deframer()
+  let _ = deframer.take(b"\x00\x00\x00"[:])
+  debug_inspect(deframer.ending(), content="InPrefix")
+  let _ = deframer.take(b"\x00\x05\x0a"[:])
+  debug_inspect(deframer.ending(), content="InMessage(length=5)")
 }
 
 ///|
@@ -79,6 +89,29 @@ test "frame a reply's message" {
     @grpc.frame(b"\x0a\x03Tom"[:]) == b"\x00\x00\x00\x00\x05\x0a\x03Tom",
     content="true",
   )
+}
+```
+
+## Timeouts
+
+A client gives a call its time in `grpc-timeout`: 1 to 8 digits, then
+the unit, `H` hours, `M` minutes, `S` seconds, `m` milliseconds, `u`
+microseconds or `n` nanoseconds.
+`@grpc.timeout_ns(value)` reads that value as nanoseconds, or gives `None`
+when it is malformed. A timeout of 0 is read, in any unit. Eight digits of
+hours are more nanoseconds than an `Int64` holds, so they saturate at
+`0x7FFF_FFFF_FFFF_FFFF` rather than wrap.
+
+```mbt check
+///|
+test "read a call's timeout" {
+  debug_inspect(@grpc.timeout_ns("250m"), content="Some(250000000)")
+  debug_inspect(@grpc.timeout_ns("0n"), content="Some(0)")
+  debug_inspect(
+    @grpc.timeout_ns("99999999H"),
+    content="Some(9223372036854775807)",
+  )
+  debug_inspect(@grpc.timeout_ns("1x"), content="None")
 }
 ```
 

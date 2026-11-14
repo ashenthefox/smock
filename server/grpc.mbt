@@ -179,9 +179,10 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
     self.answer_unserved(stream, request, ended=true)
     return
   }
-  guard @grpc.next_message(incoming.body)
-    is Message(flag=b'\x00', message~, rest~) &&
-    @grpc.next_message(rest) is Done else {
+  let deframer = @grpc.Deframer()
+  guard deframer.take(incoming.body) is Prefix(flag=b'\x00', rest~, ..) &&
+    deframer.take(rest) is All &&
+    deframer.ending() is Whole(messages=1) else {
     self.refuse_call(
       stream,
       @grpc.Internal,
@@ -192,6 +193,7 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
   }
   // A message that does not parse, or whose type has a field that smock
   // does not decode yet, does not decode.
+  let message = incoming.body[@grpc.prefix_length:]
   let json = @protobuf.decode_json(set, set.input_of(rpc), message) catch {
     _ => {
       self.refuse_call(
