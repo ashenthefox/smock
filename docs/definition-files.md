@@ -5915,20 +5915,32 @@ greeter.yaml: /stubs/0/request/query: makes no sense on a gRPC Stub: a gRPC call
 greeter.yaml: /stubs/0/request/method: must be POST on a gRPC Stub, or left out: a gRPC call is always a POST
 ```
 
+Types of proto3 and proto2 files are served, proto2's required fields,
+closed enums and packing included
+([proto2 types](grpc.md#proto2-types)). Two kinds of type are never
+served by gRPC Stubs in this release, each a problem at the Stub's `path`,
+per method, so a set may hold them for methods that no Stub uses:
+
+- A method whose input or output type comes from an editions file, or
+  reaches a type, an enum included, of one. Editions come in a later
+  spec.
+- A method whose input or output type is, or reaches, a MessageSet, a
+  message with the option `message_set_wire_format`, whose extensions use
+  another wire form.
+
 What a gRPC Stub can hold is limited for now. These are problems that say
 what is not served yet:
 
-- A method whose input or output type comes from a file that is not
-  proto3, such as a proto2 or an editions file, or whose input or output
-  type reaches a type of such a file.
+- A method whose input or output type has a group field, or is a type
+  that an extension in the set extends, or reaches one.
 - A method whose input type has a field of a well-known type, such as
   `google.protobuf.Timestamp`, singular, repeated or as a map's values, or
   reaches a message type that has one. Fields of every scalar type, enums,
-  nested messages, proto3 `optional` fields, repeated fields, maps and
-  oneofs are served.
+  nested messages, `optional` fields, repeated fields, maps and oneofs
+  are served.
 - A method whose output type is a well-known type, or has, or reaches, a
-  field of one. Every other proto3 output type is served, with fields of
-  every type.
+  field of one. Every other output type is served, with fields of every
+  type.
 - `fault.delay`, `fault.connection`, and `headers` in a reply, as the
   table above says.
 

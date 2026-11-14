@@ -1,6 +1,6 @@
 // A service for smock's tests of gRPC Stubs. smock serves the types of
-// CountItems. The other methods stream, or reach types that gRPC Stubs do
-// not serve yet.
+// CountItems. The other methods stream, reach types of a proto2 file, which
+// gRPC Stubs serve, or reach types that they do not serve yet.
 syntax = "proto3";
 
 package catalog;

@@ -503,13 +503,7 @@ test "messages may nest 100 deep in the top one, and no deeper" {
 }
 
 ///|
-test "a well-known type, and a type of a proto2 file, are not encoded yet" {
-  inspect(
-    encoded(shop_set, "shop.Money", {}),
-    content=(
-      #|error: smock does not encode shop.Money yet: it is a type of a proto2 file
-    ),
-  )
+test "a well-known type is not encoded yet" {
   // google/protobuf/empty.proto: package google.protobuf, message Empty.
   let writer = @protobuf.Writer()
   let file = @protobuf.Writer()
