@@ -1,8 +1,9 @@
 // Messages decoded from their descriptors into smock's decoded form, the
 // JSON text the engine, the Journal and templates see. For now the decoder
-// serves every field but groups and those of the well-known types that
-// is_unserved_well_known names (well_known.mbt prints the others).
-// encode.mbt encodes messages from JSON.
+// serves every field of the types of proto3 and proto2 files but groups and
+// those of the well-known types that is_unserved_well_known names
+// (well_known.mbt prints the others). encode.mbt encodes messages from
+// JSON.
 
 ///|
 /// The index in `fields` of the message's field numbered `number`, or -1,
@@ -69,7 +70,10 @@ let no_runs : Array[BytesView] = []
 /// - A bool is `true` or `false`, a string is a JSON string, and bytes are
 ///   a string of standard base64 with padding.
 /// - An enum value is printed by its name, the first one of an alias, or
-///   by its number when the enum does not define it.
+///   by its number when an open enum, as a proto3 enum is, does not define
+///   it. A closed enum, as a proto2 enum is, keeps such a number as an
+///   unknown field, as protobuf's parsers keep it: a field or a oneof keeps
+///   the value it had, a list leaves the number out, and a map its entry.
 /// - A nested message is an object in the same form.
 /// - A repeated field is an array of its values, in order, and a map an
 ///   object with a member per key, in key order: integer keys by value,
@@ -77,8 +81,11 @@ let no_runs : Array[BytesView] = []
 ///   An integer key prints in decimal, as a string.
 /// - A field without presence that the message leaves out is printed at
 ///   its default: `0`, `false`, `""`, an enum's value 0, `[]` or `{}`. A
-///   proto3 `optional` field, a member of a oneof and a message field are
-///   printed only when the message holds them.
+///   proto3 `optional` field, a member of a oneof, a message field and
+///   every singular field of a proto2 message are printed only when the
+///   message holds them.
+/// - A proto2 string need not be UTF-8: one that is not is printed with
+///   U+FFFD for each bad sequence.
 ///
 /// It reads the message as protobuf's parsers read it: the last value of a
 /// scalar or an enum field wins, the values of a message field are merged,
@@ -97,13 +104,14 @@ let no_runs : Array[BytesView] = []
 /// the value it wraps, an Int64Value or a UInt64Value as a number, a
 /// FloatValue as a float; and Empty as `{}`.
 ///
-/// Raises `DecodeError` when the input is not protobuf, when a string is
-/// not UTF-8, as a proto3 string must be, when messages nest deeper than
-/// 100, a map entry counting as a message, when a Timestamp, a Duration or
-/// a FieldMask has a value that ProtoJSON cannot print, and when a message
-/// it prints is or has a field that it does not decode yet: a group, or a
-/// well-known type that `is_unserved_well_known` names, a map's values
-/// included.
+/// Raises `DecodeError` when the input is not protobuf, when a proto3
+/// string is not UTF-8, when a message lacks a proto2 required field, as
+/// protobuf's parsers refuse it, when messages nest deeper than 100, a map
+/// entry counting as a message, when a Timestamp, a Duration or a FieldMask
+/// has a value that ProtoJSON cannot print, when a message it prints is a
+/// type of an editions file or a MessageSet, and when a message it prints
+/// is or has a field that it does not decode yet: a group, or a well-known
+/// type that `is_unserved_well_known` names, a map's values included.
 pub fn decode_json(
   set : DescriptorSet,
   message : MessageDescriptor,
@@ -123,8 +131,12 @@ pub fn decode_json(
 ///|
 /// The values of the fields of the message of the type `message` whose
 /// records are `records`, merged in order, by the index of each field in
-/// `message.fields`; `None` for a field the message leaves out.
-fn scan(
+/// `message.fields`; `None` for a field the message leaves out. A number
+/// that a closed enum does not define is skipped, as protobuf's parsers
+/// keep it as an unknown field: the field keeps the value it had, and a
+/// oneof the member it had.
+fn DescriptorSet::scan(
+  self : DescriptorSet,
   message : MessageDescriptor,
   records : Array[BytesView],
 ) -> FixedArray[Value?] raise DecodeError {
@@ -137,6 +149,9 @@ fn scan(
   } else {
     FixedArray::make(message.oneofs.length(), -1)
   }
+  // A proto3 string must be UTF-8. A proto2 string need not be, and is
+  // printed with U+FFFD for each bad sequence.
+  let checked = message.syntax is Proto3
   for r in 0..<records.length() {
     let record = records[r]
     let reader = Reader(record)
@@ -152,7 +167,7 @@ fn scan(
         match (field.type_, reader.wire_type()) {
           (String, Len) => {
             let value = reader.length_delimited()
-            if !is_utf8(value) {
+            if checked && !is_utf8(value) {
               raise reader.error(
                 at,
                 "the field \{field.name} holds octets that are not UTF-8",
@@ -215,8 +230,15 @@ fn scan(
         continue
       }
       match (field.type_, reader.wire_type()) {
-        (Int32 | Int64 | UInt32 | UInt64 | SInt32 | SInt64 | Bool | Enum, Varint
-        ) => values[index] = Some(Number(reader.varint()))
+        (Int32 | Int64 | UInt32 | UInt64 | SInt32 | SInt64 | Bool, Varint) =>
+          values[index] = Some(Number(reader.varint()))
+        (Enum, Varint) => {
+          let bits = reader.varint()
+          if self.closed_enum_of(field) is Some(type_) && !type_.defines(bits) {
+            continue
+          }
+          values[index] = Some(Number(bits))
+        }
         (Fixed64 | SFixed64 | Double, I64) =>
           values[index] = Some(Number(reader.fixed64()))
         (Fixed32 | SFixed32 | Float, I32) =>
@@ -224,13 +246,16 @@ fn scan(
         (String, Len) => {
           let at = reader.pos
           let value = reader.length_delimited()
-          if !is_utf8(value) {
+          if is_utf8(value) {
+            values[index] = Some(Octets(value))
+          } else if checked {
             raise reader.error(
               at,
               "the field \{field.name} holds octets that are not UTF-8",
             )
+          } else {
+            values[index] = Some(Octets(repaired(value)))
           }
-          values[index] = Some(Octets(value))
         }
         (Bytes, Len) => values[index] = Some(Octets(reader.length_delimited()))
         (Message, Len) => {
@@ -268,14 +293,28 @@ fn DescriptorSet::print_message(
   records : Array[BytesView],
   depth : Int32,
 ) -> Unit raise DecodeError {
+  if message.syntax is Editions {
+    raise DecodeError(
+      position=records[0].start_offset(),
+      message="the message \{message.full_name} is a type of an editions file, which smock does not decode",
+    )
+  }
+  if message.message_set_wire_format {
+    raise DecodeError(
+      position=records[0].start_offset(),
+      message="the message \{message.full_name} is a MessageSet, which smock does not decode",
+    )
+  }
   if well_known_form(message) is Some(form) {
     self.print_well_known(out, message, form, records, depth)
     return
   }
   let fields = message.fields
-  let values = scan(message, records)
+  let values = self.scan(message, records)
   out.write_byte(b'{')
   let order = message.by_number
+  // Every singular field of a proto2 message has presence.
+  let proto2 = message.syntax is Proto2
   let mut first = true
   for n in 0..<order.length() {
     let index = order[n]
@@ -287,9 +326,15 @@ fn DescriptorSet::print_message(
       )
     }
     let value = values[index]
+    if value is None && field.label is Required {
+      raise DecodeError(
+        position=records[0].start_offset(),
+        message="the message \{message.full_name} lacks its required field \{field.name}",
+      )
+    }
     if value is None &&
       !(field.label is Repeated) &&
-      (field.oneof_index is Some(_) || field.type_ is Message) {
+      (proto2 || field.oneof_index is Some(_) || field.type_ is Message) {
       continue
     }
     if !first {
@@ -306,7 +351,7 @@ fn DescriptorSet::print_message(
       match self.message_of(field) {
         Some(entry) if entry.map_entry && is_map_entry(entry) =>
           self.print_map(out, entry, runs, depth)
-        _ => self.print_list(out, field, runs, depth)
+        _ => self.print_list(out, field, runs, depth, proto2~)
       }
     } else {
       self.print_value(out, field, value, depth)
@@ -360,15 +405,20 @@ fn DescriptorSet::print_value(
 ///|
 /// Prints to `out` the values of `field`, a repeated field other than a
 /// map of a message `depth` messages deep, whose records are in `runs`,
-/// as an array.
+/// as an array. The message is of a proto2 file when `proto2`, so its
+/// strings may not be UTF-8.
 fn DescriptorSet::print_list(
   self : DescriptorSet,
   out : @buffer.Buffer,
   field : FieldDescriptor,
   runs : Array[BytesView],
   depth : Int32,
+  proto2~ : Bool,
 ) -> Unit raise DecodeError {
   out.write_byte(b'[')
+  // A number that a closed enum does not define is skipped, as protobuf's
+  // parsers keep it as an unknown field.
+  let closed = self.closed_enum_of(field)
   let mut first = true
   for r in 0..<runs.length() {
     let reader = Reader(runs[r])
@@ -392,6 +442,8 @@ fn DescriptorSet::print_list(
               self.print_message(out, type_, [element], depth + 1)
             }
             None if field.type_ is Bytes => write_base64(out, element)
+            None if proto2 && !is_utf8(element) =>
+              write_json_string(out, repaired(element))
             None => write_json_string(out, element)
           }
         }
@@ -400,6 +452,9 @@ fn DescriptorSet::print_list(
           let values = Reader(reader.length_delimited())
           while !values.at_end() {
             let bits = values.number(field.type_)
+            if closed is Some(type_) && !type_.defines(bits) {
+              continue
+            }
             if !first {
               out.write_byte(b',')
             }
@@ -409,6 +464,9 @@ fn DescriptorSet::print_list(
         }
         _ => {
           let bits = reader.number(field.type_)
+          if closed is Some(type_) && !type_.defines(bits) {
+            continue
+          }
           if !first {
             out.write_byte(b',')
           }
@@ -462,7 +520,8 @@ fn is_map_entry(entry : MessageDescriptor) -> Bool {
 /// records in `runs`, a field of a message `depth` messages deep, as an
 /// object with a member per key, in key order. An entry without a key or a
 /// value takes the default, and of the entries with one key, the last
-/// wins.
+/// wins. An entry whose value is a number that a closed enum does not
+/// define is skipped, as protobuf's parsers keep it as an unknown field.
 fn DescriptorSet::print_map(
   self : DescriptorSet,
   out : @buffer.Buffer,
@@ -478,8 +537,7 @@ fn DescriptorSet::print_map(
       entries.push(reader.length_delimited())
     }
   }
-  let count = entries.length()
-  if count == 0 {
+  if entries.length() == 0 {
     out.write_bytes(b"{}")
     return
   }
@@ -495,41 +553,50 @@ fn DescriptorSet::print_map(
   let key_field = entry.fields[key_index]
   let value_field = entry.fields[value_index]
   let textual = key_field.type_ is String
+  let checked = entry.syntax is Proto3
+  let closed = self.closed_enum_of(value_field)
   // Each entry's key: its text for a string key, or else a number whose
   // unsigned order is the key's order, the default's until the entry
   // gives one.
-  let keys : FixedArray[UInt64] = FixedArray::make(
-    count,
-    key_order(key_field.type_, 0),
-  )
+  let no_key = key_order(key_field.type_, 0)
+  let keys : FixedArray[UInt64] = FixedArray::make(entries.length(), no_key)
   let texts : FixedArray[BytesView] = FixedArray::make(
     if textual {
-      count
+      entries.length()
     } else {
       0
     },
     b""[:],
   )
-  for i in 0..<count {
+  // The entries kept, at the start of `entries`, `keys` and `texts`.
+  let mut count = 0
+  for i in 0..<entries.length() {
     let reader = Reader(entries[i])
+    // Whether the entry's last value is a number its closed enum does not
+    // define.
+    let mut unknown = false
     while !reader.at_end() {
       let number = reader.tag()
       let at = reader.pos
       match (number, key_field.type_, reader.wire_type()) {
         (1, String, Len) => {
           let text = reader.length_delimited()
-          if !is_utf8(text) {
+          texts[count] = if is_utf8(text) {
+            text
+          } else if checked {
             raise reader.error(
               at,
               "the field \{key_field.name} holds octets that are not UTF-8",
             )
+          } else {
+            // Keys that print alike are one key.
+            repaired(text)
           }
-          texts[i] = text
         }
         (1, Int32 | Int64 | UInt32 | UInt64 | SInt32 | SInt64 | Bool, Varint)
         | (1, Fixed64 | SFixed64, I64)
         | (1, Fixed32 | SFixed32, I32) =>
-          keys[i] = key_order(
+          keys[count] = key_order(
             key_field.type_,
             match reader.wire_type() {
               I64 => reader.fixed64()
@@ -537,7 +604,7 @@ fn DescriptorSet::print_map(
               _ => reader.varint()
             },
           )
-        (2, _, Len) if value_field.type_ is String => {
+        (2, _, Len) if checked && value_field.type_ is String => {
           // Checked here, since only the last entry of a key is printed.
           let text = reader.length_delimited()
           if !is_utf8(text) {
@@ -547,11 +614,26 @@ fn DescriptorSet::print_map(
             )
           }
         }
+        (2, _, Varint) if closed is Some(type_) =>
+          unknown = !type_.defines(reader.varint())
         _ => reader.skip()
       }
     }
+    if unknown {
+      keys[count] = no_key
+      if textual {
+        texts[count] = b""[:]
+      }
+      continue
+    }
+    entries[count] = entries[i]
+    count += 1
   }
-  let order = sorted_entries(keys, texts)
+  if count == 0 {
+    out.write_bytes(b"{}")
+    return
+  }
+  let order = sorted_entries(keys, texts, count)
   out.write_byte(b'{')
   let mut first = true
   for n in 0..<count {
@@ -564,7 +646,7 @@ fn DescriptorSet::print_map(
       out.write_byte(b',')
     }
     first = false
-    let values = scan(entry, [entries[i]])
+    let values = self.scan(entry, [entries[i]])
     match values[key_index] {
       Some(Octets(text)) => write_json_string(out, text)
       Some(Number(bits)) => {
@@ -660,14 +742,14 @@ fn same_key(
 }
 
 ///|
-/// The indexes of a map's entries, whose keys are `keys` or `texts`, as
-/// `compare_keys` says, in key order, entries with one key in their order:
-/// a merge sort, a run at a time, with plain loops.
+/// The indexes of the first `count` entries of a map, whose keys are `keys`
+/// or `texts`, as `compare_keys` says, in key order, entries with one key
+/// in their order: a merge sort, a run at a time, with plain loops.
 fn sorted_entries(
   keys : FixedArray[UInt64],
   texts : FixedArray[BytesView],
+  count : Int32,
 ) -> FixedArray[Int32] {
-  let count = keys.length()
   let mut from : FixedArray[Int32] = FixedArray::make(count, 0)
   for i in 0..<count {
     from[i] = i
@@ -754,6 +836,28 @@ fn DescriptorSet::print_number(
     }
     _ => ()
   }
+}
+
+///|
+/// The enum type of `field`, a field of a message of this set, when it is
+/// a closed enum, as the enums of proto2 files are: protobuf's parsers keep
+/// a number it does not define as an unknown field. `None` for an open
+/// enum and for any other type.
+fn DescriptorSet::closed_enum_of(
+  self : DescriptorSet,
+  field : FieldDescriptor,
+) -> EnumDescriptor? {
+  match self.enum_of(field) {
+    Some(type_) if type_.syntax is Proto2 => Some(type_)
+    _ => None
+  }
+}
+
+///|
+/// Whether the enum defines the number whose bits, as a varint gives them,
+/// are `bits`: their low 32 bits, as protobuf's parsers read an enum.
+fn EnumDescriptor::defines(self : EnumDescriptor, bits : UInt64) -> Bool {
+  self.find_value_by_number(bits.to_uint().reinterpret_as_int()) is Some(_)
 }
 
 ///|
@@ -929,6 +1033,13 @@ fn write_json_name(out : @buffer.Buffer, name : String) -> Unit {
     out.write_byte(name[i].to_byte())
   }
   out.write_byte(b'"')
+}
+
+///|
+/// `octets`, which are not UTF-8, as UTF-8, with U+FFFD for each bad
+/// sequence, as smock reads header values.
+fn repaired(octets : BytesView) -> BytesView {
+  @utf8.encode(@utf8.decode_lossy(octets))
 }
 
 ///|

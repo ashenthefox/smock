@@ -224,9 +224,9 @@ for reply in maxima minima specials lists maps choice inner; do
   hex_test "replies/$reply.binpb" "everything_$reply" "The Everything of fixtures/protobuf/replies/$reply.txtpb, as protoc encodes it, in hex." protobuf
 done
 
-# Output types that gRPC Stubs do not serve yet: well-known types, and a
-# type of a proto2 file, at the top or through nested messages; and an
-# input type with well-known types that they do not serve yet.
+# Output types that reach well-known types that gRPC Stubs do not serve
+# yet, at the top or through nested messages, and a type of a proto2 file;
+# and an input type with well-known types that they do not serve yet.
 descriptor_set unserved unserved.binpb unserved.proto
 
 # A request of version 2 of helloworld.proto, which carries the field
@@ -263,6 +263,25 @@ message users users.proto users.Query query
 message users users.proto users.Query ratio-9-99
 message users users.proto users.Query ratio-16777217
 hex_test users/users.binpb users_set "The Descriptor set of fixtures/protobuf/users/users.proto, fixtures/protobuf/users/users.binpb, in hex." definitions
+
+# proto2 types, which smock serves with their required fields, closed
+# enums and packing, messages of them and what a client may send in place
+# of them; a MessageSet, a group, a type that an extension extends, and
+# types of an editions file, which it does not serve.
+descriptor_set shipping shipping.binpb shipping.proto
+message shipping shipping.proto shipping.Order order
+message shipping shipping.proto shipping.Draft draft
+message shipping shipping.proto shipping.Parcel parcel
+message shipping shipping.proto shipping.ParcelOnTheWire parcel-unknown
+message shipping shipping.proto shipping.ParcelOnTheWire carrier-unknown
+message shipping shipping.proto shipping.ParcelOnTheWire parcel-unpacked
+message shipping shipping.proto shipping.Parcel parcel-not-utf8
+message shipping shipping.proto shipping.ParcelOnTheWire parcel-without-ids
+hex_test shipping/shipping.binpb shipping_set "The Descriptor set of fixtures/protobuf/shipping/shipping.proto and its imports, fixtures/protobuf/shipping/shipping.binpb, in hex." protobuf
+hex_test shipping/shipping.binpb shipping_set "The Descriptor set of fixtures/protobuf/shipping/shipping.proto and its imports, fixtures/protobuf/shipping/shipping.binpb, in hex." definitions
+hex_test shipping/parcel.binpb shipping_parcel "A Parcel with every field set, some at their defaults, as protoc encodes it: fixtures/protobuf/shipping/parcel.binpb, in hex." protobuf
+hex_test shipping/parcel-unknown.binpb shipping_unknown "Numbers that the closed enum State does not define, in place of a Parcel's, as protoc encodes them: fixtures/protobuf/shipping/parcel-unknown.binpb, in hex." protobuf
+hex_test shipping/parcel-not-utf8.binpb shipping_not_utf8 "A Parcel whose strings are not UTF-8, as protoc encodes it: fixtures/protobuf/shipping/parcel-not-utf8.binpb, in hex." protobuf
 
 # Methods whose types hold Timestamp, Duration, FieldMask, the wrappers and
 # Empty, built from protobuf's files beside them, and requests and replies

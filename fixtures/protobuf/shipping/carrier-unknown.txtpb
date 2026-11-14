@@ -1,0 +1,3 @@
+# A member of the oneof carrier that State does not define, which a test
+# sends after parcel-unknown.txtpb, whose carrier_name it leaves in place.
+carrier_state: 7

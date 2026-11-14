@@ -198,9 +198,10 @@ of each GitHub release include its section
   Mock, and the Default Mock answers with its own set. A call is looked up
   again when its request ends, so a reload never makes a call decoded with
   one version of a set and answered with another. For now smock serves
-  replies of every proto3 type but the well-known types Any, Struct,
-  Value, ListValue and NullValue, and answers the calls it does not serve
-  yet with Trailers-Only INTERNAL and a fixed message. The new `smock/grpc` module frames messages, names gRPC's
+  replies of every proto3 and proto2 type but the well-known types Any,
+  Struct, Value, ListValue and NullValue, groups and extended types, and
+  answers the calls it does not serve yet with Trailers-Only INTERNAL and
+  a fixed message. The new `smock/grpc` module frames messages, names gRPC's
   status codes and percent-encodes status messages, and `smock/protobuf`
   decodes and encodes messages. See [gRPC](docs/grpc.md).
 - `grpcStatus` in the Journal. A gRPC call's entry records the name of the
@@ -249,6 +250,21 @@ of each GitHub release include its section
   write. gRPC Stubs are compared once rewritten for the warning about a
   Stub that can never match. See
   [Conditions on the message](docs/grpc.md#conditions-on-the-message).
+- gRPC Stubs on methods whose types come from proto2 files, with proto2's
+  rules. Every singular field of a proto2 message has presence: it prints
+  only when set, and a reply writes it whenever it gives it. A request
+  message without a required field, at any depth, gets INTERNAL and does
+  not reach the Stubs, as protobuf's parsers refuse it; a static reply
+  without one is a load error, and a templated one gets INTERNAL with
+  `templateError`. A number that a closed enum does not define is kept as
+  an unknown field, so it is never printed or matched, and a condition or
+  a reply that gives one is refused. A reply packs a proto2 field's
+  repeated scalars only when it says `packed = true`. A proto2 string that
+  is not UTF-8 prints with U+FFFD for each bad sequence. A Stub whose
+  method's types reach a type of an editions file, or a MessageSet, is a
+  load error that says why, per method, so files that no Stub uses still
+  load. Groups and types that an extension extends are not served yet. See
+  [proto2 types](docs/grpc.md#proto2-types).
 - protobuf's well-known types Timestamp, Duration, FieldMask, the wrappers
   and Empty in their ProtoJSON forms, as grpcurl shows them, in request
   messages, conditions and replies, at any place, a method's whole input

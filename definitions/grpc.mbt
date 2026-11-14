@@ -214,12 +214,13 @@ let unserved_well_known : String = "and gRPC Stubs serve no Any, Struct, Value, 
 
 ///|
 /// Reports at `pointer`, a gRPC Stub's path, what gRPC Stubs do not serve
-/// yet of `output`, the output type of its method, a message of `set`, and
-/// of each message type it reaches through its fields, each once, a map's
-/// values included: a type of a file that is not proto3, and a well-known
-/// type that `@protobuf.is_unserved_well_known` names, as the type itself
-/// or as a field's. Every other field is served, as `File::check_input`
-/// words its problems. Returns whether every type it reaches is served.
+/// of `output`, the output type of its method, a message of `set`, and of
+/// each type it reaches through its fields, each once, a map's values
+/// included: what `File::check_reached` and `File::check_field` refuse,
+/// and a well-known type that `@protobuf.is_unserved_well_known` names, as
+/// the type itself or as a field's. Every other field is served, as
+/// `File::check_input` words its problems. Returns whether every type it
+/// reaches is served.
 fn File::check_output(
   self : File,
   pointer : String,
@@ -239,21 +240,16 @@ fn File::check_output(
   let pending = [output]
   while pending.pop() is Some(message) {
     let reached = message.full_name != output.full_name
-    if syntax_name(message.syntax) is Some(syntax) {
-      let defines = if reached {
-        "\{message.full_name}, a type it reaches"
-      } else {
-        "it"
-      }
-      self.error(
-        pointer,
-        "\{not_served}: \{message.file_name}, which defines \{defines}, is \{syntax}, and gRPC Stubs serve only types of proto3 files so far",
-      )
+    if !self.check_reached(pointer, "output", output, message) {
       served = false
       continue
     }
     let reached_types = []
     for field in message.fields {
+      if !self.check_field(pointer, "output", output, message, field, set, seen) {
+        served = false
+        continue
+      }
       // A map field reaches the type of its values.
       let value = match set.message_of(field) {
         Some(entry) if entry.map_entry =>
@@ -294,21 +290,109 @@ fn File::check_output(
 }
 
 ///|
-/// The syntax `syntax` as a problem names it, such as `a proto2 file`, or
-/// `None` for proto3, which gRPC Stubs serve.
-fn syntax_name(syntax : @protobuf.Syntax) -> String? {
-  match syntax {
-    Proto3 => None
-    Proto2 => Some("a proto2 file")
-    Editions => Some("an editions file")
+/// Reports at `pointer`, a gRPC Stub's path, why `message`, the `side`
+/// type of its method, `top`, or a message type it reaches, is not served,
+/// and returns whether it is, as far as the type itself goes: a type of an
+/// editions file comes in a later spec; a MessageSet is not served, since
+/// its extensions use another wire form; and a type that an extension of
+/// the set extends is not served yet. Its fields are checked by the
+/// caller.
+fn File::check_reached(
+  self : File,
+  pointer : String,
+  side : String,
+  top : @protobuf.MessageDescriptor,
+  message : @protobuf.MessageDescriptor,
+) -> Bool {
+  let reached = message.full_name != top.full_name
+  let it = if reached {
+    "\{message.full_name}, a type it reaches,"
+  } else {
+    "it"
   }
+  if message.syntax is Editions {
+    let defines = if reached {
+      "\{message.full_name}, a type it reaches"
+    } else {
+      "it"
+    }
+    self.error(
+      pointer,
+      "the \{side} type \{top.full_name} is not served yet: \{message.file_name}, which defines \{defines}, is an editions file, and editions come in a later spec",
+    )
+    return false
+  }
+  if message.message_set_wire_format {
+    self.error(
+      pointer,
+      "the \{side} type \{top.full_name} is not served: \{it} is a MessageSet, whose extensions use another wire form, and smock serves no MessageSet types",
+    )
+    return false
+  }
+  if message.is_extended() {
+    self.error(
+      pointer,
+      "the \{side} type \{top.full_name} is not served yet: \{it} is extended by an extension of the set, and gRPC Stubs serve no extended types so far",
+    )
+    return false
+  }
+  true
+}
+
+///|
+/// Reports at `pointer`, a gRPC Stub's path, why `field`, a field of
+/// `message`, the `side` type of its method, `top`, or a message type of
+/// `set` it reaches, is not served, and returns whether it is, as far as
+/// its kind goes: a group is not served yet, and an enum of an editions
+/// file, a map's values included, comes in a later spec. An enum is
+/// reported once, as `seen`, the full names of the types reached so far,
+/// says.
+fn File::check_field(
+  self : File,
+  pointer : String,
+  side : String,
+  top : @protobuf.MessageDescriptor,
+  message : @protobuf.MessageDescriptor,
+  field : @protobuf.FieldDescriptor,
+  set : @protobuf.DescriptorSet,
+  seen : Set[String],
+) -> Bool {
+  if field.type_ is Group {
+    let subject = if message.full_name != top.full_name {
+      "the field \{field.name} of \{message.full_name}, a type it reaches,"
+    } else {
+      "its field \{field.name}"
+    }
+    self.error(
+      pointer,
+      "the \{side} type \{top.full_name} is not served yet: \{subject} is a group, and gRPC Stubs serve no groups so far",
+    )
+    return false
+  }
+  // A map field reaches the type of its values.
+  let value = match set.message_of(field) {
+    Some(entry) if entry.map_entry =>
+      entry.find_field_by_number(2).unwrap_or(field)
+    _ => field
+  }
+  guard set.enum_of(value) is Some(type_) && type_.syntax is Editions else {
+    return true
+  }
+  if !seen.contains(type_.full_name) {
+    seen.add(type_.full_name)
+    self.error(
+      pointer,
+      "the \{side} type \{top.full_name} is not served yet: \{type_.file_name}, which defines \{type_.full_name}, a type it reaches, is an editions file, and editions come in a later spec",
+    )
+  }
+  false
 }
 
 ///|
 /// Reports at `pointer`, a gRPC Stub's path, what gRPC Stubs do not serve
-/// yet of `input`, the input type of its method, a message of `set`, and
-/// of each message type it reaches through its fields, a map's values
-/// included, each once: a type of a file that is not proto3, and a
+/// of `input`, the input type of its method, a message of `set`, and of
+/// each type it reaches through its fields, a map's values included, each
+/// once: what `File::check_reached` and `File::check_field` refuse, and a
 /// well-known type that `@protobuf.is_unserved_well_known` names, as the
 /// type itself, as a field's, or as a map's values. Every other field is
 /// served, singular or repeated, a map or in a oneof: one of any scalar
@@ -334,26 +418,16 @@ fn File::check_input(
   let pending = [input]
   while pending.pop() is Some(message) {
     let reached = message.full_name != input.full_name
-    let syntax = match message.syntax {
-      Proto3 => None
-      Proto2 => Some("a proto2 file")
-      Editions => Some("an editions file")
-    }
-    if syntax is Some(syntax) {
-      let defines = if reached {
-        "\{message.full_name}, a type it reaches"
-      } else {
-        "it"
-      }
-      self.error(
-        pointer,
-        "\{not_served}: \{message.file_name}, which defines \{defines}, is \{syntax}, and gRPC Stubs serve only types of proto3 files so far",
-      )
+    if !self.check_reached(pointer, "input", input, message) {
       served = false
       continue
     }
     let reached_types = []
     for field in message.fields {
+      if !self.check_field(pointer, "input", input, message, field, set, seen) {
+        served = false
+        continue
+      }
       // A map's values are checked as the field's own values are.
       let (value, map) = match set.message_of(field) {
         Some(entry) if field.label is Repeated && entry.map_entry =>

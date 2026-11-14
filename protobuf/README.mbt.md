@@ -235,16 +235,16 @@ order, under the field's JSON name, as `json_name` gives it.
   0.1f prints `0.1`. NaN and the infinities are the strings `"NaN"`,
   `"Infinity"` and `"-Infinity"`.
 - bytes are standard base64 with padding. An enum value is printed by its
-  name, the first one of an alias, or by its number when the enum does not
-  define it. A nested message is an object.
+  name, the first one of an alias, or by its number when an open enum, as
+  a proto3 enum is, does not define it. A nested message is an object.
 - A repeated field is an array. A map is an object with a member per key,
   in key order: integer keys by value, bool keys `"false"` then
   `"true"`, and string keys by their octets; an integer key prints in
   decimal, as a string.
 - A field without presence that the message leaves out is printed at its
   default, `[]` and `{}` included. A proto3 `optional` field, a member of
-  a oneof and a message field are printed only when the message holds
-  them.
+  a oneof, a message field and every singular field of a proto2 message
+  are printed only when the message holds them.
 
 So a message gives one text, whatever order its records come in.
 
@@ -253,26 +253,36 @@ scalar field wins, the values of a message field are merged, a member of
 a oneof replaces the one before it, repeated scalars are read packed or
 not with the records of a packed field joined, and unknown fields are
 skipped. A map entry without a key or a value takes the default, and when
-a key repeats, the last entry wins. It raises `DecodeError` when the input
-is not protobuf, a string is not UTF-8, or messages nest deeper than 100,
-a map entry counting as a message. It does not decode groups and the
-well-known types Any, Struct, Value, ListValue and NullValue yet, and
-raises its error for a message that is or has one. The other well-known
-types print in their ProtoJSON forms ([below](#well-known-types)).
+a key repeats, the last entry wins. A number that a closed enum, as a
+proto2 enum is, does not define is skipped, as protobuf's parsers keep it
+as an unknown field: a list leaves it out, a map leaves its entry out, and
+a field or a oneof keeps the value it had. A proto2 string that is not
+UTF-8 prints with U+FFFD for each bad sequence. It raises `DecodeError`
+when the input is not protobuf, a proto3 string is not UTF-8, a message
+lacks a proto2 required field, or messages nest deeper than 100, a map
+entry counting as a message. It does not decode groups and the well-known
+types Any, Struct, Value, ListValue and NullValue yet, nor types of
+editions files and MessageSets, and raises its error for a message that is
+or has one. The other well-known types print in their ProtoJSON forms
+([below](#well-known-types)).
 
 `set.encode_json(message, json)` encodes JSON, a message of the type
 `message`, a type of `set`, as ProtoJSON writes it, the way protoc encodes
 it: fields in field-number order, a field without presence left out at its
-default, repeated scalars packed unless the field says `packed = false`,
-and map entries sorted by key. It reads JSON as ProtoJSON reads it: a key
+default, every singular field of a proto2 message written whenever it is
+set, repeated scalars of a proto3 message packed unless the field says
+`packed = false` and those of a proto2 message only when it says
+`packed = true`, and map entries sorted by key. It reads JSON as ProtoJSON reads it: a key
 may be the field's proto name or its JSON name, `null` leaves a field
 unset, an enum is a name or a number, a 64-bit integer a number or a
 string, exact at any size, a float `"NaN"`, `"Infinity"` or `"-Infinity"`
 too, and bytes are base64, standard or URL-safe, with or without padding.
 It raises `EncodeError`, which names the JSON Pointer of the value at
-fault, for JSON that is not a message of the type, and for the types it
-does not encode yet: the well-known types Any, Struct, Value, ListValue
-and NullValue, and types of files that are not proto3.
+fault, for JSON that is not a message of the type, a message that lacks a
+proto2 required field and a number that a closed enum does not define
+included, and for the types it does not encode: the well-known types Any,
+Struct, Value, ListValue and NullValue, and types of editions files, not
+yet, and MessageSets.
 `@protobuf.is_well_known(full_name)` tells the well-known types, and
 `@protobuf.is_unserved_well_known(full_name)` those not served yet.
 

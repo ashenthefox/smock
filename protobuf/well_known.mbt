@@ -167,7 +167,7 @@ fn DescriptorSet::print_well_known(
       out.write_byte(b'"')
     }
     Wrapper(index) => {
-      let values = scan(message, records)
+      let values = self.scan(message, records)
       self.print_value(out, message.fields[index], values[index], depth)
     }
   }
