@@ -101,6 +101,10 @@ pub fn DescriptorSet::printed_value(
     }
     Enum => {
       guard self.enum_of(field) is Some(type_) else { raise unfit }
+      let null_value = type_.full_name == "google.protobuf.NullValue"
+      if null_value && json is Null {
+        return json
+      }
       let number = match json {
         String(name) =>
           match type_.find_value_by_name(name) {
@@ -116,6 +120,8 @@ pub fn DescriptorSet::printed_value(
         _ => raise unfit
       }
       match type_.find_value_by_number(number) {
+        // NullValue, whose values print as null, whatever their number.
+        _ if null_value => Json::null()
         Some(value) => Json::string(value.name)
         // A closed enum, as a proto2 enum is, keeps a number it does not
         // define as an unknown field, which a message never prints.
@@ -170,10 +176,21 @@ pub fn DescriptorSet::printed_message(
     }
     raise NotOfType(wanted="an object")
   }
-  if form is Wrapper(index) {
-    return self.printed_value(message.fields[index], json)
-  }
   let unfit = NotOfType(wanted=self.wanted_message(message))
+  match (form, json) {
+    (Wrapper(index), _) =>
+      return self.printed_value(message.fields[index], json)
+    // Their members are the caller's to check, as a message's are.
+    (Struct(_) | Any, Object(_)) | (ListValue(_), Array(_)) => return json
+    (Struct(_) | Any | ListValue(_), _) => raise unfit
+    // A number of a Value is printed as a double is.
+    (Value, Number(_)) => {
+      let n = floating(json) catch { _ => raise unfit }
+      return number_of(n.to_string())
+    }
+    (Value, _) => return json
+    (Timestamp | Duration | FieldMask, _) => ()
+  }
   // The value as ProtoJSON reads it, encoded, then printed as
   // `decode_json` prints it.
   guard json is String(text) else { raise unfit }

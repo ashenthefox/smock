@@ -40,6 +40,45 @@ priv enum WellKnown {
 }
 
 ///|
+/// How ProtoJSON writes a message of a type: what a value of it is, and so
+/// what a condition on it is checked as.
+#derive(Debug, Eq)
+pub(all) enum JsonForm {
+  /// An object of its fields, under their JSON names, Empty included.
+  Fields
+  /// A string or a number, as `DescriptorSet::printed_message` checks it:
+  /// a Timestamp, a Duration, a FieldMask or a wrapper.
+  Scalar
+  /// google.protobuf.Struct: an object whose keys are data, and whose
+  /// members are any JSON values, as a Value is.
+  Struct
+  /// google.protobuf.ListValue: an array of any JSON values, as a Value
+  /// is.
+  ListValue
+  /// google.protobuf.Value: any JSON value. Its object is a Struct, its
+  /// array a ListValue.
+  Value
+  /// google.protobuf.Any: an object of the type URL of the message it
+  /// holds, a type of the set, as `@type`, and that message: its fields, or
+  /// its form as `value` when it is a well-known type that has one, as a
+  /// `json_form` other than `Fields` says.
+  Any
+}
+
+///|
+/// How ProtoJSON writes a message of this type.
+pub fn MessageDescriptor::json_form(self : MessageDescriptor) -> JsonForm {
+  match well_known_form(self) {
+    None => Fields
+    Some(Timestamp | Duration | FieldMask | Wrapper(_)) => Scalar
+    Some(Struct(_)) => Struct
+    Some(ListValue(_)) => ListValue
+    Some(Value) => Value
+    Some(Any) => Any
+  }
+}
+
+///|
 /// The earliest Timestamp, 0001-01-01T00:00:00Z, in seconds since the epoch.
 let min_timestamp_seconds : Int64 = -62135596800L
 

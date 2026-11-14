@@ -374,3 +374,90 @@ test "an Any whose type the set lacks, or whose members do not fit the type it n
     ),
   )
 }
+
+///|
+test "printed values: a NullValue is null, whatever spelling gives it; a Value is any JSON value, its numbers printed as doubles; a Struct, a ListValue and an Any are an object, an array and an object, whose members the caller checks" {
+  let field = (name, texts : Array[String]) => {
+    texts
+    .map(text => {
+      "\{name} \{text} -> \{printed_form(dynamic_set, "dynamic.Document", name, text)}"
+    })
+    .join("\n")
+  }
+  let lines = [
+    field("nothing", ["null", "\"NULL_VALUE\"", "0", "5", "\"x\"", "{}"]),
+    field("value", [
+      "null", "1e3", "1.0", "12345678901234567890", "1e400", "\"1\"", "true", "{\"a\":1}",
+      "[1]",
+    ]),
+    field("labels", ["{}", "{\"a\":1}", "[]", "null"]),
+    field("list", ["[]", "[1]", "{}"]),
+    field("attachment", ["{}", "{\"@type\":5}", "\"x\""]),
+    field("values", ["null", "2"]),
+  ]
+  inspect(
+    lines.join("\n"),
+    content=(
+      #|nothing null -> null
+      #|nothing "NULL_VALUE" -> null
+      #|nothing 0 -> null
+      #|nothing 5 -> null
+      #|nothing "x" -> must be null
+      #|nothing {} -> must be null
+      #|value null -> null
+      #|value 1e3 -> 1000
+      #|value 1.0 -> 1
+      #|value 12345678901234567890 -> 12345678901234567000
+      #|value 1e400 -> must be a JSON value: null, a number within the range of a double, a string, true or false, an object or an array
+      #|value "1" -> "1"
+      #|value true -> true
+      #|value {"a":1} -> {"a":1}
+      #|value [1] -> [1]
+      #|labels {} -> {}
+      #|labels {"a":1} -> {"a":1}
+      #|labels [] -> must be an object, whose members are any JSON values
+      #|labels null -> must be an object, whose members are any JSON values
+      #|list [] -> []
+      #|list [1] -> [1]
+      #|list {} -> must be an array, whose elements are any JSON values
+      #|attachment {} -> {}
+      #|attachment {"@type":5} -> {"@type":5}
+      #|attachment "x" -> must be an object that gives the type URL of the message it holds as "@type"
+      #|values null -> null
+      #|values 2 -> 2
+    ),
+  )
+}
+
+///|
+test "the JSON form of each type, as a condition on it is checked" {
+  let set = hex_set(dynamic_set)
+  let lines = [
+    "dynamic.Document", "google.protobuf.Struct", "google.protobuf.ListValue", "google.protobuf.Value",
+    "google.protobuf.Any", "google.protobuf.Duration", "google.protobuf.Empty", "helloworld.HelloRequest",
+  ].map(name => {
+    guard set.find_message(name) is Some(message) else { abort("no \{name}") }
+    let form = match message.json_form() {
+      Fields => "Fields"
+      Scalar => "Scalar"
+      Struct => "Struct"
+      ListValue => "ListValue"
+      Value => "Value"
+      Any => "Any"
+    }
+    "\{name}: \{form}"
+  })
+  inspect(
+    lines.join("\n"),
+    content=(
+      #|dynamic.Document: Fields
+      #|google.protobuf.Struct: Struct
+      #|google.protobuf.ListValue: ListValue
+      #|google.protobuf.Value: Value
+      #|google.protobuf.Any: Any
+      #|google.protobuf.Duration: Scalar
+      #|google.protobuf.Empty: Fields
+      #|helloworld.HelloRequest: Fields
+    ),
+  )
+}
