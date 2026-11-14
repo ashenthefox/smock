@@ -301,6 +301,17 @@ hex_test wellknown/lease.binpb lease "The Lease of the ticket's example, as prot
 hex_test wellknown/known.binpb known "A Known with every field set, as protoc encodes it: fixtures/protobuf/wellknown/known.binpb, in hex." protobuf
 hex_test wellknown/known-defaults.binpb known_defaults "A Known with each singular field set to a message that holds its default, as protoc encodes it: fixtures/protobuf/wellknown/known-defaults.binpb, in hex." protobuf
 
+# A proto2 file with extensions, declared at the top level and in a
+# message, and with groups, and requests and replies of its types.
+descriptor_set extensions shop.binpb shop.proto
+message extensions shop.proto shop.Order order
+message extensions shop.proto shop.Order order-full
+message extensions shop.proto shop.Itinerary itinerary
+hex_test extensions/shop.binpb extensions_set "The Descriptor set of fixtures/protobuf/extensions/shop.proto, fixtures/protobuf/extensions/shop.binpb, in hex." protobuf
+hex_test extensions/shop.binpb extensions_set "The Descriptor set of fixtures/protobuf/extensions/shop.proto, fixtures/protobuf/extensions/shop.binpb, in hex." definitions
+hex_test extensions/order-full.binpb order_full "An Order with every field and every extension set, as protoc encodes it: fixtures/protobuf/extensions/order-full.binpb, in hex." protobuf
+hex_test extensions/itinerary.binpb itinerary "An Itinerary with groups nested in groups, as protoc encodes it: fixtures/protobuf/extensions/itinerary.binpb, in hex." protobuf
+
 # The end of the list of fixtures. With --check: every file the script
 # wrote, compared with the committed one.
 if [ -n "$check" ]; then

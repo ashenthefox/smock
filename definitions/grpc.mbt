@@ -329,7 +329,7 @@ fn File::check_reached(
     )
     return false
   }
-  if message.is_extended() {
+  if message.extended_by().length() > 0 {
     self.error(
       pointer,
       "the \{side} type \{top.full_name} is not served yet: \{it} is extended by an extension of the set, and gRPC Stubs serve no extended types so far",

@@ -192,16 +192,81 @@ pub fn MessageDescriptor::find_extension(
   self : MessageDescriptor,
   number : Int32,
 ) -> FieldDescriptor? {
-  match self.extended_by {
-    Some(extensions) => extensions.get(number)
-    None => None
+  let index = self.extension_index(number)
+  if index < 0 {
+    None
+  } else {
+    Some(self.extended_by[index])
   }
 }
 
 ///|
-/// Whether an extension of the set extends the message.
-pub fn MessageDescriptor::is_extended(self : MessageDescriptor) -> Bool {
-  self.extended_by is Some(_)
+/// The extensions of the set that extend the message, in field-number
+/// order: none for a message that declares no extension range.
+pub fn MessageDescriptor::extended_by(
+  self : MessageDescriptor,
+) -> ReadOnlyArray[FieldDescriptor] {
+  self.extended_by
+}
+
+///|
+/// The index in `extended_by` of the extension numbered `number`, found by
+/// binary search, or -1.
+fn MessageDescriptor::extension_index(
+  self : MessageDescriptor,
+  number : Int32,
+) -> Int32 {
+  let extensions = self.extended_by
+  let mut low = 0
+  let mut high = extensions.length()
+  while low < high {
+    let middle = (low + high) / 2
+    if extensions[middle].number < number {
+      low = middle + 1
+    } else {
+      high = middle
+    }
+  }
+  if low < extensions.length() && extensions[low].number == number {
+    low
+  } else {
+    -1
+  }
+}
+
+///|
+/// The field or the extension of the message whose index in `numbered` is
+/// `index`: a field's index in `fields`, or an extension's index in
+/// `extended_by` plus the length of `fields`.
+fn MessageDescriptor::field_or_extension(
+  self : MessageDescriptor,
+  index : Int32,
+) -> FieldDescriptor {
+  if index < self.fields.length() {
+    self.fields[index]
+  } else {
+    self.extended_by[index - self.fields.length()]
+  }
+}
+
+///|
+/// The index, as `field_or_extension` takes it, of the field of the message numbered
+/// `number`, or else of the extension of the set that extends it with that
+/// number; -1 when neither has it.
+fn MessageDescriptor::field_or_extension_index(
+  self : MessageDescriptor,
+  number : Int32,
+) -> Int32 {
+  let index = self.field_index(number)
+  if index >= 0 || self.extended_by.length() == 0 {
+    return index
+  }
+  let extension = self.extension_index(number)
+  if extension < 0 {
+    -1
+  } else {
+    self.fields.length() + extension
+  }
 }
 
 ///|
