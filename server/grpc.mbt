@@ -21,7 +21,9 @@
 // second lookup, the decoding, `handle` and the encoding run with no await
 // between them, so a reload never splits them, and a call that the reload
 // leaves without a gRPC Stub to reach gets the answer it would have got
-// from its HEADERS.
+// from its HEADERS. At both lookups, a call to a method of the Mock's
+// built-in health service that no Stub is on goes to the service, before
+// the set's method is looked up (grpc_health.mbt).
 //
 // A call that cannot reach a gRPC Stub still goes to the engine, with an
 // empty body, which plans its UNIMPLEMENTED answer and journals it as

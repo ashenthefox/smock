@@ -128,8 +128,8 @@ fn H2Connection::health_call(
 let unknown_service_message : String = "unknown service"
 
 ///|
-/// Answers `stream`, a gRPC call to `method` of the built-in health service
-/// of `mock`, whose request is `request`. `Watch` gets Trailers-Only
+/// Answers `stream`, a gRPC call to `called`, a method of the built-in
+/// health service of `mock`, whose request is `request`. `Watch` gets Trailers-Only
 /// UNIMPLEMENTED, followed by RST_STREAM NO_ERROR when the request has not
 /// `ended` (`end_early`). `Check` and `List` are answered once the request
 /// has ended: a body that is not one whole message gets the refusal that
@@ -152,12 +152,6 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_health(
     self.answer_watch(stream, request, mock, ended~)
     return
   }
-  let incoming = request.to_engine()
-  let smock_mock = self.ports.engine.default_mock_field(
-    incoming,
-    authority?=request.authority,
-  )
-  let date = self.ports.dates.at(self.now)
   guard request.deframer is Some(deframer) else {
     abort("a gRPC call reads its framing")
   }
@@ -165,6 +159,12 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_health(
     self.refuse_call(stream, refusal, ended=true)
     return
   }
+  let incoming = request.to_engine()
+  let smock_mock = self.ports.engine.default_mock_field(
+    incoming,
+    authority?=request.authority,
+  )
+  let date = self.ports.dates.at(self.now)
   let types = HealthTypes::get()
   let input = if called is Check {
     types.check_request
@@ -186,7 +186,8 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_health(
     },
   )
   if called is List {
-    // `""` first, then each service of the set, in the set's order.
+    // The status of `""` and of each service of the set, which the
+    // encoding sorts by name, as protoc's deterministic output does.
     let statuses : Map[String, Json] = { "": { "status": status } }
     if mock.descriptor_set is Some(set) {
       for file in set.files {
