@@ -2969,11 +2969,11 @@ and enum names of up to 40, for a call whose JSON smock parses once:
 - smock never parses the JSON of a refused call. Such a call costs the
   text that smock printed before the bound, and the buffers that the
   text grew through. The buffer starts at twice the message's size and
-  doubles as the text grows, up to `--body-limit`. At its peak, a call
-  may hold every buffer the text grew through. So the text costs up to
-  four times its size, and at most about three times `--body-limit`,
-  30 MiB by default. The message itself, and the notes that smock holds
-  to print it, come on top of that. The example of
+  doubles as the text grows, up to `--body-limit` and one octet. At its
+  peak, a call may hold every buffer the text grew through. So the text
+  costs up to four times its size, and at most about three times
+  `--body-limit`, 30 MiB by default. The message itself, and the notes
+  that smock holds to print it, come on top of that. The example of
   [The values a message may print](#the-values-a-message-may-print),
   9,500 empty elements of 60 `int64` fields, costs 2.4 MiB. For empty
   elements of 120 enum fields, with field names of 29 characters and
