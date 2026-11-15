@@ -61,7 +61,10 @@ disagree.
   outside 0x20 to 0x7E, or a `-bin` value that is not base64. smock checks
   them only when the response is not a template, which the Schema does not
   tell apart. The Schema itself refuses, in `grpc.trailers`, names outside
-  gRPC's grammar and names that gRPC reserves.
+  gRPC's grammar and names that gRPC reserves. So do error details in
+  `grpc.details` whose `@type` names a type the Mock's set lacks, or that
+  do not fit their type: the Schema checks only that each is an object
+  with `@type`, and that only an error gives them.
 
 A field joins the Schema only together with smock's support for it, so no
 fixture is accepted by the Schema and rejected by smock for a field smock

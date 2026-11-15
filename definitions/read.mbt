@@ -672,7 +672,7 @@ fn File::read_stub(self : File, pointer : String, json : Json) -> Stub? {
           field,
           value,
           buckets~,
-          grpc=grpc is Some(_),
+          descriptor_set=grpc.map(named => named.set),
         )
       "responses" =>
         weighted = Some(
@@ -681,7 +681,7 @@ fn File::read_stub(self : File, pointer : String, json : Json) -> Stub? {
             field,
             value,
             buckets~,
-            grpc=grpc is Some(_),
+            descriptor_set=grpc.map(named => named.set),
           ),
         )
       "variables" =>

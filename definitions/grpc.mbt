@@ -211,10 +211,7 @@ fn File::encode_reply(
 ///|
 /// Reports at `pointer`, a gRPC Stub's path, what gRPC Stubs do not serve
 /// of `output`, the output type of its method, a message of `set`, and of
-/// each type it reaches through its fields and the extensions that extend
-/// it, each once, a map's values included: what `File::check_reached` and
-/// `File::check_field` refuse. Every other field is served, groups and the
-/// well-known types included, as `File::check_input` words its problems.
+/// each type it reaches, as `File::check_reaching` says.
 /// Returns whether every type it reaches is served.
 fn File::check_output(
   self : File,
@@ -222,17 +219,36 @@ fn File::check_output(
   set : @protobuf.DescriptorSet,
   output : @protobuf.MessageDescriptor,
 ) -> Bool {
+  self.check_reaching(pointer, "output", set, output)
+}
+
+///|
+/// Reports at `pointer` what gRPC Stubs do not serve of `top`, a message of
+/// `set` that a gRPC Stub sends as its `side` type, such as `output` or
+/// `detail`, and of each type it reaches through its fields and the
+/// extensions that extend it, each once, a map's values included: what
+/// `File::check_reached` and `File::check_field` refuse. Every other field
+/// is served, groups and the well-known types included, as
+/// `File::check_input` words its problems. Returns whether every type it
+/// reaches is served.
+fn File::check_reaching(
+  self : File,
+  pointer : String,
+  side : String,
+  set : @protobuf.DescriptorSet,
+  top : @protobuf.MessageDescriptor,
+) -> Bool {
   let mut served = true
-  let seen : Set[String] = Set([output.full_name])
-  let pending = [output]
+  let seen : Set[String] = Set([top.full_name])
+  let pending = [top]
   while pending.pop() is Some(message) {
-    if !self.check_reached(pointer, "output", output, message) {
+    if !self.check_reached(pointer, side, top, message) {
       served = false
       continue
     }
     let reached_types = []
     for field in fields_and_extensions(message) {
-      if !self.check_field(pointer, "output", output, field, set, seen) {
+      if !self.check_field(pointer, side, top, field, set, seen) {
         served = false
         continue
       }
@@ -257,13 +273,14 @@ fn File::check_output(
 }
 
 ///|
-/// Reports at `pointer`, a gRPC Stub's path, why `message`, the `side`
-/// type of its method, `top`, or a message type it reaches, is not served,
-/// and returns whether it is, as far as the type itself goes: a type of an
-/// editions file, or one that an extension declared in an editions file
-/// extends, comes in a later spec; and a MessageSet is not served, since
-/// its extensions use another wire form. Its fields and the extensions that
-/// extend it are checked by the caller.
+/// Reports at `pointer`, a gRPC Stub's path or a detail's `@type`, why
+/// `message`, `top`, the `side` type of the Stub, such as the input type of
+/// its method or the type of a detail, or a message type it reaches, is
+/// not served, and returns whether it is, as far as the type itself goes:
+/// a type of an editions file, or one that an extension declared in an
+/// editions file extends, comes in a later spec; and a MessageSet is not
+/// served, since its extensions use another wire form. Its fields and the
+/// extensions that extend it are checked by the caller.
 fn File::check_reached(
   self : File,
   pointer : String,
@@ -314,13 +331,13 @@ fn File::check_reached(
 }
 
 ///|
-/// Reports at `pointer`, a gRPC Stub's path, why `field`, a field of
-/// `message`, the `side` type of its method, `top`, or a message type of
-/// `set` it reaches, or an extension that extends one, is not served, and
-/// returns whether it is, as far as its kind goes: an enum of an editions
-/// file, a map's values included, comes in a later spec. An enum is
-/// reported once, as `seen`, the full names of the types reached so far,
-/// says.
+/// Reports at `pointer`, a gRPC Stub's path or a detail's `@type`, why
+/// `field`, a field of `top`, the `side` type of the Stub, or of a message
+/// type of `set` it reaches, or an extension that extends one, is not
+/// served, and returns whether it is, as far as its kind goes: an enum of
+/// an editions file, a map's values included, comes in a later spec. An
+/// enum is reported once, as `seen`, the full names of the types reached
+/// so far, says.
 fn File::check_field(
   self : File,
   pointer : String,

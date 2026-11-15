@@ -53,29 +53,36 @@ priv struct MetadataBlock {
 /// server sends it, each with its size: its header block, then its
 /// trailers, or its one Trailers-Only block for an error without initial
 /// metadata. Each counts `:status`, `content-type`, `grpc-status`,
-/// `grpc-message` percent-encoded, the metadata with values trimmed of
+/// `grpc-message` percent-encoded, `grpc-status-details-bin` with the
+/// details' google.rpc.Status, the metadata with values trimmed of
 /// spaces at either end, and `date` unless the metadata gives one.
 /// `smock-mock`, which smock adds only when the Default Mock answers, is
 /// not counted. `None` for a templated reply, whose sizes are known only
 /// once rendered.
 fn metadata_blocks(response : Response) -> Array[MetadataBlock]? {
   guard response.headers is Written(headers) else { return None }
-  let (status, message, trailers) = match response.grpc {
-    None => (@grpc.Status::Ok, 0, no_metadata)
-    Some({ status, message, trailers: Written(trailers), }) => {
+  let (status, message, details, trailers) = match response.grpc {
+    None => (@grpc.Status::Ok, 0, 0, no_metadata)
+    Some({ status, message, trailers: Written(trailers), details, }) => {
       let message = match message {
         Some(Written(text)) =>
           field_cost(12, @grpc.percent_encode(text).length())
         Some(Templated(_)) => return None
         None => 0
       }
-      (status, message, trailers)
+      let details = match details {
+        Written(_, Some(encoded)) => field_cost(23, encoded.value.length())
+        Written(_, None) => 0
+        Templated(_) => return None
+      }
+      (status, message, details, trailers)
     }
     Some({ trailers: Templated(_), .. }) => return None
   }
   let code = status.code()
   let ending = field_cost(11, if code < 10 { 1 } else { 2 }) +
     message +
+    details +
     metadata_cost(trailers)
   if status is Ok || headers.length() > 0 {
     Some([

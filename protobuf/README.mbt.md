@@ -478,6 +478,49 @@ test "an Any's type, and a Value's number" {
 }
 ```
 
+## google.rpc.Status
+
+gRPC's richer error model sends `google.rpc.Status` in the
+`grpc-status-details-bin` trailer: a status code, a message, and error
+details, each packed in an Any. `set.encode_status(code, message,
+details)` encodes it as protoc does, from details in ProtoJSON, each an Any
+as `encode_json` reads one, with `@type`. It writes the Status and each Any
+by field number, so the set needs neither `google/rpc/status.proto` nor
+`any.proto`: only the types of the details, such as `google.rpc.ErrorInfo`
+from googleapis' `error_details.proto`. A detail that is not an object,
+has no `@type`, names a type the set lacks, or does not fit its type is an
+`EncodeError`, at the JSON Pointer of the value at fault from the details,
+such as `/0/@type`.
+
+```mbt check
+///|
+test "google.rpc.Status with a Duration as its detail" {
+  // google.protobuf.Duration { int64 seconds = 1; int32 nanos = 2; }
+  let set = @protobuf.read_descriptor_set(
+    b"\x0a\x55\x0a\x0eduration.proto\x12\x0fgoogle.protobuf\x22\x2a\x0a\x08Duration\x12\x0f\x0a\x07seconds\x18\x01\x20\x01\x28\x03\x12\x0d\x0a\x05nanos\x18\x02\x20\x01\x28\x05\x62\x06proto3"[:],
+  )
+  let status = set.encode_status(14, "try again", [
+    { "@type": "type.googleapis.com/google.protobuf.Duration", "value": "1.5s" },
+  ])
+  // The code, the message, then an Any of the type URL and the Duration.
+  inspect(
+    status ==
+    b"\x08\x0e\x12\x09try again\x1a\x38\x0a\x2ctype.googleapis.com/google.protobuf.Duration\x12\x08\x08\x01\x10\x80\xca\xb5\xee\x01",
+    content="true",
+  )
+  let missing = try
+    set.encode_status(5, "", [
+      { "@type": "type.googleapis.com/google.rpc.ErrorInfo" },
+    ])
+  catch {
+    EncodeError(pointer~, ..) => "error at \{pointer}"
+  } noraise {
+    _ => "encoded"
+  }
+  inspect(missing, content="error at /0/@type")
+}
+```
+
 ## Printed values
 
 `set.printed_value(field, json)` checks a JSON value against a field's type

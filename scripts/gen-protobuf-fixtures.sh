@@ -91,14 +91,19 @@ descriptor_set() {
   build_set --include_imports "$@"
 }
 
-# message <directory> <proto file> <type> <name>: encodes the message in
-# fixtures/protobuf/<directory>/<name>.txtpb, in protobuf's text format, as
-# the type <type> of <proto file>, into
-# fixtures/protobuf/<directory>/<name>.binpb.
+# message <directory> <proto file> <type> <name> [<proto file>...]:
+# encodes the message in fixtures/protobuf/<directory>/<name>.txtpb, in
+# protobuf's text format, as the type <type> of <proto file>, into
+# fixtures/protobuf/<directory>/<name>.binpb. The types of the other proto
+# files are in reach too, so an Any in the text can hold one of them.
 message() {
   dir=$fixtures/$1
+  proto=$2
+  type=$3
   path=$dir/$4.binpb
-  "$protoc" -I "$dir" --encode="$3" --deterministic_output "$2" <"$dir/$4.txtpb" >"$(target "$path")"
+  text=$dir/$4.txtpb
+  shift 4
+  "$protoc" -I "$dir" --encode="$type" --deterministic_output "$proto" "$@" <"$text" >"$(target "$path")"
   wrote "$path"
 }
 
@@ -368,6 +373,22 @@ for name in list-greeter list-greeter-not-serving; do
   message health grpc/health/v1/health.proto grpc.health.v1.HealthListResponse "$name"
 done
 hex_source health/health.binpb health_set "The Descriptor set of gRPC's health.proto, fixtures/protobuf/health/health.binpb, in hex: the descriptor of the built-in health service." server/health_set.mbt "It holds gRPC's health.proto, under the Apache License 2.0, which NOTICE names."
+
+# gRPC's helloworld.proto with googleapis' error_details.proto, the error
+# details of gRPC Stubs, and the google.rpc.Status of replies with details,
+# encoded through googleapis' status.proto, which the set does not hold.
+details_licence="It holds protobuf's duration.proto, under protobuf's licence: fixtures/protobuf/details/LICENSE."
+descriptor_set details details.binpb helloworld.proto google/rpc/error_details.proto
+for name in error-info retry-info bad-request several templated; do
+  message details google/rpc/status.proto google.rpc.Status "$name" google/rpc/error_details.proto helloworld.proto
+done
+message details helloworld.proto helloworld.HelloRequest hello-ann
+for package in protobuf definitions engine; do
+  hex_test details/details.binpb details_set "The Descriptor set of gRPC's helloworld.proto and googleapis' google/rpc/error_details.proto, fixtures/protobuf/details/details.binpb, in hex." "$package" "$details_licence"
+done
+for name in error-info retry-info bad-request several; do
+  hex_test "details/$name.binpb" "$(echo "$name" | tr - _)_status" "The google.rpc.Status of fixtures/protobuf/details/$name.txtpb, as protoc encodes it, in hex." protobuf
+done
 
 # The end of the list of fixtures. With --check: every file the script
 # wrote, compared with the committed one.

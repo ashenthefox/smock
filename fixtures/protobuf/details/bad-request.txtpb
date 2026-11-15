@@ -1,0 +1,16 @@
+# INVALID_ARGUMENT, with a BadRequest of two field violations.
+code: 3
+message: "the request is not valid"
+details {
+  [type.googleapis.com/google.rpc.BadRequest] {
+    field_violations {
+      field: "name"
+      description: "must not be empty"
+    }
+    field_violations {
+      field: "version"
+      description: "must be a number"
+      reason: "NOT_A_NUMBER"
+    }
+  }
+}

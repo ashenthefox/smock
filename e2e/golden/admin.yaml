@@ -845,6 +845,8 @@ stubs:
                 status: OK
                 message: string
                 trailers: {}
+                details:
+                  - "@type": string
             responses:
               - weight: 1
                 status: 200
@@ -901,6 +903,8 @@ stubs:
                   status: OK
                   message: string
                   trailers: {}
+                  details:
+                    - "@type": string
             variables: {}
             dataWrites:
               - op: set
@@ -1088,6 +1092,8 @@ stubs:
               status: OK
               message: string
               trailers: {}
+              details:
+                - "@type": string
           responses:
             - weight: 1
               status: 200
@@ -1144,6 +1150,8 @@ stubs:
                 status: OK
                 message: string
                 trailers: {}
+                details:
+                  - "@type": string
           variables: {}
           dataWrites:
             - op: set

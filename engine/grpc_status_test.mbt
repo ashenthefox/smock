@@ -91,6 +91,8 @@ test "an error's plan carries no reply message, and the OK reply of a Stub witho
       #|    message: None,
       #|    trailers: <ReadOnlyArray: []>,
       #|    encoded: None,
+      #|    details: <ReadOnlyArray: []>,
+      #|    encoded_status: None,
       #|  },
       #|)
     ),
