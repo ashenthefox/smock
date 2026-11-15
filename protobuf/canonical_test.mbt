@@ -309,7 +309,10 @@ test "proto2: fields with presence printed whenever set, extensions under their 
       #|{"label":"a�(b","tags":["��","ok"],"notes":{"�":"�"}}
     ),
   )
-  inspect(canonical(shipping_set, "shipping.Order", b"\x12\x00"), content=(
-    #|error: octet 0: the message shipping.Order lacks its required field id
-  ))
+  inspect(
+    canonical(shipping_set, "shipping.Order", b"\x12\x00"),
+    content=(
+      #|error: octet 0: the message shipping.Order lacks its required field id
+    ),
+  )
 }

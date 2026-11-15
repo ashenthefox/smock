@@ -321,7 +321,9 @@ fn DescriptorSet::scan(
 ///|
 /// Prints to `out` the message of the type `message` whose values are
 /// `records`, merged in order, `depth` messages deep in the message that
-/// `decode_json` decodes, as `decode_json` prints it.
+/// `decode_json` decodes, as `decode_json` prints it, or in canonical
+/// ProtoJSON, as `decode_canonical_json` prints it, when `canonical` says
+/// so. The functions it calls take `canonical` with the same meaning.
 fn DescriptorSet::print_message(
   self : DescriptorSet,
   out : @buffer.Buffer,
