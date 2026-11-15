@@ -553,6 +553,9 @@ same draws, so a probability and [`fault.seed` or
 - Over HTTP/2, no Fault resets the TCP connection: `reset` and `partial`
   reset a stream with RST_STREAM, a frame, and the connection that `close`
   ends closes with a FIN.
+- A gRPC call takes these forms too, with no `content-length`. Its
+  client sees INTERNAL for `reset` and `partial`, and UNAVAILABLE for
+  `close` ([gRPC Faults](grpc.md#faults)).
 
 ## The Journal
 

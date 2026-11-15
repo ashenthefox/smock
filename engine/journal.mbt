@@ -109,13 +109,14 @@ pub struct JournalEntry {
   near_miss : NearMiss?
   /// The response status, or `None` when a connection Fault ended the
   /// request before a status was written. A gRPC reply's is 200.
-  status : Int32?
+  mut status : Int32?
   /// The gRPC status a gRPC call got: its plan's, or the one the server
   /// sets with `set_grpc_status` before it commits the entry. `None` for an
-  /// HTTP request.
+  /// HTTP request, and for a gRPC call that a connection Fault ended before
+  /// a status was written.
   mut grpc_status : @grpc.Status?
   /// The connection Fault injected instead of the response, if any.
-  fault : @definitions.ConnectionKind?
+  mut fault : @definitions.ConnectionKind?
   /// Why the Stub's template could not be rendered, when it could not: the
   /// client then got a 500, or, for a gRPC call, INTERNAL.
   mut template_error : TemplateError?
@@ -321,9 +322,11 @@ fn Journal::entry(
     crud,
     near_miss,
     status,
+    // A call that a reset or close Fault ends gets no status, gRPC's no more
+    // than HTTP's.
     grpc_status: match plan.grpc {
-      Some(part) => Some(part.status)
-      None => None
+      Some(part) if status is Some(_) => Some(part.status)
+      _ => None
     },
     fault: plan.fault,
     template_error,

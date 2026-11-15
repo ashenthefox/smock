@@ -114,3 +114,24 @@ fn milliseconds(ms : Double) -> Int32 {
     ms.round().to_int()
   }
 }
+
+///|
+/// `self` as it is when the plan's connection Fault never comes, as for a
+/// gRPC call whose deadline cuts the plan's delay short, since the Fault
+/// would come after the delay: the plan without the Fault, and its Journal
+/// entry, if it has one, as the engine would have made it for that plan,
+/// with the plan's status and gRPC status and no Fault. A plan without a
+/// connection Fault leaves `self` as it is.
+pub fn Outcome::without_fault(self : Outcome) -> Outcome {
+  guard self.plan.fault is Some(_) else { return self }
+  let plan = { ..self.plan, fault: None, }
+  if self.journal is Some(entry) {
+    entry.status = Some(plan.status)
+    entry.grpc_status = match plan.grpc {
+      Some(part) => Some(part.status)
+      None => None
+    }
+    entry.fault = None
+  }
+  { ..self, plan, }
+}

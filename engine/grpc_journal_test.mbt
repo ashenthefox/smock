@@ -178,3 +178,115 @@ test "a template error the final-status method sets counts two bytes for each ch
     "templateError": { "at": "/x", "message": "y" },
   })
 }
+
+///|
+/// The Mock `greeter` with the set, and a gRPC Stub on SayHello with a
+/// delay of 3000 ms and the connection Fault `kind`.
+fn delayed_fault(kind : String) -> String {
+  (
+    #|mocks:
+    #|  - name: greeter
+    #|    grpc: { descriptorSet: greeter.binpb }
+    #|stubs:
+    #|  - id: faulty
+    #|    mock: greeter
+    #|    request: { path: /helloworld.Greeter/SayHello }
+    #|    response: { json: { message: Hello } }
+  ) +
+  "\n    fault: { delay: { fixed: 3000 }, connection: { kind: \{kind} } }"
+}
+
+///|
+/// The members of the Admin JSON of the Journal entry of `outcome` that
+/// tell how a connection Fault ended its call, `status`, `grpcStatus` when
+/// it has one, and `fault`, and the connection Fault of its plan, as
+/// `plan`.
+fn fault_members(outcome : @engine.Outcome) -> Json {
+  guard outcome.journal is Some(entry) && entry.to_json() is Object(members) else {
+    abort("no entry")
+  }
+  let shown = Map([])
+  for name in ["status", "grpcStatus", "fault"] {
+    if members.get(name) is Some(value) {
+      shown[name] = value
+    }
+  }
+  shown["plan"] = match outcome.plan.fault {
+    Some(kind) => Json::string(kind.name())
+    None => Json::null()
+  }
+  Json::object(shown)
+}
+
+///|
+test "a call whose plan has a reset or close Fault has no status and no gRPC status in its entry, while a partial one keeps both; without its Fault, as when the call's deadline cuts its delay short, the plan and the entry have none, and the entry has the plan's status and gRPC status" {
+  let shown : Array[Json] = []
+  for kind in ["reset", "close", "partial"] {
+    let h = harness(
+      [("greeter.yaml", delayed_fault(kind))],
+      body_files=greeter_body_files(),
+    )
+    let call = h.call(
+      "/helloworld.Greeter/SayHello",
+      "{\"name\":\"Tom\"}",
+      octets=10,
+    )
+    let planned = fault_members(call)
+    let without = fault_members(call.without_fault())
+    shown.push(
+      Json::object({
+        "kind": Json::string(kind),
+        "planned": planned,
+        "without": without,
+      }),
+    )
+  }
+  // Without a Fault, the outcome stays as it is.
+  let h = harness(
+    [("greeter.yaml", greeter_calls)],
+    body_files=greeter_body_files(),
+  )
+  let call = h.call(
+    "/helloworld.Greeter/SayHello",
+    "{\"name\":\"Tom\"}",
+    octets=10,
+  )
+  inspect(physical_equal(call.without_fault().plan, call.plan), content="true")
+  json_inspect(shown, content=[
+    {
+      "kind": "reset",
+      "planned": { "status": null, "fault": "reset", "plan": "reset" },
+      "without": {
+        "status": 200,
+        "grpcStatus": "OK",
+        "fault": null,
+        "plan": null,
+      },
+    },
+    {
+      "kind": "close",
+      "planned": { "status": null, "fault": "close", "plan": "close" },
+      "without": {
+        "status": 200,
+        "grpcStatus": "OK",
+        "fault": null,
+        "plan": null,
+      },
+    },
+    {
+      "kind": "partial",
+      "planned": {
+        "status": 200,
+        "grpcStatus": "OK",
+        "fault": "partial",
+        "plan": "partial",
+      },
+      "without": {
+        "status": 200,
+        "grpcStatus": "OK",
+        "fault": null,
+        "plan": null,
+      },
+    },
+  ])
+}

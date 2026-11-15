@@ -2143,7 +2143,7 @@
             "maximum": 599
           },
           "grpcStatus": {
-            "description": "For a gRPC call, the name of the gRPC status the call got, such as `OK` or `NOT_FOUND`: the status its reply ended with, or the one smock answered with instead. `status` stays the HTTP status. Absent for an HTTP request.",
+            "description": "For a gRPC call, the name of the gRPC status the call got, such as `OK` or `NOT_FOUND`: the status its reply ended with, or the one smock answered with instead. `status` stays the HTTP status. Absent for an HTTP request, and for a gRPC call that a `reset` or `close` Fault ended before any status went out.",
             "enum": ["OK", "CANCELLED", "UNKNOWN", "INVALID_ARGUMENT", "DEADLINE_EXCEEDED", "NOT_FOUND", "ALREADY_EXISTS", "PERMISSION_DENIED", "RESOURCE_EXHAUSTED", "FAILED_PRECONDITION", "ABORTED", "OUT_OF_RANGE", "UNIMPLEMENTED", "INTERNAL", "UNAVAILABLE", "DATA_LOSS", "UNAUTHENTICATED"]
           },
           "fault": {

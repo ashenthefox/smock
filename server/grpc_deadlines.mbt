@@ -43,15 +43,19 @@ priv struct PastDeadline {
 /// Answers `stream`, a gRPC call whose request is `request`, which the
 /// engine decided `outcome` for with a delay, with `answer` in a task of
 /// its own, as `wait` answers an HTTP request: once the delay is over, the
-/// task sends `answer` (`send_answer`), and writes it to `out`, while the
+/// task sends `answer` (`send_answer`), or carries out the plan's
+/// connection Fault (grpc_faults.mbt), and writes it to `out`, while the
 /// connection's other streams are answered meanwhile. When the delay would
 /// end after the call's deadline, the task sleeps until the deadline
 /// instead, and then ends the call with Trailers-Only DEADLINE_EXCEEDED
 /// `deadline exceeded`, which the call's Journal entry records before it
-/// is committed. Scenario moves, Variables and data writes stand, as after
-/// any delay. A deadline that has already passed, as a timeout of 0 gives,
-/// ends the call at once. From the end of the sleep on, the deadline no
-/// longer counts: a reply whose HEADERS are out finishes as planned.
+/// is committed, and the plan's connection Fault, which would come after
+/// the delay, never comes: the entry has the plan's HTTP status, and no
+/// Fault, whatever ends the call. Scenario moves, Variables and data
+/// writes stand, as after any delay. A deadline that has already passed,
+/// as a timeout of 0 gives, ends the call at once. From the end of the
+/// sleep on, the deadline no longer counts: a reply whose HEADERS are out
+/// finishes as planned.
 ///
 /// The task ends with its stream, as `wait`'s does. While a delay runs
 /// past the deadline, the call is among those `past_deadline` holds, so
@@ -72,8 +76,10 @@ fn[S : @io.Writer + ReadOutput] H2Connection::wait_call(
   let delay = outcome.plan.delay_ms
   let deadline = request.call_deadline
   // Whether the delay would end after the deadline, which `forever` never
-  // passes.
+  // passes. The plan's connection Fault, which would come after the delay,
+  // then never comes, whatever ends the call.
   let cut = delay.to_int64() > deadline - self.now
+  let outcome = if cut { outcome.without_fault() } else { outcome }
   if cut {
     self.past_deadline[stream] = { deadline, entry: outcome.journal, }
   }
@@ -99,6 +105,9 @@ fn[S : @io.Writer + ReadOutput] H2Connection::wait_call(
     // within the output bound. A reset meanwhile, once the deadline has
     // passed, ends the call as DEADLINE_EXCEEDED.
     let mut finished = self.output_written(stream, out)
+    // Whether the task sent the rest of the half of a reply that a partial
+    // Fault sends, which a reset then ends.
+    let mut reset = false
     if finished {
       // From here on the answer ends the stream, and commits the entry.
       entry = None
@@ -115,6 +124,10 @@ fn[S : @io.Writer + ReadOutput] H2Connection::wait_call(
           date~,
         )
         self.ended_at_deadline(stream)
+      } else if outcome.plan.fault is Some(Reset) {
+        self.reset_after(stream, outcome.journal)
+      } else if outcome.plan.fault is Some(Close) {
+        self.close_by_fault(stream, outcome.journal, out)
       } else if self.send_answer(stream, outcome, answer, date~, bounded=true)
         is Some(unsent) {
         finished = self.trickle(
@@ -124,12 +137,14 @@ fn[S : @io.Writer + ReadOutput] H2Connection::wait_call(
           out,
           end=false,
         )
-        if finished {
-          self.end_with_trailers(stream, unsent.trailers)
+        match unsent.trailers {
+          Some(trailers) if finished => self.end_with_trailers(stream, trailers)
+          Some(_) => ()
+          None => reset = true
         }
       }
     }
-    self.end_task(stream, out, finished~)
+    self.end_task(stream, out, finished~, reset~)
   })
   self.waiting[stream] = task
 }
