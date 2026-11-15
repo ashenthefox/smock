@@ -5,9 +5,11 @@ Descriptor set, the compiled form of its `.proto` files, and smock reads
 and checks the set when it loads the Definition files. Its gRPC Stubs then
 answer unary calls, on the plain port over h2c and on the TLS port over
 h2. This guide shows a first call, says which requests are gRPC calls, how
-a call reaches a Stub and how smock answers it, how a call's deadline
-meets a Stub's delay, which calls gRPC's rules refuse, how a Mock answers
-gRPC's health service, and how to build a set that smock reads. The
+a call reaches a Stub and how smock answers it, how Scenarios, Variables
+and Data buckets work over gRPC, what a call gets when its Stub cannot
+serve its content, how a call's deadline meets a Stub's delay, which calls
+gRPC's rules refuse, how a Mock answers gRPC's health service, and how to
+build a set that smock reads. The
 [Definition-file reference](definition-files.md#grpc) describes the
 Mock's `grpc` field and gRPC Stubs.
 
@@ -40,9 +42,15 @@ Mock's `grpc` field and gRPC Stubs.
   - [Error details](#error-details)
   - [Metadata size](#metadata-size)
   - [Trailers-Only](#trailers-only)
+- [State over gRPC](#state-over-grpc)
+  - [Scenarios](#scenarios)
+  - [Variables](#variables)
+  - [Data buckets](#data-buckets)
+  - [Weighted responses](#weighted-responses)
 - [Unmatched calls](#unmatched-calls)
   - [Calls answered from their HEADERS](#calls-answered-from-their-headers)
   - [The Near miss trailer](#the-near-miss-trailer)
+- [smock's own failures](#smocks-own-failures)
 - [Deadlines](#deadlines)
   - [A client that resets at its deadline](#a-client-that-resets-at-its-deadline)
 - [Built-in services](#built-in-services)
@@ -1024,10 +1032,11 @@ brought, as received, and `truncated` says whether the JSON was cut at
 The entry's `grpcStatus` is the name of the gRPC status the call got:
 the status of the Stub's reply, `OK` unless its `grpc` names another, or
 the status smock answered with instead, such as `UNIMPLEMENTED` for an
-unmatched call, or `INTERNAL`. Its `status` stays
-the HTTP status, 200 for a reply and for an unmatched call, as gRPC sends
-them: a client learns of an error from `grpc-status`, not from
-`:status`. The entry of an HTTP request has no `grpcStatus`.
+unmatched call, or `INTERNAL` or `RESOURCE_EXHAUSTED` for
+[smock's own failures](#smocks-own-failures). Its `status` stays the HTTP
+status, 200 for every answer smock sends a call, as gRPC sends them: a
+client learns of an error from `grpc-status`, not from `:status`. The
+entry of an HTTP request has no `grpcStatus`.
 
 Journal queries, verification and the unmatched list take calls as they
 take HTTP requests. A filter gives the Mock, the method `POST`, the path
@@ -1428,6 +1437,142 @@ No gRPC reply carries `content-length` or `grpc-encoding`: smock never
 compresses a reply ([Compression](#compression)). A gRPC client reads every field of a Trailers-Only
 answer as trailing metadata.
 
+## State over gRPC
+
+A gRPC Stub takes part in its Mock's state as an HTTP Stub does. Its
+`scenario` clause requires and moves a
+[Scenario](definition-files.md#scenarios), its `variables` write
+[Variables](definition-files.md#variables), its `dataWrites` write
+[Data buckets](definition-files.md#data-buckets), and its templates read
+all three. Templates see the request message as `body`, in the JSON form
+the Stubs see ([The call the Stubs see](#the-call-the-stubs-see)), so
+`${body.name}` reads the message's `name`.
+
+A Mock has one state for its HTTP requests and its gRPC calls. A call
+reads what a request of the same Session wrote, and a request reads what
+a call wrote. A call's Session comes from its `baggage` metadata, as a
+request's comes from its `baggage` header
+([Sessions](../README.md#sessions-and-ephemeral-stubs)). Another Session,
+or a call without one, has its own state.
+
+### Scenarios
+
+A call moves a Scenario when its Stub is chosen, as a request does,
+whatever then happens to the reply: an error, a delay, a deadline or
+[smock's own failure](#smocks-own-failures). This "create, then get" flow
+tells the two calls apart by the metadata `x-op`:
+
+```yaml
+stubs:
+  - id: get-missing
+    mock: greeter
+    request: { path: /helloworld.Greeter/SayHello, headers: { x-op: get } }
+    scenario: { name: greeting, requires: Started }
+    response: { grpc: { status: NOT_FOUND, message: no greeting yet } }
+  - id: create
+    mock: greeter
+    request: { path: /helloworld.Greeter/SayHello, headers: { x-op: create } }
+    scenario: { name: greeting, moveTo: Created }
+    response: { template: true, json: { message: "Created a greeting for ${body.name}" } }
+  - id: get
+    mock: greeter
+    request: { path: /helloworld.Greeter/SayHello, headers: { x-op: get } }
+    scenario: { name: greeting, requires: Created }
+    response: { template: true, json: { message: "Hello ${body.name}" } }
+  - id: reset
+    mock: greeter
+    request: { method: POST, path: /greeting/reset }
+    scenario: { name: greeting, moveTo: Started }
+    response: { status: 204 }
+```
+
+A first `get` call gets NOT_FOUND `no greeting yet`. After a `create`
+call, a `get` call gets `{"message": "Hello Tom"}`, and an HTTP Stub that
+requires `Created` answers too. `POST /greeting/reset` over HTTP moves
+the Scenario back, and the next `get` call gets NOT_FOUND again. The Journal
+entry of each call shows how it moved the Scenario in its `scenario`, as
+for a request.
+
+### Variables
+
+A call's `variables` are written before its reply renders, and its reply
+reads them, as on HTTP:
+
+```yaml
+stubs:
+  - id: hello
+    mock: greeter
+    request: { path: /helloworld.Greeter/SayHello }
+    variables:
+      calls: "${add(vars.calls ?? 0, 1)}"
+      last: "${body.name}"
+    response:
+      template: true
+      json: { message: "Hello ${body.name}, call ${vars.calls}: ${vars.greeting ?? 'no greeting'}" }
+  - id: set-greeting
+    mock: greeter
+    request: { method: PUT, path: /greeting }
+    variables: { greeting: "${body.text}" }
+    response: { status: 204 }
+```
+
+In one Session, a first call gets `Hello Tom, call 1: no greeting`. After
+`PUT /greeting` with `{"text": "welcome back"}` over HTTP, the next call
+gets `Hello Ann, call 2: welcome back`, and an HTTP Stub that reads
+`${vars.last}` reads `Ann`. The Admin API reads and sets a Session's
+Variables whoever wrote them.
+
+### Data buckets
+
+A call's `dataWrites` write the Session's copies of its Mock's Data
+buckets, which the Mock's HTTP Stubs read and write too, a
+[CRUD Stub](definition-files.md#crud-stubs) included. A CRUD Stub never
+answers a gRPC call, but its bucket is the one the gRPC Stubs use:
+
+```yaml
+data:
+  - { mock: greeter, name: greetings, key: name, json: [] }
+stubs:
+  - id: greet
+    mock: greeter
+    request: { path: /helloworld.Greeter/SayHello, headers: { x-op: greet } }
+    dataWrites:
+      - { op: append, bucket: greetings, value: { name: "${body.name}", note: over gRPC } }
+    response: { template: true, json: { message: "${len(data.greetings)} greetings" } }
+  - id: find
+    mock: greeter
+    request: { path: /helloworld.Greeter/SayHello, headers: { x-op: find } }
+    response:
+      template: true
+      json: { message: "${find(data.greetings, 'name', body.name).note ?? 'no greeting'}" }
+  - id: greetings
+    mock: greeter
+    crud: { bucket: greetings, path: /greetings }
+```
+
+After a `greet` call for Tom, `GET /greetings/Tom` over HTTP answers
+`{"name":"Tom","note":"over gRPC"}`. After `POST /greetings` with
+`{"name":"Ann","note":"over HTTP"}`, a `find` call for Ann gets
+`{"message": "over HTTP"}`. A write that cannot be applied, and writes
+that would pass the state bound, get
+[smock's own failures](#smocks-own-failures).
+
+### Weighted responses
+
+A Stub with `responses` picks one for each call, by weight, as on HTTP
+([Several responses](definition-files.md#several-responses)). Each may be
+a reply or an error, so a Stub can fail one call in ten:
+
+```yaml
+responses:
+  - { weight: 9, json: { message: Hello } }
+  - { weight: 1, grpc: { status: UNAVAILABLE, message: try again } }
+```
+
+The Journal entry's `responseIndex` says which response a call got, and
+`--seed` or `fault.seed` replays the picks
+([Seeds](definition-files.md#seeds)).
+
 ## Unmatched calls
 
 A call that no gRPC Stub on its method matches gets UNIMPLEMENTED, the
@@ -1533,6 +1678,58 @@ A call has no Near miss, and its answer no `smock-near-miss` field, when
 its Host reaches no Mock, or its Mock has no gRPC Stub, which a Mock
 without a set never has. An HTTP Stub is never a call's Near miss, even one whose
 path pattern takes the call's path.
+
+## smock's own failures
+
+smock's own HTTP answers never reach a gRPC call. An HTTP request whose
+Stub cannot serve its content gets a 500 or a 507 with a JSON body
+([Missing values and render errors](definition-files.md#missing-values-and-render-errors)).
+A gRPC call gets Trailers-Only instead: one HEADERS block that ends the
+stream, with `:status` 200, `content-type: application/grpc`, its
+`grpc-status`, a fixed ASCII `grpc-message`, `smock-mock` when the Default
+Mock answered, and `date`. None of the Stub's metadata, trailers or
+details go out with it.
+
+| What fails | `grpc-status` | `grpc-message` | In the Journal entry |
+|---|---|---|---|
+| A template of the Stub: its reply, its message, its metadata, its details, a `variables` value, or a `dataWrites` key or value. Also a rendered metadata value that breaks gRPC's rules ([Metadata](#metadata)), a rendered reply that does not fit the output type ([The reply](#the-reply)), and a rendered detail that does not fit its type ([Error details](#error-details)) | 13, INTERNAL | `template failed` | `templateError` |
+| A write of the Stub's `dataWrites` cannot be applied ([When a write fails](definition-files.md#when-a-write-fails)) | 13, INTERNAL | `data write failed` | `dataError` |
+| The Stub's writes, Variables and data writes together, would pass the bound on per-Session state ([The state bound](definition-files.md#the-state-bound)) | 8, RESOURCE_EXHAUSTED | `state limit reached` | `grpcStatus` only |
+| A block of the reply's metadata is too large to send ([Metadata size](#metadata-size)) | 13, INTERNAL | `reply metadata too large` | `templateError` |
+
+So a call whose `variables` value reads `${body.missing.name}` gets:
+
+```text
+:status: 200
+content-type: application/grpc
+grpc-status: 13
+grpc-message: template failed
+smock-mock: greeter; via=default
+date: Sat, 14 Nov 2026 07:00:00 GMT
+```
+
+and its Journal entry has the HTTP status 200, the `grpcStatus`
+`INTERNAL` and the same `templateError` as an HTTP request would get:
+
+```json
+{ "stub": "variables", "status": 200, "grpcStatus": "INTERNAL",
+  "templateError": { "at": "/variables/who", "message": "body.missing.name is missing" } }
+```
+
+smock answers INTERNAL since the fault is the mock's own: UNKNOWN would
+say that the application threw. RESOURCE_EXHAUSTED is gRPC's status for a
+server out of resources, and the refused writes count in
+`smock_state_writes_refused_total`, as on HTTP.
+
+The rest is as on HTTP. A `variables` value or a `dataWrites` key or
+value that fails to render, a write that cannot be applied, and writes
+past the state bound write nothing, Variables included, and no response
+is picked. A reply that fails once picked keeps the writes made before
+it. The Scenario move stands. The Stub's delay holds the answer back, and
+the call's deadline can cut it short ([Deadlines](#deadlines)). The
+request metrics count the call under its Mock and Stub. The `mockoon` log
+format writes its error line, and its `Transaction recorded` line gives
+`responseStatus` 200.
 
 ## Deadlines
 
@@ -1909,8 +2106,8 @@ fails to load.
 | delay | Waits before the reply's HEADERS, on the call's stream alone: the other calls of the connection are answered meanwhile. The call's deadline can cut it short ([Deadlines](#deadlines)). | The reply, later; or DEADLINE_EXCEEDED |
 
 A delay holds back whatever the call gets from its Stub: its reply, its
-error, or smock's own answer when the Stub's reply cannot be sent, such as
-INTERNAL `template failed`. A call that no Stub matched gets UNIMPLEMENTED
+error, or [smock's own failure](#smocks-own-failures) when the Stub
+cannot serve its content, such as INTERNAL `template failed`. A call that no Stub matched gets UNIMPLEMENTED
 at once.
 
 ## Calls smock does not serve yet
@@ -1931,16 +2128,8 @@ request metrics count them as rejected requests, with `mock=""` and
 The calls that gRPC's rules refuse are answered as
 [Protocol checks and limits](#protocol-checks-and-limits) says.
 
-These calls reach the Stubs. The Journal records each with the
-`grpcStatus` `INTERNAL`, and with the HTTP status planned for it: 500 or
-507 for smock's own failures, and 200 for a rendered reply that does not
-fit the output type, whose `templateError` says why:
-
-| The call | `grpc-message` |
-|---|---|
-| The Stub's reply, its message, its metadata, its details, a `variables` value or a `dataWrites` value fails to render, a rendered metadata value breaks gRPC's rules ([Metadata](#metadata)), the rendered reply does not fit the output type, or a rendered detail does not fit its type ([Error details](#error-details)) | `template failed` |
-| A write of the Stub's `dataWrites` cannot be applied | `data write failed` |
-| The Stub's writes do not fit the bound on per-Session state | `state limit reached` |
+A Stub that cannot serve its content gets
+[smock's own failures](#smocks-own-failures).
 
 ## Building a set
 
