@@ -2976,8 +2976,8 @@ and enum names of up to 40, for a call whose JSON smock parses once:
   [The values a message may print](#the-values-a-message-may-print),
   9,500 empty elements of 60 `int64` fields, costs 2.4 MiB. For empty
   elements of 120 enum fields, with field names of 29 characters and
-  enum names of 40, a message of up to 2 KB costs up to about 11 MiB,
-  and one of up to 10 KB up to about 20 MiB. The cost steps: where a
+  enum names of 40, a message of up to 2 KB costs up to about 11 MiB.
+  One of up to 10 KB costs up to about 20 MiB. The cost steps: where a
   slightly larger message saves the buffer one doubling, the cost
   halves. So a message of 1.4 KB costs up to about 11 MiB, and one of
   2 KB up to about 8 MiB.
