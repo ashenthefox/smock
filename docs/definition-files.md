@@ -4659,6 +4659,17 @@ smock render --dir defs slow-hello --request sample.json --seed 7 | jq -c '[.res
 # [0,824,27,20,38,19,40,38,26,28,0,0]
 ```
 
+A [gRPC Stub](#grpc-stubs) renders as a call to its method, whatever the
+sample's `method` and `Content-Type`, which are only conditions. The
+sample's body is the request message as JSON, checked against the
+method's input type: a body that does not fit fails, with 400
+`invalid_request` or status 1. The rendering shows the reply message as
+JSON, its initial metadata as `headers`, and, in `response.grpc`, the
+gRPC status, message, trailing metadata and error details, never
+protobuf bytes. A template that fails, or a rendered reply that does not
+fit its type, shows the INTERNAL a call gets, with its `templateError`.
+The [gRPC guide](grpc.md#rendering-a-grpc-stub) says more.
+
 A rendering reads and writes no live [Variables](#variables), so it stays
 the same on every run:
 
@@ -5967,6 +5978,9 @@ stubs:
   ([A path that looks like a gRPC method](#a-path-that-looks-like-a-grpc-method)).
 - A gRPC Stub can be an Ephemeral Stub
   ([Ephemeral gRPC Stubs](#ephemeral-grpc-stubs)).
+- `smock render` and the Admin render operation render a gRPC Stub as a
+  call, for a sample whose body is the request message as JSON
+  ([Rendering a template](#rendering-a-template)).
 
 #### A gRPC Stub's fields
 
