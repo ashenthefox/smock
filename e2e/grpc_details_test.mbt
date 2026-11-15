@@ -312,6 +312,38 @@ async test "rendered details count toward the trailers' size: a Trailers-Only bl
 }
 
 ///|
+async test "an error with details that a delay holds back sends them once the delay ends" {
+  let stubs =
+    #|  - id: slow-unknown
+    #|    mock: greeter
+    #|    request: { path: /helloworld.Greeter/SayHello }
+    #|    response:
+    #|      template: true
+    #|      grpc:
+    #|        status: NOT_FOUND
+    #|        message: no user called ${body.name}
+    #|        details:
+    #|          - "@type": type.googleapis.com/google.rpc.ErrorInfo
+    #|            reason: USER_UNKNOWN
+    #|            domain: greeter.svc
+    #|    fault: { delay: { fixed: 200 } }
+  with_details(stubs, dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      let reply = client.call("/helloworld.Greeter/SayHello", body=hello_ann())
+      assert_eq(reply.status_details(), Some(protoc_status("error-info")))
+      inspect(
+        smock.calls_of(),
+        content=(
+          #|"slow-unknown" 200 "NOT_FOUND"
+        ),
+      )
+    })
+  })
+}
+
+///|
 async test "smock check reports a detail type the set lacks and details with OK" {
   let stubs =
     #|  - id: missing
