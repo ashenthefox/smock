@@ -79,6 +79,7 @@ in a definitions directory, such as `defs/`, that `smock serve --dir` and
   - [Copies and the state bound](#copies-and-the-state-bound)
 - [gRPC](#grpc)
   - [Descriptor sets](#descriptor-sets)
+  - [The health service](#the-health-service)
   - [gRPC Stubs](#grpc-stubs)
   - [The status of a gRPC reply](#the-status-of-a-grpc-reply)
   - [gRPC reply metadata](#grpc-reply-metadata)
@@ -5744,9 +5745,10 @@ A Mock can stand in for a gRPC service. It names the service's
 Descriptor set, the compiled form of its `.proto` files, with `grpc`.
 smock reads and checks the set with the Definition files, and its
 [gRPC Stubs](#grpc-stubs) answer unary calls, on the plain port over h2c
-and on the TLS port over h2. The [gRPC guide](grpc.md) shows a first call,
-says which requests are gRPC calls and how smock serves a call, and how to
-build a set, what smock checks in it and what it keeps.
+and on the TLS port over h2. `grpc` can also turn on gRPC's
+[health service](#the-health-service). The [gRPC guide](grpc.md) shows a
+first call, says which requests are gRPC calls and how smock serves a
+call, and how to build a set, what smock checks in it and what it keeps.
 
 ### Descriptor sets
 
@@ -5769,7 +5771,8 @@ mocks:
       descriptorSet: greeter.binpb
 ```
 
-- `grpc` is an object, and `descriptorSet` is required in it.
+- `grpc` is an object with two fields, `descriptorSet` and `health`
+  ([The health service](#the-health-service)). Either may be left out.
 - `descriptorSet` is a path relative to the body-file subdirectory, with
   the rules of `bodyFile`: it stays inside the subdirectory, symlinks
   included, and none of its names starts with `.`.
@@ -5804,6 +5807,39 @@ mocks:
   service. A Mock without `grpc` holds no set. Each set is held decoded,
   so a large set costs memory in every replica
   ([Memory](grpc.md#memory)).
+
+### The health service
+
+`grpc.health`, a boolean, `false` by default, turns on the Mock's
+built-in health service, gRPC's `grpc.health.v1.Health`, which clients
+and proxies that health-check a gRPC server call:
+
+```yaml
+mocks:
+  - name: greeter
+    hosts: [greeter.svc]
+    grpc:
+      descriptorSet: greeter.binpb
+      health: true
+```
+
+- `Check` says SERVING for `""` and for each service of the Mock's set,
+  and gives NOT_FOUND for other names. `List` gives the status of `""`
+  and of each service. `Watch`, which streams, gets UNIMPLEMENTED.
+- Once SIGTERM starts the drain, every answer says NOT_SERVING.
+- The set need not hold `health.proto`, and `descriptorSet` may be left
+  out: `grpc: { health: true }` alone serves health for `""`.
+- A gRPC Stub on a health method, such as
+  `/grpc.health.v1.Health/Check`, answers in the service's place, an
+  Ephemeral one of the call's Session included. Such a Stub needs
+  `health.proto` in the Mock's set, as any gRPC Stub needs its method.
+- Health answers are not recorded in the Journal. They count in the
+  request metrics under their Mock with `stub=""`.
+- A Mock that does not turn health on has no health service: a call to
+  it is a call to a method the set lacks.
+
+The gRPC guide's [Health](grpc.md#health) has the details, a Scenario
+that makes the service NOT_SERVING, and grpcurl's commands.
 
 ### gRPC Stubs
 

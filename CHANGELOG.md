@@ -351,6 +351,19 @@ of each GitHub release include its section
   reads framed messages as they arrive, in pieces split anywhere. See
   [Protocol checks and limits](docs/grpc.md#protocol-checks-and-limits)
   and [Compression](docs/grpc.md#compression).
+- A Mock's built-in health service. With `grpc: { health: true }`, a Mock
+  answers gRPC's `grpc.health.v1.Health` as gRPC's health servers do:
+  `Check` says SERVING for `""` and for each service of the Mock's set,
+  and gives NOT_FOUND for other names; `List` gives the same statuses;
+  `Watch`, which streams, gets UNIMPLEMENTED. Once SIGTERM starts the
+  drain, every answer says NOT_SERVING. A gRPC Stub on a health method,
+  an Ephemeral one of the call's Session included, answers in the
+  service's place, so a Scenario can make it NOT_SERVING. Health answers
+  are not journaled, and count under their Mock with `stub=""`. smock
+  embeds the descriptor of gRPC's `health.proto`, so the set need not
+  hold it, and `descriptorSet` may now be left out of `grpc`. smock's own
+  probes stay on the admin port's `/readyz`. See
+  [Health](docs/grpc.md#health).
 
 ### Changed
 
@@ -369,7 +382,9 @@ of each GitHub release include its section
   speak of a request the protocol layer rejects, and name HTTP/2's
   statuses beside HTTP/1.1's: 400, 413 and 431 on its stream. They also
   name gRPC's refusals: 405, 400, or 200 with the gRPC status
-  UNIMPLEMENTED, INTERNAL or RESOURCE_EXHAUSTED.
+  UNIMPLEMENTED, INTERNAL or RESOURCE_EXHAUSTED. They say that, for a
+  Mock, `stub=""` also counts the gRPC calls that its built-in health and
+  reflection services answer, which are not unmatched requests.
 - The help texts of `--header-size-limit` and `--read-timeout-ms` give
   their meaning over HTTP/2. A header list is counted as RFC 7541 counts
   it, each field with 32 octets more, and a larger one gets 431 on its
@@ -451,6 +466,8 @@ of each GitHub release include its section
   `--header-size-limit` and `SMOCK_HEADER_SIZE_LIMIT` too, so they load a
   directory as `smock serve` does. See
   [Metadata size](docs/grpc.md#metadata-size).
+- NOTICE names gRPC's `health.proto` (Apache-2.0), whose descriptor smock
+  embeds for a Mock's built-in health service.
 
 ### Fixed
 

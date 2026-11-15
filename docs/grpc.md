@@ -6,7 +6,8 @@ and checks the set when it loads the Definition files. Its gRPC Stubs then
 answer unary calls, on the plain port over h2c and on the TLS port over
 h2. This guide shows a first call, says which requests are gRPC calls, how
 a call reaches a Stub and how smock answers it, which calls gRPC's rules
-refuse, and how to build a set that smock reads. The
+refuse, how a Mock answers gRPC's health service, and how to build a set
+that smock reads. The
 [Definition-file reference](definition-files.md#grpc) describes the
 Mock's `grpc` field and gRPC Stubs.
 
@@ -41,6 +42,8 @@ Mock's `grpc` field and gRPC Stubs.
 - [Unmatched calls](#unmatched-calls)
   - [Calls answered from their HEADERS](#calls-answered-from-their-headers)
   - [The Near miss trailer](#the-near-miss-trailer)
+- [Built-in services](#built-in-services)
+  - [Health](#health)
 - [Protocol checks and limits](#protocol-checks-and-limits)
   - [The order of the checks](#the-order-of-the-checks)
   - [Timeouts](#timeouts)
@@ -1036,6 +1039,10 @@ The request metrics count a call that a Stub answered under its Mock and
 Stub, as they count an HTTP request, and a call that no Stub matched as
 an unmatched request of its Mock.
 
+A call that a Mock's [built-in health service](#health) answers is not in
+the Journal. The request metrics count it under its Mock with
+`stub=""`, and not as an unmatched request.
+
 ## Status and message
 
 A gRPC Stub's reply ends with a gRPC status, `OK` unless its `grpc` gives
@@ -1411,6 +1418,144 @@ A call has no Near miss, and its answer no `smock-near-miss` field, when
 its Host reaches no Mock, or its Mock has no gRPC Stub, which a Mock
 without a set never has. An HTTP Stub is never a call's Near miss, even one whose
 path pattern takes the call's path.
+
+## Built-in services
+
+A Mock can answer gRPC's standard health service itself, with no Stub.
+It is off unless the Mock turns it on.
+
+### Health
+
+Clients and proxies that health-check a gRPC server call gRPC's
+[health service](https://github.com/grpc/grpc/blob/master/doc/health-checking.md),
+`grpc.health.v1.Health`. Turn it on with the Mock's `grpc.health`:
+
+```yaml
+mocks:
+  - name: greeter
+    hosts: [greeter.svc]
+    grpc:
+      descriptorSet: greeter.binpb
+      health: true
+```
+
+smock then answers as gRPC's health servers do:
+
+| Method | Answer |
+|---|---|
+| `Check` | SERVING for `""`, the server as a whole, and for each service of the Mock's set, such as `helloworld.Greeter`. NOT_FOUND with the message `unknown service` for any other name. |
+| `List` | The status of `""` and of each service of the set, by name. |
+| `Watch` | It streams, so it gets UNIMPLEMENTED `streaming methods are not served yet` from its HEADERS, as a streaming method of a set does ([Calls answered from their HEADERS](#calls-answered-from-their-headers)), but it is not journaled, as no health answer is. |
+
+- The set need not hold `health.proto`. smock embeds the descriptor of
+  gRPC's
+  [health.proto](https://github.com/grpc/grpc-proto/blob/master/grpc/health/v1/health.proto),
+  and decodes and encodes the service's messages with it. A set that
+  holds the file has `grpc.health.v1.Health` among its services, so the
+  service says SERVING for itself too.
+- `descriptorSet` may be left out. A Mock with `grpc: { health: true }`
+  alone has no service of its own: `Check` says SERVING for `""` and
+  gives NOT_FOUND for every other name, and `List` gives `""` alone.
+- The [protocol checks](#protocol-checks-and-limits) come first, as for
+  any call. A `Check` of `""` may send a message of zero octets.
+- The service answers on the plain and TLS ports alike, through the
+  Default Mock too, with `smock-mock` in its answer.
+- smock's own probes stay on the admin port. Kubernetes reads `/readyz`,
+  not the health service.
+
+#### The drain
+
+Once SIGTERM starts the drain, every answer of `Check` and `List` says
+NOT_SERVING, for every name, an unknown one included. Health-checking
+clients then move away before smock stops, while the calls in flight
+finish ([The drain](http2.md#the-drain)). `/readyz` fails from the same
+moment.
+
+#### A Stub wins
+
+A call to a health method goes to the Stubs, not to the service, when
+the Mock has a gRPC Stub on that path: one in a Definition file, or an
+Ephemeral one of the call's Session. So a Scenario can make the service
+NOT_SERVING:
+
+```yaml
+mocks:
+  - name: greeter
+    hosts: [greeter.svc]
+    grpc:
+      descriptorSet: greeter.binpb
+      health: true
+stubs:
+  - id: health-down
+    mock: greeter
+    scenario: { name: health, requires: down }
+    request: { path: /grpc.health.v1.Health/Check }
+    response: { json: { status: NOT_SERVING } }
+  - id: health-up
+    mock: greeter
+    request: { path: /grpc.health.v1.Health/Check }
+    response: { json: { status: SERVING } }
+```
+
+A test sets the Scenario `health` to `down` through the Admin API, and
+`Check` then says NOT_SERVING.
+
+- Such a Stub is a gRPC Stub like any other, so the Mock's set must hold
+  `health.proto`. Build the set with it:
+
+  ```sh
+  protoc --include_imports -o defs/files/greeter.binpb \
+    helloworld.proto grpc/health/v1/health.proto
+  ```
+
+- The call goes to the Stubs even when none of them matches it, and then
+  gets UNIMPLEMENTED `no Stub matched`. So give one Stub without
+  conditions, as `health-up` above.
+- A Stub on one method leaves the others to the service: with the Stubs
+  above, `List` is still the service's.
+- A call that goes to the Stubs is journaled and counted as any call a
+  Stub answers.
+
+#### With grpcurl
+
+grpcurl needs the service's schema. Give it `health.proto`:
+
+```sh
+mkdir -p grpc/health/v1
+curl -fsSL -o grpc/health/v1/health.proto \
+  https://raw.githubusercontent.com/grpc/grpc-proto/master/grpc/health/v1/health.proto
+grpcurl -plaintext -authority greeter.svc -proto grpc/health/v1/health.proto \
+  localhost:8080 grpc.health.v1.Health/Check
+```
+
+```json
+{
+  "status": "SERVING"
+}
+```
+
+A name that is not a service of the set:
+
+```sh
+grpcurl -plaintext -authority greeter.svc -proto grpc/health/v1/health.proto \
+  -d '{"service": "nope.Svc"}' localhost:8080 grpc.health.v1.Health/Check
+```
+
+```text
+ERROR:
+  Code: NotFound
+  Message: unknown service
+```
+
+`grpc.health.v1.Health/List` with the same flags prints the status of
+`""` and of `helloworld.Greeter`.
+
+#### In the Journal and the metrics
+
+Health answers are not recorded in the Journal: probes every few seconds
+would otherwise evict the calls that tests verify. The request metrics
+count each under its Mock with `stub=""`, and not as an unmatched
+request. In the `mockoon` log format, they get no line.
 
 ## Protocol checks and limits
 
