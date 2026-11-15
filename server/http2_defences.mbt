@@ -5,9 +5,11 @@
 // defence that closes a connection ends it. `H2Connection::hand` counts
 // the streams that end reset before smock has finished their responses,
 // against Rapid Reset and MadeYouReset (`H2Connection::reset_early`), which
-// ends the connection the same way. A header block past moonhttp's
-// bound as received, a CONTINUATION flood, is the `Conn`'s own connection
-// error, which smock logs the same way (`H2Connection::flooded`).
+// ends the connection the same way. Neither counts a client reset of a
+// gRPC call that times out, once per stream (grpc_deadlines.mbt). A header
+// block past moonhttp's bound as received, a CONTINUATION flood, is the
+// `Conn`'s own connection error, which smock logs the same way
+// (`H2Connection::flooded`).
 
 ///|
 /// How many frames that do no work a client may send in any one second.

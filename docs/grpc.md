@@ -47,6 +47,7 @@ Mock's `grpc` field and gRPC Stubs.
   - [The Near miss trailer](#the-near-miss-trailer)
 - [Deadlines](#deadlines)
   - [A client that resets at its deadline](#a-client-that-resets-at-its-deadline)
+  - [Resets and the connection's defences](#resets-and-the-connections-defences)
 - [Built-in services](#built-in-services)
   - [Health](#health)
 - [Protocol checks and limits](#protocol-checks-and-limits)
@@ -1675,6 +1676,34 @@ A call that the client cancels earlier during a delay, or that has no
 deadline, ends there, as any HTTP/2 stream does
 ([Streams that wait](http2.md#streams-that-wait)). Its entry keeps the
 HTTP status and the `grpcStatus` that its Stub's reply planned.
+
+### Resets and the connection's defences
+
+The defences of an HTTP/2 connection count the streams a client resets
+before smock has finished their answers, against Rapid Reset, and the
+resets of streams that have closed, among the frames that do no work. Past
+either bound, the connection gets GOAWAY `ENHANCE_YOUR_CALM`
+([Defences](http2.md#defences)).
+
+A client that keeps deadlines resets every call that times out, so these
+resets count toward neither bound:
+
+- a client reset that smock records as DEADLINE_EXCEEDED, as above: one
+  that arrives at most 100 ms before the deadline, while the delay runs
+  past it;
+- the first reset of a call that smock ended at its deadline with
+  DEADLINE_EXCEEDED.
+
+So a client whose calls time out against a slow Stub keeps its
+connection, however many calls time out. For the second kind, smock keeps
+the stream IDs of the calls it ended at their deadlines until their resets
+arrive. It keeps at most `--http2-max-concurrent-streams` of them per
+connection, and drops the oldest first, since a client that read the
+answer before its own deadline sends no reset.
+
+Each stream gets this once. Every other reset counts as on any HTTP/2
+stream: a second reset of the same stream, a reset of a call without a
+deadline, and a reset that arrives more than 100 ms before the deadline.
 
 ## Built-in services
 

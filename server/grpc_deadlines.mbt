@@ -12,7 +12,9 @@
 // deadline is watched only while a delay runs: once the reply's HEADERS
 // are out, the reply finishes as planned. The stream's task sleeps until
 // the earlier of the delay's end and the deadline, so a deadline adds no
-// task and no timer.
+// task and no timer. Since clients that keep deadlines reset each call that
+// times out, spec E's defences count neither such a reset nor the first
+// reset of a call smock ended at its deadline (http2_defences.mbt).
 
 ///|
 /// The fixed `grpc-message` of the DEADLINE_EXCEEDED that ends a call
