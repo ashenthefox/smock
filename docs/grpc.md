@@ -3075,7 +3075,7 @@ of a served message, cut at `--journal-body-limit`, 4,096 octets by
 default, so raise that limit to count a large message there. smock never
 shows the JSON of a refused message, so count such a message with
 protobuf's own printer, told to print the fields without presence. In
-Python:
+Python, with protobuf 5.26 or later:
 
 ```python
 from google.protobuf import json_format
