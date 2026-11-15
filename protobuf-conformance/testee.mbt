@@ -130,6 +130,16 @@ fn respond(set : @protobuf.DescriptorSet, request : Request) -> Response {
           }
         _ => RuntimeError("not yet")
       }
+    Json(text) => {
+      // Read as smock reads the JSON of a gRPC reply.
+      let json = @json.parse(@utf8.decode(text)) catch {
+        error => return ParseError(error.to_string())
+      }
+      let binary = set.encode_json(message, json) catch {
+        error => return ParseError(error.to_string())
+      }
+      Binary(binary)
+    }
     _ => RuntimeError("not yet")
   }
 }

@@ -24,3 +24,8 @@ async fn check(name : String) -> Unit {
 async test "a binary message asked for as JSON is answered in canonical ProtoJSON" {
   check("binary-to-json")
 }
+
+///|
+async test "a JSON message asked for in the binary encoding is encoded as protoc encodes it" {
+  check("json-to-binary")
+}

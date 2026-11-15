@@ -1,0 +1,2 @@
+# The answer to json-to-binary.txtpb: the message as protobuf encodes it.
+protobuf_payload: "\010\001\020\373\377\377\377\377\377\377\377\377\001r\005smock"
