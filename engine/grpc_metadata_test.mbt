@@ -159,22 +159,22 @@ test "a rendered metadata value outside 0x20 to 0x7E, or a rendered -bin value t
   }
   inspect(
     failure("rendered", "Zoë", "AAE="),
-    content="500 /response/headers/x-name: the rendered value holds U+00EB, and gRPC metadata values hold only characters from 0x20 to 0x7E",
+    content="200 /response/headers/x-name: the rendered value holds U+00EB, and gRPC metadata values hold only characters from 0x20 to 0x7E",
   )
   inspect(
     failure("rendered", "Ann\\tBob", "AAE="),
-    content="500 /response/headers/x-name: the rendered value holds U+0009, and gRPC metadata values hold only characters from 0x20 to 0x7E",
+    content="200 /response/headers/x-name: the rendered value holds U+0009, and gRPC metadata values hold only characters from 0x20 to 0x7E",
   )
   inspect(
     failure("rendered", "Ann", "AA="),
-    content="500 /response/grpc/trailers/name-bin: the rendered value is not standard base64, which a field whose name ends with -bin holds",
+    content="200 /response/grpc/trailers/name-bin: the rendered value is not standard base64, which a field whose name ends with -bin holds",
   )
   inspect(
     failure("rendered-error", "☺", "AAE="),
-    content="500 /response/grpc/trailers/x-name: the rendered value holds U+263A, and gRPC metadata values hold only characters from 0x20 to 0x7E",
+    content="200 /response/grpc/trailers/x-name: the rendered value holds U+263A, and gRPC metadata values hold only characters from 0x20 to 0x7E",
   )
   inspect(
     failure("rendered-error", "Ann", "AAE=,AAE="),
-    content="500 /response/grpc/trailers/name-bin: the rendered value is not standard base64, which a field whose name ends with -bin holds",
+    content="200 /response/grpc/trailers/name-bin: the rendered value is not standard base64, which a field whose name ends with -bin holds",
   )
 }

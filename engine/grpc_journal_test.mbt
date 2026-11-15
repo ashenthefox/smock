@@ -77,29 +77,39 @@ test "the final-status method sets the gRPC status a call really got, and keeps 
     ],
     body_files=greeter_body_files(),
   )
-  // A template that fails: smock answers in its own way, a 500, so the plan
-  // has no gRPC part, and the entry has no gRPC status yet.
+  // A template that fails: smock answers in its own way, INTERNAL, which
+  // the plan's gRPC part carries and the entry records, with the HTTP
+  // status 200.
   let failed = h.call(
     "/helloworld.Greeter/SayHello",
     "{\"name\":\"Tom\"}",
     octets=10,
     headers=[("x-tenant", "fails")],
   )
-  inspect(grpc_part(failed), content="none")
+  inspect(
+    grpc_part(failed),
+    content=(
+      #|INTERNAL
+      #|grpc-message: template failed
+    ),
+  )
   json_inspect(answer_members(failed), content={
     "stub": "fails",
-    "status": 500,
+    "status": 200,
+    "grpcStatus": "INTERNAL",
     "templateError": {
       "at": "/response/json/message",
       "message": "body.missing.name is missing",
     },
   })
+  // A delay may hold that answer back past the call's deadline, which ends
+  // it otherwise: the template error stays.
   guard failed.journal is Some(entry) else { fail("no entry") }
-  entry.set_grpc_status(Internal)
+  entry.set_grpc_status(DeadlineExceeded)
   json_inspect(answer_members(failed), content={
     "stub": "fails",
-    "status": 500,
-    "grpcStatus": "INTERNAL",
+    "status": 200,
+    "grpcStatus": "DEADLINE_EXCEEDED",
     "templateError": {
       "at": "/response/json/message",
       "message": "body.missing.name is missing",

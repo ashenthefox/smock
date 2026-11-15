@@ -4274,6 +4274,11 @@ for a Stub with no path condition) and the Stub ID (`routeUUID`):
 A value of `variables` or `dataWrites` that fails to render writes the
 same line.
 
+A gRPC call never gets this 500. Its Stub's template failure is
+Trailers-Only INTERNAL `template failed`, with the HTTP status 200, and its
+Journal entry has the same `templateError`
+([smock's own failures](grpc.md#smocks-own-failures)).
+
 ### Environment variables
 
 A template can read an environment variable only when it is listed with
@@ -4575,6 +4580,10 @@ a request whose body would take the count above 1 MiB gets 507, with
   `variablesWritten: []` and `dataWritten: []`.
 - A write that does not grow the count, such as one that replaces a value
   with a smaller one, always fits.
+- A gRPC call whose writes would pass the bound gets Trailers-Only
+  RESOURCE_EXHAUSTED `state limit reached` instead of the 507, and its
+  Journal entry records the HTTP status 200 and the `grpcStatus`
+  `RESOURCE_EXHAUSTED` ([smock's own failures](grpc.md#smocks-own-failures)).
 
 An Admin API set follows the same rule. One that would take the count
 above the bound writes nothing and gets 507 `state_limit_reached`, in the
@@ -5112,6 +5121,12 @@ written, Variables included:
 After any of these, no response is picked. The Scenario move stands, the
 Stub's delay still applies, and a connection Fault still replaces the
 answer, as for a template failure.
+
+A gRPC call gets each of these in gRPC's form instead, as Trailers-Only
+with the HTTP status 200: INTERNAL `template failed` or `data write
+failed`, with the same `templateError` or `dataError` in its Journal
+entry, and RESOURCE_EXHAUSTED `state limit reached`
+([smock's own failures](grpc.md#smocks-own-failures)).
 
 A write that cannot be applied writes no log line in the default `json`
 [log format](../README.md#run). The `mockoon` format writes the error line
@@ -5967,6 +5982,13 @@ stubs:
   ([A path that looks like a gRPC method](#a-path-that-looks-like-a-grpc-method)).
 - A gRPC Stub can be an Ephemeral Stub
   ([Ephemeral gRPC Stubs](#ephemeral-grpc-stubs)).
+- A gRPC Stub requires and moves Scenarios, and reads and writes Variables
+  and Data buckets, as an HTTP Stub does, and a Mock's HTTP requests and
+  gRPC calls share them ([State over gRPC](grpc.md#state-over-grpc)). One
+  that cannot serve its content, since a template fails, a data write
+  cannot be applied or its writes would pass the state bound, gets
+  smock's own failure in gRPC's form, never a 500 or a 507
+  ([smock's own failures](grpc.md#smocks-own-failures)).
 
 #### A gRPC Stub's fields
 

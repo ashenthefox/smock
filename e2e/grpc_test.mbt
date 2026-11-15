@@ -211,7 +211,7 @@ async test "a call whose message does not decode gets Trailers-Only INTERNAL wit
 }
 
 ///|
-async test "a gRPC Stub whose template fails gets Trailers-Only INTERNAL, and is journaled with smock's own answer as planned" {
+async test "a gRPC Stub whose template fails gets Trailers-Only INTERNAL template failed, never smock's HTTP 500, and is journaled with the HTTP status 200" {
   let yaml =
     #|mocks:
     #|  - name: greeter
@@ -255,7 +255,7 @@ async test "a gRPC Stub whose template fails gets Trailers-Only INTERNAL, and is
       inspect(
         "\{stub.stringify()} \{status.stringify()} \{error.stringify()}",
         content=(
-          #|"hello" 500 {"at":"/response/json/message","message":"body.missing.name is missing"}
+          #|"hello" 200 {"at":"/response/json/message","message":"body.missing.name is missing"}
         ),
       )
       inspect(
