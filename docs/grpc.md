@@ -2930,14 +2930,16 @@ no more than the largest JSON body an HTTP request may send:
   it needs few such notes. One of 10 MiB whose records alternate between
   two lists gets RESOURCE_EXHAUSTED.
 
-So a call holds its message once as it came, and once as JSON, each
-within `--body-limit`. While smock decodes the message, the notes it
-holds to print it may take up to one more `--body-limit`. For example, a
-message of 10 MiB of empty `Item`s in a `repeated Item items`, where an
-`Item` has a string, a list and a map, would print 160 MiB of JSON. smock
-answers RESOURCE_EXHAUSTED once the JSON passes 10 MiB, in well under a
-second. Such a call, like an HTTP request with a body of 10 MiB, holds
-tens of MiB at once.
+So once smock has decoded a call's message, the call holds it once as it
+came, and once as JSON, each within `--body-limit`. While smock decodes
+the message, the call holds more. The buffers that the JSON's text grows
+through may take up to three times `--body-limit`, as the list below
+explains, and the notes that smock holds to print the message up to one
+more. For example, a message of 10 MiB of empty `Item`s in a
+`repeated Item items`, where an `Item` has a string, a list and a map,
+would print 160 MiB of JSON. smock answers RESOURCE_EXHAUSTED once the
+JSON passes 10 MiB, in well under a second. Such a call, like an HTTP
+request with a body of 10 MiB, holds tens of MiB at once.
 
 When a condition, a template or a Near miss reads the message, smock
 parses its JSON, and the parsed values cost more memory than the text.
@@ -2969,7 +2971,8 @@ and enum names of up to 40, for a call whose JSON smock parses once:
   doubles as the text grows, up to `--body-limit`. At its peak, a call
   may hold every buffer the text grew through. So the text costs up to
   four times its size, and at most about three times `--body-limit`,
-  30 MiB by default. The example of
+  30 MiB by default. The message itself, and the notes that smock holds
+  to print it, come on top of that. The example of
   [The values a message may print](#the-values-a-message-may-print),
   9,500 empty elements of 60 `int64` fields, costs 2.4 MiB. For empty
   elements of 120 enum fields, with field names of 29 characters and
@@ -2978,6 +2981,14 @@ and enum names of up to 40, for a call whose JSON smock parses once:
   slightly larger message saves the buffer one doubling, the cost
   halves. So a message of 1.4 KB costs up to about 11 MiB, and one of
   2 KB up to about 8 MiB.
+- The text of a served call grows through the same buffers, whatever
+  reads the message, and smock then copies the text out of the last
+  one. So a served call's text costs up to about five times its size
+  once it outgrows its first buffer, and at most about four times
+  `--body-limit`, 40 MiB by default. For example, a message of 544
+  octets that prints 2.4 MB of JSON costs about 9 MiB when no
+  condition, template or Near miss reads it. The costs of a parsed
+  call, above, include this one.
 - Near `--body-limit` the JSON's octets are the bound that counts. The
   JSON of a call may then cost hundreds of MiB once parsed, as the JSON
   body of an HTTP request of that size may, and more than 1 GiB when

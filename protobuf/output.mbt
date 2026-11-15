@@ -1,11 +1,17 @@
 // The JSON text that `decode_json` and `decode_canonical_json` print,
 // bounded by the limit each is given. What is printed is counted as it is
 // printed, and printing stops with `TooLarge` as soon as it passes the
-// limit. So a message of a few octets whose JSON would be far larger, such
-// as a list of empty messages each printed with every field at its
-// default, costs no more than the limit. What the decoder holds meanwhile
-// to print the message, views of the input beyond one a field, is counted
-// too, against the same limit on its own.
+// limit. So the text of a message of a few octets whose JSON would be far
+// larger, such as a list of empty messages each printed with every field
+// at its default, takes no more than the limit. The buffers that the text
+// grows through take more than the text: each is twice the last, until
+// the next would pass the limit and is the limit instead
+// (`Output::reserve`). Together they take up to four times a text that
+// has outgrown the first, and under three times the limit, or one buffer
+// more when the text passes the limit by the octet that `Output::wrapped`
+// allows it. What the decoder holds meanwhile to print the message, views
+// of the input beyond one a field, is counted too, against the same limit
+// on its own.
 //
 // The JSON values printed are counted as well, against a bound that
 // follows the size of the message (`values_bound`), and printing stops
