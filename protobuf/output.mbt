@@ -79,6 +79,9 @@ priv struct Output {
   /// The most octets the text may take for now: `limit`, and one more
   /// while the braces of an object are to come off (`Output::unwrap`).
   mut most : Int32
+  /// Where the room that the text has now ends: at the end of `data`, or
+  /// at `most` when that comes first. `Output::reserve` makes more.
+  mut room : Int32
   /// What the decoder holds, in octets, as `Output::hold` counts it.
   mut held : Int32
   /// The JSON values printed so far, the message that is printed being
@@ -117,6 +120,7 @@ fn Output::new(
     length: 0,
     limit,
     most: limit,
+    room: capacity,
     held: 0,
     values: 1,
     most_values,
@@ -159,13 +163,22 @@ fn Output::reserve(self : Output, count : Int32) -> Unit raise DecodeError {
     )
     data.unsafe_blit(0, self.data, 0, self.length)
     self.data = data
+    self.bound(self.most)
   }
+}
+
+///|
+/// Lets the text take at most `most` octets for now, and sets the room it
+/// has by that.
+fn Output::bound(self : Output, most : Int32) -> Unit {
+  self.most = most
+  self.room = if self.data.length() < most { self.data.length() } else { most }
 }
 
 ///|
 /// Writes `value`.
 fn Output::write_byte(self : Output, value : Byte) -> Unit raise DecodeError {
-  if self.length >= self.data.length() {
+  if self.length >= self.room {
     self.reserve(1)
   }
   self.data[self.length] = value
@@ -218,7 +231,7 @@ fn Output::release_to(self : Output, held : Int32) -> Unit {
 /// limit by its `{` meanwhile.
 fn Output::wrapped(self : Output) -> Int32 {
   // The data never grows past the limit but by that octet.
-  self.most += 1
+  self.bound(self.most + 1)
   self.length
 }
 
@@ -229,7 +242,7 @@ fn Output::wrapped(self : Output) -> Int32 {
 /// empty object leaves only the `}` that ends the object it is printed in.
 /// Raises `TooLarge` when the text then passes the limit.
 fn Output::unwrap(self : Output, at : Int32) -> Unit raise DecodeError {
-  self.most -= 1
+  self.bound(self.most - 1)
   if self.length - at == 2 {
     self.data[at] = b'}'
     self.length = at + 1

@@ -411,6 +411,165 @@ test "an Any's message is printed in place, after its @type: one with no field t
 }
 
 ///|
+/// A set written field by field: google.protobuf.Any and Duration, and in
+/// the package `e`, `E`, a message with no field, `F`, with the string
+/// `name`, and messages that hold an Any: `Only` alone, as `a`, `Last`
+/// after the string `pad`, `First` before it, `Middle` between the strings
+/// `before` and `after`, `List` as the repeated `items`, and `Map` as the
+/// values of the map `items`, whose keys are strings.
+fn any_holders() -> @protobuf.DescriptorSet {
+  let any_type = ".google.protobuf.Any"
+  // A repeated field numbered 1, of the message type `type_name`.
+  let listed = (name : String, type_name : String) => {
+    nested(w => {
+      string_field(w, 1, name)
+      varint_field(w, 3, 1)
+      varint_field(w, 4, 3)
+      varint_field(w, 5, 11)
+      string_field(w, 6, type_name)
+    })
+  }
+  let any = file_proto(
+    "google/protobuf/any.proto",
+    package_name="google.protobuf",
+    body=w => {
+      message_field(
+        w,
+        4,
+        message_proto("Any", body=w => {
+          message_field(w, 2, field_proto("type_url", 1, 9))
+          message_field(w, 2, field_proto("value", 2, 12))
+        }),
+      )
+    },
+  )
+  let duration = file_proto(
+    "google/protobuf/duration.proto",
+    package_name="google.protobuf",
+    body=w => {
+      message_field(
+        w,
+        4,
+        message_proto("Duration", body=w => {
+          message_field(w, 2, field_proto("seconds", 1, 3))
+          message_field(w, 2, field_proto("nanos", 2, 5))
+        }),
+      )
+    },
+  )
+  let entry = message_proto("ItemsEntry", body=w => {
+    message_field(w, 2, field_proto("key", 1, 9))
+    message_field(w, 2, field_proto("value", 2, 11, type_name=any_type))
+    // MessageOptions with map_entry true.
+    message_field(w, 7, nested(w => varint_field(w, 7, 1)))
+  })
+  let holders = file_proto(
+    "e.proto",
+    package_name="e",
+    dependencies=["google/protobuf/any.proto"],
+    body=w => {
+      message_field(w, 4, message_proto("E"))
+      message_field(
+        w,
+        4,
+        message_proto("F", body=w => {
+          message_field(w, 2, field_proto("name", 1, 9))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("Only", body=w => {
+          message_field(w, 2, field_proto("a", 1, 11, type_name=any_type))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("Last", body=w => {
+          message_field(w, 2, field_proto("pad", 1, 9))
+          message_field(w, 2, field_proto("a", 2, 11, type_name=any_type))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("First", body=w => {
+          message_field(w, 2, field_proto("a", 1, 11, type_name=any_type))
+          message_field(w, 2, field_proto("pad", 2, 9))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("Middle", body=w => {
+          message_field(w, 2, field_proto("before", 1, 9))
+          message_field(w, 2, field_proto("a", 2, 11, type_name=any_type))
+          message_field(w, 2, field_proto("after", 3, 9))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("List", body=w => {
+          message_field(w, 2, listed("items", any_type))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("Map", body=w => {
+          message_field(w, 2, listed("items", ".e.Map.ItemsEntry"))
+          message_field(w, 3, entry)
+        }),
+      )
+    },
+  )
+  @protobuf.read_descriptor_set(set_of([any, duration, holders])) catch {
+    err => abort("not a set: \{err}")
+  }
+}
+
+///|
+/// `input` decoded as a message of the type whose full name is `name` in
+/// `set`, with its JSON bounded by `limit`, as text, or the error that
+/// stops it.
+fn bounded_in(
+  set : @protobuf.DescriptorSet,
+  name : String,
+  input : Bytes,
+  limit~ : Int32,
+) -> String {
+  guard set.find_message(name) is Some(message) else {
+    abort("no message \{name}")
+  }
+  @utf8.decode(@protobuf.decode_json(set, message, input[:], limit~)) catch {
+    err => "error: \{err}"
+  }
+}
+
+///|
+test "the JSON is held to the limit after an Any's object too: a message that ends one octet past the limit, with the brace after an Any of a message with no field, is refused" {
+  let set = any_holders()
+  // An Only whose Any holds an E.
+  let only = nested(w => {
+    message_field(w, 1, any_of("type.googleapis.com/e.E", b""))
+  })
+  inspect(
+    [
+      bounded_in(set, "e.Only", only, limit=no_limit),
+      bounded_in(set, "e.Only", only, limit=41),
+      bounded_in(set, "e.Only", only, limit=40),
+    ].join("\n"),
+    content=(
+      #|{"a":{"@type":"type.googleapis.com/e.E"}}
+      #|{"a":{"@type":"type.googleapis.com/e.E"}}
+      #|error: the decoded message passes the limit of 40 octets
+    ),
+  )
+}
+
+///|
 test "a length that runs past its message, or past the message that holds it, makes the message not parse, at any level and before anything is allocated for it" {
   let past = [
     // A Burrow's name: 5 octets announced, 1 sent.
