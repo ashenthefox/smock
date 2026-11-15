@@ -20,6 +20,10 @@ fn hex_set(hex : String) -> @protobuf.DescriptorSet {
 }
 
 ///|
+/// A limit of the JSON that no test message's JSON reaches.
+let no_limit : Int32 = 0x7FFF_FFFF
+
+///|
 /// `input` decoded as a message of the type whose full name is `name` in
 /// the set the script wrote in `hex`, as text, or the error that stops it.
 fn decoded(hex : String, name : String, input : Bytes) -> String {
@@ -27,7 +31,7 @@ fn decoded(hex : String, name : String, input : Bytes) -> String {
   guard set.find_message(name) is Some(message) else {
     abort("no message \{name}")
   }
-  @utf8.decode(@protobuf.decode_json(set, message, input[:])) catch {
+  @utf8.decode(@protobuf.decode_json(set, message, input[:], limit=no_limit)) catch {
     err => "error: \{err}"
   }
 }

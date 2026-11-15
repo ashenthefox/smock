@@ -5,9 +5,11 @@
 // defence that closes a connection ends it. `H2Connection::hand` counts
 // the streams that end reset before smock has finished their responses,
 // against Rapid Reset and MadeYouReset (`H2Connection::reset_early`), which
-// ends the connection the same way. A header block past moonhttp's
-// bound as received, a CONTINUATION flood, is the `Conn`'s own connection
-// error, which smock logs the same way (`H2Connection::flooded`).
+// ends the connection the same way. Neither counts a client reset of a
+// gRPC call that times out, once per stream (grpc_deadlines.mbt). A header
+// block past moonhttp's bound as received, a CONTINUATION flood, is the
+// `Conn`'s own connection error, which smock logs the same way
+// (`H2Connection::flooded`).
 
 ///|
 /// How many frames that do no work a client may send in any one second.
@@ -86,7 +88,10 @@ fn NoWorkFrames::count(self : NoWorkFrames, at : Int64) -> Bool {
 /// - a CONTINUATION frame with no octets that ends no header block;
 /// - a DATA, WINDOW_UPDATE or RST_STREAM frame on a stream already closed,
 ///   and HEADERS on a stream this side reset, which the `Conn` ignores, as
-///   the record of the client's streams (`StreamRecord`) tells them;
+///   the record of the client's streams (`StreamRecord`) tells them. The
+///   first RST_STREAM on a gRPC call that smock ended at its deadline with
+///   DEADLINE_EXCEEDED is the exception (`deadline_reset`): a client that
+///   keeps deadlines resets the call at its own;
 /// - a frame of a type RFC 9113 does not define, which is ignored.
 ///
 /// `frame` is the whole frame, its header included. It runs before
@@ -114,7 +119,7 @@ fn H2Connection::no_work(
       None
     }
   } else if ftype == @http2.frame_rst_stream {
-    if self.closed(head.stream_id) {
+    if self.closed(head.stream_id) && !self.deadline_reset(head.stream_id) {
       Some("RST_STREAM on a closed stream")
     } else {
       None
