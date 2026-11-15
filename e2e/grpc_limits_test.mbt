@@ -586,7 +586,7 @@ async test "a message whose decoded JSON holds more values than a message of its
 }
 
 ///|
-async test "the review's case: a message of 19,000 octets, 9,500 empty Rows whose JSON would hold 579,503 values, gets RESOURCE_EXHAUSTED as soon as it passes the 108,768 that its size allows, and costs smock less than 6 MiB" {
+async test "9,500 empty Rows: a message of 19,000 octets whose JSON would hold 579,503 values gets RESOURCE_EXHAUSTED as soon as it passes the 108,768 that its size allows, and costs smock less than 6 MiB" {
   with_wide(dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let client = smock.h2c()

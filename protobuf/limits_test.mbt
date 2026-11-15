@@ -482,7 +482,8 @@ test "the values a message prints are bounded by its size, 32,768 and 4 more for
       // one of 34 it may print 37,880.
       table(rows(621) + b"\x12\x23" + repeated(b"a", 35)),
       table(rows(621) + b"\x12\x22" + repeated(b"a", 34)),
-      // The review's case: 9,500 Rows, 19,000 octets, 579,503 values.
+      // The guide's example in a Table: 9,500 empty Rows, 19,000 octets,
+      // 579,503 values.
       table(rows(9500)),
       // An empty Item, 2 octets, prints 4 values, so a list of them stays
       // within 4 values an octet whatever its length: 10,000 print 40,011
@@ -502,14 +503,14 @@ test "the values a message prints are bounded by its size, 32,768 and 4 more for
     ),
   )
   // Canonical ProtoJSON prints no default, so each value it prints takes
-  // an octet or more of the message: the review's case prints 9,502
+  // an octet or more of the message: the same 9,500 Rows print 9,502
   // values, `{"rows":[{},{},...]}`.
   let canonical = canonical(wide_set, "wide.Table", rows(9500))
   inspect(canonical.length(), content="28510")
 }
 
 ///|
-test "the values bound counts a message's octets as sent, whatever they carry: rows of 60 fields with one small number each are printed up to 728 and no further, and the review's rows are printed once an unknown field of zeros takes their message to 136,684 octets" {
+test "the values bound counts a message's octets as sent, whatever they carry: rows of 60 fields with one small number each are printed up to 728 and no further, and 9,500 empty Rows are printed once an unknown field of zeros takes their message to 136,684 octets" {
   let table = (input : Bytes) => printed_size(wide_set, "wide.Table", input)
   // A Row whose `f1` is 1 takes 4 octets and prints 61 values, as an empty
   // one does: 728 print 44,411 values where 2,912 octets may print 44,416,
