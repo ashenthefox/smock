@@ -419,6 +419,15 @@ message limits limits.proto limits.Burrow burrow
 hex_test limits/limits.binpb limits_set "The Descriptor set of fixtures/protobuf/limits/limits.proto, fixtures/protobuf/limits/limits.binpb, in hex." protobuf
 hex_test limits/burrow.binpb burrow "A Burrow that holds another in each way, as protoc encodes it: fixtures/protobuf/limits/burrow.binpb, in hex." protobuf
 
+# The set of the gRPC Mock of the release benchmark's gRPC variant, which
+# bench/gen_definitions.py copies to bench/definitions-grpc/files/, and the
+# request messages of its mix, which bench/test_gen_definitions.py
+# compares with the ones that script encodes by hand.
+descriptor_set bench shop.binpb shop.proto
+message bench shop.proto bench.shop.v1.GetOrderRequest get-order
+message bench shop.proto bench.shop.v1.QuoteRequest quote-order
+message bench shop.proto bench.shop.v1.TrackOrderRequest track-order
+
 # The end of the list of fixtures. With --check: every file the script
 # wrote, compared with the committed one.
 if [ -n "$check" ]; then
