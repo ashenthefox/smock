@@ -215,6 +215,8 @@ awk -v dir="$tmp/guide" '
     if (indent != "" && index(s, indent) == 1) s = substr(s, length(indent) + 1)
     return s
   }
+  # squeeze(s): s with each run of blanks made one space, and none at
+  # either end.
   function squeeze(s) {
     gsub(/[ \t]+/, " ", s)
     sub(/^ /, "", s)

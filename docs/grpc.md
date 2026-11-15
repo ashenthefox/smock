@@ -191,7 +191,7 @@ grpcurl -insecure -authority greeter.svc -H 'x-tenant: acme' \
   -d '{"name":"Tom"}' localhost:8443 helloworld.Greeter/SayHello
 ```
 
-The Journal records both calls, with the request message as JSON:
+The Journal records each call, with the request message as JSON:
 
 ```sh
 curl -H "Authorization: Bearer change-me" -d '{}' localhost:9090/v1/journal/query
@@ -199,9 +199,9 @@ curl -H "Authorization: Bearer change-me" -d '{}' localhost:9090/v1/journal/quer
 
 Tom's entry shows `POST`, the target `/helloworld.Greeter/SayHello`, the
 version `HTTP/2`, grpcurl's metadata as headers, the body
-`{"name":"Tom"}`, the status 200 and the gRPC status `OK`. Ann's shows the
-gRPC status `NOT_FOUND`. A call that no Stub matches gets UNIMPLEMENTED,
-and the Journal records it as unmatched
+`{"name":"Tom"}`, the status 200 and the gRPC status `OK`. Ann's entry
+shows the gRPC status `NOT_FOUND`. A call that no Stub matches gets
+UNIMPLEMENTED, and the Journal records it as unmatched
 ([Unmatched calls](#unmatched-calls)).
 
 CI runs every grpcurl command of this guide against smock, over h2c and
