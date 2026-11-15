@@ -3070,9 +3070,12 @@ than its size:
 [The decoder's limits](#the-decoders-limits) gives the costs.
 
 To count a message's values, count the values of its JSON:
-`jq '[..] | length'` does it for a JSON text. smock never shows the JSON
-of a refused message, so count such a message with protobuf's own
-printer, told to print the fields without presence. In Python:
+`jq '[..] | length'` does it for a JSON text. The Journal shows the JSON
+of a served message, cut at `--journal-body-limit`, 4,096 octets by
+default, so raise that limit to count a large message there. smock never
+shows the JSON of a refused message, so count such a message with
+protobuf's own printer, told to print the fields without presence. In
+Python:
 
 ```python
 from google.protobuf import json_format
