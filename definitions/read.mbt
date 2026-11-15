@@ -191,6 +191,9 @@ priv struct MockDecl {
   descriptor_set : @protobuf.DescriptorSet?
   /// Whether the Mock's built-in health service answers: `grpc.health`.
   health : Bool
+  /// The files that the Mock's built-in reflection service answers with,
+  /// when `grpc.reflection` turns it on (`GrpcFields`).
+  reflection : ReadOnlyArray[Bytes]?
 }
 
 ///|
@@ -442,6 +445,7 @@ fn File::read_mock(self : File, pointer : String, json : Json) -> MockDecl? {
     journal,
     descriptor_set: grpc.descriptor_set,
     health: grpc.health,
+    reflection: grpc.reflection,
   })
 }
 
@@ -453,39 +457,74 @@ priv struct GrpcFields {
   descriptor_set : @protobuf.DescriptorSet?
   /// `health`: whether the built-in health service answers.
   health : Bool
+  /// When `reflection` turns the built-in reflection service on, the files
+  /// it answers with: each file of the set, in the order of the set, as
+  /// the set encodes it without its SourceCodeInfo, none without a set.
+  /// `None` when reflection is off, so that a Mock without it keeps no
+  /// more than its set's model.
+  reflection : ReadOnlyArray[Bytes]?
 }
 
 ///|
 /// What a Mock without `grpc` has: no Descriptor set and no built-in
 /// service.
-let no_grpc : GrpcFields = { descriptor_set: None, health: false, }
+let no_grpc : GrpcFields = {
+  descriptor_set: None,
+  health: false,
+  reflection: None,
+}
 
 ///|
 /// Reads a Mock's `grpc`, a closed object: the Descriptor set its
 /// `descriptorSet` names, decoded, or none, with the problem reported, and
-/// whether its `health` turns the built-in health service on. Either may
-/// be left out, so a Mock may turn health on without a set.
+/// whether its `health` and `reflection` turn the built-in services on.
+/// Each may be left out, so a Mock may turn a service on without a set.
+/// With reflection on, the Mock also keeps the set's files as reflection
+/// sends them.
 fn File::read_grpc(self : File, pointer : String, json : Json) -> GrpcFields {
   guard json is Object(grpc) else {
     self.error(pointer, "must be an object")
     return no_grpc
   }
-  let mut descriptor_set = None
+  let mut read = None
   let mut health = false
+  let mut reflection = false
   for key, value in grpc {
     let field = child_pointer(pointer, key)
     match key {
-      "descriptorSet" => descriptor_set = self.read_descriptor_set(field, value)
-      "health" =>
-        match value {
-          True => health = true
-          False => ()
-          _ => self.error(field, "must be true or false")
-        }
+      "descriptorSet" => read = self.read_descriptor_set(field, value)
+      "health" => health = self.flag(field, value)
+      "reflection" => reflection = self.flag(field, value)
       _ => self.unknown_field(field)
     }
   }
-  { descriptor_set, health, }
+  let files = if !reflection {
+    None
+  } else if read is Some((_, bytes)) {
+    // The set decoded, so its files split.
+    Some(
+      @protobuf.files_without_source_info(bytes) catch {
+        _ => abort("a Descriptor set that decodes splits into its files")
+      },
+    )
+  } else {
+    Some(ReadOnlyArray::from_array([]))
+  }
+  { descriptor_set: read.map(read => read.0), health, reflection: files, }
+}
+
+///|
+/// Reads `json`, the value at `pointer`, as a boolean, false by default:
+/// any other value is a problem, and false.
+fn File::flag(self : File, pointer : String, json : Json) -> Bool {
+  match json {
+    True => true
+    False => false
+    _ => {
+      self.error(pointer, "must be true or false")
+      false
+    }
+  }
 }
 
 ///|
@@ -493,12 +532,13 @@ fn File::read_grpc(self : File, pointer : String, json : Json) -> GrpcFields {
 /// body file, with the path rules of `bodyFile`, that holds a
 /// self-contained FileDescriptorSet in protobuf's binary encoding. It has
 /// none, and each problem is reported, when the file is missing, does not
-/// decode, or fails the checks of `@protobuf.read_descriptor_set`.
+/// decode, or fails the checks of `@protobuf.read_descriptor_set`. The set
+/// comes with the octets it was read from.
 fn File::read_descriptor_set(
   self : File,
   pointer : String,
   json : Json,
-) -> @protobuf.DescriptorSet? {
+) -> (@protobuf.DescriptorSet, Bytes)? {
   guard self.string(pointer, json) is Some(path) else { return None }
   guard self.body_file(pointer, path) is Some(bytes) else { return None }
   // `declared_sets` has read it already.
@@ -507,7 +547,7 @@ fn File::read_descriptor_set(
     None => decode_set(bytes)
   }
   match decoded {
-    Decoded(set) => Some(set)
+    Decoded(set) => Some((set, bytes))
     NotASet(NotDecoded(err)) => {
       self.error(
         pointer,

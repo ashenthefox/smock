@@ -88,6 +88,11 @@
               "description": "Whether the Mock answers gRPC's standard health service, grpc.health.v1.Health, as gRPC's health servers do: Check and List say SERVING for the empty name and for each service of the Mock's Descriptor set, and Check gives NOT_FOUND for other names; once SIGTERM starts the drain, every answer says NOT_SERVING. Watch, which streams, gets UNIMPLEMENTED. A gRPC Stub on a health method, an Ephemeral one of the call's Session included, answers in its place. Health answers are not recorded in the Journal. Default false (off).",
               "type": "boolean",
               "default": false
+            },
+            "reflection": {
+              "description": "Whether the Mock answers gRPC's server reflection, grpc.reflection.v1 and grpc.reflection.v1alpha, so that tools such as grpcurl and Postman can list and describe its services without a local copy of the set. It answers from the Mock's Descriptor set, each file without its source info, and lists the health service when health is on, from a descriptor smock embeds unless the set defines grpc.health.v1 itself. It answers one request per call. Reflection answers are not recorded in the Journal. With it on, the Mock keeps the set's files as encoded, beside the set's model. Default false (off).",
+              "type": "boolean",
+              "default": false
             }
           },
           "additionalProperties": false
