@@ -23,7 +23,7 @@
 #
 # CI runs it on linux/amd64 and linux/arm64
 # (.github/workflows/build-test.yml). It needs grpcurl 1.9.4 on PATH
-# (scripts/install-grpcurl.sh installs it) and jq.
+# (scripts/install-grpcurl.sh installs it), curl and jq.
 #
 # usage: scripts/check-grpcurl.sh <smock>
 set -eu
@@ -62,10 +62,11 @@ mkdir -p "$work/grpc/health"
 ln -s "$repo/scripts/grpcurl/definitions" "$work/defs"
 ln -s "$repo/fixtures/protobuf/health/grpc/health/v1" "$work/grpc/health/v1"
 
-# smock, on free ports. Without certificate files, the TLS port presents a
-# self-signed certificate.
-(cd "$work" && exec "$smock" serve --dir defs --port 0 --tls-port 0 --admin-port 0 \
-  --admin-auth off) 2>"$tmp/smock.log" &
+# smock, on free ports, with the Admin API token of the guide's examples.
+# Without certificate files, the TLS port presents a self-signed
+# certificate.
+(cd "$work" && SMOCK_ADMIN_TOKEN=change-me exec "$smock" serve --dir defs \
+  --port 0 --tls-port 0 --admin-port 0) 2>"$tmp/smock.log" &
 pid=$!
 
 # port <listener>: the port number of the listener, from smock's listening
@@ -78,8 +79,9 @@ port() {
 }
 plain=""
 tls=""
+admin=""
 tries=0
-while [ -z "$plain" ] || [ -z "$tls" ]; do
+while [ -z "$plain" ] || [ -z "$tls" ] || [ -z "$admin" ]; do
   if ! kill -0 "$pid" 2>/dev/null; then
     smock_log
     echo "check-grpcurl: smock stopped before it listened" >&2
@@ -94,7 +96,20 @@ while [ -z "$plain" ] || [ -z "$tls" ]; do
   sleep 0.1
   plain=$(port plain)
   tls=$(port tls)
+  admin=$(port admin)
 done
+
+# The Ephemeral gRPC Stub of the guide's example, which makes the calls of
+# the Session test-a fail with UNAVAILABLE (docs/grpc.md, "Ephemeral gRPC
+# Stubs").
+if ! curl -sS --fail-with-body -o "$tmp/stub.json" -H "Authorization: Bearer change-me" \
+  -H "baggage: smock-session=test-a" \
+  -d '{"request": {"path": "/helloworld.Greeter/SayHello"}, "response": {"grpc": {"status": "UNAVAILABLE", "message": "try again"}}}' \
+  "localhost:$admin/v1/mocks/greeter/stubs" 2>"$tmp/curl.err"; then
+  cat "$tmp/curl.err" "$tmp/stub.json" 2>/dev/null | sed 's/^/    /' >&2
+  echo "check-grpcurl: the Admin API did not add the guide's Ephemeral gRPC Stub" >&2
+  exit 1
+fi
 
 # run <command> <file>: runs the command in $work, and writes its
 # transcript, which starts with <file>'s first line, into $tmp/actual.

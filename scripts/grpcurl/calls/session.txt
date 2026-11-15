@@ -1,0 +1,5 @@
+$ grpcurl -plaintext -authority greeter.svc -H "baggage: smock-session=test-a" -d '{"name": "Tom"}' localhost:8080 helloworld.Greeter/SayHello
+ERROR:
+  Code: Unavailable
+  Message: try again
+exit status 78
