@@ -2952,7 +2952,7 @@ and enum names of up to 40, for a call whose JSON smock parses once:
   an empty object or map about 110 more. Each octet of the JSON text
   costs about 5 more.
 - The 32,768 values that a message of any size may print cost 3 to
-  15 MiB. smock decodes and matches one call at a time, so calls at once
+  16 MiB. smock decodes and matches one call at a time, so calls at once
   do not add this up.
 - A message of 64 KiB may print 294,912 values, which cost 34 to
   112 MiB. The most is for empty maps whose JSON just fits
