@@ -551,6 +551,20 @@ of each GitHub release include its section
   rendered, is not a message of the method's output type, why a rendered
   error detail is not a message of its type, and why a reply's metadata
   is too large to send.
+- The Admin API document's render result gains the gRPC part of a reply:
+  a gRPC Stub's rendering has `response.grpc` (`RenderedGrpc`), with the
+  gRPC status, message, trailing metadata and error details a call gets,
+  and an HTTP Stub's has none. The descriptions of the result, its
+  `templateError`, its headers and its body say what a gRPC rendering
+  shows: the reply message as JSON, never protobuf bytes, and INTERNAL
+  when the Stub cannot serve its content or its rendered reply or details
+  do not fit their types. The description of the render sample says how a
+  gRPC Stub reads it: as a call to its method, whatever its method and
+  Content-Type, which are only conditions, with its body as the request
+  message in JSON, checked against the method's input type. A body that
+  does not fit gets 400 `invalid_request`, and makes `smock render` exit
+  with status 1. See
+  [Rendering a gRPC Stub](docs/grpc.md#rendering-a-grpc-stub).
 - The Admin API document's `EphemeralStubInput` says that an Ephemeral
   Stub may be a gRPC Stub, checked against its Mock's set, and what a
   reload does to it.

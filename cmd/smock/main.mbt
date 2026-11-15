@@ -111,8 +111,9 @@ async fn main {
 /// cannot be read or is not valid, when no Stub has the ID, when the Stub
 /// has no response at the index `--response` gives, when the sample's data
 /// names a Data bucket the Stub's Mock does not declare or breaks a keyed
-/// bucket's rules, or when the sample fits no operation of a CRUD Stub.
-/// Every problem goes to stderr.
+/// bucket's rules, when the sample fits no operation of a CRUD Stub, or
+/// when its body is not a message of a gRPC Stub's input type. Every
+/// problem goes to stderr.
 async fn render(settings : @settings.RenderSettings) -> Int32 {
   let snapshot = match
     load_definitions(

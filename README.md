@@ -588,7 +588,13 @@ rendered even when the sample fails them, and a
 [templated](docs/definition-files.md#templates) response is rendered for the
 sample. An [LLM response](docs/definition-files.md#llm-responses) shows the
 reply the sample's body asks for: the JSON body, or a stream's events,
-each with its wait. `--time` (RFC 3339) and `--seed` fix the clock and the
+each with its wait. A [gRPC Stub](docs/grpc.md#rendering-a-grpc-stub)
+renders as a call to its method, whatever the sample's method and
+Content-Type, which are only conditions: the sample's body is the request
+message as JSON, checked against the method's input type, and the
+rendering shows the reply message as JSON, its initial metadata, and its
+gRPC status, message, trailing metadata and error details as
+`response.grpc`, never protobuf bytes. `--time` (RFC 3339) and `--seed` fix the clock and the
 random source of the rendering; without a seed, it uses the Stub's
 `fault.seed`, or a fresh one. A Stub with
 [`responses`](docs/definition-files.md#several-responses) renders the one
@@ -611,7 +617,9 @@ with the problem on stderr, for:
 - a sample that cannot be read or is not valid;
 - sample data for a bucket the Stub's Mock does not declare, or that
   breaks a keyed bucket's rules;
-- a sample whose method and path fit no operation of a CRUD Stub.
+- a sample whose method and path fit no operation of a CRUD Stub;
+- a sample whose body is not a message of a gRPC Stub's input type, as
+  JSON.
 
 `smock import-openapi api/petstore.yaml --mock petstore --output defs/petstore.yaml`
 converts an OpenAPI 3.0, 3.1 or 3.2 document into one Definition file,

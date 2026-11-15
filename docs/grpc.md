@@ -7,10 +7,10 @@ answer unary calls, on the plain port over h2c and on the TLS port over
 h2. This guide shows a first call, says which requests are gRPC calls, how
 a call reaches a Stub and how smock answers it, how Scenarios, Variables
 and Data buckets work over gRPC, what a call gets when its Stub cannot
-serve its content, how a call's deadline meets a Stub's delay, which status
-each Fault gives a client, which calls
-gRPC's rules refuse, how a Mock answers gRPC's health service, and how to
-build a set that smock reads. The
+serve its content, how a call's deadline meets a Stub's delay, how to
+render a gRPC Stub without a client, which status each Fault gives a
+client, which calls gRPC's rules refuse, how a Mock answers gRPC's health
+service, and how to build a set that smock reads. The
 [Definition-file reference](definition-files.md#grpc) describes the
 Mock's `grpc` field and gRPC Stubs.
 
@@ -57,6 +57,9 @@ Mock's `grpc` field and gRPC Stubs.
 - [Deadlines](#deadlines)
   - [A client that resets at its deadline](#a-client-that-resets-at-its-deadline)
   - [Resets and the connection's defences](#resets-and-the-connections-defences)
+- [Rendering a gRPC Stub](#rendering-a-grpc-stub)
+  - [The sample's message](#the-samples-message)
+  - [What the rendering shows](#what-the-rendering-shows)
 - [Built-in services](#built-in-services)
   - [Health](#health)
   - [Reflection](#reflection)
@@ -2005,6 +2008,89 @@ answer before its own deadline sends no reset.
 Each stream gets this once. Every other reset counts as on any HTTP/2
 stream: a second reset of the same stream, a reset of a call without a
 deadline, and a reset that arrives more than 100 ms before the deadline.
+
+## Rendering a gRPC Stub
+
+`smock render` and the Admin render operation
+([Rendering a template](definition-files.md#rendering-a-template)) show
+what a Stub answers, without a client. A gRPC Stub renders as a call to
+its method. The Stub decides this, not the sample: the sample's `method`
+and its `Content-Type` are checked only as conditions, as a call's are,
+and the rendering lists them among the conditions the sample fails. An
+HTTP Stub renders as a request, whatever the sample's `Content-Type`.
+
+For the `hello-unknown` Stub of [Error details](#error-details), with
+`sample.json` holding
+
+```json
+{"path": "/helloworld.Greeter/SayHello", "body": "{\"name\": \"Ann\"}"}
+```
+
+this command shows the reply a call for Ann gets:
+
+```sh
+smock render --dir defs hello-unknown --request sample.json | jq -c .response
+```
+
+```json
+{"status":200,"headers":[],"body":{"encoding":"utf-8","data":"","size":0,"truncated":false},"events":null,"grpc":{"status":"NOT_FOUND","message":"no user called Ann","trailers":[{"name":"x-trace","value":"abc"}],"details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"USER_UNKNOWN","domain":"greeter.svc"}]}}
+```
+
+### The sample's message
+
+The sample's `body` is the request message as JSON, in a string. smock
+checks it against the input type of the Stub's method, and normalises it
+as it normalises a Stub's conditions
+([Conditions on the message](#conditions-on-the-message)): a field may be
+named by its proto name, and an enum by its number. A value that smock
+never prints in that form is refused, such as a Duration of `"1.5s"`
+([Printed forms](#printed-forms)). smock then reads the message as it
+reads a call's ([The request message as JSON](#the-request-message-as-json)),
+so a field without presence that the sample leaves out is there at its
+default, as in a call. An empty body is the empty message.
+
+A body that is not such a message is refused with every problem, each at
+its JSON Pointer in the message. So is a message whose JSON takes more
+than `--body-limit` once read, as a call's would be
+([The body limit](#the-body-limit)): the Admin render operation uses the
+limit of the smock that serves it, and `smock render`, which takes no
+`--body-limit`, the default, 10 MiB. `smock render` exits with status 1,
+and the Admin render operation answers 400 `invalid_request`.
+For the [quick start](#quick-start)'s `hello` Stub and the body
+`{"nmae": "Tom"}`:
+
+```text
+smock render: the sample request's body must be a helloworld.HelloRequest as JSON, the message that the method of the gRPC Stub "hello" takes: /nmae is not a field of helloworld.HelloRequest
+```
+
+The sample's binary metadata, a header field whose name ends with `-bin`,
+loses its padding, as a call's does ([Request metadata](#request-metadata)).
+
+### What the rendering shows
+
+The rendering shows the reply as JSON, never its protobuf bytes:
+
+- `response.body` is the reply message as JSON, as written or rendered.
+  It is empty for an error, which has no message.
+- `response.headers` is the initial metadata.
+- `response.grpc` is how the reply ends: `status`, the gRPC status's
+  name; `message`, as written or rendered, before smock percent-encodes
+  it, or null; `trailers`, the trailing metadata; and `details`, the error
+  details as JSON, each with its `@type`.
+- `response.status` stays 200, the HTTP status of every gRPC reply.
+
+smock encodes a templated reply, once rendered, with the output type, as
+it does for a call. A reply that does not fit shows the Trailers-Only
+INTERNAL a call gets, with the message `template failed`, no metadata,
+and the reason in `templateError`. So does a rendered detail that does
+not fit its type, and a template that fails. A write that cannot be
+applied shows INTERNAL `data write failed`
+([smock's own failures](#smocks-own-failures)).
+
+The rendering leaves out what a call adds on the wire, such as
+`content-type` and the Default Mock's `smock-mock` field. It does not
+check the size of the reply's metadata ([Metadata size](#metadata-size)),
+and it decides no deadline and no Fault.
 
 ## Built-in services
 
