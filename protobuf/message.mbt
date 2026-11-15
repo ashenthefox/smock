@@ -127,7 +127,9 @@ let no_runs : Array[BytesView] = []
 /// default can pass the bound, as in a list of thousands of empty messages
 /// of a type with many fields. Printing stops before the value that would
 /// pass it. Once parsed, JSON costs memory by its values more than by its
-/// octets, so this keeps a small message from growing into a large tree.
+/// octets, so the bound limits the tree that a message can grow into by
+/// the octets it takes. It is a price in octets, not a cap: each octet
+/// allows 4 more values, whatever it carries.
 ///
 /// Raises `DecodeError` when the input is not protobuf, when a proto3
 /// string is not UTF-8, when a message lacks a proto2 required field, as
