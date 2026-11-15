@@ -198,8 +198,9 @@ over the limit gets RESOURCE_EXHAUSTED with `:status` 200 instead of 413,
 as gRPC servers answer it, and the JSON that smock decodes its message
 into is held to the limit as well
 ([The body limit](docs/grpc.md#the-body-limit)). That JSON may also hold
-at most 32,768 values, and 4 more for each octet of the message, so a
-small message cannot grow into a large JSON body
+at most 32,768 values, and 4 more for each octet of the message, which
+bounds the memory that a small message costs once its JSON is parsed. No
+flag changes that bound
 ([The values a message may print](docs/grpc.md#the-values-a-message-may-print)).
 
 Over HTTP/2, a request over a header limit gets 431 on its stream alone,

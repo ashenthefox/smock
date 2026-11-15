@@ -507,3 +507,31 @@ test "the values a message prints are bounded by its size, 32,768 and 4 more for
   let canonical = canonical(wide_set, "wide.Table", rows(9500))
   inspect(canonical.length(), content="28510")
 }
+
+///|
+test "the values bound counts a message's octets as sent, whatever they carry: rows of 60 fields with one small number each are printed up to 728 and no further, and the review's rows are printed once an unknown field of zeros takes their message to 136,684 octets" {
+  let table = (input : Bytes) => printed_size(wide_set, "wide.Table", input)
+  // A Row whose `f1` is 1 takes 4 octets and prints 61 values, as an empty
+  // one does: 728 print 44,411 values where 2,912 octets may print 44,416,
+  // and 729 print 44,472 where 2,916 octets may print 44,432.
+  let numbered = (count : Int32) => repeated(b"\x0a\x02\x08\x01", count)
+  // 9,500 empty Rows, 19,000 octets, then field 15, which a Table lacks,
+  // with 117,679 or 117,680 zeros: 136,683 octets, which may print 579,500
+  // values, or 136,684, which may print 579,504. The Table prints 579,503
+  // either way.
+  let rows = repeated(b"\x0a\x00", 9500)
+  inspect(
+    [
+      table(numbered(728)),
+      table(numbered(729)),
+      table(rows + b"\x7a\xaf\x97\x07" + repeated(b"\x00", 117679)),
+      table(rows + b"\x7a\xb0\x97\x07" + repeated(b"\x00", 117680)),
+    ].join("\n"),
+    content=(
+      #|344364 octets
+      #|error: the decoded message holds more than 44432 values, the most for a message of its size
+      #|error: the decoded message holds more than 579500 values, the most for a message of its size
+      #|4493520 octets
+    ),
+  )
+}

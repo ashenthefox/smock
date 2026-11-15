@@ -343,29 +343,32 @@ of each GitHub release include its section
     journaled, and counts as rejected traffic. See
     [Protocol checks and limits](docs/grpc.md#protocol-checks-and-limits)
     and [Compression](docs/grpc.md#compression).
-  - **Bounds on decoding.** A small hostile message cannot use up smock's
-    CPU or memory. A message nested deeper than 100, through messages,
-    groups, map entries, Anys, Structs and their Values, gets INTERNAL,
-    and so does one with a length that runs past it. smock counts the
-    decoded JSON as it prints it, and a call gets RESOURCE_EXHAUSTED
-    `the decoded request message is over the body limit` as soon as it
-    passes `--body-limit`: an empty element of a list of messages, 2
-    octets, prints every field of its type, so a 10 MiB message could
-    otherwise print gigabytes. smock counts the JSON's values too, since
-    parsed JSON costs memory by its values: each object, array, string,
-    number, `true`, `false` and `null` is one. A message of N octets may
-    print 32,768 + 4 × N of them, and a call past that gets
+  - **Bounds on decoding.** smock bounds the CPU and the memory that a
+    small hostile message can cost. A message nested deeper than 100,
+    through messages, groups, map entries, Anys, Structs and their Values,
+    gets INTERNAL, and so does one with a length that runs past it. smock
+    counts the decoded JSON as it prints it, and a call gets
+    RESOURCE_EXHAUSTED `the decoded request message is over the body
+    limit` as soon as it passes `--body-limit`: an empty element of a list
+    of messages, 2 octets, prints every field of its type, so a 10 MiB
+    message could otherwise print gigabytes. smock counts the JSON's
+    values too, since parsed JSON costs memory by its values: each object,
+    array, string, number, `true`, `false` and `null` is one. A message of
+    N octets may print 32,768 + 4 × N of them, and a call past that gets
     RESOURCE_EXHAUSTED `the decoded request message holds more than
     108768 values, the most for a message of 19000 octets`, with its own
-    two numbers. That call is 9,500 empty elements of a message with 60
-    fields, which would print 579,503 values. A list passes at any length
-    when an element of n octets prints at most 4 × n − 1 fields: 7 for a
-    default-constructed element, 15 for one with a small field set.
-    Wider default-constructed elements pass in smaller numbers, such as
-    618 elements of 60 fields. `smock render` and the Admin render
-    operation refuse a sample past the bound too. What smock holds
-    to print a message, such as its map entries, is bounded by
-    `--body-limit` too. See
+    two numbers. That call is a list of 9,500 empty elements of a message
+    with 60 fields, which would print 579,502 values. A list passes at any
+    length when an element of n octets prints at most 4 × n − 1 fields: 7
+    for a default-constructed element, 15 for one with a small field set.
+    Wider elements pass in smaller numbers, such as 618 default-constructed
+    elements of 60 fields, or 728 with one small number each. No flag
+    changes the bound. It is a price in octets, not a cap on what a call
+    costs: the same list passes in a message of 136,684 octets, and a
+    message of 64 KiB can still cost about 112 MiB once its JSON is
+    parsed. `smock render` and the Admin render operation refuse a sample
+    past the bound too. What smock holds to print a message, such as its
+    map entries, is bounded by `--body-limit` too. See
     [The decoder's limits](docs/grpc.md#the-decoders-limits).
   - **Connections.** A gRPC channel's connection is an HTTP/2 connection
     like any other: an idle one gets GOAWAY after `--idle-timeout-ms`,

@@ -2940,22 +2940,32 @@ tens of MiB at once.
 
 When a condition, a template or a Near miss reads the message, smock
 parses its JSON, and the parsed values cost more memory than the text.
-The cost follows the Mock's own field and enum names, so it is a range:
+The cost follows the Mock's own field and enum names, so it is a range.
+The ranges below were measured with field names of up to 29 characters
+and enum names of up to 40:
 
-- A value costs about 100 octets of memory, and each octet of the JSON
-  text about 5 more.
-- The 32,768 values that a message of any size may print cost 4 to
-  14 MiB. smock decodes and matches one call at a time, so calls at once
+- A value costs about 100 octets of memory, `true` and `false` less, and
+  an empty object or map about 110 more. Each octet of the JSON text
+  costs about 5 more.
+- The 32,768 values that a message of any size may print cost 3 to
+  15 MiB. smock decodes and matches one call at a time, so calls at once
   do not add this up.
-- A message of 64 KiB may print 294,912 values, which cost 40 to 110 MiB.
-- A refused call costs the text printed before the bound: 2 to 14 MiB for
-  a message of 19 KB.
+- A message of 64 KiB may print 294,912 values, which cost 34 to
+  112 MiB. The most is for empty maps whose JSON just fits
+  `--body-limit`. It is about 30 times the most that a JSON body of
+  64 KiB costs an HTTP request.
+- A refused call costs the text printed before the bound, by the Mock's
+  names: up to 17 MiB for a message of 19 KB.
 - Near `--body-limit` the JSON's octets are the bound that counts. The
   JSON of a call may then cost hundreds of MiB once parsed, as the JSON
   body of an HTTP request of that size may.
 
-For a small Pod, lower `--body-limit`
-([Limits and timeouts](http2.md#limits-and-timeouts)).
+So the bounds hold a call's cost down, and a small message can still cost
+far more memory than its size
+([The values a message may print](#the-values-a-message-may-print)). For
+a small Pod, lower `--body-limit`
+([Limits and timeouts](http2.md#limits-and-timeouts)): the JSON's octets
+bound its values too.
 
 #### The values a message may print
 
@@ -2963,8 +2973,9 @@ Once parsed, JSON costs memory by its values more than by its octets. A
 field without presence prints at its default and costs the message no
 octet. So a small message could print JSON that fits `--body-limit` and
 still costs thousands of times the message's size to hold. For example,
-9,500 empty elements of a message with 60 `int64` fields take 19,000
-octets. They would print 4.5 MB of JSON that holds 579,503 values.
+a list of 9,500 empty elements of a message with 60 `int64` fields takes
+19,000 octets. A message that holds only that list would print 4.5 MB of
+JSON that holds 579,502 values.
 
 smock bounds the values by the size of the message:
 
@@ -3007,21 +3018,35 @@ elements:
 | The elements | Octets each | Pass at any length | Wider elements |
 |---|---|---|---|
 | default-constructed, with no field set | 2 | up to 7 printed fields | up to about 32,766 / (f − 7) of them: 10,922 of 10 fields, 2,520 of 20, 618 of 60 |
-| with one small field set, such as a bool or a small number | 4 | up to 15 printed fields | |
-| with a name of 8 characters | 12 | up to 47 printed fields | |
+| with one small field set, such as a bool or a small number | 4 | up to 15 printed fields | up to about 32,766 / (f − 15) of them: 728 of 60 fields |
+| with a name of 8 characters | 12 | up to 47 printed fields | up to about 32,766 / (f − 47) of them: 2,520 of 60 fields |
 
 A list whose field number is 16 or more has a tag of 2 octets, so each
 of its elements takes one octet more, and allows 4 more values.
 
 So a list of thousands of default-constructed or almost empty wide
-messages is refused, and so is a large sparse grid of wide cells. To send
-one, set fields in the elements, since each octet sent allows four more
+messages is refused, and so is a large sparse grid of wide cells. A wide
+element can have a field set and still be almost empty: 1,000 rows of 60
+fields with one small number each are refused. No flag changes the bound
+or turns it off, and `--body-limit` does not move it. To send such a
+list, set fields in the elements, since each octet sent allows four more
 values, such as one field in every cell of a grid. Or send fewer
 elements, or split the call.
 
 The octets are counted as sent. A client that writes every zero, or
 writes a list unpacked, sends more octets for the same message, and
 passes where the message as generated code encodes it is refused.
+
+So the bound is a price in octets, not a cap on what a call may cost.
+Each octet that a client sends allows 4 more values, whatever the octet
+carries, and an octet of padding counts as any other. The list of the
+example above is refused in a message of 19,000 octets. It is served in
+a message of 136,684 octets, where an unknown field of zeros takes the
+rest. Its JSON then costs about 78 MiB once parsed, as it would without
+the bound. So the bound sets how many octets a client must send for the
+values smock prints. It does not stop a message from costing far more
+memory than its size:
+[The decoder's limits](#the-decoders-limits) gives the costs.
 
 To count a message's values, count the values of its JSON:
 `jq '[..] | length'` does it for a JSON text. smock never shows the JSON

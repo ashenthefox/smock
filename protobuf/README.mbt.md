@@ -347,8 +347,10 @@ message sends takes an octet or more, so only fields printed at their
 default can pass the bound, as in a list of thousands of empty messages
 of a type with many fields. `decode_json` raises `TooManyValues` before
 it prints the value that would pass the bound. Once parsed, JSON costs
-memory by its values more than by its octets, so the bound keeps a small
-message from growing into a large tree.
+memory by its values more than by its octets, so the bound limits the
+tree that a message can grow into by the octets it takes. It is a price
+in octets, not a cap: each octet allows 4 more values, whatever it
+carries.
 
 `set.encode_json(message, json)` encodes JSON, a message of the type
 `message`, a type of `set`, as ProtoJSON writes it, the way protoc encodes
