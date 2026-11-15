@@ -1405,7 +1405,10 @@ The fields of `llm`:
   request. `model` is the Stub's `model`, or else the request's. [Ids,
   seeds and time](#ids-seeds-and-time) says more.
 
-An LLM response is a response like any other. `status` is required, as
+An LLM response is a response like any other, and `llm` is for HTTP
+Stubs. A [gRPC Stub](#grpc-stubs) cannot give it, since a gRPC reply is a
+protobuf message, not an LLM API's HTTP wire form
+([A gRPC Stub's fields](#a-grpc-stubs-fields)). `status` is required, as
 on every HTTP Stub. `llm` may stand in `response` or in any element of
 [`responses`](#several-responses), so weighted responses can answer one
 request in ten with an ordinary 429. Request conditions,
@@ -1426,7 +1429,8 @@ These are reported with the field's JSON Pointer:
   [mid-stream error](#mid-stream-errors);
 - a wait of `timing` that is not one distribution of the delay;
 - a reply as written over the [size bound](#the-size-bound);
-- `llm` beside another body.
+- `llm` beside another body;
+- `llm` on a gRPC Stub, in `response` or in any element of `responses`.
 
 `smock check` reports them, and so do startup and a reload, which keeps the
 set served. An Ephemeral Stub with one of them gets 400 `invalid_stub`.
