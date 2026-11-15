@@ -351,8 +351,21 @@ of each GitHub release include its section
     `the decoded request message is over the body limit` as soon as it
     passes `--body-limit`: an empty element of a list of messages, 2
     octets, prints every field of its type, so a 10 MiB message could
-    otherwise print gigabytes. What smock holds to print a message, such
-    as its map entries, is bounded by `--body-limit` too. See
+    otherwise print gigabytes. smock counts the JSON's values too, since
+    parsed JSON costs memory by its values: each object, array, string,
+    number, `true`, `false` and `null` is one. A message of N octets may
+    print 32,768 + 4 × N of them, and a call past that gets
+    RESOURCE_EXHAUSTED `the decoded request message holds more than
+    108768 values, the most for a message of 19000 octets`, with its own
+    two numbers. That call is 9,500 empty elements of a message with 60
+    fields, which would print 579,503 values. A list passes at any length
+    when an element of n octets prints at most 4 × n − 1 fields: 7 for a
+    default-constructed element, 15 for one with a small field set.
+    Wider default-constructed elements pass up to about 32,766 / (f − 7)
+    of them, such as 618 of 60 fields. `smock render` and the Admin
+    render operation refuse a sample past the bound too. What smock holds
+    to print a message, such as its map entries, is bounded by
+    `--body-limit` too. See
     [The decoder's limits](docs/grpc.md#the-decoders-limits).
   - **Connections.** A gRPC channel's connection is an HTTP/2 connection
     like any other: an idle one gets GOAWAY after `--idle-timeout-ms`,

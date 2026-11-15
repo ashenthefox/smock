@@ -2127,6 +2127,17 @@ For the [quick start](#quick-start)'s `hello` Stub and the body
 smock render: the sample request's body must be a helloworld.HelloRequest as JSON, the message that the method of the gRPC Stub "hello" takes: /nmae is not a field of helloworld.HelloRequest
 ```
 
+A sample whose message would be refused for its values is refused the
+same way ([The values a message may print](#the-values-a-message-may-print)).
+The sample is JSON, so the problem gives the octets it encodes to, which
+the bound follows. A field written at its default, such as `"f1": 0`,
+encodes to no octet. For a Stub `load` and a sample of 619 empty rows of
+a message with 60 fields:
+
+```text
+smock render: the sample request's body must be a wide.Table as JSON, the message that the method of the gRPC Stub "load" takes: encodes to 1238 octets and holds more than 37720 values as JSON once decoded, the most for a call's message of that size
+```
+
 The sample's binary metadata, a header field whose name ends with `-bin`,
 loses its padding, as a call's does ([Request metadata](#request-metadata)).
 
@@ -2723,7 +2734,9 @@ the Stubs, and answers it as gRPC servers answer it. The answer is
 [Trailers-Only](#trailers-only), with `:status` 200, its gRPC status and
 a fixed `grpc-message`, except for two that get another `:status`, as
 grpc-go answers them: 405 for a method other than `POST`, and 400 for a
-malformed `grpc-timeout`. Both carry `grpc-status: 13` (INTERNAL).
+malformed `grpc-timeout`. Both carry `grpc-status: 13` (INTERNAL). Two
+messages name what the call sent: the encoding of a compressed message,
+and the numbers of a message whose JSON holds too many values.
 
 | The call | Checked | `:status` | gRPC status | `grpc-message` |
 |---|---|---|---|---|
@@ -2740,6 +2753,7 @@ malformed `grpc-timeout`. Both carry `grpc-status: 13` (INTERNAL).
 | The request has more than one message | at the end | 200 | UNIMPLEMENTED | `the request has more than one message` |
 | Its message does not parse, or holds a value that smock cannot print | at the end | 200 | INTERNAL | `the request message cannot be decoded` |
 | Its message's JSON passes `--body-limit` as smock prints it ([The decoder's limits](#the-decoders-limits)) | at the end, as soon as it shows | 200 | RESOURCE_EXHAUSTED | `the decoded request message is over the body limit` |
+| Its message's JSON holds more values than a message of its size may print ([The values a message may print](#the-values-a-message-may-print)) | at the end, as soon as it shows | 200 | RESOURCE_EXHAUSTED | `the decoded request message holds more than 108768 values, the most for a message of 19000 octets`, with the two numbers of the call |
 
 A message is the 5-octet prefix, a flag and a length, then the octets
 the length announces. A message of zero octets, `00 00 00 00 00`, is one
@@ -2849,8 +2863,9 @@ request's, and also each block of a reply's metadata: a reply over it, or
 over the client's own limit, gets INTERNAL `reply metadata too large`
 ([Metadata size](#metadata-size)).
 
-`--body-limit` also bounds the JSON that smock decodes a message into
-([The decoder's limits](#the-decoders-limits)).
+`--body-limit` also bounds the JSON that smock decodes a message into.
+The values of that JSON have a bound of their own, which follows the size
+of the message ([The decoder's limits](#the-decoders-limits)).
 
 ### The decoder's limits
 
@@ -2874,6 +2889,12 @@ no more than the largest JSON body an HTTP request may send:
   presence prints at its default, so an empty element of a list of
   messages, 2 octets, prints every field of its type. Without the limit,
   a 10 MiB message could print gigabytes.
+- **The JSON's values.** smock counts the JSON values it prints too, and
+  stops before the one that would pass what a message of that size may
+  print: 32,768 values, and 4 more for each octet of the message. The
+  call gets RESOURCE_EXHAUSTED, with the two numbers in its
+  `grpc-message`. [The values a message may print](#the-values-a-message-may-print)
+  says what counts as a value, and which messages pass.
 - **What smock holds to print it.** smock keeps a note of each place in
   the message where the records of a list do not follow the list's last
   ones, of each record of a message field after its first, and of each
@@ -2888,9 +2909,112 @@ within `--body-limit`. For example, a message of 10 MiB of empty `Item`s
 in a `repeated Item items`, where an `Item` has a string, a list and a
 map, would print 160 MiB of JSON. smock answers RESOURCE_EXHAUSTED once
 the JSON passes 10 MiB, in well under a second. Such a call, like an
-HTTP request with a body of 10 MiB, holds tens of MiB at once. For a
-small Pod, lower `--body-limit`
+HTTP request with a body of 10 MiB, holds tens of MiB at once.
+
+When a condition, a template or a Near miss reads the message, smock
+parses its JSON, and the parsed values cost more memory than the text.
+The cost follows the Mock's own field and enum names, so it is a range:
+
+- A value costs about 100 octets of memory, and each octet of the JSON
+  text about 5 more.
+- The 32,768 values that a message of any size may print cost 4 to
+  14 MiB. smock decodes and matches one call at a time, so calls at once
+  do not add this up.
+- A message of 64 KiB may print 294,912 values, which cost 40 to 110 MiB.
+- A refused call costs the text printed before the bound: 2 to 14 MiB for
+  a message of 19 KB.
+- Near `--body-limit` the JSON's octets are the bound that counts. The
+  JSON of a call may then cost hundreds of MiB once parsed, as the JSON
+  body of an HTTP request of that size may.
+
+For a small Pod, lower `--body-limit`
 ([Limits and timeouts](http2.md#limits-and-timeouts)).
+
+#### The values a message may print
+
+Once parsed, JSON costs memory by its values more than by its octets. A
+field without presence prints at its default and costs the message no
+octet. So a small message could print JSON that fits `--body-limit` and
+still costs thousands of times the message's size to hold. For example,
+9,500 empty elements of a message with 60 `int64` fields take 19,000
+octets. They would print 4.5 MB of JSON that holds 579,503 values.
+
+smock bounds the values by the size of the message:
+
+- A **value** is every JSON value of the decoded text: each object,
+  array, string, number, `true`, `false` and `null`. The whole message is
+  one. A member's name is none. So `{"name":"","sizes":[]}` holds 3.
+- A message of N octets, without its 5-octet prefix, may print at most
+  **32,768 + 4 × N** values: 32,768 for a message of any size, and 4 more
+  for each octet. An empty message may print 32,768 values, one of 1 KiB
+  36,864, and one of 1 MiB 4,227,072. The example above may print
+  108,768.
+- A call past the bound gets RESOURCE_EXHAUSTED, as one whose JSON passes
+  `--body-limit` does: Trailers-Only, not journaled, counted as rejected
+  traffic. smock stops printing at the bound, so its `grpc-message` gives
+  the bound and the message's octets, not the values the message holds:
+  `the decoded request message holds more than 108768 values, the most
+  for a message of 19000 octets`.
+- The bound applies whatever the Mock's Stubs read. A Mock whose Stubs
+  read only the metadata refuses the same messages.
+- Whichever bound the JSON passes first answers. A message near
+  `--body-limit` gets `the decoded request message is over the body
+  limit`.
+
+A value that a message sends takes an octet or more, so the values a
+message sends never number more than its octets. Only fields printed at
+their default can take a message past the bound. Those are the fields
+without presence: a message field, a member of a oneof and a proto3
+`optional` field print only when the message holds them
+([The request message as JSON](#the-request-message-as-json)). In
+practice the bound refuses long lists of wide, almost empty messages.
+
+An element of a list that prints f fields, and takes n octets with its
+tag and its length, prints f + 1 values and allows 4 × n. So a list
+passes at any length, until `--body-limit`, when n is at least
+(f + 1) / 4. Otherwise it passes up to about 32,766 / (f + 1 − 4 × n)
+elements:
+
+| The elements | Octets each | Pass at any length | Wider elements |
+|---|---|---|---|
+| default-constructed, with no field set | 2, or 3 under a field number of 16 or more | up to 7 printed fields | up to about 32,766 / (f − 7) of them: 10,922 of 10 fields, 2,520 of 20, 618 of 60 |
+| with one small field set, such as a bool or a small number | 4 | up to 15 printed fields | |
+| with a name of 8 characters | 12 | up to 47 printed fields | |
+
+So a list of thousands of default-constructed or almost empty wide
+messages is refused, and so is a large sparse grid of wide cells. To send
+one, set fields in the elements, since each octet sent allows four more
+values, such as one field in every cell of a grid. Or send fewer
+elements, or split the call.
+
+The octets are counted as sent. A client that writes every zero, or
+writes a list unpacked, sends more octets for the same message, and
+passes where the message as generated code encodes it is refused.
+
+To count a message's values, count the values of its JSON:
+`jq '[..] | length'` does it for a JSON text. smock never shows the JSON
+of a refused message, so count such a message with protobuf's own
+printer, told to print the fields without presence. In Python:
+
+```python
+from google.protobuf import json_format
+
+
+def values(json):
+    if isinstance(json, dict):
+        return 1 + sum(values(member) for member in json.values())
+    if isinstance(json, list):
+        return 1 + sum(values(element) for element in json)
+    return 1
+
+
+decoded = json_format.MessageToDict(
+    message, always_print_fields_with_no_presence=True
+)
+print(values(decoded), "values from", message.ByteSize(), "octets")
+```
+
+A [rendering](#the-samples-message) refuses a sample past the bound too.
 
 ## Connections
 
