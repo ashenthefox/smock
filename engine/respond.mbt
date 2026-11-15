@@ -656,7 +656,7 @@ fn template_failed(
   grpc~ : Bool = false,
 ) -> ResponsePlan {
   if grpc {
-    return grpc_failure(Internal, "template failed")
+    return grpc_failure(Internal, template_failed_message)
   }
   json_failure(500, {
     "error": "template failed",
@@ -665,6 +665,13 @@ fn template_failed(
     "message": Json::string(error.message),
   })
 }
+
+///|
+/// The fixed `grpc-message` of smock's own INTERNAL to a gRPC call whose
+/// Stub's template could not be rendered, or whose rendered reply or error
+/// details do not fit their types, which the server finds when it encodes
+/// them.
+pub let template_failed_message : String = "template failed"
 
 ///|
 /// A response of smock's own that says what went wrong: `status`, with

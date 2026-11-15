@@ -327,15 +327,12 @@ fn call_answer(
     let details = status_details(set, part) catch {
       EncodeError(pointer~, message~) =>
         return Internal(
-          message="template failed",
-          template_error=match outcome.journal {
-            Some(entry) =>
-              Some(@engine.TemplateError::{
-                at: reply_at(entry.response_index) + "/grpc/details" + pointer,
-                message,
-              })
-            None => None
-          },
+          message=@engine.template_failed_message,
+          template_error=reply_error(
+            outcome,
+            "/grpc/details" + pointer,
+            message,
+          ),
         )
     }
     return Status(part, details)
@@ -348,15 +345,8 @@ fn call_answer(
       let reply = encode_reply(set, output, plan.body) catch {
         EncodeError(pointer~, message~) =>
           return Internal(
-            message="template failed",
-            template_error=match outcome.journal {
-              Some(entry) =>
-                Some(@engine.TemplateError::{
-                  at: reply_pointer(entry.response_index) + pointer,
-                  message,
-                })
-              None => None
-            },
+            message=@engine.template_failed_message,
+            template_error=reply_error(outcome, "/json" + pointer, message),
           )
       }
       Reply(part, reply)
@@ -529,21 +519,13 @@ fn H2Connection::answer_too_large(
     None => self.too_large("Trailers-Only block", last)
   }
   guard why is Some(message) else { return false }
-  let template_error = match outcome.journal {
-    Some(entry) =>
-      Some(@engine.TemplateError::{
-        at: reply_at(entry.response_index),
-        message,
-      })
-    None => None
-  }
   self.answer_own(
     stream,
     outcome,
     Internal,
     too_large_message,
     date~,
-    template_error?,
+    template_error?=reply_error(outcome, "", message),
   )
   true
 }
@@ -693,10 +675,20 @@ fn status_details(
 }
 
 ///|
-/// The JSON Pointer, within its Stub, of the `json` of the reply that the
-/// Stub's pick chose (`reply_at`).
-fn reply_pointer(index : Int32?) -> String {
-  reply_at(index) + "/json"
+/// The template error that says why smock's own INTERNAL takes the place of
+/// the reply of the Stub that matched a gRPC call, which the engine decided
+/// `outcome` for: `message`, at the JSON Pointer of the reply that the
+/// Stub's pick chose (`reply_at`), followed by `within`, the pointer of the
+/// value at fault within the reply, such as `/json/name`, or `""` for the
+/// reply as a whole. `None` for a call without a Journal entry, which
+/// alone records it.
+fn reply_error(
+  outcome : @engine.Outcome,
+  within : String,
+  message : String,
+) -> @engine.TemplateError? {
+  guard outcome.journal is Some(entry) else { return None }
+  Some({ at: reply_at(entry.response_index) + within, message, })
 }
 
 ///|

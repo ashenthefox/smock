@@ -733,7 +733,7 @@ fn call_answer(
         let json = @json.parse(@utf8.decode_lossy(body)) catch {
           _ =>
             return (
-              grpc_failure(Internal, "template failed"),
+              grpc_failure(Internal, template_failed_message),
               Some({
                 at: reply + "/json",
                 message: "the rendered reply is not JSON",
@@ -743,7 +743,7 @@ fn call_answer(
         let _ : Bytes = set.encode_json(set.output_of(rpc), json) catch {
           EncodeError(pointer~, message~) =>
             return (
-              grpc_failure(Internal, "template failed"),
+              grpc_failure(Internal, template_failed_message),
               Some({ at: reply + "/json" + pointer, message, }),
             )
         }
@@ -757,7 +757,7 @@ fn call_answer(
     ) catch {
       EncodeError(pointer~, message~) =>
         return (
-          grpc_failure(Internal, "template failed"),
+          grpc_failure(Internal, template_failed_message),
           Some({ at: reply + "/grpc/details" + pointer, message, }),
         )
     }
