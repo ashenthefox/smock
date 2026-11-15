@@ -41,7 +41,8 @@ priv struct PastDeadline {
 /// Answers `stream`, a gRPC call whose request is `request`, which the
 /// engine decided `outcome` for with a delay, with `answer` in a task of
 /// its own, as `wait` answers an HTTP request: once the delay is over, the
-/// task sends `answer` (`send_answer`), and writes it to `out`, while the
+/// task sends `answer` (`send_answer`), or carries out the plan's
+/// connection Fault (grpc_faults.mbt), and writes it to `out`, while the
 /// connection's other streams are answered meanwhile. When the delay would
 /// end after the call's deadline, the task sleeps until the deadline
 /// instead, and then ends the call with Trailers-Only DEADLINE_EXCEEDED
@@ -115,6 +116,10 @@ fn[S : @io.Writer + ReadOutput] H2Connection::wait_call(
           deadline_message,
           date~,
         )
+      } else if outcome.plan.fault is Some(Reset) {
+        self.reset_after(stream, outcome.journal)
+      } else if outcome.plan.fault is Some(Close) {
+        self.close_by_fault(stream, outcome.journal, out)
       } else if self.send_answer(stream, outcome, answer, date~, bounded=true)
         is Some(unsent) {
         finished = self.trickle(

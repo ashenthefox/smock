@@ -351,3 +351,90 @@ async test "a close Fault sends GOAWAY NO_ERROR, then closes the connection, whi
     })
   })
 }
+
+///|
+/// The Mock `greeter`, the Default Mock, with the set, and gRPC Stubs on
+/// SayHello whose Faults come after a delay, one for each value of the
+/// call's `x-fault`: `late-reset` (300 ms), `late-partial` (450 ms) and
+/// `late-close` (700 ms); `fast` answers any other call at once.
+let late_greeter : String =
+  #|mocks:
+  #|  - name: greeter
+  #|    grpc: { descriptorSet: greeter.binpb }
+  #|stubs:
+  #|  - id: late-reset
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: late-reset } }
+  #|    response: { json: { message: never sent } }
+  #|    fault: { delay: { fixed: 300 }, connection: { kind: reset } }
+  #|  - id: late-partial
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: late-partial } }
+  #|    response: { json: { message: Hello Tom } }
+  #|    fault: { delay: { fixed: 450 }, connection: { kind: partial } }
+  #|  - id: late-close
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: late-close } }
+  #|    response: { json: { message: never sent } }
+  #|    fault: { delay: { fixed: 700 }, connection: { kind: close } }
+  #|  - id: fast
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello }
+  #|    response: { json: { message: Hello Tom } }
+
+///|
+async test "a Fault with a delay comes in its call's task once the delay is over, while the connection's other calls are answered: a reset one, a partial one and a close one" {
+  with_greeter_set([("greeter.yaml", late_greeter)], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      let start = @async.now()
+      let late = []
+      for fault in ["late-reset", "late-partial", "late-close"] {
+        late.push((fault, client.start_call(headers=[("x-fault", fault)])))
+      }
+      let fast = client.call("/helloworld.Greeter/SayHello")
+      let out = [
+        "fast, at once: \{derived_status(fast)}, before 300 ms: \{@async.now() - start < 300}",
+      ]
+      let delays = [300L, 450, 700]
+      for i, called in late {
+        let (fault, stream) = called
+        let reply = client.reply(stream)
+        out.push("x-fault: \{fault}:")
+        out.push(reply.render())
+        out.push(
+          "the client sees \{derived_status(reply)}, after its delay: \{@async.now() - start >= delays[i]}",
+        )
+      }
+      inspect(
+        [..out, "Journal:", fault_answers(smock)].join("\n"),
+        content=(
+          #|fast, at once: OK, before 300 ms: true
+          #|x-fault: late-reset:
+          #|HEADERS
+          #|(reset INTERNAL_ERROR)
+          #|the client sees INTERNAL, after its delay: true
+          #|x-fault: late-partial:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  smock-mock: greeter; via=default
+          #|  date: <now>
+          #|DATA 000000000b0a0948
+          #|(reset INTERNAL_ERROR)
+          #|the client sees INTERNAL, after its delay: true
+          #|x-fault: late-close:
+          #|HEADERS
+          #|(closed)
+          #|the client sees UNAVAILABLE, after its delay: true
+          #|Journal:
+          #|"fast" 200 "OK" null
+          #|"late-reset" null - "reset"
+          #|"late-partial" 200 "OK" "partial"
+          #|"late-close" null - "close"
+        ),
+      )
+    })
+  })
+}
