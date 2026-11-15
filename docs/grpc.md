@@ -80,39 +80,71 @@ Mock's `grpc` field and gRPC Stubs.
 
 Build the Descriptor set of gRPC's
 [helloworld.proto](https://github.com/grpc/grpc/blob/master/examples/protos/helloworld.proto)
-into the body-file subdirectory of a definitions directory:
+and googleapis'
+[error_details.proto](https://github.com/googleapis/googleapis/blob/master/google/rpc/error_details.proto),
+whose `ErrorInfo` an error below carries, into the body-file subdirectory
+of a definitions directory:
 
 ```sh
-mkdir -p defs/files
-protoc --include_imports -o defs/files/greeter.binpb helloworld.proto
+mkdir -p defs/files google/rpc
+curl -fsSL -o google/rpc/error_details.proto \
+  https://raw.githubusercontent.com/googleapis/googleapis/master/google/rpc/error_details.proto
+protoc --include_imports -o defs/files/greeter.binpb \
+  helloworld.proto google/rpc/error_details.proto
 ```
 
-Write a Mock that names the set, and a gRPC Stub on the method `SayHello`,
-in `defs/greeter.yaml`:
+Write a Mock that names the set, and two gRPC Stubs on the method
+`SayHello`, in `defs/greeter.yaml`:
 
 ```yaml
 mocks:
   - name: greeter
+    hosts: [greeter.svc]
     grpc:
-      descriptorSet: greeter.binpb
+      descriptorSet: greeter.binpb   # in the body-file subdirectory, like a bodyFile
+      reflection: true               # off unless turned on
+      health: true                   # off unless turned on
 stubs:
-  - id: hello
+  - id: hello-tom
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello      # names a unary method of the set
+      headers: { x-tenant: acme }             # metadata, as headers
+      body: { json: { name: Tom } }           # the message as ProtoJSON
+    response:
+      headers: { x-served-by: smock }         # initial metadata
+      json: { message: Hello Tom }            # encoded with the output type
+  - id: hello-unknown
     mock: greeter
     request:
       path: /helloworld.Greeter/SayHello
-      body: { json: { name: Tom } }
     response:
-      json: { message: Hello Tom }
+      template: true
+      grpc:
+        status: NOT_FOUND
+        message: no user called ${body.name}
+        trailers: { x-trace: abc }
+        details:
+          - "@type": type.googleapis.com/google.rpc.ErrorInfo   # a type of the set
+            reason: USER_UNKNOWN
+            domain: greeter.svc
 ```
 
+The Mock answers calls for the Host `greeter.svc`. It turns on
+[reflection](#reflection), so tools find its services and types, and the
+[health service](#health). The first Stub answers Tom of the tenant
+`acme`. The second answers every other call with NOT_FOUND, a message that
+names the user, a trailer and an error detail.
+
 Serve it, and call the method over h2c on the plain port, here with
-[grpcurl](https://github.com/fullstorydev/grpcurl), which reads the
-method's types from the same set:
+[grpcurl](https://github.com/fullstorydev/grpcurl). Its `-authority`
+gives the call's Host, which chooses the Mock, and it finds the method's
+types through reflection:
 
 ```sh
 SMOCK_ADMIN_TOKEN=change-me smock serve --dir defs
-grpcurl -plaintext -protoset defs/files/greeter.binpb \
-  -d '{"name": "Tom"}' localhost:8080 helloworld.Greeter/SayHello
+grpcurl -plaintext -authority greeter.svc -H 'x-tenant: acme' \
+  -d '{"name":"Tom"}' localhost:8080 helloworld.Greeter/SayHello
 ```
 
 ```json
@@ -121,30 +153,60 @@ grpcurl -plaintext -protoset defs/files/greeter.binpb \
 }
 ```
 
-With [reflection](#reflection) on, grpcurl finds the types through it
-instead, and needs no `-protoset`.
+A call for Ann gets the second Stub's error. grpcurl's `-format-error`
+prints its status, its message and its detail:
+
+```sh
+grpcurl -plaintext -authority greeter.svc -H 'x-tenant: acme' -format-error \
+  -d '{"name":"Ann"}' localhost:8080 helloworld.Greeter/SayHello
+```
+
+```text
+{
+  "code": 5,
+  "message": "no user called Ann",
+  "details": [
+    {
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      "domain": "greeter.svc",
+      "reason": "USER_UNKNOWN"
+    }
+  ]
+}
+```
+
+Without reflection, give grpcurl the same set with `-protoset`, and it
+reads the types from there:
+
+```sh
+grpcurl -plaintext -authority greeter.svc -protoset defs/files/greeter.binpb \
+  -H 'x-tenant: acme' -d '{"name":"Tom"}' localhost:8080 helloworld.Greeter/SayHello
+```
 
 The same call goes to the TLS port over h2. Leave out `-plaintext`, and
 add `-insecure` while smock serves its self-signed certificate:
 
 ```sh
-grpcurl -insecure -protoset defs/files/greeter.binpb \
-  -d '{"name": "Tom"}' localhost:8443 helloworld.Greeter/SayHello
+grpcurl -insecure -authority greeter.svc -H 'x-tenant: acme' \
+  -d '{"name":"Tom"}' localhost:8443 helloworld.Greeter/SayHello
 ```
 
-The Journal records the call, with the request message as JSON:
+The Journal records both calls, with the request message as JSON:
 
 ```sh
 curl -H "Authorization: Bearer change-me" -d '{}' localhost:9090/v1/journal/query
 ```
 
-Its entry shows `POST`, the target `/helloworld.Greeter/SayHello`, the
+Tom's entry shows `POST`, the target `/helloworld.Greeter/SayHello`, the
 version `HTTP/2`, grpcurl's metadata as headers, the body
-`{"name":"Tom"}`, the status 200 and the gRPC status `OK`. With
-`{"name": "Ann"}`, which the Stub's condition does not meet, grpcurl
-reports `Code: Unimplemented` and `Message: no Stub matched`, and the
-Journal records the call as unmatched
+`{"name":"Tom"}`, the status 200 and the gRPC status `OK`. Ann's shows the
+gRPC status `NOT_FOUND`. A call that no Stub matches gets UNIMPLEMENTED,
+and the Journal records it as unmatched
 ([Unmatched calls](#unmatched-calls)).
+
+CI runs every grpcurl command of this guide against smock, over h2c and
+over TLS, and checks that grpcurl prints what the guide shows
+(`scripts/check-grpcurl.sh`).
 
 ## Ports and detection
 
@@ -280,20 +342,27 @@ The warning does not change the exit status
 A test can add a gRPC Stub through the Admin API, as any
 [Ephemeral Stub](../README.md#sessions-and-ephemeral-stubs). It is a gRPC
 Stub when its path names a method of the Mock's set. This one makes the
-calls of the Session `test-a` fail with UNAVAILABLE:
+calls of the Session `test-a` to the [quick start](#quick-start)'s Mock
+fail with UNAVAILABLE:
 
 ```sh
 curl -H "Authorization: Bearer change-me" \
   -H "baggage: smock-session=test-a" \
   -d '{"request": {"path": "/helloworld.Greeter/SayHello"}, "response": {"grpc": {"status": "UNAVAILABLE", "message": "try again"}}}' \
   localhost:9090/v1/mocks/greeter/stubs
-grpcurl -plaintext -protoset defs/files/greeter.binpb \
+grpcurl -plaintext -authority greeter.svc -H 'x-tenant: acme' \
   -H "baggage: smock-session=test-a" \
-  -d '{"name": "Tom"}' localhost:8080 helloworld.Greeter/SayHello
+  -d '{"name":"Tom"}' localhost:8080 helloworld.Greeter/SayHello
 ```
 
-grpcurl reports `Code: Unavailable` and `Message: try again`. The same
-call without the Session still gets the reply of the Stub from the files.
+```text
+ERROR:
+  Code: Unavailable
+  Message: try again
+```
+
+The same call without the Session still gets the reply of the Stub from
+the files, `{"message": "Hello Tom"}`.
 
 - smock checks the Stub against the set, and normalises its `json`
   condition, as it does a Stub in a Definition file. One that does not fit
@@ -483,9 +552,9 @@ header: in the `smock-session` member, or wherever `--session-header` and
 `--session-member` say. There is no key of gRPC's own. With grpcurl:
 
 ```sh
-grpcurl -plaintext -protoset defs/files/greeter.binpb \
+grpcurl -plaintext -authority greeter.svc -H 'x-tenant: acme' \
   -H "baggage: smock-session=test-a" \
-  -d '{"name": "Tom"}' localhost:8080 helloworld.Greeter/SayHello
+  -d '{"name":"Tom"}' localhost:8080 helloworld.Greeter/SayHello
 ```
 
 The Session scopes a call as it scopes an HTTP request: its
@@ -1377,7 +1446,13 @@ date: Sat, 14 Nov 2026 07:00:00 GMT
 
 The status in `grpc-status-details-bin` has the code and the message of
 `grpc-status` and `grpc-message`, so the two never disagree. grpcurl
-decodes it with `-format-error`:
+decodes it with `-format-error`, here for the [quick start](#quick-start)'s
+Mock:
+
+```sh
+grpcurl -plaintext -authority greeter.svc -H 'x-tenant: acme' -format-error \
+  -d '{"name":"Ann"}' localhost:8080 helloworld.Greeter/SayHello
+```
 
 ```text
 {
@@ -1404,8 +1479,10 @@ protoc --include_imports -I . -I googleapis -o greeter.binpb \
 ```
 
 The set need not hold `google/rpc/status.proto`: smock encodes the status
-without it. A client that decodes the details needs their types too, so
-give grpcurl the same set with `-protoset`.
+without it. A client that decodes the details needs their types too.
+grpcurl finds them through [reflection](#reflection), or in the same set
+given with `-protoset`; without them, it prints each detail's bytes in
+base64.
 
 - A type the set lacks is a problem when the files load, at the detail's
   `@type`. Any message type of the set can be a detail, and a detail type
@@ -2102,11 +2179,17 @@ helloworld.Greeter.SayHello is a method:
 rpc SayHello ( .helloworld.HelloRequest ) returns ( .helloworld.HelloReply );
 ```
 
-A call then needs no `-protoset`:
+A call then needs no `-protoset`, as in the [quick start](#quick-start):
 
 ```sh
-grpcurl -plaintext -authority greeter.svc -d '{"name": "Tom"}' \
-  localhost:8080 helloworld.Greeter/SayHello
+grpcurl -plaintext -authority greeter.svc -H 'x-tenant: acme' \
+  -d '{"name":"Tom"}' localhost:8080 helloworld.Greeter/SayHello
+```
+
+```json
+{
+  "message": "Hello Tom"
+}
 ```
 
 smock serves both versions of the service, `grpc.reflection.v1` and its
