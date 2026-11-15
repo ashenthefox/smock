@@ -194,7 +194,14 @@ pub fn DescriptorSet::printed_message(
     _ => raise unfit
   }
   let out = @buffer.Buffer(size_hint=text.length() + 16)
-  self.print_well_known(out, message, form, [writer.to_bytes()[:]], 0) catch {
+  self.print_well_known(
+    out,
+    message,
+    form,
+    [writer.to_bytes()[:]],
+    0,
+    canonical=false,
+  ) catch {
     _ => raise unfit
   }
   let printed = @utf8.decode(out.to_bytes()) catch { _ => raise unfit }

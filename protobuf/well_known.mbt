@@ -162,6 +162,7 @@ fn DescriptorSet::print_well_known(
   form : WellKnown,
   records : Array[BytesView],
   depth : Int32,
+  canonical~ : Bool,
 ) -> Unit raise DecodeError {
   let position = records[0].start_offset()
   match form {
@@ -226,11 +227,23 @@ fn DescriptorSet::print_well_known(
     }
     Wrapper(index) => {
       let values = self.scan(message, records)
-      self.print_value(out, message.fields[index], values[index], depth)
+      self.print_value(
+        out,
+        message.fields[index],
+        values[index],
+        depth,
+        canonical~,
+      )
     }
     Struct(index) | ListValue(index) => {
       let values = self.scan(message, records)
-      self.print_repeated(out, message.fields[index], values[index], depth)
+      self.print_repeated(
+        out,
+        message.fields[index],
+        values[index],
+        depth,
+        canonical~,
+      )
     }
     Value => {
       let values = self.scan(message, records)
@@ -258,9 +271,9 @@ fn DescriptorSet::print_well_known(
           )
         }
       }
-      self.print_value(out, field, values[held], depth)
+      self.print_value(out, field, values[held], depth, canonical~)
     }
-    Any => self.print_any(out, records, depth)
+    Any => self.print_any(out, records, depth, canonical~)
   }
 }
 
@@ -297,6 +310,7 @@ fn DescriptorSet::print_any(
   out : @buffer.Buffer,
   records : Array[BytesView],
   depth : Int32,
+  canonical~ : Bool,
 ) -> Unit raise DecodeError {
   let position = records[0].start_offset()
   let mut url = records[0][0:0]
@@ -353,14 +367,14 @@ fn DescriptorSet::print_any(
   write_json_string(out, url)
   if well_known_form(held) is Some(_) {
     out.write_bytes(b",\"value\":")
-    self.print_message(out, held, [value], depth + 1)
+    self.print_message(out, held, [value], depth + 1, canonical~)
     out.write_byte(b'}')
     return
   }
   // The message's fields follow `@type` in the Any's object: the message
   // is printed on its own, then its object's members are taken.
   let fields = @buffer.Buffer(size_hint=2 * value.length() + 16)
-  self.print_message(fields, held, [value], depth + 1)
+  self.print_message(fields, held, [value], depth + 1, canonical~)
   let printed = fields.to_bytes()
   if printed.length() > 2 {
     out.write_byte(b',')
