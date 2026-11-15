@@ -1102,7 +1102,8 @@ be published on mooncakes on their own. `scripts/check-no-io.sh` checks
 that.
 
 `fixtures/protobuf/` holds the Descriptor sets and protobuf messages that
-tests read, beside the `.proto` files they are built from.
+tests read, and the descriptor of gRPC's `health.proto` that smock embeds,
+beside the `.proto` files they are built from.
 `scripts/gen-protobuf-fixtures.sh` rebuilds them with the pinned protoc,
 which `scripts/install-protoc.sh` installs, and CI checks on every push
 that the committed ones are what their sources build; the README there

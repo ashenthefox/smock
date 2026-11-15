@@ -60,12 +60,12 @@ test "a Mock's grpc.descriptorSet names a Descriptor set in the body-file subdir
 }
 
 ///|
-test "grpc is a closed object that needs descriptorSet, a string" {
+test "grpc is a closed object whose descriptorSet is a string and health a boolean" {
   inspect(
     mock_sets(
       (
         #|[{ "name": "a", "grpc": "greeter.binpb" },
-        #| { "name": "b", "grpc": {} },
+        #| { "name": "b", "grpc": { "health": "yes" } },
         #| { "name": "c", "grpc": { "descriptorSet": 1 } },
         #| { "name": "d", "grpc": { "descriptorSet": "a.binpb", "reflection": true } }]
       ),
@@ -73,9 +73,40 @@ test "grpc is a closed object that needs descriptorSet, a string" {
     ),
     content=(
       #|a.json: /mocks/0/grpc: must be an object
-      #|a.json: /mocks/1/grpc: needs "descriptorSet"
+      #|a.json: /mocks/1/grpc/health: must be true or false
       #|a.json: /mocks/2/grpc/descriptorSet: must be a string
       #|a.json: /mocks/3/grpc/reflection: is not a known field
+    ),
+  )
+}
+
+///|
+test "grpc.health turns the Mock's health service on, false by default, and descriptorSet may be left out" {
+  let snapshot = load_mocks(
+    (
+      #|[{ "name": "a", "grpc": { "descriptorSet": "a.binpb", "health": true } },
+      #| { "name": "b", "grpc": { "health": true } },
+      #| { "name": "c", "grpc": { "descriptorSet": "a.binpb", "health": false } },
+      #| { "name": "d", "grpc": {} },
+      #| { "name": "e" }]
+    ),
+    body_files=[("a.binpb", one_file_set)],
+  ).unwrap()
+  inspect(
+    snapshot.mocks
+    .iter()
+    .map(mock => {
+      let set = if mock.descriptor_set is Some(_) { "a set" } else { "no set" }
+      "\{mock.name}: \{set}, health \{mock.health}"
+    })
+    .collect()
+    .join("\n"),
+    content=(
+      #|a: a set, health true
+      #|b: no set, health true
+      #|c: a set, health false
+      #|d: no set, health false
+      #|e: no set, health false
     ),
   )
 }
