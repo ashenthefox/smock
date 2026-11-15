@@ -23,7 +23,8 @@ such as Mock, Stub and Session.
   first call, what a gRPC Stub can hold, Ephemeral ones included, how
   smock serves a unary call and answers it, how Scenarios, Variables and
   Data buckets work over gRPC, what a call gets when its Stub cannot serve
-  its content, how a call's deadline meets a Stub's delay, which status
+  its content, how a call's deadline meets a Stub's delay, how
+  `smock render` shows a gRPC Stub's reply without a client, which status
   each Fault gives a client, the health and reflection services a Mock can
   turn on, and how to build the Descriptor set that the Mock names, what
   smock checks in it and what it keeps.
