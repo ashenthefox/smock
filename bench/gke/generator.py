@@ -62,13 +62,19 @@ Environment:
                "first_second": false to skip the scrape a second into
               each run, true by default}; a variant may also name its own
               "mix", a file of the directory of bench.py, as a crud
-              variant names the CRUD variant's (requests-crud.json), and
+              variant names the CRUD variant's (requests-crud.json) and a
+              grpc variant the gRPC variant's (requests-grpc.json), and
               its own "plain_port", "tls_port" and "admin_port", as a test
               that runs several smocks on one machine does
   ROUNDS      with VARIANTS, how many rounds to run (default: 1)
   PROFILE     the profile of the plan to run
   CASES       the cases to run, comma-separated (default: every case of the plan
-              but those that run only on one machine, local_only)
+              that runs against DEFINITIONS but those that run only on one
+              machine, local_only)
+  DEFINITIONS the definitions smock serves, as the repository names them, which
+              decide the cases that may run (default: bench/definitions;
+              bench/definitions-grpc for grpc variants, which run
+              grpc-keep-alive alone)
   PLAN        the plan (default: plan.json in the directory of bench.py)
   PLAIN_PORT, TLS_PORT, ADMIN_PORT
               smock's ports (default: 80, 443 and 9090, its Service's)
@@ -154,14 +160,12 @@ class TlsConnection(http.client.HTTPSConnection):
 
 def send_once(address, port, request, tls, timeout):
     """Sends a request of the mix once to smock at `address` and `port`, as
-    oha sends it: its HTTP status. Raises OSError or HTTPException when it
-    gets no response."""
+    oha sends it, with its body, a string or a body file's octets: its HTTP
+    status. Raises OSError or HTTPException when it gets no response."""
     connection = (TlsConnection(address, port, request["host"], timeout) if tls
                   else http.client.HTTPConnection(address, port, timeout=timeout))
-    body = request["body"]
     try:
-        connection.request(request["method"], request["target"],
-                           body=body.encode() if isinstance(body, str) else body,
+        connection.request(request["method"], request["target"], body=harness.request_body(request),
                            headers={"Host": request["host"], **dict(request["headers"])})
         response = connection.getresponse()
         response.read()
@@ -504,7 +508,8 @@ def main():
     rounds = int(os.environ.get("ROUNDS") or 1) if tagged else 1
     plan = gke.read_json(os.environ.get("PLAN") or harness.BENCH / "plan.json")
     [profile] = gke.plan_profiles(plan, [profile_name])
-    specs = gke.steps(plan, profile, gke.plan_cases(plan, gke.comma_list(os.environ.get("CASES"))))
+    specs = gke.steps(plan, profile, gke.plan_cases(plan, gke.comma_list(os.environ.get("CASES")),
+                                                    os.environ.get("DEFINITIONS") or gke.DEFINITIONS))
     runs = run_order(specs, variants, rounds)
     oha = shutil.which(os.environ.get("OHA", "oha")) or os.environ.get("OHA", "oha")
     # Every connection is a file descriptor.

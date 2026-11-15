@@ -11,8 +11,11 @@ latency for each case, and checks the provisional performance targets.
 | `bench/definitions/` | The definition set smock serves: four Mocks, one of them the Default Mock, and about 1,200 Stubs with exact, pattern and `json` conditions (`e2e/bench_test.mbt` pins the exact count). `bench/gen_definitions.py` writes it. |
 | `bench/definitions-scenarios/` | Its Scenario variant, which `--definitions` selects ([Scenarios in the benchmark](#scenarios-in-the-benchmark)). `bench/gen_definitions.py` writes it too. |
 | `bench/definitions-crud/` | Its CRUD variant, which `--definitions` selects too ([CRUD Stubs in the benchmark](#crud-stubs-in-the-benchmark)). `bench/gen_definitions.py` writes it too. |
+| `bench/definitions-grpc/` | Its gRPC variant, with a gRPC Mock, which `--definitions` selects too ([gRPC calls in the benchmark](#grpc-calls-in-the-benchmark)). `bench/gen_definitions.py` writes it too. |
 | `bench/requests.json` | The request mix: nine kinds of request, with weights, realistic headers, a Session in `baggage`, and bodies. |
 | `bench/requests-crud.json` | The CRUD variant's own request mix, which a run sends it. `bench/gen_definitions.py` writes it from `bench/requests.json`. |
+| `bench/requests-grpc.json` | The gRPC variant's own request mix, three kinds of gRPC call, which a run sends it. `bench/gen_definitions.py` writes it. |
+| `bench/requests-grpc/` | The body of each call of the gRPC variant's mix: its request message, framed. `bench/gen_definitions.py` writes them. |
 | `bench/plan.json` | The cases, the CPU limits, and the rates and durations. |
 | `bench/plan-autopilot.json` | Another plan: smock under the CPU and memory limits of the smallest GKE Autopilot Pods and of the Helm chart's default, at ladders of rates, over HTTP/1.1 and HTTP/2. The targets hold under its profiles. |
 | `bench/plan-same-node.json` | The plan of a GKE run that compares smock binaries on one node: HTTP keep-alive at the lowest rates of `bench/plan-autopilot.json`'s ladders, and at half the lowest under 50m and 250m. |
@@ -26,10 +29,13 @@ The commands below run from the repository root.
 `e2e/bench_test.mbt` checks on every test run that each request of the mix
 reaches the Mock and the Stub it names, on the plain and on the TLS port,
 over HTTP/1.1 and over HTTP/2, and lands in the Journal under its Session,
-that in the Scenario variant each request moves its Scenario, and that in
+that in the Scenario variant each request moves its Scenario, that in
 the CRUD variant each request of its mix makes the CRUD operation it
-names. CI checks that `bench/definitions/`, `bench/definitions-scenarios/`,
-`bench/definitions-crud/` and `bench/requests-crud.json` are what
+names, and that in the gRPC variant each call of its mix gets the gRPC
+status it names. CI checks that `bench/definitions/`,
+`bench/definitions-scenarios/`, `bench/definitions-crud/`,
+`bench/definitions-grpc/`, `bench/requests-crud.json`,
+`bench/requests-grpc.json` and `bench/requests-grpc/` are what
 `bench/gen_definitions.py` writes.
 
 The benchmark runs on a developer's machine. The full run of
@@ -46,6 +52,7 @@ a schedule.
 - [HTTP/2 cases](#http2-cases)
 - [Scenarios in the benchmark](#scenarios-in-the-benchmark)
 - [CRUD Stubs in the benchmark](#crud-stubs-in-the-benchmark)
+- [gRPC calls in the benchmark](#grpc-calls-in-the-benchmark)
 - [The mockoon log format in the benchmark](#the-mockoon-log-format-in-the-benchmark)
 - [Targets](#targets)
 - [What a run does](#what-a-run-does)
@@ -73,6 +80,7 @@ python3 bench/bench.py run --plan bench/plan-autopilot.json            # the pro
 python3 bench/bench.py run --plan bench/plan-autopilot.json --profiles autopilot-burst-min   # one profile
 python3 bench/bench.py run --plan bench/plan-autopilot.json --definitions bench/definitions-scenarios   # with Scenario Stubs
 python3 bench/bench.py run --plan bench/plan-autopilot.json --definitions bench/definitions-crud   # with CRUD Stubs, sent their own mix
+python3 bench/bench.py run --plan bench/plan-autopilot.json --definitions bench/definitions-grpc   # gRPC calls, in grpc-keep-alive alone, about 11 minutes
 python3 bench/bench.py run --plan bench/plan-autopilot.json --log-format mockoon   # smock in the mockoon log format, its stdout read through a pipe
 python3 bench/bench.py run --rate 500 --ramp 1 --duration 3 --tail 1 --settle 1 --cooldown 0   # a check of the setup, about 2 minutes
 python3 bench/bench.py run --rate 500 --ramp 1 --duration 3 --tail 1 --settle 1 --cooldown 0 --log-format mockoon   # the same check in the mockoon log format
@@ -275,6 +283,100 @@ checks the targets. On GKE, a variant with the `crud` option serves it,
 and the load generator sends that variant its mix
 ([Comparing smock binaries on one node](#comparing-smock-binaries-on-one-node)).
 
+## gRPC calls in the benchmark
+
+`bench/definitions-grpc/` is the gRPC variant of the definitions: the
+same Mocks and Stubs, and one more Mock, `shop` (`shop.bench.internal`),
+which serves the shop's orders over [gRPC](../docs/grpc.md), in a file of
+its own, `shop.json`. Its [Descriptor set](../docs/grpc.md),
+`files/shop.binpb`, is the set of `fixtures/protobuf/bench/shop.proto`,
+the service `bench.shop.v1.Orders`. `scripts/gen-protobuf-fixtures.sh`
+builds it with protoc, and `bench/gen_definitions.py` copies it. The
+service's messages hold a nested message, a repeated field, 64-bit
+integers and enums, so that what smock spends to decode a call and
+encode its reply shows. The Mock's Stubs:
+
+- `GetOrder`: a Stub for each of the CRUD variant's 48 orders, matched by
+  a `json` condition on the order's ID and its channel, an enum, and
+  answered with the order. The reply is static, so smock encodes it once,
+  when the files load.
+- `QuoteOrder`: one Stub, whose templated reply repeats the request's
+  lines. smock renders and encodes it for each call.
+- `TrackOrder`: one Stub that answers NOT_FOUND with a message and no
+  reply message, which smock sends as Trailers-Only.
+
+The variant has its own mix, `bench/requests-grpc.json`, which
+`bench/gen_definitions.py` writes too. It holds a call to each method, by
+weight:
+
+| Call | Weight | Method | What smock does |
+|---|---|---|---|
+| `get-order` | 60% | `GetOrder` | Decodes the message and tries the 48 Stubs' conditions until the 19th matches; sends its static reply |
+| `quote-order` | 25% | `QuoteOrder` | Decodes a basket of two lines with a coupon; renders and encodes the templated reply |
+| `track-order` | 15% | `TrackOrder` | Answers NOT_FOUND as Trailers-Only |
+
+Each call sends the headers a gRPC client sends over HTTP/2, with
+`content-type: application/grpc` and `te: trailers`, and a Session of its
+own. Its body is its request message, framed as gRPC frames one, in a
+file of its own under `bench/requests-grpc/`, which the call names
+(`bodyFile`, relative to `bench/`). A frame starts with NUL octets, which
+oha's `-d` cannot carry on a command line, so oha sends the file with
+`-D`. `bench/gen_definitions.py` encodes the messages by hand, and
+`bench/test_gen_definitions.py` checks each against protoc's encoding of
+it, in `fixtures/protobuf/bench/`.
+
+### The case
+
+`grpc-keep-alive`, in `bench/plan-autopilot.json`, sends the mix as
+`h2c-keep-alive` sends requests: h2c to the plain port by prior
+knowledge, 64 keep-alive connections, one call at a time on each (oha's
+`-p 1`), and `http-keep-alive`'s ladders. It names the definitions it
+runs against (`"definitions": "definitions-grpc"`), so it runs only when
+smock serves the gRPC variant, and a run that serves the variant runs no
+other case:
+
+```sh
+python3 bench/bench.py run --plan bench/plan-autopilot.json --definitions bench/definitions-grpc
+```
+
+That run takes about 11 minutes: 1 case, 3 profiles and 8 rates, at
+about 27 seconds a step. A run of any other definitions leaves the case
+out, so it takes no longer than before. Naming the case in `--cases`
+there is refused, and so is naming another case in a run of the variant.
+`summary.md` and `summary.json` report the case as any other: its latency
+at each rate, and smock's CPU time a call (`smock_cpu.us_per_request`).
+Idle RSS and peak memory are measured under each profile, with the gRPC
+Mock's set loaded.
+
+### oha's success count is not a gRPC status
+
+A gRPC reply carries its status in `grpc-status`: in its trailers, or in
+the HEADERS of a Trailers-Only reply. Its `:status` is 200 either way.
+oha counts a request by its `:status` alone, and does not read trailers.
+So it counts every call that gets a reply as a success, NOT_FOUND ones
+included, and so would it an INTERNAL from a reply that smock failed to
+render. The mix expects 200 for every call, `track-order` too, and
+errors count only calls that got no reply or another `:status`.
+
+The gRPC statuses are checked elsewhere: `e2e/bench_test.mbt` sends each
+call of the mix once, over h2c through moonhttp's client, and checks the
+gRPC status of its reply and its Journal entry: the Mock, the Stub,
+`grpcStatus`, and the message smock decoded.
+
+- **No target.** No entry of `bench/targets.json` names the case, since
+  a count by `:status` cannot tell a run in which every call failed from
+  one in which none did. `summary.md` and `summary.json` report it, and
+  `bench/compare.py` compares it with an earlier run that has it, as it
+  compares `h2c-multiplexed`. A run of the variant checks the idle RSS
+  targets, with the gRPC Mock loaded. Its peak memory at each rate is in
+  `summary.json`, to read against the 32 MiB of the
+  [targets](#targets) by hand; their other limits are for cases the run
+  does not run, so they are not measured.
+- **On GKE.** A run of one smock serves `bench/definitions/` and leaves
+  the case out. The gRPC variant is served only to variants with the
+  `grpc` option, in a comparison on one node
+  ([Comparing smock binaries on one node](#comparing-smock-binaries-on-one-node)).
+
 ## The mockoon log format in the benchmark
 
 `--log-format mockoon` runs smock in the `mockoon` log format
@@ -470,7 +572,10 @@ architecture the targets file has no set for.
   carry several requests at once on each connection
   (`streams_per_connection`, 1 by default), and a case marked `local_only`
   runs on your machine but not on GKE
-  ([The multiplexed case](#the-multiplexed-case)).
+  ([The multiplexed case](#the-multiplexed-case)). A case that names its
+  definitions (`definitions`, a directory of `bench/`) runs only when
+  smock serves them, and a run that serves them runs no other case
+  ([gRPC calls in the benchmark](#grpc-calls-in-the-benchmark)).
 - **CPU limits and pinning.** smock runs in its own systemd scope with a
   CPU quota over the 100 ms period Kubernetes also uses, pinned to the
   fastest CPUs, as many as the largest CPU limit of the plan needs (two for
@@ -743,7 +848,10 @@ compare, such as for a summary of another `format`.
 Autopilot: smock in a Pod with each profile's limits as its requests, the
 load from another node over the Pod network. It runs every case of the
 plan but `h2c-multiplexed`, which runs on your machine only
-([The multiplexed case](#the-multiplexed-case)). It is part of the
+([The multiplexed case](#the-multiplexed-case)), and `grpc-keep-alive`:
+a run of one smock serves `bench/definitions/`, and only variants with
+the `grpc` option serve the gRPC variant
+([gRPC calls in the benchmark](#grpc-calls-in-the-benchmark)). It is part of the
 [checklist before merging into main](../docs/merging-into-main.md), and costs
 money: about $0.40 to $0.48 a run on x86 nodes (us-central1 or
 asia-northeast1), and about $0.31 on Arm nodes in us-central1, at the
@@ -833,11 +941,11 @@ that run's linux/amd64 build and tests passed.
   unless `--yes` says to go on.
 - **Images.** It builds the release binary, unless given one, and two
   images for the run's architecture (`docker build --platform`): the
-  release image with `bench/definitions/` and its Scenario and CRUD
-  variants (`bench/gke/smock-definitions.dockerfile`), and the load
+  release image with `bench/definitions/` and its Scenario, CRUD and
+  gRPC variants (`bench/gke/smock-definitions.dockerfile`), and the load
   generator's (`bench/gke/generator.Dockerfile`: Python, the pinned oha
-  of that architecture, `bench.py`, both request mixes, the plan and
-  `bench/gke/`). With `--variant`
+  of that architecture, `bench.py`, the request mixes, the bodies of the
+  gRPC variant's calls, the plan and `bench/gke/`). With `--variant`
   it builds no binary, and in place of the release image one image of
   smock for each distinct binary the variants give (see
   [Comparing smock binaries on one node](#comparing-smock-binaries-on-one-node)).
@@ -1067,8 +1175,15 @@ in place of `bench/definitions/`
 serves their CRUD variant, `bench/definitions-crud/`, and the load
 generator sends that variant the CRUD variant's mix,
 `bench/requests-crud.json`, and the others the benchmark's
-([CRUD Stubs in the benchmark](#crud-stubs-in-the-benchmark)). A variant
-takes one of the two.
+([CRUD Stubs in the benchmark](#crud-stubs-in-the-benchmark)). `grpc`
+serves their gRPC variant, `bench/definitions-grpc/`, and the load
+generator sends that variant the gRPC variant's mix,
+`bench/requests-grpc.json`, in `grpc-keep-alive` alone
+([gRPC calls in the benchmark](#grpc-calls-in-the-benchmark)). That case
+runs against the gRPC variant alone, and each step runs every variant, so
+`grpc` goes to every variant or to none. A variant takes one of
+`scenarios`, `crud` and `grpc`. A run without `--variant` serves
+`bench/definitions/` and never runs `grpc-keep-alive`.
 Variants of one binary (one SHA-256) are also compared with the first
 variant that has it: with the same options,
 such as newb against new, an A/A pair, whose paired changes show how far
@@ -1143,12 +1258,25 @@ scripts/gke-bench.sh --yes --arch amd64 --plan bench/plan-same-node.json \
   --variant plain="$dir/smock" --variant cr="$dir/smock",crud --variant crb="$dir/smock",crud
 ```
 
+To measure gRPC calls on GKE, give every variant the `grpc` option, such
+as two binaries, each serving the gRPC variant. `bench/plan-same-node.json`
+has `grpc-keep-alive` at its rates, which grpc variants run in place of
+`http-keep-alive`; `bench/plan-autopilot.json` has it at its full
+ladders, which take longer. A `grpc` variant's samples record the
+definitions they served and the mix they were sent:
+
+```sh
+scripts/gke-bench.sh --yes --arch amd64 --plan bench/plan-same-node.json \
+  --profiles autopilot-burst-min,autopilot-min --time-limit 100m \
+  --variant old="$old/smock",grpc --variant new="$new/smock",grpc
+```
+
 To read the variants against another baseline, such as each against
 new, run `gke.py same-node` again on the run's results with
 `--baseline new --report same-node-new` and the `--sha256 LABEL=HEX` and
 `--no-init LABEL` the run gave it (same-node.json names each variant's
-SHA-256 and options; the samples say which served the Scenario or the
-CRUD variant):
+SHA-256 and options; the samples say which served the Scenario, the
+CRUD or the gRPC variant):
 it writes `same-node-new.json` and
 `same-node-new.md`, and leaves the run's own comparison as it is.
 

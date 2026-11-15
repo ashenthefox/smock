@@ -2,10 +2,12 @@
 """The release benchmark of smock.
 
 It runs smock with the benchmark's definition set (bench/definitions/, or
-another such as its Scenario variant, bench/definitions-scenarios/, or its
-CRUD variant, bench/definitions-crud/) under resource profiles, each a CPU
-limit and an optional memory limit, and sends it the request mix
-(bench/requests.json, or the CRUD variant's own, bench/requests-crud.json)
+another such as its Scenario variant, bench/definitions-scenarios/, its
+CRUD variant, bench/definitions-crud/, or its gRPC variant,
+bench/definitions-grpc/) under resource profiles, each a CPU limit and an
+optional memory limit, and sends it the request mix (bench/requests.json,
+or the CRUD variant's own, bench/requests-crud.json, or the gRPC variant's
+own, bench/requests-grpc.json, whose gRPC calls only their own case sends)
 at a fixed arrival rate, an open model: requests go out on schedule whether
 or not earlier ones have been answered. Each request's latency counts from
 the time it was scheduled to be sent, so a server that stalls cannot hide
@@ -57,8 +59,18 @@ ROOT = BENCH.parent
 
 # The request mix a run sends to a definitions directory of bench/ that has
 # its own, by the directory: the CRUD variant's, whose requests list, read
-# and update its items. Any other directory is sent bench/requests.json.
-MIXES = {BENCH / "definitions-crud": BENCH / "requests-crud.json"}
+# and update its items, and the gRPC variant's, whose requests are gRPC
+# calls. Any other directory is sent bench/requests.json.
+MIXES = {BENCH / "definitions-crud": BENCH / "requests-crud.json",
+         BENCH / "definitions-grpc": BENCH / "requests-grpc.json"}
+
+# The definitions directories of bench/ that only the cases naming them
+# run against: the gRPC variant, whose mix holds gRPC calls, which only its
+# own case, grpc-keep-alive, sends as a gRPC client does. A case names the
+# directory it runs against with `definitions`, its name under bench/; it
+# runs only when smock serves that directory, and a run that serves such a
+# directory runs only the cases that name it.
+OWN_CASES_DEFINITIONS = (BENCH / "definitions-grpc",)
 
 
 def mix_path(definitions):
@@ -389,14 +401,24 @@ def tcp_passive_opens():
     return int(values[names.index("PassiveOpens")])
 
 
+def request_body(request):
+    """The body of a request of the mix as bytes, or None when it has none:
+    its `body`, a string, in UTF-8, or the octets of its `bodyFile`, a file
+    under bench/, such as a gRPC call's framed message, which holds octets
+    that a string on oha's command line cannot."""
+    if request.get("bodyFile") is not None:
+        return (BENCH / request["bodyFile"]).read_bytes()
+    return None if request["body"] is None else request["body"].encode()
+
+
 def raw_request(request):
     """A request of the mix as the bytes of an HTTP/1.1 request."""
     head = [f"{request['method']} {request['target']} HTTP/1.1", f"Host: {request['host']}"]
     head += [f"{name}: {value}" for name, value in request["headers"]]
-    body = (request["body"] or "").encode()
-    if request["body"] is not None:
+    body = request_body(request)
+    if body is not None:
         head.append(f"Content-Length: {len(body)}")
-    return ("\r\n".join(head) + "\r\n\r\n").encode() + body
+    return ("\r\n".join(head) + "\r\n\r\n").encode() + (body or b"")
 
 
 def exchange(connection, request):
@@ -950,10 +972,26 @@ class Run:
             self.profiles = [profile for profile in self.profiles if profile["cpu_limit"] in limits]
         self.cpu_limits = list(dict.fromkeys(profile["cpu_limit"] for profile in self.profiles))
         names = [case["name"] for case in self.plan["cases"]]
-        self.cases = args.cases.split(",") if args.cases else names
+        # The cases that run against the definitions smock serves: a case
+        # that names its definitions only against them, and the others
+        # against any others (OWN_CASES_DEFINITIONS).
+        fitting = [case["name"] for case in cases_for(self.plan["cases"], self.definitions)]
+        served = shown_path(self.definitions)
+        if not fitting:
+            raise BenchError(f"{plan_name} has no case that runs when smock serves {served}: run a plan that has "
+                             "one, such as bench/plan-autopilot.json")
+        self.cases = args.cases.split(",") if args.cases else fitting
         for name in self.cases:
             if name not in names:
                 raise BenchError(f"no case {name} in {plan_name}")
+            if name not in fitting:
+                [case] = [case for case in self.plan["cases"] if case["name"] == name]
+                own = case_definitions(case)
+                if own is not None:
+                    raise BenchError(f"case {name} runs only when smock serves {shown_path(own)}, not {served}: "
+                                     f"give --definitions {shown_path(own)}")
+                raise BenchError(f"a run that serves {served} runs {', '.join(fitting)} alone: leave {name} out of "
+                                 "--cases")
         for case in self.plan["cases"]:
             problem = case_problem(case)
             if problem:
@@ -1120,6 +1158,25 @@ class Run:
                 process.kill()
 
 
+def case_definitions(case):
+    """The definitions directory that `case` runs against alone, as its
+    `definitions` names it under bench/, resolved; None for a case that
+    runs against any directory but those (OWN_CASES_DEFINITIONS)."""
+    return (BENCH / case["definitions"]).resolve() if case.get("definitions") else None
+
+
+def cases_for(cases, definitions):
+    """The cases among `cases`, a plan's, that run when smock serves the
+    definitions directory `definitions`, in their order: those that name
+    it, when a case names it or it is one of OWN_CASES_DEFINITIONS, such
+    as the gRPC variant; otherwise those that name none."""
+    definitions = Path(definitions).resolve()
+    own = ({case_definitions(case) for case in cases} | {path.resolve() for path in OWN_CASES_DEFINITIONS}) - {None}
+    if definitions in own:
+        return [case for case in cases if case_definitions(case) == definitions]
+    return [case for case in cases if case_definitions(case) is None]
+
+
 def case_spec(run, case, profile, rate, ladder):
     """What one step of a case runs: the case under `profile` at `rate`,
     one of the rates of its `ladder`. The id names the rate only when the
@@ -1244,7 +1301,8 @@ def oha_request(protocol, request, address, port, streams=1):
     smock at `address` and `port`: the port its URL implies, 443 over TLS
     and 80 otherwise, redirected there; over HTTP/2, `streams` requests at
     once on each connection (oha's -p), one by default; its method, headers
-    and body; over TLS, any certificate accepted; and its URL, last."""
+    and body, a string (-d) or the file that holds it (-D); over TLS, any
+    certificate accepted; and its URL, last."""
     tls, http2 = PROTOCOLS[protocol]
     arguments = ["--connect-to", f"{request['host']}:{443 if tls else 80}:{address}:{port}"]
     if http2:
@@ -1252,7 +1310,10 @@ def oha_request(protocol, request, address, port, streams=1):
     arguments += ["-m", request["method"]]
     for name, value in request["headers"]:
         arguments += ["-H", f"{name}: {value}"]
-    if request["body"] is not None:
+    # A body file's octets, which oha reads from the file, or a string.
+    if request.get("bodyFile") is not None:
+        arguments += ["-D", str(BENCH / request["bodyFile"])]
+    elif request["body"] is not None:
         arguments += ["-d", request["body"]]
     if tls:
         arguments.append("--insecure")
@@ -2350,7 +2411,9 @@ def arguments(argv):
                           "bench/definitions-crud is its CRUD variant, which is sent its own mix, "
                           "bench/requests-crud.json, whose requests list, read and update items through CRUD Stubs; "
                           "bench/definitions-scenarios is its Scenario variant, in which every request of the mix "
-                          "matches a Stub that moves a Scenario)")
+                          "matches a Stub that moves a Scenario; bench/definitions-grpc is its gRPC variant, which "
+                          "is sent its own mix of gRPC calls, bench/requests-grpc.json, in the case grpc-keep-alive "
+                          "of bench/plan-autopilot.json alone, which runs only against it)")
     run.add_argument("--cases", help="only these cases of the plan, comma-separated")
     run.add_argument("--profiles", help="only these resource profiles of the plan, comma-separated")
     run.add_argument("--cpu-limits", help="only the profiles with these CPU limits, comma-separated, such as 250m,1")

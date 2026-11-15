@@ -463,6 +463,22 @@ of each GitHub release include its section
   `templateError` or `dataError` as on HTTP. See
   [State over gRPC](docs/grpc.md#state-over-grpc) and
   [smock's own failures](docs/grpc.md#smocks-own-failures).
+- The release benchmark measures gRPC calls, in a gRPC variant of its
+  definitions, `bench/definitions-grpc/`: the plain set with a gRPC Mock,
+  its Stubs and its Descriptor set. Its own mix,
+  `bench/requests-grpc.json`, holds three kinds of call: one matched by a
+  condition on the message, one with a templated reply, and one answered
+  NOT_FOUND as Trailers-Only. Each takes its framed message from a file
+  (a request of a mix may now name a `bodyFile`, which oha sends with
+  `-D`). `bench/plan-autopilot.json`'s new case `grpc-keep-alive` sends
+  them over h2c, 64 keep-alive connections, one call at a time on each. It
+  runs only when smock serves the gRPC variant, in about 11 minutes, and
+  such a run runs no other case, so runs of the other definitions take no
+  longer. It has no target: oha counts a call by its HTTP status, which is
+  200 whatever the gRPC status, and `e2e/bench_test.mbt` checks each
+  call's gRPC status instead. On GKE, variants with the new `grpc` option
+  serve it (`scripts/gke-bench.sh --variant LABEL=FILE,grpc`). See
+  [gRPC calls in the benchmark](bench/README.md#grpc-calls-in-the-benchmark).
 
 ### Changed
 

@@ -1,7 +1,9 @@
 """Tests of bench/gen_definitions.py, which writes the release benchmark's
 definition sets: bench/definitions/, its Scenario variant,
-bench/definitions-scenarios/, and its CRUD variant, bench/definitions-crud/,
-with the CRUD variant's request mix, bench/requests-crud.json.
+bench/definitions-scenarios/, its CRUD variant, bench/definitions-crud/,
+with the CRUD variant's request mix, bench/requests-crud.json, and its gRPC
+variant, bench/definitions-grpc/, with the gRPC variant's request mix,
+bench/requests-grpc.json, and its bodies, bench/requests-grpc/.
 
 They read the files it wrote, which CI checks are what it writes, and run
 it on a copy of bench/. They need python3 alone. e2e/bench_test.mbt checks
@@ -21,6 +23,10 @@ from pathlib import Path
 
 BENCH = Path(__file__).resolve().parent
 SCRIPT = BENCH / "gen_definitions.py"
+
+# The fixtures of the gRPC variant's set and of the messages of its mix,
+# which protoc builds (scripts/gen-protobuf-fixtures.sh).
+FIXTURES = BENCH.parent / "fixtures" / "protobuf" / "bench"
 
 _spec = importlib.util.spec_from_file_location("gen_definitions", SCRIPT)
 gen_definitions = importlib.util.module_from_spec(_spec)
@@ -213,20 +219,137 @@ class CrudVariant(unittest.TestCase):
         self.assertNotIn("create", [(request["expect"]["crud"] or {}).get("op") for request in crud])
 
 
+class GrpcVariant(unittest.TestCase):
+    """The gRPC variant serves what the plain set does, and a gRPC Mock,
+    shop, with its Stubs and its Descriptor set, which the fixture script
+    builds. Its mix holds gRPC calls only, each with a framed protobuf body
+    in a file of its own, encoded by hand: one matched by a condition on
+    the request message and answered with an OK reply, one answered with a
+    templated OK reply, and one answered with an error, sent as
+    Trailers-Only."""
+
+    ORDER = "7f9c2ba4-e88f-4c1a-9c5b-2d3a1e8f6b10"
+    METHODS = "/bench.shop.v1.Orders/"
+
+    def setUp(self):
+        self.plain = definition_files(BENCH / "definitions")
+        self.variant = definition_files(BENCH / "definitions-grpc")
+
+    def test_it_is_the_plain_set_with_a_grpc_mock_its_stubs_and_its_set_in_a_file_of_their_own(self):
+        self.assertEqual({name: content for name, content in self.variant.items() if name != "shop.json"},
+                         self.plain)
+        shop = self.variant["shop.json"]
+        self.assertEqual(shop["mocks"], [{"name": "shop", "hosts": ["shop.bench.internal"],
+                                          "grpc": {"descriptorSet": "shop.binpb"}}])
+        self.assertEqual({stub["mock"] for stub in shop["stubs"]}, {"shop"})
+        files = BENCH / "definitions-grpc" / "files"
+        self.assertEqual(sorted(path.name for path in files.iterdir()), ["search-results.json", "shop.binpb"])
+        self.assertEqual((files / "shop.binpb").read_bytes(), (FIXTURES / "shop.binpb").read_bytes())
+        self.assertEqual((files / "search-results.json").read_bytes(),
+                         (BENCH / "definitions" / "files" / "search-results.json").read_bytes())
+
+    def test_an_order_is_found_by_a_condition_on_its_id_and_channel_among_one_stub_for_each_way_to_create_one(self):
+        stubs = self.variant["shop.json"]["stubs"]
+        orders = [stub for stub in stubs if stub["request"]["path"] == self.METHODS + "GetOrder"]
+        self.assertEqual(len(orders), 48)
+        self.assertEqual(len({stub["id"] for stub in orders}), 48)
+        self.assertEqual(len({json.dumps(stub["request"]["body"]) for stub in orders}), 48)
+        # The mix's order, paid, as the plain set's get-order answers it,
+        # with two lines whose prices are those of the catalog's items.
+        [mine] = [stub for stub in orders if stub["id"] == "get-order-partner-gold"]
+        self.assertEqual(orders.index(mine), 18)
+        self.assertEqual(mine, {
+            "id": "get-order-partner-gold", "mock": "shop",
+            "request": {"path": self.METHODS + "GetOrder",
+                        "body": {"json": {"orderId": self.ORDER, "channel": "CHANNEL_PARTNER"}}},
+            "response": {"json": {
+                "id": self.ORDER, "customerId": 10042, "status": "STATUS_PAID", "channel": "CHANNEL_PARTNER",
+                "lines": [{"sku": "SKU-00317", "quantity": 2, "price": {"amountMinor": 2728, "currency": "EUR"}},
+                          {"sku": "SKU-00042", "quantity": 1, "price": {"amountMinor": 2053, "currency": "EUR"}}],
+                "total": {"amountMinor": 7509, "currency": "EUR"}, "placedAtUnixMs": 1760313600000}},
+        })
+        # Every order's reply is a static message of its own.
+        for stub in orders:
+            reply = stub["response"]["json"]
+            self.assertNotIn("template", stub["response"])
+            self.assertEqual(stub["request"]["body"]["json"], {"orderId": reply["id"], "channel": reply["channel"]})
+            self.assertEqual(reply["total"]["amountMinor"],
+                             sum(line["quantity"] * line["price"]["amountMinor"] for line in reply["lines"]))
+
+    def test_a_quote_is_a_templated_reply_that_repeats_the_requests_lines_and_tracking_an_order_is_not_found(self):
+        stubs = {stub["id"]: stub for stub in self.variant["shop.json"]["stubs"]}
+        self.assertEqual(stubs["quote-order"], {
+            "id": "quote-order", "mock": "shop", "request": {"path": self.METHODS + "QuoteOrder"},
+            "response": {"template": True, "json": {
+                "customerId": "${body.customerId}",
+                "lines": {"$each": "body.lines", "as": "line",
+                          "do": {"sku": "${line.sku}", "quantity": "${line.quantity}", "price": "${line.price}"}},
+                "total": {"amountMinor": 7509, "currency": "EUR"},
+                "coupon": "${body.coupon}"}},
+        })
+        self.assertEqual(stubs["track-order"], {
+            "id": "track-order", "mock": "shop", "request": {"path": self.METHODS + "TrackOrder"},
+            "response": {"grpc": {"status": "NOT_FOUND", "message": "no shipment for this order yet"}},
+        })
+        self.assertEqual(list(stubs)[-2:], ["quote-order", "track-order"])
+
+    def test_its_mix_holds_a_grpc_call_of_each_kind_by_weight_each_with_a_session_of_its_own(self):
+        mix = read_mix("requests-grpc.json")
+        self.assertEqual([(request["name"], request["weight"]) for request in mix],
+                         [("get-order", 60), ("quote-order", 25), ("track-order", 15)])
+        for request, method, stub, status in zip(mix, ("GetOrder", "QuoteOrder", "TrackOrder"),
+                                                  ("get-order-partner-gold", "quote-order", "track-order"),
+                                                  ("OK", "OK", "NOT_FOUND"), strict=True):
+            name = request["name"]
+            self.assertEqual((request["method"], request["host"], request["target"]),
+                             ("POST", "shop.bench.internal", self.METHODS + method), name)
+            # As a gRPC client sends a call over HTTP/2: lower-case names,
+            # the content type and te: trailers first.
+            headers = dict(request["headers"])
+            self.assertEqual(request["headers"][:2], [["content-type", "application/grpc"], ["te", "trailers"]])
+            self.assertEqual([header for header, _ in request["headers"]],
+                             [header.lower() for header, _ in request["headers"]])
+            self.assertEqual(headers["baggage"], f"tenant=acme-eu,smock-session=bench-grpc-{name},deployment=perf")
+            self.assertEqual((request["body"], request["bodyFile"]), (None, f"requests-grpc/{name}.grpc"), name)
+            self.assertEqual(request["expect"], {"session": f"bench-grpc-{name}", "status": 200,
+                                                 "grpcStatus": status, "mock": "shop", "stub": stub,
+                                                 "viaDefault": False}, name)
+
+    def test_each_calls_body_is_its_request_message_framed_and_encoded_by_hand_as_protoc_encodes_it(self):
+        # protoc's encoding of each message's text form, which the fixture
+        # script writes, framed: flag 0 (not compressed), then the length
+        # in four octets, big-endian.
+        for request in read_mix("requests-grpc.json"):
+            body = (BENCH / request["bodyFile"]).read_bytes()
+            message = (FIXTURES / f"{request['name']}.binpb").read_bytes()
+            self.assertEqual(body[:5], b"\x00" + len(message).to_bytes(4, "big"), request["name"])
+            self.assertEqual(body[5:], message, request["name"])
+        self.assertEqual(sorted(path.name for path in (BENCH / "requests-grpc").iterdir()),
+                         ["get-order.grpc", "quote-order.grpc", "track-order.grpc"])
+
+
 class Check(unittest.TestCase):
-    """--check writes nothing, and fails when a file of either set is not
-    what the script writes, naming it."""
+    """--check writes nothing, and fails when a file of a set, a mix or the
+    gRPC variant's bodies is not what the script writes, naming it."""
+
+    # What the script says when every file is what it writes.
+    SETS = ("bench/definitions/, bench/definitions-scenarios/, bench/definitions-crud/, bench/definitions-grpc/, "
+            "bench/requests-crud.json, bench/requests-grpc.json and bench/requests-grpc/")
 
     def copy(self):
         """A copy of what the script reads and writes, in a directory of its
-        own: the script, the request mixes and the three sets."""
-        bench = Path(tempfile.mkdtemp(prefix="smock-gen-definitions-test-")) / "bench"
-        self.addCleanup(shutil.rmtree, bench.parent, ignore_errors=True)
+        own: the script, the request mixes, the four sets, the gRPC
+        variant's bodies, and the gRPC Mock's set among the fixtures."""
+        root = Path(tempfile.mkdtemp(prefix="smock-gen-definitions-test-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        bench = root / "bench"
         bench.mkdir()
-        for name in ("gen_definitions.py", "requests.json", "requests-crud.json"):
+        for name in ("gen_definitions.py", "requests.json", "requests-crud.json", "requests-grpc.json"):
             shutil.copy2(BENCH / name, bench / name)
-        for name in ("definitions", "definitions-scenarios", "definitions-crud"):
+        for name in ("definitions", "definitions-scenarios", "definitions-crud", "definitions-grpc", "requests-grpc"):
             shutil.copytree(BENCH / name, bench / name)
+        (root / "fixtures" / "protobuf" / "bench").mkdir(parents=True)
+        shutil.copy2(FIXTURES / "shop.binpb", root / "fixtures" / "protobuf" / "bench" / "shop.binpb")
         return bench
 
     def run_script(self, bench, *args):
@@ -237,8 +360,7 @@ class Check(unittest.TestCase):
     def test_both_sets_as_written_pass(self):
         status, output = self.run_script(BENCH, "--check")
         self.assertEqual(status, 0, output)
-        self.assertEqual(output, "gen_definitions: bench/definitions/, bench/definitions-scenarios/, "
-                                 "bench/definitions-crud/ and bench/requests-crud.json are up to date (21 files)\n")
+        self.assertEqual(output, f"gen_definitions: {self.SETS} are up to date (33 files)\n")
 
     def test_a_changed_or_missing_file_of_the_variant_fails_and_is_named_and_a_run_writes_it_again(self):
         bench = self.copy()
@@ -253,9 +375,7 @@ class Check(unittest.TestCase):
                                  "writes\n"
                                  "gen_definitions: run python3 bench/gen_definitions.py and commit the result\n")
         status, output = self.run_script(bench)
-        self.assertEqual((status, output), (0, "gen_definitions: wrote 21 files to bench/definitions/, "
-                                               "bench/definitions-scenarios/, bench/definitions-crud/ and "
-                                               "bench/requests-crud.json\n"))
+        self.assertEqual((status, output), (0, f"gen_definitions: wrote 33 files to {self.SETS}\n"))
         status, output = self.run_script(bench, "--check")
         self.assertEqual(status, 0, output)
 
@@ -273,6 +393,38 @@ class Check(unittest.TestCase):
         status, _ = self.run_script(bench)
         self.assertEqual(status, 0)
         self.assertEqual((bench / "requests-crud.json").read_bytes(), (BENCH / "requests-crud.json").read_bytes())
+
+    def test_a_changed_body_set_or_mix_of_the_grpc_variant_or_a_file_it_does_not_write_fails_and_is_named(self):
+        # Bodies and the set are compared octet for octet. A file the script
+        # does not write is named too, and a run deletes it.
+        bench = self.copy()
+        body = bench / "requests-grpc" / "get-order.grpc"
+        body.write_bytes(body.read_bytes()[:-1] + b"\x04")
+        grpc_set = bench / "definitions-grpc" / "files" / "shop.binpb"
+        grpc_set.write_bytes(grpc_set.read_bytes() + b"\x00")
+        (bench / "requests-grpc" / "old.grpc").write_bytes(b"\x00\x00\x00\x00\x00")
+        (bench / "requests-grpc.json").unlink()
+        status, output = self.run_script(bench, "--check")
+        self.assertEqual(status, 1, output)
+        self.assertEqual(output, "gen_definitions: bench/definitions-grpc/files/shop.binpb is not what the script "
+                                 "writes\n"
+                                 "gen_definitions: bench/requests-grpc.json is not what the script writes\n"
+                                 "gen_definitions: bench/requests-grpc/get-order.grpc is not what the script writes\n"
+                                 "gen_definitions: bench/requests-grpc/old.grpc is not what the script writes\n"
+                                 "gen_definitions: run python3 bench/gen_definitions.py and commit the result\n")
+        status, _ = self.run_script(bench)
+        self.assertEqual(status, 0)
+        self.assertFalse((bench / "requests-grpc" / "old.grpc").exists())
+        for name in ("requests-grpc/get-order.grpc", "definitions-grpc/files/shop.binpb", "requests-grpc.json"):
+            self.assertEqual((bench / name).read_bytes(), (BENCH / name).read_bytes(), name)
+        # The set comes from the fixtures: one that changes there changes
+        # what the script writes.
+        fixture = bench.parent / "fixtures" / "protobuf" / "bench" / "shop.binpb"
+        fixture.write_bytes(fixture.read_bytes() + b"\x00")
+        status, output = self.run_script(bench, "--check")
+        self.assertEqual(status, 1, output)
+        self.assertIn("gen_definitions: bench/definitions-grpc/files/shop.binpb is not what the script writes\n",
+                      output)
 
 
 if __name__ == "__main__":

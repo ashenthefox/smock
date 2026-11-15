@@ -532,13 +532,14 @@ def traffic_check_line(profile, tls_answers=True):
                               "error": None if tls_answers else "timed out"}}}
 
 
-def step_result(profile, cpu_limit, memory_limit, rate):
-    """A step of http-keep-alive at `rate` under a profile, as the load
-    generator reports it: every request answered, smock at 30 µs each."""
+def step_result(profile, cpu_limit, memory_limit, rate, case="http-keep-alive", protocol="http"):
+    """A step of `case`, by default http-keep-alive, over `protocol`, at
+    `rate` under a profile, as the load generator reports it: every request
+    answered, smock at 30 µs each."""
     return {
-        "id": f"http-keep-alive@{profile}@{rate}", "case": "http-keep-alive", "profile": profile,
+        "id": f"{case}@{profile}@{rate}", "case": case, "profile": profile,
         "cpu_limit": cpu_limit, "memory_limit": memory_limit, "rate": rate, "ramp_s": 2, "duration_s": 20,
-        "tail_s": 3, "connections": 64, "protocol": "http", "connection": "keep-alive", "idle_connections": 0,
+        "tail_s": 3, "connections": 64, "protocol": protocol, "connection": "keep-alive", "idle_connections": 0,
         "achieved_rate": rate, "errors": 0,
         "latency_ms": {"p50": 1.2, "p90": 1.6, "p99": 2.0, "p99_9": 2.5, "max": 4.0},
         "latency_from_release_ms": {"p50": 0.3, "p90": 0.5, "p99": 1.0, "p99_9": 1.5, "max": 3.0},
@@ -567,7 +568,7 @@ def generator_log(profile="small", cpu_limit="250m", memory_limit="512Mi", rates
 
 
 def variant_generator_log(commits, rounds=4, profile="small", cpu_limit="250m", memory_limit="512Mi",
-                          rates=(500, 1000), skipped=()):
+                          rates=(500, 1000), skipped=(), case="http-keep-alive", protocol="http"):
     """What the load generator writes for a run of variants under a profile
     of the small plans, each variant's smock saying the commit of
     `commits` ({label: commit}, the baseline first): each one's start, idle
@@ -575,7 +576,8 @@ def variant_generator_log(commits, rounds=4, profile="small", cpu_limit="250m", 
     middle and the variants inner, their order turned by one each round and
     rate, every line tagged with its variant (and a run's with its round);
     then each one's done. The variants `skipped` are not scraped a second
-    into each step (no-first-second)."""
+    into each step (no-first-second). The steps are of `case`, over
+    `protocol`."""
     labels = list(commits)
     lines = []
     for label in labels:
@@ -590,7 +592,7 @@ def variant_generator_log(commits, rounds=4, profile="small", cpu_limit="250m", 
                 lines.append({"kind": "step", "variant": label, "round": round_,
                               "neighbours": {other: 0.004 for other in labels if other != label},
                               "node_steal_s": {other: 0.0 for other in labels},
-                              "result": step_result(profile, cpu_limit, memory_limit, rate)})
+                              "result": step_result(profile, cpu_limit, memory_limit, rate, case, protocol)})
     lines += [{"kind": "done", "profile": profile, "variant": label} for label in labels]
     return "".join(json.dumps(line) + "\n" for line in lines)
 
@@ -1068,8 +1070,10 @@ class Run(Script):
         self.assertEqual(status, 0, output)
         [_, generator] = self.made(["build"])
         self.assertEqual(generator["context"], ["bench/bench.py", "bench/gke/generator.py", "bench/gke/gke.py",
-                                                "bench/plan.json", "bench/requests-crud.json", "bench/requests.json",
-                                                "oha"])
+                                                "bench/plan.json", "bench/requests-crud.json",
+                                                "bench/requests-grpc.json", "bench/requests-grpc/get-order.grpc",
+                                                "bench/requests-grpc/quote-order.grpc",
+                                                "bench/requests-grpc/track-order.grpc", "bench/requests.json", "oha"])
         self.assertEqual(generator["copies"], [[["oha"], "/usr/local/bin/oha"], [["bench"], "/bench"]])
         self.assertEqual(generator["missing"], [])
 
@@ -1651,13 +1655,13 @@ def copy_repository(destination):
     """The files of the repository that a GKE run reads, copied, so that a
     test can change them."""
     for name in ("scripts/gke-bench.sh", "scripts/install-oha.sh", "scripts/build-release.sh", "Dockerfile",
-                 "bench/bench.py", "bench/requests.json", "bench/requests-crud.json", "bench/targets.json",
-                 "bench/plan-autopilot.json"):
+                 "bench/bench.py", "bench/requests.json", "bench/requests-crud.json", "bench/requests-grpc.json",
+                 "bench/targets.json", "bench/plan-autopilot.json"):
         (destination / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / name, destination / name)
     shutil.copytree(ROOT / "bench" / "gke", destination / "bench" / "gke",
                     ignore=shutil.ignore_patterns("__pycache__"))
-    for name in ("definitions", "definitions-scenarios", "definitions-crud"):
+    for name in ("definitions", "definitions-scenarios", "definitions-crud", "definitions-grpc", "requests-grpc"):
         shutil.copytree(ROOT / "bench" / name, destination / "bench" / name)
     return destination / "scripts" / "gke-bench.sh"
 
@@ -1987,11 +1991,16 @@ class Variants(Script):
                  "variant a is given twice: give each its own label"),
                 (["--variant", f"A={self.smock}", "--variant", f"b={other}"], "variant label A: use 1 to 16"),
                 (["--variant", f"a={self.smock},no-tls", "--variant", f"b={other}"],
-                 "variant a: no option no-tls; there are no-init, no-first-second, scenarios and crud"),
+                 "variant a: no option no-tls; there are no-init, no-first-second, scenarios, crud and grpc"),
                 (["--variant", f"a={self.smock},scenarios,crud", "--variant", f"b={other}"],
                  "variant a: scenarios and crud serve other definitions: give one of them"),
+                (["--variant", f"a={self.smock},grpc,no-init,crud,grpc", "--variant", f"b={other}"],
+                 "variant a: grpc and crud serve other definitions: give one of them"),
+                (["--variant", f"a={self.smock}", "--variant", f"b={other},grpc", "--variant", f"c={other}"],
+                 "variant b serves bench/definitions-grpc, which only its own case runs against, and variant a "
+                 "does not: give every variant the grpc option, or none"),
                 (["--variant", f"a={self.smock}", "--variant", "b"],
-                 "--variant b: give it as LABEL=FILE[,no-init][,no-first-second][,scenarios][,crud]"),
+                 "--variant b: give it as LABEL=FILE[,no-init][,no-first-second][,scenarios][,crud][,grpc]"),
                 (["--variant", f"a={self.smock}", "--variant", f"b={self.tmp}/missing"],
                  f"no file {self.tmp}/missing")):
             # Without --smock: a run of variants is given its binaries.
@@ -2119,9 +2128,10 @@ class Variants(Script):
         # lacks); the scenarios variant's Pod serves the Scenario variant.
         [smock_build, _] = self.made(["build"])
         self.assertEqual(smock_build["missing"], [])
-        self.assertEqual(smock_build["copies"][-3:], [[["definitions"], "/definitions"],
+        self.assertEqual(smock_build["copies"][-4:], [[["definitions"], "/definitions"],
                                                       [["definitions-scenarios"], "/definitions-scenarios"],
-                                                      [["definitions-crud"], "/definitions-crud"]])
+                                                      [["definitions-crud"], "/definitions-crud"],
+                                                      [["definitions-grpc"], "/definitions-grpc"]])
         pods = {item["metadata"]["name"]: item for call in self.made(["apply"])
                 for item in call["document"].get("items", []) if item["kind"] == "Pod"}
         self.assertEqual({name: {variable["name"]: variable["value"]
@@ -2145,9 +2155,10 @@ class Variants(Script):
         # the CRUD variant's mix beside the benchmark's.
         [smock_build, generator_build] = self.made(["build"])
         self.assertEqual(smock_build["missing"], [])
-        self.assertEqual(smock_build["copies"][-3:], [[["definitions"], "/definitions"],
+        self.assertEqual(smock_build["copies"][-4:], [[["definitions"], "/definitions"],
                                                       [["definitions-scenarios"], "/definitions-scenarios"],
-                                                      [["definitions-crud"], "/definitions-crud"]])
+                                                      [["definitions-crud"], "/definitions-crud"],
+                                                      [["definitions-grpc"], "/definitions-grpc"]])
         self.assertIn("definitions-crud/files/items.json", smock_build["context"])
         self.assertLessEqual({"bench/requests.json", "bench/requests-crud.json"}, set(generator_build["context"]))
         pods = {item["metadata"]["name"]: item for call in self.made(["apply"])
@@ -2171,6 +2182,71 @@ class Variants(Script):
         report = json.loads((self.out / "same-node.json").read_text())
         self.assertEqual([(variant["label"], variant["options"]) for variant in report["variants"]],
                          [("r2", []), ("r2c", ["crud"])])
+
+    def test_grpc_variants_serve_the_grpc_variant_and_the_load_generator_sends_them_its_calls_in_its_own_case(self):
+        # The plan's case for the gRPC variant, which the variants run alone.
+        self.plan.write_text(json.dumps({**SMALL_PLAN, "cases": [
+            *SMALL_PLAN["cases"], {**SMALL_PLAN["cases"][0], "name": "grpc-keep-alive", "protocol": "h2c",
+                                   "definitions": "definitions-grpc"}]}))
+        (self.tmp / "generator-small.log").write_text(variant_generator_log(
+            {"g1": HEAD, "g2": HEAD}, case="grpc-keep-alive", protocol="h2c"))
+        status, output = self.run_script_without_smock("--yes", "--variant", f"g1={self.smock},grpc",
+                                                       "--variant", f"g2={self.smock},grpc")
+        self.assertEqual(status, 0, output)
+        # One image of smock holds every set; the load generator's holds
+        # the gRPC variant's mix and the bodies of its calls, which oha
+        # reads.
+        [smock_build, generator_build] = self.made(["build"])
+        self.assertEqual(smock_build["missing"], [])
+        self.assertIn("definitions-grpc/files/shop.binpb", smock_build["context"])
+        self.assertLessEqual({"bench/requests-grpc.json", "bench/requests-grpc/get-order.grpc"},
+                             set(generator_build["context"]))
+        pods = {item["metadata"]["name"]: item for call in self.made(["apply"])
+                for item in call["document"].get("items", []) if item["kind"] == "Pod"}
+        self.assertEqual({name: {variable["name"]: variable["value"]
+                                 for variable in pod["spec"]["containers"][0]["env"]}["SMOCK_DIR"]
+                          for name, pod in pods.items()},
+                         {"smock-small-g1": "/definitions-grpc", "smock-small-g2": "/definitions-grpc"})
+        [job] = self.applied("Job")
+        env = {item["name"]: item["value"] for item in job["spec"]["template"]["spec"]["containers"][0]["env"]}
+        self.assertEqual((env["CASES"], env["DEFINITIONS"]), ("grpc-keep-alive", "bench/definitions-grpc"))
+        self.assertEqual({variant["label"]: variant.get("mix") for variant in json.loads(env["VARIANTS"])},
+                         {"g1": "requests-grpc.json", "g2": "requests-grpc.json"})
+        # Each of its samples says what it served and was sent, with the
+        # case's steps, and the comparison names the option.
+        for round_ in range(1, 5):
+            for label in ("g1", "g2"):
+                sample = self.out / "samples" / f"{round_}-{label}"
+                conditions = json.loads((sample / "conditions.json").read_text())
+                self.assertEqual((conditions["definitions"]["directory"], conditions["request_mix"]["file"]),
+                                 ("bench/definitions-grpc", "bench/requests-grpc.json"), (round_, label))
+                summary = json.loads((sample / "summary.json").read_text())
+                self.assertEqual([case["id"] for case in summary["cases"]],
+                                 ["grpc-keep-alive@small@500", "grpc-keep-alive@small@1000"], (round_, label))
+        report = json.loads((self.out / "same-node.json").read_text())
+        self.assertEqual([(variant["label"], variant["options"]) for variant in report["variants"]],
+                         [("g1", ["grpc"]), ("g2", ["grpc"])])
+
+    def test_a_run_of_one_smock_serves_the_benchmarks_definitions_and_leaves_the_grpc_case_out(self):
+        # Only grpc variants serve the gRPC variant: a run of one smock
+        # never runs its case, and refuses it when named.
+        self.plan.write_text(json.dumps({**SMALL_PLAN, "cases": [
+            *SMALL_PLAN["cases"], {**SMALL_PLAN["cases"][0], "name": "grpc-keep-alive", "protocol": "h2c",
+                                   "definitions": "definitions-grpc"}]}))
+        status, output = self.run_script("--yes")
+        self.assertEqual(status, 0, output)
+        [job] = self.applied("Job")
+        env = {item["name"]: item["value"] for item in job["spec"]["template"]["spec"]["containers"][0]["env"]}
+        self.assertEqual(env["CASES"], "http-keep-alive")
+        self.assertNotIn("DEFINITIONS", env)
+        [pod] = [item for call in self.made(["apply"]) for item in call["document"].get("items", [])
+                 if item["kind"] == "Pod"]
+        self.assertEqual({variable["name"]: variable["value"]
+                          for variable in pod["spec"]["containers"][0]["env"]}["SMOCK_DIR"], "/definitions")
+        status, output = self.run_script("--dry-run", "--cases", "grpc-keep-alive")
+        self.assertEqual(status, 1, output)
+        self.assertIn("case grpc-keep-alive runs only when smock serves bench/definitions-grpc, which a GKE run serves "
+                      "only to variants with the grpc option", output)
 
     def test_a_dry_run_of_variants_prints_each_image_and_each_variant_it_would_make(self):
         old = self.smock_for(HOST_ARCH, "0d984c8a1b2c")

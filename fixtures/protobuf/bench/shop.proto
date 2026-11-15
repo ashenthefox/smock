@@ -1,0 +1,91 @@
+// Written for smock's release benchmark: the gRPC Mock of its gRPC variant,
+// bench/definitions-grpc/, serves the orders of the benchmark's shop
+// through this service. Its messages hold a nested message, a repeated
+// field, 64-bit integers and enums, so that what decoding a call and
+// encoding its reply cost shows in the benchmark.
+syntax = "proto3";
+
+package bench.shop.v1;
+
+service Orders {
+  // An order by its ID and channel: a gRPC Stub for each order, matched by
+  // a condition on the request message.
+  rpc GetOrder (GetOrderRequest) returns (Order);
+  // The price of a basket: one gRPC Stub, whose templated reply repeats
+  // the request's lines.
+  rpc QuoteOrder (QuoteRequest) returns (Quote);
+  // Where an order's parcel is: NOT_FOUND, sent as Trailers-Only.
+  rpc TrackOrder (TrackOrderRequest) returns (Shipment);
+}
+
+enum Channel {
+  CHANNEL_UNSPECIFIED = 0;
+  CHANNEL_WEB = 1;
+  CHANNEL_APP = 2;
+  CHANNEL_PARTNER = 3;
+  CHANNEL_POS = 4;
+  CHANNEL_CALL_CENTER = 5;
+  CHANNEL_KIOSK = 6;
+}
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_CREATED = 1;
+  STATUS_PAID = 2;
+  STATUS_SHIPPED = 3;
+  STATUS_DELIVERED = 4;
+  STATUS_CANCELLED = 5;
+}
+
+// An amount in the currency's minor unit, such as cents.
+message Money {
+  int64 amount_minor = 1;
+  string currency = 2;
+}
+
+message Line {
+  string sku = 1;
+  int32 quantity = 2;
+  Money price = 3;
+}
+
+message GetOrderRequest {
+  string order_id = 1;
+  int64 customer_id = 2;
+  Channel channel = 3;
+}
+
+message Order {
+  string id = 1;
+  int64 customer_id = 2;
+  Status status = 3;
+  Channel channel = 4;
+  repeated Line lines = 5;
+  Money total = 6;
+  int64 placed_at_unix_ms = 7;
+}
+
+message QuoteRequest {
+  int64 customer_id = 1;
+  Channel channel = 2;
+  repeated Line lines = 3;
+  string coupon = 4;
+}
+
+message Quote {
+  int64 customer_id = 1;
+  repeated Line lines = 2;
+  Money total = 3;
+  string coupon = 4;
+}
+
+message TrackOrderRequest {
+  string order_id = 1;
+  int64 customer_id = 2;
+}
+
+message Shipment {
+  string order_id = 1;
+  string carrier = 2;
+  string tracking_number = 3;
+}

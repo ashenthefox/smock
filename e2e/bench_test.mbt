@@ -1,12 +1,15 @@
 // Seam 2 tests of the release benchmark's request mix (bench/requests.json)
 // and definition set (bench/definitions/), of the set's Scenario variant
-// (bench/definitions-scenarios/), and of its CRUD variant
+// (bench/definitions-scenarios/), of its CRUD variant
 // (bench/definitions-crud/) with the CRUD variant's own mix
-// (bench/requests-crud.json). bench/bench.py sends these requests to smock
+// (bench/requests-crud.json), and of its gRPC variant
+// (bench/definitions-grpc/) with the gRPC variant's own mix
+// (bench/requests-grpc.json). bench/bench.py sends these requests to smock
 // under load; here each one is sent once, over the plain and the TLS port
-// (and the benchmark's mix over h2c and h2 too), so that a request that no
-// longer reaches the Stub the mix names for it fails a test instead of
-// quietly measuring something else.
+// (and the benchmark's mix over h2c and h2 too; the gRPC calls over h2c
+// alone, as their case sends them), so that a request that no longer
+// reaches the Stub the mix names for it fails a test instead of quietly
+// measuring something else.
 
 ///|
 /// The benchmark's definitions directory, relative to the module root.
@@ -28,6 +31,16 @@ let bench_crud_definitions : String = "bench/definitions-crud"
 let bench_crud_mix : String = "bench/requests-crud.json"
 
 ///|
+/// The directory of the gRPC variant of the benchmark's definitions,
+/// relative to the module root.
+let bench_grpc_definitions : String = "bench/definitions-grpc"
+
+///|
+/// The request mix bench/bench.py sends the gRPC variant, relative to the
+/// module root.
+let bench_grpc_mix : String = "bench/requests-grpc.json"
+
+///|
 /// One request of the mix and what smock should do with it, as
 /// bench/requests.json gives them.
 priv struct MixRequest {
@@ -37,6 +50,10 @@ priv struct MixRequest {
   target : String
   headers : Array[(String, String)]
   body : String?
+  /// The file that holds its body, relative to bench/, which oha sends
+  /// with `-D`, as the gRPC variant's mix gives it for each call: the
+  /// framed request message. `None` in a mix whose bodies are text.
+  body_file : String?
   session : String
   status : Int32
   mock : String
@@ -45,6 +62,9 @@ priv struct MixRequest {
   /// The CRUD operation and key the Journal records for it, as the CRUD
   /// variant's mix gives them; `None` in a mix that names none.
   crud : Json?
+  /// The gRPC status the Journal records for it, as the gRPC variant's mix
+  /// gives it; `None` in a mix that names none.
+  grpc_status : String?
 }
 
 ///|
@@ -90,6 +110,16 @@ async fn read_mix(file~ : String = "bench/requests.json") -> Array[MixRequest] {
       Null => None
       _ => fail("\{name}: the body is neither a string nor null")
     }
+    let body_file = match request {
+      Object({ "bodyFile": String(file), .. }) => Some(file)
+      Object({ "bodyFile": _, .. }) => fail("\{name}: bodyFile is not a string")
+      _ => None
+    }
+    let grpc_status = match expect.get("grpcStatus") {
+      Some(String(status)) => Some(status)
+      None => None
+      Some(_) => fail("\{name}: grpcStatus is not a string")
+    }
     {
       name,
       meth,
@@ -97,12 +127,14 @@ async fn read_mix(file~ : String = "bench/requests.json") -> Array[MixRequest] {
       target,
       headers,
       body,
+      body_file,
       session,
       status: status.to_int(),
       mock,
       stub,
       via_default: via_default is True,
       crud: expect.get("crud"),
+      grpc_status,
     }
   })
 }
@@ -673,4 +705,169 @@ async test "bench/in the CRUD variant, each request of its mix gets its status f
 ///|
 async test "bench/smock check finds nothing to warn about in the CRUD variant" {
   inspect(check([bench_crud_definitions]), content="status 0\n")
+}
+
+///|
+/// The gRPC status of a reply: `grpc-status` in its trailers, or in its
+/// HEADERS when they came alone (Trailers-Only); `None` without one.
+fn GrpcReply::grpc_status(self : GrpcReply) -> String? {
+  let fields = self.trailers.unwrap_or(self.head)
+  for field in fields {
+    if field.0 == "grpc-status" {
+      return Some(field.1)
+    }
+  }
+  None
+}
+
+///|
+async test "bench/in the gRPC variant, each call of its mix gets its gRPC status from the Stub the mix names over h2c, and is in the Journal under its Session with the message smock decoded from its body" {
+  let mix = read_mix(file=bench_grpc_mix)
+  let _ = with_smock(["--dir", bench_grpc_definitions, "--port", "0"], smock => {
+    let problems = []
+    // As grpc-keep-alive sends the mix: h2c to the plain port by prior
+    // knowledge, each call in turn on one connection, with the mix's
+    // headers and its body file, which oha sends with -D.
+    let client = smock.h2c()
+    defer client.close()
+    let replies : Map[String, Json] = Map([])
+    for request in mix {
+      guard request.body_file is Some(file) else {
+        fail("\{request.name}: no body file")
+      }
+      let stream = client.send(
+        request.meth,
+        request.target,
+        authority=request.host,
+        headers=request.headers,
+        body=@fs.read_file("bench/\{file}").binary(),
+      )
+      let reply = client.reply(stream)
+      // oha counts a call by its :status alone: 200 for every gRPC status.
+      if reply.head.search((":status", request.status.to_string())) is None {
+        problems.push(
+          "\{request.name}: not \{request.status}: \{reply.render()}",
+        )
+      }
+      let shown = []
+      for octets in reply.data {
+        shown.push("DATA of \{octets.length()} octets")
+      }
+      shown.push(
+        match reply.trailers {
+          Some(_) =>
+            "trailers: grpc-status \{reply.grpc_status().unwrap_or("none")}"
+          None =>
+            "Trailers-Only: grpc-status \{reply.grpc_status().unwrap_or("none")}"
+        },
+      )
+      shown.push("(\{reply.ended})")
+      replies[request.name] = Json::string(shown.join(", "))
+    }
+    // Each call's entry: the Mock, the Stub, the HTTP status, the gRPC
+    // status and whether the Default Mock answered, as the mix names
+    // them, and the message smock decoded from the framed body, as
+    // protoc's text form of it says (fixtures/protobuf/bench/).
+    let decoded : Map[String, Json] = Map([])
+    for request in mix {
+      guard smock.journal(session=request.session)
+        is (200, Object({ "entries": Array([entry]), .. })) else {
+        fail("\{request.name}: not one entry in the Journal")
+      }
+      guard entry
+        is Object(
+          {
+            "mock": mock,
+            "stub": stub,
+            "status": status,
+            "grpcStatus": grpc_status,
+            "viaDefault": via_default,
+            "request": Object(
+              {
+                "body": Object(
+                  { "data": String(data), "size": size, "truncated": False, .. }
+                ),
+                ..
+              }
+            ),
+            ..
+          }
+        ) else {
+        fail("\{request.name}: an entry without a member: \{entry.stringify()}")
+      }
+      let expected : Json = {
+        "mock": request.mock,
+        "stub": request.stub,
+        "status": request.status,
+        "grpcStatus": request.grpc_status.map_or(Json::null(), Json::string),
+        "viaDefault": request.via_default,
+      }
+      let found : Json = {
+        "mock": mock,
+        "stub": stub,
+        "status": status,
+        "grpcStatus": grpc_status,
+        "viaDefault": via_default,
+      }
+      if found != expected {
+        problems.push(
+          "\{request.name}: expected \{expected.stringify()}, got \{found.stringify()}",
+        )
+      }
+      decoded[request.name] = { "size": size, "message": @json.parse(data) }
+    }
+    debug_inspect(problems, content="[]")
+    json_inspect(
+      { "replies": Json::object(replies), "decoded": Json::object(decoded) },
+      content={
+        "replies": {
+          "get-order": "DATA of 117 octets, trailers: grpc-status 0, (end)",
+          "quote-order": "DATA of 79 octets, trailers: grpc-status 0, (end)",
+          "track-order": "Trailers-Only: grpc-status 5, (end)",
+        },
+        "decoded": {
+          "get-order": {
+            "size": 48,
+            "message": {
+              "orderId": "7f9c2ba4-e88f-4c1a-9c5b-2d3a1e8f6b10",
+              "customerId": 10042,
+              "channel": "CHANNEL_PARTNER",
+            },
+          },
+          "quote-order": {
+            "size": 71,
+            "message": {
+              "customerId": 10042,
+              "channel": "CHANNEL_APP",
+              "lines": [
+                {
+                  "sku": "SKU-00317",
+                  "quantity": 2,
+                  "price": { "amountMinor": 2728, "currency": "EUR" },
+                },
+                {
+                  "sku": "SKU-00042",
+                  "quantity": 1,
+                  "price": { "amountMinor": 2053, "currency": "EUR" },
+                },
+              ],
+              "coupon": "WELCOME10",
+            },
+          },
+          "track-order": {
+            "size": 46,
+            "message": {
+              "orderId": "7f9c2ba4-e88f-4c1a-9c5b-2d3a1e8f6b10",
+              "customerId": 10042,
+            },
+          },
+        },
+      },
+    )
+  })
+}
+
+///|
+async test "bench/smock check finds nothing to warn about in the gRPC variant" {
+  inspect(check([bench_grpc_definitions]), content="status 0\n")
 }
