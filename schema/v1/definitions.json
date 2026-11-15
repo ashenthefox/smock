@@ -76,16 +76,20 @@
           "default": true
         },
         "grpc": {
-          "description": "The Mock's gRPC settings: the Descriptor set that its gRPC Stubs are checked against and its calls are decoded with.",
+          "description": "The Mock's gRPC settings: the Descriptor set that its gRPC Stubs are checked against and its calls are decoded with, and the built-in services it turns on. Each may be left out: a Mock that wants only the built-in services needs no set.",
           "type": "object",
           "properties": {
             "descriptorSet": {
               "description": "The Mock's Descriptor set: a self-contained FileDescriptorSet in protobuf's binary encoding, as protoc --include_imports -o or buf build -o writes it, read from a body file. It is a path relative to the body-file subdirectory of the definitions directory (files by default), such as greeter.binpb, with the path rules of bodyFile. It is read when the definitions are loaded, and a file that does not decode as a FileDescriptorSet is an error.",
               "type": "string",
               "pattern": "^(?!\\.)[^/]+(/(?!\\.)[^/]+)*$"
+            },
+            "health": {
+              "description": "Whether the Mock answers gRPC's standard health service, grpc.health.v1.Health, as gRPC's health servers do: Check and List say SERVING for the empty name and for each service of the Mock's Descriptor set, and Check gives NOT_FOUND for other names; once SIGTERM starts the drain, every answer says NOT_SERVING. Watch, which streams, gets UNIMPLEMENTED. A gRPC Stub on a health method, an Ephemeral one of the call's Session included, answers in its place. Health answers are not recorded in the Journal. Default false (off).",
+              "type": "boolean",
+              "default": false
             }
           },
-          "required": ["descriptorSet"],
           "additionalProperties": false
         }
       },

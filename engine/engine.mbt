@@ -392,6 +392,57 @@ pub fn Engine::mock_for_call(
 }
 
 ///|
+/// Whether a gRPC call to `path`, the `:path` it sends, of the Mock `mock`
+/// in `session` goes to the Stubs, as `handle` matches it: whether the
+/// Mock has a gRPC Stub on the path in its Definition files, or the
+/// Session an Ephemeral gRPC Stub of the Mock on it that answers calls.
+/// Whether any of them matches the call is not asked. A Mock's built-in
+/// services answer only the calls that do not go to the Stubs.
+pub fn Engine::has_grpc_stub(
+  self : Engine,
+  mock : @definitions.Mock,
+  path : String,
+  session~ : String?,
+) -> Bool {
+  if mock.grpc_candidates(path).length() > 0 {
+    return true
+  }
+  guard self.ephemeral.of(mock.name, session) is Some(list) else {
+    return false
+  }
+  for e in list {
+    if e.answers is GrpcCalls &&
+      e.stub.serves
+      is Ordinary({ request: { path: Some(Has(Exact(on))), .. }, .. }) &&
+      on == path {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// The value of smock's own `Smock-Mock` field on an answer to the gRPC
+/// call `request` that no Stub gives, such as a built-in service's: the
+/// Mock's name and `via=default` when the Default Mock answers the call,
+/// as `handle` adds it to every answer of the Default Mock, or `None` when
+/// a Mock's Hosts include the call's Host, given by `authority` when given.
+pub fn Engine::default_mock_field(
+  self : Engine,
+  request : Request,
+  authority? : String,
+) -> String? {
+  if host_of(request, authority) is Some(host) &&
+    self.snapshot.mock_for_host(host) is Some(_) {
+    return None
+  }
+  match self.snapshot.default_mock() {
+    Some(mock) => Some("\{header_safe(mock.name)}; via=default")
+    None => None
+  }
+}
+
+///|
 /// What a reload did.
 #derive(Debug)
 pub(all) struct ReloadResult {

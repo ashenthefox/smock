@@ -1,0 +1,8 @@
+statuses {
+  key: ""
+  value { status: NOT_SERVING }
+}
+statuses {
+  key: "helloworld.Greeter"
+  value { status: NOT_SERVING }
+}

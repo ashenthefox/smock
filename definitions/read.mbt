@@ -189,6 +189,8 @@ priv struct MockDecl {
   journal : Bool
   /// The Descriptor set that `grpc.descriptorSet` names, decoded, if any.
   descriptor_set : @protobuf.DescriptorSet?
+  /// Whether the Mock's built-in health service answers: `grpc.health`.
+  health : Bool
 }
 
 ///|
@@ -403,7 +405,7 @@ fn File::read_mock(self : File, pointer : String, json : Json) -> MockDecl? {
   let mut no_match_status = 404
   let mut no_match_headers = []
   let mut journal = true
-  let mut descriptor_set = None
+  let mut grpc = no_grpc
   for key, value in mock {
     let field = child_pointer(pointer, key)
     match key {
@@ -426,7 +428,7 @@ fn File::read_mock(self : File, pointer : String, json : Json) -> MockDecl? {
           False => journal = false
           _ => self.error(field, "must be true or false")
         }
-      "grpc" => descriptor_set = self.read_grpc(field, value)
+      "grpc" => grpc = self.read_grpc(field, value)
       _ => self.unknown_field(field)
     }
   }
@@ -438,33 +440,52 @@ fn File::read_mock(self : File, pointer : String, json : Json) -> MockDecl? {
     no_match_status,
     no_match_headers,
     journal,
-    descriptor_set,
+    descriptor_set: grpc.descriptor_set,
+    health: grpc.health,
   })
 }
 
 ///|
-/// Reads a Mock's `grpc`, a closed object, and returns the Descriptor set
-/// its `descriptorSet` names, decoded, or `None`, with the problem
-/// reported, when there is none.
-fn File::read_grpc(
-  self : File,
-  pointer : String,
-  json : Json,
-) -> @protobuf.DescriptorSet? {
+/// What a Mock's `grpc` gives.
+priv struct GrpcFields {
+  /// The Descriptor set that `descriptorSet` names, decoded, or `None`
+  /// when it names none, or one that is not there or does not decode.
+  descriptor_set : @protobuf.DescriptorSet?
+  /// `health`: whether the built-in health service answers.
+  health : Bool
+}
+
+///|
+/// What a Mock without `grpc` has: no Descriptor set and no built-in
+/// service.
+let no_grpc : GrpcFields = { descriptor_set: None, health: false, }
+
+///|
+/// Reads a Mock's `grpc`, a closed object: the Descriptor set its
+/// `descriptorSet` names, decoded, or none, with the problem reported, and
+/// whether its `health` turns the built-in health service on. Either may
+/// be left out, so a Mock may turn health on without a set.
+fn File::read_grpc(self : File, pointer : String, json : Json) -> GrpcFields {
   guard json is Object(grpc) else {
     self.error(pointer, "must be an object")
-    return None
+    return no_grpc
   }
   let mut descriptor_set = None
+  let mut health = false
   for key, value in grpc {
     let field = child_pointer(pointer, key)
     match key {
       "descriptorSet" => descriptor_set = self.read_descriptor_set(field, value)
+      "health" =>
+        match value {
+          True => health = true
+          False => ()
+          _ => self.error(field, "must be true or false")
+        }
       _ => self.unknown_field(field)
     }
   }
-  self.require(grpc, pointer, "descriptorSet")
-  descriptor_set
+  { descriptor_set, health, }
 }
 
 ///|

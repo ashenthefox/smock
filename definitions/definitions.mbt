@@ -99,6 +99,10 @@ pub struct Mock {
   /// The Descriptor set that the Mock's `grpc.descriptorSet` names,
   /// decoded, or `None` when it names none.
   descriptor_set : @protobuf.DescriptorSet?
+  /// Whether the Mock's built-in health service, `grpc.health.v1.Health`,
+  /// answers the gRPC calls to it that no Stub is on: the Mock's
+  /// `grpc.health`, false by default.
+  health : Bool
   /// The Stubs of this Mock, in the order they are tried: by priority,
   /// lower numbers first and Stubs without a priority last; Stubs of equal
   /// priority in declaration order, that is file-name order, then position
@@ -1377,6 +1381,7 @@ pub fn ValidSet::snapshot(self : ValidSet, digest~ : String) -> Snapshot {
           no_match_headers: ReadOnlyArray::from_array([]),
           journal: true,
           descriptor_set: None,
+          health: false,
           stubs: ReadOnlyArray::from_array([]),
           http_stubs: ReadOnlyArray::from_array([]),
           index: MatchIndex::new(ReadOnlyArray::from_array([])),
@@ -1420,6 +1425,7 @@ pub fn ValidSet::snapshot(self : ValidSet, digest~ : String) -> Snapshot {
       no_match_headers: ReadOnlyArray::from_array(mock.no_match_headers),
       journal: mock.journal,
       descriptor_set: mock.descriptor_set,
+      health: mock.health,
       stubs,
       http_stubs,
       index: MatchIndex::new(http_stubs),
