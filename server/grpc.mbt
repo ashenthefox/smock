@@ -256,8 +256,8 @@ priv enum CallAnswer {
   /// it has error details (`status_details`).
   Status(@engine.GrpcPart, Bytes?)
   /// smock's own Trailers-Only INTERNAL, with the fixed `message`, in place
-  /// of a reply that the plan holds but that smock cannot send, since it
-  /// does not fit its type, with the template error that says why, if there
+  /// of a reply message or error details that the plan holds but that do
+  /// not fit their type, with the template error that says why, if there
   /// is one.
   Internal(message~ : String, template_error~ : @engine.TemplateError?)
 }
@@ -274,9 +274,9 @@ priv enum CallAnswer {
 /// not OK, smock's own failures included, gets the google.rpc.Status of
 /// its error details, if it has any, as `status_details` builds it, and a
 /// detail that does not fit its type gets INTERNAL `template failed` too.
-/// It runs with no await after the
-/// second lookup, the decoding and `handle`, so a reload never splits
-/// them, even when the answer then waits for the plan's delay.
+/// It runs with no await after the second lookup, the decoding and
+/// `handle`, so a reload never splits them, even when the answer then
+/// waits for the plan's delay.
 fn call_answer(
   set : @protobuf.DescriptorSet,
   rpc : @protobuf.MethodDescriptor,
