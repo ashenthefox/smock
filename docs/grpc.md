@@ -1337,7 +1337,8 @@ block as RFC 7541 counts a header list, the way HTTP/2 counts
 SETTINGS_MAX_HEADER_LIST_SIZE: each field's name and value, in octets,
 plus 32. smock's own fields count too: `:status`, `content-type`,
 `grpc-status`, `grpc-message` once percent-encoded,
-`grpc-status-details-bin`, `smock-mock` and `date`. So the Trailers-Only answer of `try again ☺` takes 275 octets:
+`grpc-status-details-bin`, `smock-mock` and `date`. So the Trailers-Only
+answer of `try again ☺` takes 275 octets:
 
 | Field | Octets |
 |---|---|
