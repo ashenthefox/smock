@@ -3,9 +3,11 @@
 Protobuf for MoonBit: the wire format, a reader of Descriptor sets
 (FileDescriptorSets), the compiled form of `.proto` files that
 `protoc --include_imports -o` and `buf build -o` write, and messages
-decoded into JSON and encoded from it with their types from a set. smock
-reads a Mock's Descriptor set with it, and decodes and encodes the
-messages of gRPC calls. The module does no I/O and depends only on
+decoded into JSON and encoded from it with their types from a set. It
+prints JSON in two forms: smock's decoded form, and canonical ProtoJSON
+([Two forms of JSON](#two-forms-of-json)). smock reads a Mock's
+Descriptor set with it, and decodes and encodes the messages of gRPC
+calls. The module does no I/O and depends only on
 `moonbitlang/core`. It builds for every MoonBit target and is tested on
 native and `wasm-gc`.
 
@@ -392,6 +394,65 @@ test "decode a message, and encode one" {
 }
 ```
 
+## Two forms of JSON
+
+The module prints a message in two forms of JSON, each compact text in
+UTF-8.
+
+- `decode_json` prints smock's decoded form, above. smock serves gRPC
+  calls with it: the engine, the Journal and templates see it. It prints
+  every field without presence, so the condition `{count: 0}` meets a
+  message that leaves `count` out, and it writes a 64-bit integer as a
+  number, which conditions compare exactly.
+- `@protobuf.decode_canonical_json(set, message, input, limit~)` prints
+  canonical ProtoJSON, as protobuf's JSON printers write it with their
+  defaults. Tools that check JSON against protobuf's own read it, as
+  protobuf's conformance suite does. smock serves no call with it.
+
+Canonical ProtoJSON differs from the decoded form in three ways:
+
+- A 64-bit integer (int64, uint64, sint64, fixed64 and sfixed64) is a
+  string of its digits, such as `"42"`, and so is the value an Int64Value
+  or a UInt64Value wraps. Map keys are strings in both forms.
+- A field without presence is left out at its default, even when the
+  message holds it, and so is a repeated field or a map that holds no
+  element. A field with presence, such as a proto3 `optional` field, a
+  member of a oneof or a message, prints whenever the message holds it,
+  at its default too.
+- A double or a float of negative zero prints `-0`, and is not a default.
+  The decoded form prints `0`.
+
+Everything else is the same in both: field names and their order, map
+entries in key order, enums, bytes, the well-known types, extensions and
+groups, the errors, and the limit on the JSON and on what is held to
+print it. Numbers print in the shortest form that reads
+back as the same value, as protobuf-go writes them; protobuf's C++
+printer may write other digits for the same value, such as `1e-07` for
+`1e-7`, and reads both. An Any that holds an Empty prints its `@type`
+alone, as protobuf's C++ and Python printers write it, where protobuf-go
+adds `"value": {}`.
+
+```mbt check
+///|
+test "the decoded form and canonical ProtoJSON" {
+  // message User { int64 id = 1; string name = 2; }
+  let set = @protobuf.read_descriptor_set(
+    b"\x0a\x43\x0a\x07a.proto\x12\x04demo\x22\x2a\x0a\x04User\x12\x0e\x0a\x02id\x18\x01\x20\x01\x28\x03\x52\x02id\x12\x12\x0a\x04name\x18\x02\x20\x01\x28\x09\x52\x04name\x62\x06proto3"[:],
+  )
+  let user = set.files[0].messages[0]
+  // id: 42, and no name.
+  let input = b"\x08\x2a"[:]
+  inspect(
+    @utf8.decode(@protobuf.decode_json(set, user, input, limit=1024)),
+    content="{\"id\":42,\"name\":\"\"}",
+  )
+  inspect(
+    @utf8.decode(@protobuf.decode_canonical_json(set, user, input, limit=1024)),
+    content="{\"id\":\"42\"}",
+  )
+}
+```
+
 ## Well-known types
 
 `decode_json` and `encode_json` give protobuf's well-known types their
@@ -410,7 +471,8 @@ known by its full name, such as `google.protobuf.Duration`.
 - A FieldMask prints as its paths in lowerCamelCase, joined by commas,
   such as `"userName,address.city"`.
 - A wrapper prints as the value it wraps, as its type prints: an
-  Int64Value as a number, a FloatValue as a float.
+  Int64Value as a number, or a string in canonical ProtoJSON, a FloatValue
+  as a float.
 - Empty prints as `{}`.
 - A Struct, a Value and a ListValue print as the JSON values they hold: a
   Struct as an object in key order, a ListValue as an array, and a Value

@@ -134,15 +134,52 @@ pub fn decode_json(
   input : BytesView,
   limit~ : Int32,
 ) -> Bytes raise DecodeError {
-  // Twice the input, as a guess, but never more than the limit.
-  let guess = if input.length() > (limit - 16) / 2 {
+  let out = Output::new(size_hint=json_size_hint(input, limit), limit~)
+  set.print_message(out, message, [input], 0, canonical=false)
+  out.to_bytes()
+}
+
+///|
+/// Decodes `input`, a message of the type `message` of `set` in protobuf's
+/// binary encoding, into canonical ProtoJSON, as protobuf's JSON printers
+/// write it with their defaults: compact JSON text in UTF-8, the form that
+/// protobuf's conformance suite reads. It differs from smock's decoded
+/// form, which `decode_json` prints, in three ways:
+///
+/// - A 64-bit integer (int64, uint64, sint64, fixed64 and sfixed64) is a
+///   string of its digits, such as `"42"`, and so is the value an
+///   Int64Value or a UInt64Value wraps.
+/// - A field without presence is left out at its default, and so is a
+///   repeated field or a map that holds no element. A field with presence
+///   is printed whenever the message holds it, at its default too, as in
+///   the decoded form.
+/// - A double or a float of negative zero is `-0`, and is not a default.
+///
+/// Everything else is as `decode_json` prints it, and so are the errors it
+/// raises, `TooLarge` past `limit` included: field names, the order of
+/// fields and map entries, enums, numbers, bytes, the well-known types,
+/// extensions and groups.
+pub fn decode_canonical_json(
+  set : DescriptorSet,
+  message : MessageDescriptor,
+  input : BytesView,
+  limit~ : Int32,
+) -> Bytes raise DecodeError {
+  let out = Output::new(size_hint=json_size_hint(input, limit), limit~)
+  set.print_message(out, message, [input], 0, canonical=true)
+  out.to_bytes()
+}
+
+///|
+/// The room to make for the JSON text of `input` that may take at most
+/// `limit` octets: twice the input, as a guess, but never more than the
+/// limit.
+fn json_size_hint(input : BytesView, limit : Int32) -> Int32 {
+  if input.length() > (limit - 16) / 2 {
     limit
   } else {
     2 * input.length() + 16
   }
-  let out = Output::new(size_hint=guess, limit~)
-  set.print_message(out, message, [input], 0)
-  out.to_bytes()
 }
 
 ///|
@@ -316,13 +353,16 @@ fn DescriptorSet::scan(
 ///|
 /// Prints to `out` the message of the type `message` whose values are
 /// `records`, merged in order, `depth` messages deep in the message that
-/// `decode_json` decodes, as `decode_json` prints it.
+/// `decode_json` decodes, as `decode_json` prints it, or in canonical
+/// ProtoJSON, as `decode_canonical_json` prints it, when `canonical` says
+/// so. The functions it calls take `canonical` with the same meaning.
 fn DescriptorSet::print_message(
   self : DescriptorSet,
   out : Output,
   message : MessageDescriptor,
   records : Array[BytesView],
   depth : Int32,
+  canonical~ : Bool,
 ) -> Unit raise DecodeError {
   if message.syntax is Editions {
     raise DecodeError(
@@ -339,7 +379,7 @@ fn DescriptorSet::print_message(
   // What the message's scan holds is let go once it is printed.
   let held = out.held
   if well_known_form(message) is Some(form) {
-    self.print_well_known(out, message, form, records, depth)
+    self.print_well_known(out, message, form, records, depth, canonical~)
     out.release_to(held)
     return
   }
@@ -375,9 +415,11 @@ fn DescriptorSet::print_message(
       )
     }
     // An extension is printed only when the message holds it, as
-    // ProtoJSON prints it, a repeated one too.
+    // ProtoJSON prints it, a repeated one too. Canonical ProtoJSON leaves
+    // out every field the message leaves out.
     if value is None &&
       (
+        canonical ||
         extension ||
         (
           !(field.label is Repeated) &&
@@ -388,6 +430,11 @@ fn DescriptorSet::print_message(
           )
         )
       ) {
+      continue
+    }
+    if canonical &&
+      value is Some(given) &&
+      self.leaves_out(field, given, extension~, proto2~) {
       continue
     }
     if !first {
@@ -401,13 +448,111 @@ fn DescriptorSet::print_message(
     }
     out.write_byte(b':')
     if field.label is Repeated {
-      self.print_repeated(out, field, value, depth)
+      self.print_repeated(out, field, value, depth, canonical~)
     } else {
-      self.print_value(out, field, value, depth)
+      self.print_value(out, field, value, depth, canonical~)
     }
   }
   out.write_byte(b'}')
   out.release_to(held)
+}
+
+///|
+/// Whether canonical ProtoJSON leaves out `field`, a field of a message,
+/// of a proto2 file when `proto2` says so, or an extension that extends
+/// it, when `extension` says so, though the message holds `value` for it:
+/// when it is a repeated field or a map that holds no element, or a field
+/// without presence at its default. A field has presence when it is an
+/// extension, a singular field of a proto2 message, a member of a oneof, a
+/// proto3 `optional` field included, or a message or a group.
+fn DescriptorSet::leaves_out(
+  self : DescriptorSet,
+  field : FieldDescriptor,
+  value : Value,
+  extension~ : Bool,
+  proto2~ : Bool,
+) -> Bool raise DecodeError {
+  match value {
+    Elements(runs) => !self.holds_elements(field, runs)
+    _ if extension || proto2 || field.oneof_index is Some(_) => false
+    // A 32-bit type keeps the low 32 bits of a varint, as protobuf's
+    // parsers read it.
+    Number(bits) =>
+      match field.type_ {
+        Int64 | UInt64 | SInt64 | Fixed64 | SFixed64 | Double | Bool =>
+          bits == 0
+        _ => bits.to_uint() == 0
+      }
+    Octets(octets) => octets.length() == 0
+    Messages(_) => false
+  }
+}
+
+///|
+/// Whether `field`, a repeated field whose records are in `runs`, holds an
+/// element that `print_repeated` prints. It holds none when its records
+/// are packed records of no values, or numbers that a closed enum does not
+/// define, which a list leaves out, as a map leaves out entries whose
+/// values they are.
+fn DescriptorSet::holds_elements(
+  self : DescriptorSet,
+  field : FieldDescriptor,
+  runs : Array[BytesView],
+) -> Bool raise DecodeError {
+  if self.message_of(field) is Some(entry) &&
+    entry.map_entry &&
+    is_map_entry(entry) {
+    guard self.closed_enum_of(entry.fields[entry.field_index(2)])
+      is Some(closed) else {
+      return runs.length() > 0
+    }
+    for r in 0..<runs.length() {
+      let reader = Reader(runs[r])
+      while !reader.at_end() {
+        ignore(reader.tag())
+        let fields = Reader(reader.length_delimited())
+        // The entry's last value wins, as `print_map` reads it.
+        let mut defined = true
+        while !fields.at_end() {
+          match (fields.tag(), fields.wire_type()) {
+            (2, Varint) => defined = closed.defines(fields.varint())
+            _ => fields.skip()
+          }
+        }
+        if defined {
+          return true
+        }
+      }
+    }
+    return false
+  }
+  let closed = self.closed_enum_of(field)
+  for r in 0..<runs.length() {
+    let reader = Reader(runs[r])
+    while !reader.at_end() {
+      ignore(reader.tag())
+      match (field.type_, reader.wire_type()) {
+        (String | Bytes | Message | Group, _) => return true
+        // A packed record of values.
+        (_, Len) => {
+          let values = Reader(reader.length_delimited())
+          while !values.at_end() {
+            let bits = values.number(field.type_)
+            if !(closed is Some(type_) && !type_.defines(bits)) {
+              return true
+            }
+          }
+        }
+        _ => {
+          let bits = reader.number(field.type_)
+          if !(closed is Some(type_) && !type_.defines(bits)) {
+            return true
+          }
+        }
+      }
+    }
+  }
+  false
 }
 
 ///|
@@ -420,6 +565,7 @@ fn DescriptorSet::print_repeated(
   field : FieldDescriptor,
   value : Value?,
   depth : Int32,
+  canonical~ : Bool,
 ) -> Unit raise DecodeError {
   let runs = match value {
     Some(Elements(runs)) => runs
@@ -427,8 +573,8 @@ fn DescriptorSet::print_repeated(
   }
   match self.message_of(field) {
     Some(entry) if entry.map_entry && is_map_entry(entry) =>
-      self.print_map(out, entry, runs, depth)
-    _ => self.print_list(out, field, runs, depth)
+      self.print_map(out, entry, runs, depth, canonical~)
+    _ => self.print_list(out, field, runs, depth, canonical~)
   }
 }
 
@@ -441,6 +587,7 @@ fn DescriptorSet::print_value(
   field : FieldDescriptor,
   value : Value?,
   depth : Int32,
+  canonical~ : Bool,
 ) -> Unit raise DecodeError {
   match value {
     Some(Messages(list)) => {
@@ -451,7 +598,8 @@ fn DescriptorSet::print_value(
         )
       }
       match self.message_of(field) {
-        Some(type_) => self.print_message(out, type_, list, depth + 1)
+        Some(type_) =>
+          self.print_message(out, type_, list, depth + 1, canonical~)
         // Never: a message field's type is a message of its set.
         None => out.write_bytes(b"{}")
       }
@@ -464,14 +612,14 @@ fn DescriptorSet::print_value(
         // file were checked when the message was scanned.
         write_json_string(out, octets, repair=field.syntax is Proto2)
       }
-    Some(Number(bits)) => self.print_number(out, field, bits)
+    Some(Number(bits)) => self.print_number(out, field, bits, canonical~)
     None | Some(Elements(_)) =>
       match field.type_ {
         String | Bytes => out.write_bytes(b"\"\"")
         // Never: a message field the message leaves out is not printed,
         // and a map value is given.
         Message | Group => out.write_bytes(b"{}")
-        _ => self.print_number(out, field, 0)
+        _ => self.print_number(out, field, 0, canonical~)
       }
   }
 }
@@ -486,6 +634,7 @@ fn DescriptorSet::print_list(
   field : FieldDescriptor,
   runs : Array[BytesView],
   depth : Int32,
+  canonical~ : Bool,
 ) -> Unit raise DecodeError {
   out.write_byte(b'[')
   // The strings of a proto3 file were checked when the message was
@@ -518,7 +667,7 @@ fn DescriptorSet::print_list(
                   message="messages nest deeper than \{max_depth}",
                 )
               }
-              self.print_message(out, type_, [element], depth + 1)
+              self.print_message(out, type_, [element], depth + 1, canonical~)
             }
             None if field.type_ is Bytes => write_base64(out, element)
             None => write_json_string(out, element, repair=!checked)
@@ -536,7 +685,7 @@ fn DescriptorSet::print_list(
               out.write_byte(b',')
             }
             first = false
-            self.print_number(out, field, bits)
+            self.print_number(out, field, bits, canonical~)
           }
         }
         _ => {
@@ -548,7 +697,7 @@ fn DescriptorSet::print_list(
             out.write_byte(b',')
           }
           first = false
-          self.print_number(out, field, bits)
+          self.print_number(out, field, bits, canonical~)
         }
       }
     }
@@ -605,6 +754,7 @@ fn DescriptorSet::print_map(
   entry : MessageDescriptor,
   runs : Array[BytesView],
   depth : Int32,
+  canonical~ : Bool,
 ) -> Unit raise DecodeError {
   // Each entry is held, with its key and its place in the map's order,
   // until the map is printed.
@@ -741,7 +891,7 @@ fn DescriptorSet::print_map(
       Some(Octets(text)) => write_json_string(out, text, repair=!checked)
       Some(Number(bits)) => {
         out.write_byte(b'"')
-        self.print_number(out, key_field, bits)
+        self.print_number(out, key_field, bits, canonical=false)
         out.write_byte(b'"')
       }
       _ =>
@@ -749,7 +899,7 @@ fn DescriptorSet::print_map(
           out.write_bytes(b"\"\"")
         } else {
           out.write_byte(b'"')
-          self.print_number(out, key_field, 0)
+          self.print_number(out, key_field, 0, canonical=false)
           out.write_byte(b'"')
         }
     }
@@ -760,7 +910,7 @@ fn DescriptorSet::print_map(
         Some(Messages([entries[i][0:0]]))
       value => value
     }
-    self.print_value(out, value_field, value, depth + 1)
+    self.print_value(out, value_field, value, depth + 1, canonical~)
     out.release_to(before)
   }
   out.write_byte(b'}')
@@ -882,14 +1032,25 @@ fn sorted_entries(
 ///|
 /// Prints to `out` the value of `field`, a scalar or an enum field other
 /// than a string or bytes, whose bits are `bits`: a varint, or a fixed
-/// 32-bit or 64-bit value.
+/// 32-bit or 64-bit value. In canonical ProtoJSON, as `canonical` says, a
+/// 64-bit integer is a string, and a double or a float of negative zero is
+/// `-0`, as protobuf's printers keep its sign.
 fn DescriptorSet::print_number(
   self : DescriptorSet,
   out : Output,
   field : FieldDescriptor,
   bits : UInt64,
+  canonical~ : Bool,
 ) -> Unit raise DecodeError {
   match field.type_ {
+    Int64 | SFixed64 | UInt64 | Fixed64 | SInt64 if canonical => {
+      out.write_byte(b'"')
+      self.print_number(out, field, bits, canonical=false)
+      out.write_byte(b'"')
+    }
+    Double if canonical && bits == 0x8000_0000_0000_0000UL =>
+      out.write_bytes(b"-0")
+    Float if canonical && bits == 0x8000_0000UL => out.write_bytes(b"-0")
     Bool => out.write_bytes(if bits != 0 { b"true" } else { b"false" })
     Int64 | SFixed64 => write_signed(out, bits.reinterpret_as_int64())
     UInt64 | Fixed64 => write_unsigned(out, bits)
