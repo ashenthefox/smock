@@ -1935,9 +1935,11 @@ excess shows, before it reads the rest:
 - on a DATA frame, when the octets received pass the limit. smock keeps
   none of them.
 
-So with `--body-limit 10`, a call whose framed message takes 10 octets is
-served, and a prefix that announces 6 octets gets RESOURCE_EXHAUSTED at
-once, then RST_STREAM `NO_ERROR`.
+So with `--body-limit 32`, a call whose framed message takes 32 octets
+passes, and a prefix that announces 28 octets gets RESOURCE_EXHAUSTED at
+once, then RST_STREAM `NO_ERROR`. The message's JSON must fit within the
+limit too, so a small limit refuses messages that a body of its size can
+hold ([The decoder's limits](#the-decoders-limits)).
 
 `--header-size-limit` bounds a call's header list, as it bounds an HTTP
 request's, and also each block of a reply's metadata: a reply over it, or
