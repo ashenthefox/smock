@@ -78,8 +78,10 @@ fn pick_response(ordinary : @definitions.Ordinary, draw : UInt64) -> Int32? {
 /// The reply to a gRPC call, when `grpc` is true, gets the plan's gRPC
 /// part last: the status of the response's `grpc`, `OK` without one, its
 /// message, as written or rendered after the body, its trailing metadata,
-/// as written or rendered after the message, and the reply message encoded
-/// when the files were loaded, if it was. The header fields are its
+/// as written or rendered after the message, its error details, as written
+/// with google.rpc.Status encoded when the files were loaded, or rendered
+/// after the trailing metadata, and the reply message encoded when the
+/// files were loaded, if it was. The header fields are its
 /// initial metadata. A rendered value of either that gRPC metadata cannot
 /// carry is a render error (`sent_metadata`).
 ///
@@ -261,6 +263,7 @@ fn plan_response(
         data~,
         copies~,
       )
+      context = Some(rendering)
       let trailers = Array(capacity=fields.length())
       for i in 0..<fields.length() {
         let field = fields[i]
@@ -274,6 +277,25 @@ fn plan_response(
       ReadOnlyArray::from_array(trailers)
     }
   }
+  let (details, encoded_status) = match reply.details {
+    Written(details, encoded_status) => (details, encoded_status)
+    Templated(templates) => {
+      let rendering = rendering_for(
+        incoming,
+        context,
+        now~,
+        draw~,
+        vars~,
+        data~,
+        copies~,
+      )
+      let details = Array(capacity=templates.length())
+      for i in 0..<templates.length() {
+        details.push(templates[i].render_value(rendering))
+      }
+      (ReadOnlyArray::from_array(details), None)
+    }
+  }
   {
     ..plan,
     grpc: Some({
@@ -281,6 +303,8 @@ fn plan_response(
       message,
       trailers,
       encoded: response.encoded,
+      details,
+      encoded_status,
     }),
   }
 }
