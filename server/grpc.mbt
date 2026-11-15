@@ -11,10 +11,11 @@
 // without waiting for its message. Once the request has ended, the call is
 // looked up again, its one message is taken from the body and decoded into
 // JSON, and the engine decides the call as a POST to the method's path,
-// with the metadata as headers, the JSON as the body and the gRPC call
-// marker. The reply is the message that a static reply was encoded into
-// when the files were loaded, or else the rendered reply JSON, encoded here
-// with the method's output type. It is written as gRPC writes it: HEADERS
+// with the metadata as headers, `-bin` values without their padding
+// (`H2Request::new`), the JSON as the body and the gRPC call marker. The
+// reply is the message that a static reply was encoded into when the
+// files were loaded, or else the rendered reply JSON, encoded here with
+// the method's output type. It is written as gRPC writes it: HEADERS
 // with the reply's initial metadata, one DATA frame with the framed
 // message, then trailers with `grpc-status: 0`, the reply's
 // `grpc-message`, if it gives one, and its trailing metadata. The

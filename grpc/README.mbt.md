@@ -175,7 +175,9 @@ grammar. A name holds one or more of `0-9`, `a-z`, `_`, `-` and `.`, and
 gRPC keeps `content-type`, `te` and every name that starts with `grpc-` for
 itself. The value of ASCII metadata holds characters from 0x20 to 0x7E.
 Binary metadata has a name that ends with `-bin`, and its value is
-standard base64, padded or not, which gRPC sends without its padding.
+standard base64, padded or not, which gRPC sends without its padding. A
+call's binary metadata loses its padding too, so that padded and unpadded
+clients look alike.
 
 - `@grpc.is_metadata_name(name)` tells a name of the grammar, given in
   lower case; `@grpc.is_reserved_name(name)` one that gRPC keeps.
@@ -183,6 +185,11 @@ standard base64, padded or not, which gRPC sends without its padding.
 - `@grpc.is_ascii_value(value)` tells the value of ASCII metadata.
 - `@grpc.unpadded_base64(value)` gives the value of binary metadata without
   its padding, or `None` when it is not base64. It copies nothing.
+- `@grpc.unpadded_elements(value)` gives the value of binary metadata as a
+  call carries it without the padding that ends each comma-separated
+  element, since a proxy may join repeated fields with commas. It checks
+  nothing and decodes nothing, and gives `value` itself when there is no
+  padding.
 
 ```mbt check
 ///|
@@ -195,5 +202,6 @@ test "check reply metadata" {
   guard @grpc.unpadded_base64("AAE=") is Some(value) else { fail("not base64") }
   inspect(value, content="AAE")
   inspect(@grpc.unpadded_base64("AA=") is None, content="true")
+  inspect(@grpc.unpadded_elements("AAA=,BBB="), content="AAA,BBB")
 }
 ```
