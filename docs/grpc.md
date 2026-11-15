@@ -3087,11 +3087,12 @@ To count a message's values, count the values of its JSON:
 `jq '[..] | length'` does it for a JSON text. The Journal shows the JSON
 of a served message, cut at `--journal-body-limit`, 4,096 octets by
 default, so raise that limit to count a large message there. Keep
-`--journal-max-bytes` above the JSON's size too: the Journal evicts at
-once an entry that takes more. smock never shows the JSON of a refused
-message, so count such a message with protobuf's own printer, told to
-print the fields without presence. In Python, with protobuf 5.26 or
-later:
+`--journal-max-bytes` well above the JSON's size too. An entry also
+counts its request line and headers, a few hundred octets or more, and
+the Journal evicts at once an entry that takes more than the bound.
+smock never shows the JSON of a refused message, so count such a message
+with protobuf's own printer, told to print the fields without presence.
+In Python, with protobuf 5.26 or later:
 
 ```python
 from google.protobuf import json_format
