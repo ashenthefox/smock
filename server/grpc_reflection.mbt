@@ -64,13 +64,13 @@ fn H2Connection::reflection_call(
 
 ///|
 /// Answers `stream`, a call to reflection whose first message has arrived
-/// whole while the client still sends, or that `answer_from_headers` no
-/// longer sends to reflection: it looks the call up again, from the
-/// definition set served now, and returns whether it answered it. A call
+/// whole while the client still sends, and returns whether it answered it.
+/// The call is looked up again, from the definition set served now. One
 /// that still goes to the reflection service of its Mock is answered
 /// (`answer_reflection`), and RST_STREAM NO_ERROR follows. One that a
-/// reload has sent elsewhere is answered as from its HEADERS, or waits for
-/// the end of its request when it can now reach a gRPC Stub.
+/// reload has sent elsewhere is handled as from its HEADERS
+/// (`answer_from_headers`): answered at once, or left to wait for the end
+/// of its request when it can now reach a gRPC Stub.
 fn[S : @io.Writer + ReadOutput] H2Connection::answer_first_message(
   self : H2Connection,
   stream : Int32,
