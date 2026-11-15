@@ -41,3 +41,54 @@ test "the ticket's example: a 64-bit integer as a string, and a field at its def
     ),
   )
 }
+
+///|
+test "each scalar type: 64-bit integers as strings, at their largest and smallest values" {
+  inspect(
+    canonical(scalars_set, "scalars.Every", fixture(every_max)),
+    content=(
+      #|{"aDouble":1.7976931348623157e+308,"aFloat":3.4028235e+38,"anInt64":"9223372036854775807","aUint64":"18446744073709551615","anInt32":2147483647,"aFixed64":"18446744073709551615","aFixed32":4294967295,"aBool":true,"aString":"Kyōto \"quoted\"\n","aBytes":"AAH7/w==","aUint32":4294967295,"anSfixed32":2147483647,"anSfixed64":"9223372036854775807","anSint32":2147483647,"anSint64":"9223372036854775807","aStatus":"ACTIVE"}
+    ),
+  )
+  // The unsigned types, the bool, the string and the enum at their
+  // defaults are left out.
+  inspect(
+    canonical(scalars_set, "scalars.Every", fixture(every_min)),
+    content=(
+      #|{"aDouble":-1.7976931348623157e+308,"aFloat":-3.4028235e+38,"anInt64":"-9223372036854775808","anInt32":-2147483648,"aBytes":"YQ==","anSfixed32":-2147483648,"anSfixed64":"-9223372036854775808","anSint32":-2147483648,"anSint64":"-9223372036854775808"}
+    ),
+  )
+}
+
+///|
+test "fields without presence are left out at their defaults, even when the message holds them; fields with presence are printed whenever it does" {
+  inspect(canonical(scalars_set, "scalars.Every", b""), content="{}")
+  // Records of a double, an int32 whose varint's low 32 bits are 0, a
+  // string, bytes, an enum and a bool, each at its default.
+  let defaults = b"\x09\x00\x00\x00\x00\x00\x00\x00\x00\x28\x80\x80\x80\x80\x10\x4a\x00\x62\x00\xa0\x01\x00\x40\x00"
+  inspect(canonical(scalars_set, "scalars.Every", defaults), content="{}")
+  // A bool whose varint is 2, and an int64 past 32 bits.
+  inspect(
+    canonical(
+      scalars_set,
+      "scalars.Every",
+      b"\x40\x02\x18\x80\x80\x80\x80\x10",
+    ),
+    content=(
+      #|{"anInt64":"4294967296","aBool":true}
+    ),
+  )
+  // The nested message and the two optional fields set, each at its
+  // default.
+  let message = nested(w => {
+    message_field(w, 21, b"")
+    varint_field(w, 22, 0)
+    string_field(w, 23, "")
+  })
+  inspect(
+    canonical(scalars_set, "scalars.Every", message),
+    content=(
+      #|{"anAddress":{},"maybeCount":0,"maybeName":""}
+    ),
+  )
+}
