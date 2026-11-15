@@ -2979,8 +2979,8 @@ and enum names of up to 40, for a call whose JSON smock parses once:
   enum names of 40, a message of up to 2 KB costs up to about 11 MiB.
   One of up to 10 KB costs up to about 20 MiB. The cost steps: where a
   slightly larger message saves the buffer one doubling, the cost
-  halves. So a message of 1.4 KB costs up to about 11 MiB, and one of
-  2 KB up to about 8 MiB.
+  halves. So a message of 1,382 octets costs up to about 11 MiB, one of
+  1,384 up to about 6 MiB, and one of 2,000 up to about 8 MiB.
 - The text of a served call grows through the same buffers, whatever
   reads the message, and smock then copies the text out of the last
   one. So a served call's text costs up to about five times its size
