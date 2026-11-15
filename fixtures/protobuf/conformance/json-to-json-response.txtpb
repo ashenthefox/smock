@@ -1,0 +1,3 @@
+# The answer to json-to-json.txtpb, in canonical ProtoJSON: defaults left
+# out, the enum by its name and the 64-bit integer as a string.
+json_payload: "{\"optionalUint64\":\"18446744073709551615\",\"optionalNestedEnum\":\"BAR\"}"

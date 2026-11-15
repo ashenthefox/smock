@@ -419,6 +419,18 @@ message limits limits.proto limits.Burrow burrow
 hex_test limits/limits.binpb limits_set "The Descriptor set of fixtures/protobuf/limits/limits.proto, fixtures/protobuf/limits/limits.binpb, in hex." protobuf
 hex_test limits/burrow.binpb burrow "A Burrow that holds another in each way, as protoc encodes it: fixtures/protobuf/limits/burrow.binpb, in hex." protobuf
 
+# protobuf's conformance messages, proto3, proto2 and editions, whose set
+# the testee of protobuf's conformance suite decodes and encodes with
+# (protobuf-conformance/README.md), and requests of the suite's pipe
+# protocol, from protobuf's conformance.proto, each with the testee's
+# answer, named <request>-response.
+descriptor_set conformance conformance.binpb test_messages_proto3.proto test_messages_proto2.proto test_messages_proto3_editions.proto test_messages_proto2_editions.proto test_messages_edition2023.proto test_messages_edition_unstable.proto
+conformance_requests="binary-to-json json-to-binary json-to-json binary-to-binary text-format text-format-output editions not-protobuf unknown-type"
+for name in $conformance_requests; do
+  message conformance conformance.proto conformance.ConformanceRequest "$name"
+  message conformance conformance.proto conformance.ConformanceResponse "$name-response"
+done
+
 # The end of the list of fixtures. With --check: every file the script
 # wrote, compared with the committed one.
 if [ -n "$check" ]; then

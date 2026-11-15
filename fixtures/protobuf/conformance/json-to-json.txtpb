@@ -1,0 +1,7 @@
+# JSON with fields at their defaults and an enum by its number, asked for
+# as JSON: optional_int32 0, repeated_int32 [], optional_nested_enum 1
+# (BAR) and optional_uint64 18446744073709551615.
+json_payload: "{\"optionalInt32\": 0, \"repeatedInt32\": [], \"optionalNestedEnum\": 1, \"optionalUint64\": 18446744073709551615}"
+requested_output_format: JSON
+message_type: "protobuf_test_messages.proto3.TestAllTypesProto3"
+test_category: JSON_TEST

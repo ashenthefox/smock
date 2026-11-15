@@ -623,3 +623,11 @@ test "check values as decode_json prints them" {
   inspect(suggested, content="write 42")
 }
 ```
+
+## Conformance
+
+smock checks this module with protobuf's conformance suite, binary and
+JSON, on every push. A small testee built on the module answers the
+suite's runner, and the cases the module fails are listed, each with its
+reason. `protobuf-conformance/README.md` in smock's repository says how
+it runs, how to run it locally and how to update the list.

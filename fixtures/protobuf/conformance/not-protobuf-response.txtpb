@@ -1,0 +1,2 @@
+# The answer to not-protobuf.txtpb: smock/protobuf's error.
+parse_error: "octet 1: the input ends inside a varint"
