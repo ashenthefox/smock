@@ -728,15 +728,7 @@ pub fn Engine::handle(
     let found = if grpc is Some(call) {
       // A gRPC call is matched against the gRPC Stubs on its method alone,
       // which the snapshot lists by path, with or without the match index.
-      let stubs = mock.grpc_candidates(call.path)
-      let mut found = None
-      for i in 0..<stubs.length() {
-        if incoming.matches(stubs[i], current) {
-          found = Some(stubs[i])
-          break
-        }
-      }
-      found
+      incoming.first_match(mock.grpc_candidates(call.path), current)
     } else if self.match_index {
       if gated {
         mock.first_candidate(request.meth, incoming.path, stub => {
@@ -748,15 +740,7 @@ pub fn Engine::handle(
         })
       }
     } else {
-      let stubs = mock.http_stubs
-      let mut found = None
-      for i in 0..<stubs.length() {
-        if incoming.matches(stubs[i], current) {
-          found = Some(stubs[i])
-          break
-        }
-      }
-      found
+      incoming.first_match(mock.http_stubs, current)
     }
     if found is Some(stub) {
       matched = Some({
@@ -1078,6 +1062,23 @@ fn Incoming::matches(
       self.meets(ordinary.request) && scenario_allows(ordinary.scenario, states)
     Crud(crud) => crud.operation(self.request.meth, self.path) is Some(_)
   }
+}
+
+///|
+/// The first of `stubs`, file Stubs in the order they are tried, that the
+/// request matches in the current states, `states` (`matches`), or `None`
+/// when it matches none. A plain loop, as `handle` needs.
+fn Incoming::first_match(
+  self : Incoming,
+  stubs : ReadOnlyArray[@definitions.Stub],
+  states : Map[String, String]?,
+) -> @definitions.Stub? {
+  for i in 0..<stubs.length() {
+    if self.matches(stubs[i], states) {
+      return Some(stubs[i])
+    }
+  }
+  None
 }
 
 ///|
