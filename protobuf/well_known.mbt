@@ -225,15 +225,15 @@ fn DescriptorSet::print_well_known(
       out.write_byte(b'"')
     }
     Wrapper(index) => {
-      let values = self.scan(message, records)
+      let values = self.scan(out, message, records)
       self.print_value(out, message.fields[index], values[index], depth)
     }
     Struct(index) | ListValue(index) => {
-      let values = self.scan(message, records)
+      let values = self.scan(out, message, records)
       self.print_repeated(out, message.fields[index], values[index], depth)
     }
     Value => {
-      let values = self.scan(message, records)
+      let values = self.scan(out, message, records)
       // The member of the oneof `kind` that the Value holds: the last one
       // of its fields by number, as the oneof keeps one.
       let mut held = -1

@@ -55,3 +55,222 @@ test "the JSON is counted as it is printed: a message whose JSON passes the limi
     ),
   )
 }
+
+///|
+test "what the decoder holds to print a message counts with its JSON: the records of a field that do not come together, a message field sent again, and each entry of a map" {
+  // 200 numbers and 200 flags, each an unpacked record of 0: together,
+  // as two runs of records, or one after the other, as 400 runs.
+  let together = repeated(b"\x08\x00", 200) + repeated(b"\x30\x00", 200)
+  let apart = repeated(b"\x08\x00\x30\x00", 200)
+  let filled = (input : Bytes, limit : Int32) => {
+    let text = bounded(collections_set, "collections.Lists", input, limit~)
+    if text.has_prefix("error: ") {
+      text
+    } else {
+      "\{text.length()} octets"
+    }
+  }
+  // A Node's child sent 100 times, merged into one.
+  let children = (count : Int32, limit : Int32) => {
+    bounded(
+      scalars_set,
+      "scalars.Node",
+      repeated(b"\x12\x00", count),
+      limit~,
+    )
+  }
+  // A map of 100 entries, from 0 to 99, each with the value 1.
+  let entries = @buffer.Buffer()
+  for key in 0..<100 {
+    entries.write_bytes(b"\x12\x04\x08")
+    entries.write_byte(key.to_byte())
+    entries.write_bytes(b"\x10\x01")
+  }
+  let counts = (limit : Int32) => {
+    let text = bounded(
+      collections_set,
+      "collections.Tagged",
+      entries.to_bytes(),
+      limit~,
+    )
+    if text.has_prefix("error: ") {
+      text
+    } else {
+      "\{text.length()} octets"
+    }
+  }
+  inspect(
+    [
+      filled(together, 2000),
+      filled(apart, 2000),
+      filled(apart, 100000),
+      children(1, 1000),
+      children(100, 1000),
+      counts(2000),
+      counts(100000),
+    ].join("\n"),
+    content=(
+      #|1716 octets
+      #|error: the decoded message passes the limit of 2000 octets
+      #|1716 octets
+      #|{"name":"","child":{"name":""}}
+      #|error: the decoded message passes the limit of 1000 octets
+      #|error: the decoded message passes the limit of 2000 octets
+      #|712 octets
+    ),
+  )
+}
+
+///|
+/// What decoding `input` as the type `name` of the set in `hex` gives:
+/// `decoded`, or the error's message, without its position.
+fn depth_outcome(hex : String, name : String, input : Bytes) -> String {
+  let set = hex_set(hex)
+  guard set.find_message(name) is Some(message) else {
+    abort("no message \{name}")
+  }
+  let _ = @protobuf.decode_json(set, message, input[:], limit=no_limit) catch {
+    DecodeError(message~, ..) => return message
+    error => return error.to_string()
+  }
+  "decoded"
+}
+
+///|
+/// A Burrow that holds `levels` more, each in the one before, through
+/// `field`: 2, a message field, 3, a group, whose field 1 holds the next,
+/// or 4, a map's values. The last holds `last`.
+fn burrows(levels : Int32, field : Int32, last : Bytes) -> Bytes {
+  let mut message = last
+  for _ in 0..<levels {
+    let inner = message
+    message = nested(w => {
+      match field {
+        3 => {
+          w.tag(3, StartGroup)
+          message_field(w, 1, inner)
+          w.tag(3, EndGroup)
+        }
+        4 => message_field(w, 4, nested(e => message_field(e, 2, inner)))
+        _ => message_field(w, field, inner)
+      }
+    })
+  }
+  message
+}
+
+///|
+test "messages nest 100 deep and no deeper through each path: a message field, a group and a map's values, each group and map entry counting as a message" {
+  let dig = (levels : Int32, field : Int32, last : Bytes) => {
+    depth_outcome(limits_set, "limits.Burrow", burrows(levels, field, last))
+  }
+  // A group with nothing in it, and a map entry with nothing in it, at the
+  // depth after the last Burrow.
+  let empty_group = b"\x1b\x1c"
+  let empty_entry = b"\x22\x00"
+  inspect(
+    [
+      // The last Burrow at depth 100, then one deeper.
+      dig(100, 2, b""),
+      dig(101, 2, b""),
+      // A group and its Burrow are two levels: the last Burrow at depth
+      // 100, then its empty group at 101.
+      dig(50, 3, b""),
+      dig(50, 3, empty_group),
+      // A map entry and its Burrow are two levels, too.
+      dig(50, 4, b""),
+      dig(50, 4, empty_entry),
+      // protoc's Burrow, with each path, nested in each path.
+      dig(1, 3, fixture(burrow)),
+    ].join("\n"),
+    content=(
+      #|decoded
+      #|messages nest deeper than 100
+      #|decoded
+      #|messages nest deeper than 100
+      #|decoded
+      #|messages nest deeper than 100
+      #|decoded
+    ),
+  )
+  inspect(
+    bounded(limits_set, "limits.Burrow", fixture(burrow), limit=no_limit),
+    content=(
+      #|{"name":"top","inner":{"name":"inner","rooms":{}},"layer":{"inner":{"name":"layer","rooms":{}}},"rooms":{"room":{"name":"room","rooms":{}}}}
+    ),
+  )
+}
+
+///|
+/// An Any of the Any `inner`, `levels` times.
+fn anys(levels : Int32, inner : Bytes) -> Bytes {
+  let mut message = inner
+  for _ in 0..<levels {
+    message = any_of("type.googleapis.com/google.protobuf.Any", message)
+  }
+  message
+}
+
+///|
+/// A Struct of one member, `x`, whose Value holds a Struct of the same,
+/// `levels` times, the last holding the Value `last`.
+fn structs(levels : Int32, last : Bytes) -> Bytes {
+  let mut message = struct_of([("x", last)])
+  for _ in 1..<levels {
+    let inner = message
+    message = struct_of([("x", nested(w => message_field(w, 5, inner)))])
+  }
+  message
+}
+
+///|
+/// A Value that holds a ListValue of one Value, `levels` times, the last
+/// being `last`.
+fn listed_values(levels : Int32, last : Bytes) -> Bytes {
+  let mut message = last
+  for _ in 0..<levels {
+    let inner = message
+    message = nested(w => message_field(w, 6, list_of([inner])))
+  }
+  message
+}
+
+///|
+test "messages nest 100 deep and no deeper through an Any, a Struct and its Values, and a ListValue, as protobuf's parsers count their messages" {
+  let hello = any_of(
+    "type.googleapis.com/helloworld.HelloRequest",
+    nested(w => string_field(w, 1, "Tom")),
+  )
+  let empty_list = nested(w => message_field(w, 6, b""))
+  inspect(
+    [
+      // An Any is one level: the HelloRequest at depth 100, then 101.
+      dynamic_depth("google.protobuf.Any", anys(99, hello)),
+      dynamic_depth("google.protobuf.Any", anys(100, hello)),
+      // A Struct, its entry and its Value are three levels: the last
+      // Struct at depth 96 and its Value at 98, then the Struct at 99 and
+      // its Value at 101.
+      dynamic_depth("google.protobuf.Struct", structs(33, number_value(1.0))),
+      dynamic_depth("google.protobuf.Struct", structs(34, number_value(1.0))),
+      // A Value and its ListValue are two levels: the last Value at depth
+      // 100, then its ListValue at 101.
+      dynamic_depth("google.protobuf.Value", listed_values(50, number_value(1.0))),
+      dynamic_depth("google.protobuf.Value", listed_values(50, empty_list)),
+    ].join("\n"),
+    content=(
+      #|decoded
+      #|messages nest deeper than 100
+      #|decoded
+      #|messages nest deeper than 100
+      #|decoded
+      #|messages nest deeper than 100
+    ),
+  )
+}
+
+///|
+/// What decoding `input` as the type `name` of dynamic.proto's set gives,
+/// as `depth_outcome` says.
+fn dynamic_depth(name : String, input : Bytes) -> String {
+  depth_outcome(dynamic_set, name, input)
+}

@@ -145,9 +145,12 @@ pub fn decode_json(
 /// `message.fields`; `None` for a field the message leaves out. A number
 /// that a closed enum does not define is skipped, as protobuf's parsers
 /// keep it as an unknown field: the field keeps the value it had, and a
-/// oneof the member it had.
+/// oneof the member it had. Each view a field's value holds beyond its
+/// first is held in `out`, which the caller lets go once it has printed
+/// the message.
 fn DescriptorSet::scan(
   self : DescriptorSet,
+  out : Output,
   message : MessageDescriptor,
   records : Array[BytesView],
 ) -> FixedArray[Value?] raise DecodeError {
@@ -238,6 +241,7 @@ fn DescriptorSet::scan(
             if from >= 0 && from + last.length() == start {
               runs[runs.length() - 1] = record[from:reader.pos]
             } else {
+              out.hold(held_view)
               runs.push(record[start:reader.pos])
             }
           }
@@ -281,7 +285,10 @@ fn DescriptorSet::scan(
             reader.length_delimited()
           }
           match values[index] {
-            Some(Messages(list)) => list.push(value)
+            Some(Messages(list)) => {
+              out.hold(held_view)
+              list.push(value)
+            }
             _ => values[index] = Some(Messages([value]))
           }
         }
@@ -325,12 +332,15 @@ fn DescriptorSet::print_message(
       message="the message \{message.full_name} is a MessageSet, which smock does not decode",
     )
   }
+  // What the message's scan holds is let go once it is printed.
+  let held = out.held
   if well_known_form(message) is Some(form) {
     self.print_well_known(out, message, form, records, depth)
+    out.release_to(held)
     return
   }
   let fields = message.fields
-  let values = self.scan(message, records)
+  let values = self.scan(out, message, records)
   out.write_byte(b'{')
   // The fields, and the extensions that extend the message, in
   // field-number order.
@@ -393,6 +403,7 @@ fn DescriptorSet::print_message(
     }
   }
   out.write_byte(b'}')
+  out.release_to(held)
 }
 
 ///|
@@ -591,12 +602,21 @@ fn DescriptorSet::print_map(
   runs : Array[BytesView],
   depth : Int32,
 ) -> Unit raise DecodeError {
+  // Each entry is held, with its key and its place in the map's order,
+  // until the map is printed.
+  let held = out.held
+  let key_type = entry.fields[entry.field_index(1)].type_
+  let each = held_view +
+    held_entry +
+    (if key_type is String { held_view } else { 0 })
   let entries : Array[BytesView] = []
   for r in 0..<runs.length() {
     let reader = Reader(runs[r])
     while !reader.at_end() {
       ignore(reader.tag())
-      entries.push(reader.length_delimited())
+      let value = reader.length_delimited()
+      out.hold(each)
+      entries.push(value)
     }
   }
   if entries.length() == 0 {
@@ -692,6 +712,7 @@ fn DescriptorSet::print_map(
     count += 1
   }
   if count == 0 {
+    out.release_to(held)
     out.write_bytes(b"{}")
     return
   }
@@ -708,7 +729,8 @@ fn DescriptorSet::print_map(
       out.write_byte(b',')
     }
     first = false
-    let values = self.scan(entry, [entries[i]])
+    let before = out.held
+    let values = self.scan(out, entry, [entries[i]])
     match values[key_index] {
       Some(Octets(text)) => write_json_string(out, text)
       Some(Number(bits)) => {
@@ -733,8 +755,10 @@ fn DescriptorSet::print_map(
       value => value
     }
     self.print_value(out, value_field, value, depth + 1)
+    out.release_to(before)
   }
   out.write_byte(b'}')
+  out.release_to(held)
 }
 
 ///|
