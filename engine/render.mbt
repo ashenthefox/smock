@@ -618,6 +618,12 @@ pub fn Engine::render(
           }
         }
       }
+      // A gRPC Stub shows the answer a call gets from the plan.
+      let (plan, template_error) = match grpc {
+        Some((set, rpc)) =>
+          call_answer(set, rpc, plan, template_error, response_index)
+        None => (plan, template_error)
+      }
       {
         stub: stub.id,
         mock: stub.mock,
@@ -637,6 +643,107 @@ pub fn Engine::render(
       }
     }
     Crud(crud) => render_crud(stub, mock, crud, sample, now~, seed~)
+  }
+}
+
+///|
+/// The answer a call to `rpc`, a unary method of `set`, gets from `plan`,
+/// the plan of a gRPC Stub on it rendered for a sample, as the server makes
+/// it, with the template error that says why it is not the Stub's reply,
+/// if it is not: `error`, the rendering's, or one of its own. `index` is
+/// the index of the response rendered among the Stub's `responses`, or
+/// `None` for its `response`.
+///
+/// - A plan without a gRPC part is smock's answer to a Stub that could not
+///   serve its content: Trailers-Only INTERNAL, with the message `template
+///   failed` when a template failed, as `error` says, or else `data write
+///   failed`, since a rendering applies no bound on per-Session state.
+/// - A reply with the status OK whose message was not encoded when the
+///   files loaded, which a templated one never is, is encoded with the
+///   method's output type; one that does not fit gets INTERNAL `template
+///   failed`, with a template error at the JSON Pointer of the value at
+///   fault, in the reply's `json`.
+/// - An error's details are encoded in google.rpc.Status, unless they were
+///   when the files loaded; a detail that does not fit its type gets
+///   INTERNAL `template failed` too, with a template error in the reply's
+///   `grpc/details`.
+///
+/// smock's own answers carry none of the Stub's metadata, and no message.
+fn call_answer(
+  set : @protobuf.DescriptorSet,
+  rpc : @protobuf.MethodDescriptor,
+  plan : ResponsePlan,
+  error : TemplateError?,
+  index : Int32?,
+) -> (ResponsePlan, TemplateError?) {
+  let reply = match index {
+    Some(index) => "/responses/\{index}"
+    None => "/response"
+  }
+  guard plan.grpc is Some(part) else {
+    let message = if error is Some(_) {
+      "template failed"
+    } else {
+      "data write failed"
+    }
+    return (own_answer(message), error)
+  }
+  if part.status is Ok {
+    if part.encoded is None {
+      let body = match plan.body {
+        Bytes(json) => json
+        // A gRPC Stub's reply is never a stream of events.
+        Events(_) => b""
+      }
+      // An empty body is an empty message.
+      if body.length() > 0 {
+        let json = @json.parse(@utf8.decode_lossy(body)) catch {
+          _ =>
+            return (
+              own_answer("template failed"),
+              Some({
+                at: reply + "/json",
+                message: "the rendered reply is not JSON",
+              }),
+            )
+        }
+        let _ : Bytes = set.encode_json(set.output_of(rpc), json) catch {
+          EncodeError(pointer~, message~) =>
+            return (
+              own_answer("template failed"),
+              Some({ at: reply + "/json" + pointer, message, }),
+            )
+        }
+      }
+    }
+  } else if !part.details.is_empty() && part.encoded_status is None {
+    let _ : Bytes = set.encode_status(
+      part.status.code(),
+      part.message.unwrap_or(""),
+      part.details.exact_view(),
+    ) catch {
+      EncodeError(pointer~, message~) =>
+        return (
+          own_answer("template failed"),
+          Some({ at: reply + "/grpc/details" + pointer, message, }),
+        )
+    }
+  }
+  (plan, error)
+}
+
+///|
+/// smock's own Trailers-Only answer to a gRPC call, INTERNAL with the
+/// fixed `message`, as a rendering shows it: the HTTP status 200, no
+/// metadata and no message.
+fn own_answer(message : String) -> ResponsePlan {
+  {
+    status: 200,
+    headers: [],
+    body: Bytes(b""),
+    delay_ms: 0,
+    fault: None,
+    grpc: Some({ ..grpc_ok, status: Internal, message: Some(message), }),
   }
 }
 

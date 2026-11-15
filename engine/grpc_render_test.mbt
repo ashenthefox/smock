@@ -39,6 +39,28 @@ let render_greeter : String =
   #|          - "@type": type.googleapis.com/google.rpc.ErrorInfo
   #|            reason: USER_UNKNOWN
   #|            domain: greeter.svc
+  #|  - id: hello-post
+  #|    mock: greeter
+  #|    request: { method: POST, path: /helloworld.Greeter/SayHello }
+  #|    response: { template: true, json: { message: "Hello ${body.name}" } }
+  #|  - id: plain
+  #|    mock: greeter
+  #|    request: { method: POST, path: /hello }
+  #|    response: { status: 200, template: true, body: "${bodyText}" }
+  #|  - id: typed
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello }
+  #|    response:
+  #|      template: true
+  #|      grpc:
+  #|        status: INVALID_ARGUMENT
+  #|        details:
+  #|          - "@type": "type.googleapis.com/${header.x-type}"
+  #|            fieldViolations: [{ field: name, description: "no user called ${body.name}" }]
+  #|  - id: tokened
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-token-bin: AAE } }
+  #|    response: { template: true, json: { message: "${header.x-token-bin}" } }
 
 ///|
 /// The sample of a call to SayHello for `name`, with the metadata
@@ -159,6 +181,28 @@ let render_catalog : String =
   #|    response:
   #|      template: true
   #|      json: { count: 2, shelf: "${body.shelf}" }
+  #|  - id: priced
+  #|    mock: catalog
+  #|    request: { path: /catalog.Catalog/GetItem, headers: { x-case: priced } }
+  #|    responses:
+  #|      - { template: true, json: { price: "${body.id}" } }
+  #|  - id: unknown
+  #|    mock: catalog
+  #|    request: { path: /catalog.Catalog/GetItem, headers: { x-case: unknown } }
+  #|    response:
+  #|      template: true
+  #|      headers: { x-served-by: smock }
+  #|      grpc:
+  #|        status: NOT_FOUND
+  #|        message: "no item ${body.nothing}"
+  #|  - id: counted
+  #|    mock: catalog
+  #|    request: { path: /catalog.Catalog/GetItem, headers: { x-case: counted } }
+  #|    dataWrites:
+  #|      - { op: merge, bucket: counts, value: { last: "${body.id}" } }
+  #|    response: { json: { price: 1 } }
+  #|data:
+  #|  - { mock: catalog, name: counts, json: 0 }
 
 ///|
 /// The rendering of `id` for a call to `rpc`, a method of catalog.Catalog, whose
@@ -289,4 +333,141 @@ test "a sample's body that is not a message of the input type is refused, with e
       #|OK {"count":2,"shelf":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"} failed=[]
     ),
   )
+}
+
+///|
+test "the Stub's kind decides: a gRPC Stub renders as a call whatever the sample's method and content type, which fail as conditions, and an HTTP Stub as a request whatever its content type" {
+  let h = harness(
+    [("greeter.yaml", render_greeter)],
+    body_files=details_body_files(),
+  )
+  let brief = (rendering : String) => {
+    guard @json.parse(rendering)
+      is { "response": Object(response), "failed": failed, .. } else {
+      return "no response"
+    }
+    let grpc = response
+      .get("grpc")
+      .map_or("no gRPC part", grpc => grpc.stringify())
+    guard response is { "body": { "data": String(body), .. }, .. } else {
+      return "no body"
+    }
+    "body \{body}\n\{grpc}\nfailed \{failed.stringify()}"
+  }
+  let get : Json = {
+    "method": "GET",
+    "path": "/helloworld.Greeter/SayHello",
+    "headers": { "content-type": "text/plain" },
+    "body": "{\"name\":\"Ann\"}",
+  }
+  let grpc_text : Json = {
+    "method": "POST",
+    "path": "/hello",
+    "headers": { "content-type": "application/grpc" },
+    "body": "not a message",
+  }
+  inspect(
+    [brief(h.render("hello-post", get)), brief(h.render("plain", grpc_text))].join(
+      "\n---\n",
+    ),
+    content=(
+      #|body {"message":"Hello Ann"}
+      #|{"status":"OK","message":null,"trailers":[],"details":[]}
+      #|failed [{"condition":"method","expected":"POST","actual":["GET"]}]
+      #|---
+      #|body not a message
+      #|no gRPC part
+      #|failed []
+    ),
+  )
+}
+
+///|
+test "a gRPC Stub that cannot serve its content renders the INTERNAL a call gets, without the Stub's metadata, and its templateError: a reply that does not fit the output type, a template that fails, a data write that cannot be applied" {
+  let h = harness(
+    [("catalog.yaml", render_catalog)],
+    body_files=catalog_body_files(),
+  )
+  let shown = (id : String, case_ : String, body : String) => {
+    let sample : Json = {
+      "method": "POST",
+      "path": "/catalog.Catalog/GetItem",
+      "headers": { "x-case": Json::string(case_) },
+      "body": Json::string(body),
+    }
+    guard @json.parse(h.render(id, sample))
+      is { "response": response, "templateError": error, .. } else {
+      return "no response"
+    }
+    "\{response.stringify()}\n  templateError \{error.stringify()}"
+  }
+  inspect(
+    [
+      shown("priced", "priced", "{\"id\": \"x\"}"),
+      // A reply that fits: the id is an integer.
+      shown("priced", "priced", "{\"id\": \"42\"}"),
+      shown("unknown", "unknown", "{\"id\": \"x\"}"),
+      shown("counted", "counted", "{\"id\": \"x\"}"),
+    ].join("\n"),
+    content=(
+      #|{"status":200,"headers":[],"body":{"encoding":"utf-8","data":"","size":0,"truncated":false},"events":null,"grpc":{"status":"INTERNAL","message":"template failed","trailers":[],"details":[]}}
+      #|  templateError {"at":"/responses/0/json/price","message":"must be an integer from -9223372036854775808 to 9223372036854775807: the field price of catalog.Item has the type int64"}
+      #|{"status":200,"headers":[],"body":{"encoding":"utf-8","data":"{\"price\":\"42\"}","size":14,"truncated":false},"events":null,"grpc":{"status":"OK","message":null,"trailers":[],"details":[]}}
+      #|  templateError null
+      #|{"status":200,"headers":[],"body":{"encoding":"utf-8","data":"","size":0,"truncated":false},"events":null,"grpc":{"status":"INTERNAL","message":"template failed","trailers":[],"details":[]}}
+      #|  templateError {"at":"/response/grpc/message","message":"body.nothing is missing"}
+      #|{"status":200,"headers":[],"body":{"encoding":"utf-8","data":"","size":0,"truncated":false},"events":null,"grpc":{"status":"INTERNAL","message":"data write failed","trailers":[],"details":[]}}
+      #|  templateError null
+    ),
+  )
+}
+
+///|
+test "rendered details are shown as JSON when they fit their types, and a detail that does not fit gets INTERNAL with its templateError" {
+  let h = harness(
+    [("greeter.yaml", render_greeter)],
+    body_files=details_body_files(),
+  )
+  let shown = (x_type : String) => {
+    let sample : Json = {
+      "path": "/helloworld.Greeter/SayHello",
+      "headers": { "x-type": Json::string(x_type) },
+      "body": "{\"name\":\"Ann\"}",
+    }
+    guard @json.parse(h.render("typed", sample))
+      is { "response": { "grpc": grpc, .. }, "templateError": error, .. } else {
+      return "no gRPC part"
+    }
+    "\{grpc.stringify()}\n  templateError \{error.stringify()}"
+  }
+  inspect(
+    [shown("google.rpc.BadRequest"), shown("google.rpc.ErrorInfo")].join("\n"),
+    content=(
+      #|{"status":"INVALID_ARGUMENT","message":null,"trailers":[],"details":[{"@type":"type.googleapis.com/google.rpc.BadRequest","fieldViolations":[{"field":"name","description":"no user called Ann"}]}]}
+      #|  templateError null
+      #|{"status":"INTERNAL","message":"template failed","trailers":[],"details":[]}
+      #|  templateError {"at":"/response/grpc/details/0/fieldViolations","message":"is not a field of google.rpc.ErrorInfo"}
+    ),
+  )
+}
+
+///|
+test "binary metadata in the sample loses its padding, as a call's does, so it meets the Stub's conditions and templates read it unpadded" {
+  let h = harness(
+    [("greeter.yaml", render_greeter)],
+    body_files=details_body_files(),
+  )
+  let sample : Json = {
+    "path": "/helloworld.Greeter/SayHello",
+    "headers": { "X-Token-Bin": "AAE=" },
+  }
+  guard @json.parse(h.render("tokened", sample))
+    is {
+      "response": { "body": { "data": body, .. }, .. },
+      "failed": failed,
+      ..
+    } else {
+    fail("no response")
+  }
+  json_inspect([body, failed], content=["{\"message\":\"AAE\"}", []])
 }
