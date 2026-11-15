@@ -76,7 +76,7 @@ priv struct Output {
   /// What the decoder holds, in octets, as `Output::hold` counts it.
   mut held : Int32
   /// The JSON values printed so far, the message that is printed being
-  /// one, as `Output::value` counts them.
+  /// one, as `Output::count_value` counts them.
   mut values : Int32
   /// The most JSON values the text may hold.
   most_values : Int32
@@ -121,7 +121,7 @@ fn Output::new(
 /// Counts one more JSON value, a member of an object or an element of an
 /// array that is printed next, or raises `TooManyValues` when the text
 /// already holds the most it may: before anything of the value is written.
-fn Output::value(self : Output) -> Unit raise DecodeError {
+fn Output::count_value(self : Output) -> Unit raise DecodeError {
   if self.values >= self.most_values {
     raise TooManyValues(limit=self.most_values)
   }

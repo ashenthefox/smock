@@ -366,11 +366,11 @@ fn DescriptorSet::print_any(
       message="messages nest deeper than \{max_depth}",
     )
   }
-  out.value()
+  out.count_value()
   out.write_bytes(b"{\"@type\":")
   write_json_string(out, url)
   if well_known_form(held) is Some(_) {
-    out.value()
+    out.count_value()
     out.write_bytes(b",\"value\":")
     self.print_message(out, held, [value], depth + 1, canonical~)
     out.write_byte(b'}')

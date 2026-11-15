@@ -460,7 +460,7 @@ fn DescriptorSet::print_message(
       self.leaves_out(field, given, extension~, proto2~) {
       continue
     }
-    out.value()
+    out.count_value()
     if !first {
       out.write_byte(b',')
     }
@@ -679,7 +679,7 @@ fn DescriptorSet::print_list(
           } else {
             reader.length_delimited()
           }
-          out.value()
+          out.count_value()
           if !first {
             out.write_byte(b',')
           }
@@ -706,7 +706,7 @@ fn DescriptorSet::print_list(
             if closed is Some(type_) && !type_.defines(bits) {
               continue
             }
-            out.value()
+            out.count_value()
             if !first {
               out.write_byte(b',')
             }
@@ -719,7 +719,7 @@ fn DescriptorSet::print_list(
           if closed is Some(type_) && !type_.defines(bits) {
             continue
           }
-          out.value()
+          out.count_value()
           if !first {
             out.write_byte(b',')
           }
@@ -908,7 +908,7 @@ fn DescriptorSet::print_map(
     if n + 1 < count && same_key(keys, texts, i, order[n + 1]) {
       continue
     }
-    out.value()
+    out.count_value()
     if !first {
       out.write_byte(b',')
     }
