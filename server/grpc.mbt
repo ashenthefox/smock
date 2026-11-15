@@ -41,15 +41,18 @@
 // before either is sent, and a reply with a block over
 // `--header-size-limit`, or over the SETTINGS_MAX_HEADER_LIST_SIZE the
 // client advertised, gets Trailers-Only INTERNAL `reply metadata too large`
-// instead (`answer_too_large`). An answer sent before the client has
-// ended its request is followed by RST_STREAM NO_ERROR (`end_early`). What
-// gRPC's rules refuse in a call, checked as soon as it arrives, and what the
-// layer cannot serve yet, get Trailers-Only too, with their `grpc-status`
-// and a fixed `grpc-message`, and `:status` 200 but for a method other than
-// POST and a malformed `grpc-timeout` (grpc_checks.mbt). A call that does
-// not reach the engine is counted as rejected traffic and is not
-// journaled; one that does is journaled as the engine planned it, with the
-// gRPC status INTERNAL, which the entry records before it is committed.
+// instead (`answer_too_large`). A Stub's delay holds its answer back, in
+// the stream's task, unless the call's deadline cuts it short with
+// DEADLINE_EXCEEDED (grpc_deadlines.mbt). An answer sent before the client
+// has ended its request is followed by RST_STREAM NO_ERROR (`end_early`).
+// What gRPC's rules refuse in a call, checked as soon as it arrives, and
+// what the layer cannot serve yet, get Trailers-Only too, with their
+// `grpc-status` and a fixed `grpc-message`, and `:status` 200 but for a
+// method other than POST and a malformed `grpc-timeout`
+// (grpc_checks.mbt). A call that does not reach the engine is counted as
+// rejected traffic and is not journaled; one that does is journaled as the
+// engine planned it, or with smock's own gRPC status, such as INTERNAL or
+// DEADLINE_EXCEEDED, which the entry records before it is committed.
 
 ///|
 /// The content type of gRPC calls, as the octets of a field value.
@@ -128,13 +131,8 @@ fn H2Connection::answer_unserved(
   guard outcome.plan.grpc is Some(part) else {
     abort("a gRPC call that reaches no gRPC Stub is planned UNIMPLEMENTED")
   }
-  self.answer_status(
-    stream,
-    request,
-    outcome,
-    part,
-    date=self.ports.dates.at(self.now),
-  )
+  self.answer_status(stream, outcome, part, date=self.ports.dates.at(self.now))
+  self.ended_in_place(request, outcome)
   if !ended {
     self.end_early(stream)
   }
@@ -155,12 +153,12 @@ fn H2Connection::end_early(self : H2Connection, stream : Int32) -> Unit {
 /// `refuse_call` sends, when its body is not one whole message
 /// (`check_end`) or the message does not decode. The call's Mock and its
 /// set are looked up again first, and a call that cannot reach a gRPC Stub
-/// now is answered as from its HEADERS (`answer_unserved`). A plan whose gRPC
-/// status is not OK is sent as Trailers-Only, with its gRPC part. A reply
-/// too large to send gets INTERNAL instead (`answer_too_large`). A reply
-/// whose framed message fits the windows is queued at once; the rest of a
-/// larger one is sent in a task of its own (`write_slowly`), which writes
-/// to `out`, with the trailers after it.
+/// now is answered as from its HEADERS (`answer_unserved`). The engine's
+/// plan becomes the call's answer (`call_answer`), which is sent at once
+/// (`send_answer`), or once the plan's delay is over, in a task of its own
+/// (`wait_call`), which writes to `out`. The rest of a reply too large for
+/// the windows is sent in a task of its own too (`write_slowly`), with the
+/// trailers after it.
 fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
   self : H2Connection,
   stream : Int32,
@@ -201,100 +199,183 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
     grpc={ path: incoming.target, octets: incoming.body.length(), },
     now=self.now,
   )
+  let answer = call_answer(set, rpc, outcome)
+  // A delay waits in the stream's task, which the call's deadline can cut
+  // short.
+  if outcome.plan.delay_ms > 0 {
+    self.wait_call(stream, request, outcome, answer, out)
+    return
+  }
+  match
+    self.send_answer(stream, outcome, answer, date=ports.dates.at(self.now)) {
+    Some(unsent) =>
+      self.write_slowly(
+        stream,
+        request,
+        unsent.rest,
+        outcome,
+        out,
+        trailers=unsent.trailers,
+      )
+    None => self.ended_in_place(request, outcome)
+  }
+}
+
+///|
+/// What a gRPC call that reached the engine gets, as `call_answer` makes it
+/// from the engine's plan, once the reply message is encoded.
+priv enum CallAnswer {
+  /// The reply of a Stub that matched, with the status OK: the plan's gRPC
+  /// part and the reply message, encoded.
+  Reply(@engine.GrpcPart, Bytes)
+  /// An answer without a message, with the plan's gRPC part, whose status
+  /// is not OK, such as a Stub's error or the UNIMPLEMENTED of a call that
+  /// no Stub matched, and the value of its `grpc-status-details-bin`, when
+  /// it has error details (`status_details`).
+  Status(@engine.GrpcPart, Bytes?)
+  /// smock's own Trailers-Only INTERNAL, with the fixed `message`, in place
+  /// of a reply it cannot send, with the template error that says why, if
+  /// there is one.
+  Internal(message~ : String, template_error~ : @engine.TemplateError?)
+}
+
+///|
+/// The answer to a gRPC call to `rpc`, a unary method of `set`, that the
+/// engine decided `outcome` for. A plan without a gRPC part is smock's own
+/// answer to a gRPC Stub that could not serve its content, which gets
+/// INTERNAL. A plan whose status is OK gets its reply message encoded with
+/// the method's output type: a static reply was encoded when the files
+/// were loaded, with the output type of the set served then, which is
+/// `set` unless the Stub outlived a reload; a templated one is encoded
+/// here, once rendered, and one that does not fit the output type gets
+/// INTERNAL `template failed`. A plan whose status is not OK gets the
+/// google.rpc.Status of its error details, if it has any, as
+/// `status_details` builds it, and a detail that does not fit its type
+/// gets INTERNAL `template failed` too. It runs with no await after the
+/// second lookup, the decoding and `handle`, so a reload never splits
+/// them, even when the answer then waits for the plan's delay.
+fn call_answer(
+  set : @protobuf.DescriptorSet,
+  rpc : @protobuf.MethodDescriptor,
+  outcome : @engine.Outcome,
+) -> CallAnswer {
   let plan = outcome.plan
-  let date = ports.dates.at(self.now)
-  // A plan without a gRPC part is smock's own answer to a gRPC Stub that
-  // could not serve its content.
   guard plan.grpc is Some(part) else {
     let message = match outcome.content_error {
       Some({ failure: Template(_), .. }) => "template failed"
       Some({ failure: Data(_), .. }) => "data write failed"
       None => "state limit reached"
     }
-    self.answer_internal(stream, request, outcome, message, date~)
-    return
+    return Internal(message~, template_error=None)
   }
   // Any status but OK, such as the UNIMPLEMENTED of a call that no Stub
   // matched, ends the call without a message, and with its details, if
   // it has any.
   guard part.status is Ok else {
     let details = status_details(set, part) catch {
-      EncodeError(pointer~, message~) => {
-        let template_error = match outcome.journal {
-          Some(entry) =>
-            Some(@engine.TemplateError::{
-              at: reply_at(entry.response_index) + "/grpc/details" + pointer,
-              message,
-            })
-          None => None
-        }
-        self.answer_internal(
-          stream,
-          request,
-          outcome,
-          "template failed",
-          date~,
-          template_error?,
-        )
-        return
-      }
-    }
-    self.answer_status(stream, request, outcome, part, date~, details?)
-    return
-  }
-  // A static reply was encoded when the files were loaded, with the output
-  // type of the set served then, which is this one unless the Stub outlived
-  // a reload. A templated one is encoded here, once rendered.
-  let output = set.output_of(rpc)
-  let reply = match part.encoded {
-    Some(encoded) if physical_equal(encoded.output, output) => encoded.message
-    _ =>
-      encode_reply(set, output, plan.body) catch {
-        EncodeError(pointer~, message~) => {
-          let template_error = match outcome.journal {
+      EncodeError(pointer~, message~) =>
+        return Internal(
+          message="template failed",
+          template_error=match outcome.journal {
             Some(entry) =>
               Some(@engine.TemplateError::{
-                at: reply_pointer(entry.response_index) + pointer,
+                at: reply_at(entry.response_index) + "/grpc/details" + pointer,
                 message,
               })
             None => None
-          }
-          self.answer_internal(
-            stream,
-            request,
-            outcome,
-            "template failed",
-            date~,
-            template_error?,
+          },
+        )
+    }
+    return Status(part, details)
+  }
+  let output = set.output_of(rpc)
+  match part.encoded {
+    Some(encoded) if physical_equal(encoded.output, output) =>
+      Reply(part, encoded.message)
+    _ => {
+      let reply = encode_reply(set, output, plan.body) catch {
+        EncodeError(pointer~, message~) =>
+          return Internal(
+            message="template failed",
+            template_error=match outcome.journal {
+              Some(entry) =>
+                Some(@engine.TemplateError::{
+                  at: reply_pointer(entry.response_index) + pointer,
+                  message,
+                })
+              None => None
+            },
           )
-          return
-        }
       }
+      Reply(part, reply)
+    }
   }
-  let head = reply_head(plan.headers, date~)
-  let trailers = status_trailers(Ok, part.message, part.trailers)
-  if self.answer_too_large(
-      stream,
-      request,
-      outcome,
-      Some(head),
-      trailers,
-      date~,
-    ) {
-    return
+}
+
+///|
+/// The part of a reply's framed message that did not fit when the reply
+/// was queued, and the trailers that follow it.
+priv struct Unsent {
+  rest : BytesView
+  trailers : Array[@header.Header]
+}
+
+///|
+/// Sends `answer` on `stream`, a gRPC call that the engine decided
+/// `outcome` for, with the value `date` in its `date` field, and commits
+/// the call's Journal entry just before the block that ends the stream. A
+/// Stub's reply too large to send gets INTERNAL instead
+/// (`answer_too_large`). A reply whose framed message does not fit the
+/// windows, or with `bounded`, from the stream's task, the room the output
+/// bound leaves for one DATA frame (`H2Writer::frame_room`), gets as much
+/// as fits: the rest is returned, with the trailers that follow it, which
+/// the caller sends from the stream's task, with the entry still to
+/// commit. Otherwise it returns `None`.
+fn H2Connection::send_answer(
+  self : H2Connection,
+  stream : Int32,
+  outcome : @engine.Outcome,
+  answer : CallAnswer,
+  date~ : String,
+  bounded~ : Bool = false,
+) -> Unsent? {
+  match answer {
+    Internal(message~, template_error~) => {
+      self.answer_own(
+        stream,
+        outcome,
+        Internal,
+        message,
+        date~,
+        template_error?,
+      )
+      None
+    }
+    Status(part, details) => {
+      self.answer_status(stream, outcome, part, date~, details?)
+      None
+    }
+    Reply(part, reply) => {
+      let head = reply_head(outcome.plan.headers, date~)
+      let trailers = status_trailers(Ok, part.message, part.trailers)
+      if self.answer_too_large(stream, outcome, Some(head), trailers, date~) {
+        return None
+      }
+      let rest = self.queue_reply(
+        stream,
+        head,
+        @grpc.frame(reply),
+        trailers,
+        outcome.journal,
+        bounded~,
+      )
+      if rest.length() > 0 {
+        Some({ rest, trailers, })
+      } else {
+        None
+      }
+    }
   }
-  let rest = self.queue_reply(
-    stream,
-    head,
-    @grpc.frame(reply),
-    trailers,
-    outcome.journal,
-  )
-  if rest.length() > 0 {
-    self.write_slowly(stream, request, rest, outcome, out, trailers~)
-    return
-  }
-  self.ended_in_place(request, outcome)
 }
 
 ///|
@@ -312,7 +393,6 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
 fn H2Connection::answer_status(
   self : H2Connection,
   stream : Int32,
-  request : H2Request,
   outcome : @engine.Outcome,
   part : @engine.GrpcPart,
   date~ : String,
@@ -327,14 +407,7 @@ fn H2Connection::answer_status(
       part.trailers,
       details?,
     )
-    if self.answer_too_large(
-        stream,
-        request,
-        outcome,
-        Some(head),
-        trailers,
-        date~,
-      ) {
+    if self.answer_too_large(stream, outcome, Some(head), trailers, date~) {
       return
     }
     self.head_then_trailers(stream, head, trailers, outcome.journal)
@@ -347,12 +420,11 @@ fn H2Connection::answer_status(
       trailers=part.trailers,
       details?,
     )
-    if self.answer_too_large(stream, request, outcome, None, fields, date~) {
+    if self.answer_too_large(stream, outcome, None, fields, date~) {
       return
     }
     self.headers_only(stream, fields, outcome.journal, partial=false)
   }
-  self.ended_in_place(request, outcome)
 }
 
 ///|
@@ -377,7 +449,6 @@ let too_large_message : String = "reply metadata too large"
 fn H2Connection::answer_too_large(
   self : H2Connection,
   stream : Int32,
-  request : H2Request,
   outcome : @engine.Outcome,
   head : Array[@header.Header]?,
   last : Array[@header.Header],
@@ -401,10 +472,10 @@ fn H2Connection::answer_too_large(
       })
     None => None
   }
-  self.answer_internal(
+  self.answer_own(
     stream,
-    request,
     outcome,
+    Internal,
     too_large_message,
     date~,
     template_error?,
@@ -480,31 +551,31 @@ fn H2Connection::head_then_trailers(
 
 ///|
 /// Answers `stream`, a gRPC call that the engine decided `outcome` for, with
-/// Trailers-Only INTERNAL and the fixed ASCII `message` instead of the
-/// plan's reply, which it cannot send, and records INTERNAL as the call's
-/// gRPC status in its Journal entry, which is then committed, with
+/// smock's own Trailers-Only `status` and the fixed ASCII `message` instead
+/// of the plan's answer: INTERNAL for a reply it cannot send, or
+/// DEADLINE_EXCEEDED at the call's deadline. It records `status` as the
+/// call's gRPC status in its Journal entry, which is then committed, with
 /// `template_error`, when given, as the reason. `date` is the value of the
 /// answer's `date` field.
-fn H2Connection::answer_internal(
+fn H2Connection::answer_own(
   self : H2Connection,
   stream : Int32,
-  request : H2Request,
   outcome : @engine.Outcome,
+  status : @grpc.Status,
   message : String,
   date~ : String,
   template_error? : @engine.TemplateError,
 ) -> Unit {
   let fields = trailers_only(
-    @grpc.Internal,
+    status,
     Some(message),
     smock_mock_of(outcome.plan.headers),
     date~,
   )
   if outcome.journal is Some(entry) {
-    entry.set_grpc_status(@grpc.Internal, template_error?)
+    entry.set_grpc_status(status, template_error?)
   }
   self.headers_only(stream, fields, outcome.journal, partial=false)
-  self.ended_in_place(request, outcome)
 }
 
 ///|
@@ -583,7 +654,10 @@ fn reply_at(index : Int32?) -> String {
 /// as much as the windows allow; the rest is returned, which the caller
 /// sends in the stream's task, with the trailers after it and the entry
 /// still to commit. HEADERS or trailers the `Conn` refuses get RST_STREAM
-/// INTERNAL_ERROR, the entry committed just before (`reset_after`).
+/// INTERNAL_ERROR, the entry committed just before (`reset_after`). In the
+/// stream's task, `bounded` is true: the message queued now is also no
+/// more than the output bound leaves for one DATA frame
+/// (`H2Writer::frame_room`), as `queue` holds a body to it.
 fn H2Connection::queue_reply(
   self : H2Connection,
   stream : Int32,
@@ -591,6 +665,7 @@ fn H2Connection::queue_reply(
   framed : Bytes,
   trailers : Array[@header.Header],
   entry : @engine.JournalEntry?,
+  bounded~ : Bool = false,
 ) -> BytesView {
   self.conn.headers(stream, head) catch {
     _ => {
@@ -598,7 +673,13 @@ fn H2Connection::queue_reply(
       return framed[0:0]
     }
   }
-  let room = self.room(stream)
+  let mut room = self.room(stream)
+  if bounded {
+    let bound = self.writer.frame_room()
+    if bound < room {
+      room = bound
+    }
+  }
   if framed.length() > room {
     if room > 0 {
       self.conn.data(stream, framed[0:room]) catch {

@@ -5,8 +5,9 @@ Descriptor set, the compiled form of its `.proto` files, and smock reads
 and checks the set when it loads the Definition files. Its gRPC Stubs then
 answer unary calls, on the plain port over h2c and on the TLS port over
 h2. This guide shows a first call, says which requests are gRPC calls, how
-a call reaches a Stub and how smock answers it, which calls gRPC's rules
-refuse, and how to build a set that smock reads. The
+a call reaches a Stub and how smock answers it, how a call's deadline
+meets a Stub's delay, which calls gRPC's rules refuse, and how to build a
+set that smock reads. The
 [Definition-file reference](definition-files.md#grpc) describes the
 Mock's `grpc` field and gRPC Stubs.
 
@@ -42,11 +43,14 @@ Mock's `grpc` field and gRPC Stubs.
 - [Unmatched calls](#unmatched-calls)
   - [Calls answered from their HEADERS](#calls-answered-from-their-headers)
   - [The Near miss trailer](#the-near-miss-trailer)
+- [Deadlines](#deadlines)
+  - [A client that resets at its deadline](#a-client-that-resets-at-its-deadline)
 - [Protocol checks and limits](#protocol-checks-and-limits)
   - [The order of the checks](#the-order-of-the-checks)
   - [Timeouts](#timeouts)
   - [The body limit](#the-body-limit)
 - [Compression](#compression)
+- [Faults](#faults)
 - [Calls smock does not serve yet](#calls-smock-does-not-serve-yet)
 - [Building a set](#building-a-set)
   - [Self-contained sets](#self-contained-sets)
@@ -215,8 +219,10 @@ stubs:
   the status, message and trailing metadata the reply ends with
   ([Status and message](#status-and-message)). `template` and weighted
   `responses` work as on HTTP.
-- `priority`, `scenario`, `variables`, `dataWrites` and `fault.seed` work
-  as on HTTP.
+- `priority`, `scenario`, `variables`, `dataWrites`, `fault.delay` and
+  `fault.seed` work as on HTTP. A delay waits before the reply's HEADERS,
+  and the call's deadline can cut it short ([Faults](#faults),
+  [Deadlines](#deadlines)).
 
 Fields that make no sense for gRPC are problems when the files load:
 `query` and `cookies` conditions, a body condition other than `json`, and
@@ -227,7 +233,8 @@ Fields that make no sense for gRPC are problems when the files load:
 greeter.yaml: /stubs/0/request/query: makes no sense on a gRPC Stub: a gRPC call's path has no query
 ```
 
-Faults that delay or break the connection are not served yet. The
+Connection Faults, which break a call's stream or its connection, are not
+served yet: a Stub that gives one fails to load. The
 [Definition-file reference](definition-files.md#a-grpc-stubs-fields)
 lists every field. A [CRUD Stub](definition-files.md#crud-stubs) is never
 a gRPC Stub, whatever its path: it has no request path, so gRPC calls
@@ -1520,6 +1527,66 @@ its Host reaches no Mock, or its Mock has no gRPC Stub, which a Mock
 without a set never has. An HTTP Stub is never a call's Near miss, even one whose
 path pattern takes the call's path.
 
+## Deadlines
+
+A client gives a call its time in `grpc-timeout`
+([Timeouts](#timeouts)). smock counts the call's deadline from the arrival
+of its HEADERS. A call without `grpc-timeout` has no deadline. Neither has
+a call whose timeout is longer than the longest delay smock can give,
+2^31-1 ms, about 24.8 days, such as `99999999H`: no delay can outlast it.
+
+smock watches the deadline only while a Stub's delay runs
+([Faults](#faults)). When the delay would end after the deadline, the call
+ends at the deadline instead, as a gRPC server ends a call whose deadline
+passes. smock sends [Trailers-Only](#trailers-only) DEADLINE_EXCEEDED with
+the fixed `grpc-message` `deadline exceeded`. So with a Stub whose `fault`
+is `{delay: {fixed: 3000}}`, a call with `grpc-timeout: 5S` gets its reply
+after 3 s, and a call with `grpc-timeout: 1S` gets this about 1 s after
+its HEADERS:
+
+```text
+:status: 200
+content-type: application/grpc
+grpc-status: 4
+grpc-message: deadline exceeded
+smock-mock: greeter; via=default
+date: Sat, 14 Nov 2026 07:00:00 GMT
+```
+
+- A call without a delay is served, whatever its deadline. Once the
+  reply's HEADERS are out, the reply finishes as planned, however long its
+  message takes to send.
+- A timeout of 0, in any unit, such as `0m`, is accepted. Its deadline is
+  the arrival of the HEADERS, so a call with a delay gets
+  DEADLINE_EXCEEDED at once, and a call without one is served.
+- The Journal records the call when it ends at its deadline, with the HTTP
+  status 200 and the `grpcStatus` `DEADLINE_EXCEEDED`. Scenario moves,
+  Variables and data writes stand, as after any delay: they are made
+  before the delay begins.
+- The request metrics count the call under its Mock and Stub, as any call
+  that reached a Stub.
+
+smock adds no timer for a deadline: the delay's wait ends at the earlier
+of its own end and the deadline.
+
+### A client that resets at its deadline
+
+Clients that keep deadlines, such as grpc-go, grpc-java and grpcurl with
+`-max-time`, reset the stream with `CANCEL` at their own deadline. A
+client puts the time it has left in `grpc-timeout` when it builds the
+HEADERS, so smock's deadline comes about one transit after the client's,
+about when the client's reset arrives: either can come first.
+
+smock records such a reset as DEADLINE_EXCEEDED too. A client reset that
+arrives while a delay runs past the deadline, at most 100 ms before the
+deadline, ends the call's Journal entry as if smock had ended the call at
+its deadline. So the entry does not depend on which comes first.
+
+A call that the client cancels earlier during a delay, or that has no
+deadline, ends there, as any HTTP/2 stream does
+([Streams that wait](http2.md#streams-that-wait)). Its entry keeps the
+HTTP status and the `grpcStatus` that its Stub's reply planned.
+
 ## Protocol checks and limits
 
 smock refuses a call that gRPC's rules refuse before the call reaches
@@ -1620,8 +1687,8 @@ digits, a sign, a space. Eight digits of any unit are read, `99999999H`
 included, and so is a timeout of 0 in any unit, such as `0m`. Of several
 `grpc-timeout` fields, each must be well formed.
 
-For now smock only checks the timeout's form: it does not end a call at
-its deadline.
+A well-formed timeout gives the call its deadline
+([Deadlines](#deadlines)).
 
 ### The body limit
 
@@ -1682,6 +1749,24 @@ A message's flag says whether it is compressed: 0 for a message as it is,
 smock checks the flag as soon as the message's prefix arrives. A reply
 never carries `grpc-encoding`, and its message always has flag 0. A
 client's `grpc-accept-encoding` changes nothing.
+
+## Faults
+
+A gRPC Stub's `fault` may give a delay, drawn as on HTTP, with its
+`probability` ([Delays](definition-files.md#delays)). smock decides it as
+for an HTTP request, with the same draws, so
+[`fault.seed` and `--seed`](definition-files.md#seeds) replay it.
+Connection Faults are not served on gRPC Stubs yet: a Stub that gives one
+fails to load.
+
+| Fault | On a gRPC call | The client sees |
+|---|---|---|
+| delay | Waits before the reply's HEADERS, on the call's stream alone: the other calls of the connection are answered meanwhile. The call's deadline can cut it short ([Deadlines](#deadlines)). | The reply, later; or DEADLINE_EXCEEDED |
+
+A delay holds back whatever the call gets from its Stub: its reply, its
+error, or smock's own answer when the Stub's reply cannot be sent, such as
+INTERNAL `template failed`. A call that no Stub matched gets UNIMPLEMENTED
+at once.
 
 ## Calls smock does not serve yet
 
