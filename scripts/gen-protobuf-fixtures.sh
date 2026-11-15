@@ -389,6 +389,9 @@ done
 for name in error-info retry-info bad-request several; do
   hex_test "details/$name.binpb" "$(echo "$name" | tr - _)_status" "The google.rpc.Status of fixtures/protobuf/details/$name.txtpb, as protoc encodes it, in hex." protobuf
 done
+# The set of the definition set that scripts/check-grpcurl.sh serves to
+# grpcurl, with protobuf's LICENSE beside it.
+copy details/details.binpb scripts/grpcurl/definitions/files/greeter.binpb
 
 # gRPC's reflection.proto, whose messages the tests of a Mock's built-in
 # reflection service send and expect: requests, and their replies. A reply

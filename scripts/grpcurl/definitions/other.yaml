@@ -1,0 +1,6 @@
+# A second Mock, so that greeter is not the Default Mock: a call reaches it
+# only when its :authority, grpcurl's -authority, names greeter.svc, and a
+# call to any other Host reaches no Mock.
+mocks:
+  - name: other
+    hosts: [other.svc]
