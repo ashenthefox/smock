@@ -84,6 +84,20 @@ fn MockPorts::done(
 }
 
 ///|
+/// Counts a gRPC call that a built-in service of the Mock named `mock`
+/// answered, once its answer is written, with the seconds `stopwatch`
+/// gives since the call was read in full. No Stub was tried, so it counts
+/// under the Mock with `stub=""`. It is neither an unmatched request nor in
+/// the Journal.
+fn MockPorts::built_in(
+  self : MockPorts,
+  mock : String,
+  stopwatch : Stopwatch,
+) -> Unit {
+  self.traffic.count(mock, "", stopwatch.seconds())
+}
+
+///|
 /// Counts a request the protocol layer rejected, once its error response
 /// is written, with the seconds `stopwatch` gives since the read that
 /// brought it. No Mock or Stub was tried, so it counts with `mock=""` and

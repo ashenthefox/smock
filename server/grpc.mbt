@@ -92,6 +92,16 @@ fn H2Connection::answer_from_headers(
     request.without_body(),
     authority?=request.authority,
   )
+  // A method of the Mock's built-in health service that no Stub is on:
+  // `Check` and `List` wait for their message, and `Watch`, which streams,
+  // is answered now, as a streaming method of the set would be.
+  if mock is Some(found) && self.health_call(found, request) is Some(called) {
+    guard called is Watch else { return false }
+    self.requests.remove(stream)
+    self.answer_watch(stream, request, found, ended=false)
+    self.end_stream()
+    return true
+  }
   if mock is Some({ descriptor_set: Some(set), .. }) &&
     unary_method(set, request.target) is Some(_) {
     return false
@@ -166,9 +176,15 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
   let ports = self.ports
   let incoming = request.to_engine()
   // The second lookup, from the definition set served now: a reload since
-  // the HEADERS may have changed the Mock, its set or the method.
-  guard ports.engine.mock_for_call(incoming, authority?=request.authority)
-    is Some({ descriptor_set: Some(set), .. }) &&
+  // the HEADERS may have changed the Mock, its set or the method. A method
+  // of the Mock's built-in health service that no Stub is on goes to the
+  // service.
+  let mock = ports.engine.mock_for_call(incoming, authority?=request.authority)
+  if mock is Some(found) && self.health_call(found, request) is Some(called) {
+    self.answer_health(stream, request, found, called, out, ended=true)
+    return
+  }
+  guard mock is Some({ descriptor_set: Some(set), .. }) &&
     unary_method(set, incoming.target) is Some(rpc) else {
     self.answer_unserved(stream, request, ended=true)
     return
