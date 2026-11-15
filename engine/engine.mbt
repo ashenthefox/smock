@@ -216,6 +216,19 @@ pub(all) struct ResponsePlan {
 }
 
 ///|
+/// The plan that sends `status`, the header fields `headers` and `body`,
+/// with nothing more: no delay and no Fault, which a matched Stub's plan
+/// gets from `with_faults`, and no gRPC part, which the reply to a gRPC
+/// call gets from `plan_response`.
+fn ResponsePlan::plain(
+  status : Int32,
+  headers : Array[(String, String)],
+  body : Body,
+) -> ResponsePlan {
+  { status, headers, body, delay_ms: 0, fault: None, grpc: None, }
+}
+
+///|
 /// The gRPC part of a plan: what a gRPC call's reply carries beside its
 /// message, which is the plan's body as JSON, and the message encoded when
 /// it could be.
@@ -1107,14 +1120,11 @@ fn no_match(mock : @definitions.Mock, near_miss : NearMiss?) -> ResponsePlan {
   if near_miss is Some(near_miss) {
     headers.push(("Smock-Near-Miss", near_miss.header_value()))
   }
-  {
-    status: mock.no_match_status,
+  ResponsePlan::plain(
+    mock.no_match_status,
     headers,
-    body: Bytes(b"{\"error\":\"no Stub matched\"}"),
-    delay_ms: 0,
-    fault: None,
-    grpc: None,
-  }
+    Bytes(b"{\"error\":\"no Stub matched\"}"),
+  )
 }
 
 ///|
@@ -1176,14 +1186,11 @@ fn no_mock(host : String?, hosts : Array[String]) -> ResponsePlan {
     "host": host.map_or(Json::null(), host => Json::string(host)),
     "acceptedHosts": Json::array(hosts.map(host => Json::string(host))),
   }
-  {
-    status: 404,
-    headers: [("Content-Type", "application/json")],
-    body: Bytes(@utf8.encode(body.stringify())),
-    delay_ms: 0,
-    fault: None,
-    grpc: None,
-  }
+  ResponsePlan::plain(
+    404,
+    [("Content-Type", "application/json")],
+    Bytes(@utf8.encode(body.stringify())),
+  )
 }
 
 ///|

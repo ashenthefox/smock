@@ -158,25 +158,11 @@ fn plan_response(
       if response.serves_ranges {
         range_response(status, headers, bytes, incoming.request)
       } else {
-        {
-          status,
-          headers,
-          body: Bytes(bytes),
-          delay_ms: 0,
-          fault: None,
-          grpc: None,
-        }
+        ResponsePlan::plain(status, headers, Bytes(bytes))
       }
     Events(events) => {
       set_content_type(headers, "text/event-stream")
-      {
-        status,
-        headers,
-        body: Events(events),
-        delay_ms: 0,
-        fault: None,
-        grpc: None,
-      }
+      ResponsePlan::plain(status, headers, Events(events))
     }
     Template(template) => {
       let rendering = rendering_for(
@@ -227,7 +213,7 @@ fn plan_response(
           Events(sse_events(events, waits))
         }
       }
-      { status, headers, body, delay_ms: 0, fault: None, grpc: None, }
+      ResponsePlan::plain(status, headers, body)
     }
   }
   guard grpc else { return plan }
@@ -643,7 +629,7 @@ fn render_body(
       Events(ReadOnlyArray::from_array(rendered))
     }
   }
-  { status, headers, body, delay_ms: 0, fault: None, grpc: None, }
+  ResponsePlan::plain(status, headers, body)
 }
 
 ///|
@@ -677,14 +663,11 @@ pub let template_failed_message : String = "template failed"
 /// A response of smock's own that says what went wrong: `status`, with
 /// `body` in compact JSON, as `application/json`, and no delay or Fault.
 fn json_failure(status : Int32, body : Json) -> ResponsePlan {
-  {
+  ResponsePlan::plain(
     status,
-    headers: [("Content-Type", "application/json")],
-    body: Bytes(@template.compact_json_bytes(body)),
-    delay_ms: 0,
-    fault: None,
-    grpc: None,
-  }
+    [("Content-Type", "application/json")],
+    Bytes(@template.compact_json_bytes(body)),
+  )
 }
 
 ///|

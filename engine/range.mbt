@@ -38,14 +38,7 @@ fn range_response(
   request : Request,
 ) -> ResponsePlan {
   guard request.meth is ("GET" | "HEAD") else {
-    return {
-      status,
-      headers,
-      body: Bytes(bytes),
-      delay_ms: 0,
-      fault: None,
-      grpc: None,
-    }
+    return ResponsePlan::plain(status, headers, Bytes(bytes))
   }
   // RFC 9110 defines range handling for GET only, so a HEAD ignores
   // Range. An empty body has no range to send.
@@ -72,7 +65,7 @@ fn range_response(
       body = b""
     }
   }
-  { status, headers, body: Bytes(body), delay_ms: 0, fault: None, grpc: None, }
+  ResponsePlan::plain(status, headers, Bytes(body))
 }
 
 ///|

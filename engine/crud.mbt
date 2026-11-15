@@ -419,14 +419,7 @@ fn crud_plan(
   for i in 0..<given.length() {
     fields.push(given[i])
   }
-  {
-    status,
-    headers: fields,
-    body: Bytes(body),
-    delay_ms: 0,
-    fault: None,
-    grpc: None,
-  }
+  ResponsePlan::plain(status, fields, Bytes(body))
 }
 
 ///|
