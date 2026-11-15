@@ -57,7 +57,7 @@ test "the JSON is counted as it is printed: a message whose JSON passes the limi
 }
 
 ///|
-test "what the decoder holds to print a message counts with its JSON: the records of a field that do not come together, a message field sent again, and each entry of a map" {
+test "what the decoder holds to print a message is bounded by the limit too: the records of a field that do not come together, a message field sent again, and each entry of a map" {
   // 200 numbers and 200 flags, each an unpacked record of 0: together,
   // as two runs of records, or one after the other, as 400 runs.
   let together = repeated(b"\x08\x00", 200) + repeated(b"\x30\x00", 200)
@@ -320,4 +320,92 @@ test "a proto2 string that is not UTF-8 prints as UTF-8 decoders repair it, U+FF
       !good,
     )
   }
+}
+
+///|
+test "the JSON counts wherever it is printed: through a message field, a list, a map, a group, an Any's message, a Struct and a ListValue, a message is printed at its JSON's length and refused one octet short" {
+  let hello = any_of(
+    "type.googleapis.com/helloworld.HelloRequest",
+    nested(w => string_field(w, 1, "Tom")),
+  )
+  let cases : Array[(String, String, Bytes)] = [
+    (limits_set, "limits.Burrow", fixture(burrow)),
+    (collections_set, "collections.Lists", repeated(b"\x52\x00", 2)),
+    // Maps whose JSON is longer than what is held to print them.
+    (
+      collections_set,
+      "collections.Tagged",
+      fixture(tagged) + nested(w => string_field(w, 1, "x".repeat(400))),
+    ),
+    (dynamic_set, "google.protobuf.Any", anys(2, hello)),
+    (
+      dynamic_set,
+      "google.protobuf.Struct",
+      structs(3, nested(w => string_field(w, 3, "x".repeat(400)))),
+    ),
+    (dynamic_set, "google.protobuf.Value", listed_values(3, number_value(1.5))),
+  ]
+  let out = []
+  for case in cases {
+    let (hex, name, input) = case
+    let text = bounded(hex, name, input, limit=no_limit)
+    let at = bounded(hex, name, input, limit=text.length())
+    let short = bounded(hex, name, input, limit=text.length() - 1)
+    out.push(
+      "\{name}: \{at == text}, \{short.has_prefix("error: the decoded message passes")}",
+    )
+  }
+  inspect(
+    out.join("\n"),
+    content=(
+      #|limits.Burrow: true, true
+      #|collections.Lists: true, true
+      #|collections.Tagged: true, true
+      #|google.protobuf.Any: true, true
+      #|google.protobuf.Struct: true, true
+      #|google.protobuf.Value: true, true
+    ),
+  )
+}
+
+///|
+test "an Any's message is printed in place, after its @type: one with no field to print leaves @type alone" {
+  // google.protobuf.Any, and e.E, a message with no fields.
+  let any = file_proto(
+    "google/protobuf/any.proto",
+    package_name="google.protobuf",
+    body=w => {
+      message_field(
+        w,
+        4,
+        message_proto("Any", body=w => {
+          message_field(w, 2, field_proto("type_url", 1, 9))
+          message_field(w, 2, field_proto("value", 2, 12))
+        }),
+      )
+    },
+  )
+  let e = file_proto("e.proto", package_name="e", body=w => {
+    message_field(w, 4, message_proto("E"))
+  })
+  let set = @protobuf.read_descriptor_set(set_of([any, e])) catch {
+    err => abort("not a set: \{err}")
+  }
+  guard set.find_message("google.protobuf.Any") is Some(message) else {
+    abort("no Any")
+  }
+  let printed = (input : Bytes, limit : Int32) => {
+    @utf8.decode(@protobuf.decode_json(set, message, input[:], limit~)) catch {
+      err => "error: \{err}"
+    }
+  }
+  let empty = any_of("type.googleapis.com/e.E", b"")
+  inspect(
+    [printed(empty, 100), printed(empty, 35), printed(empty, 34)].join("\n"),
+    content=(
+      #|{"@type":"type.googleapis.com/e.E"}
+      #|{"@type":"type.googleapis.com/e.E"}
+      #|error: the decoded message passes the limit of 34 octets
+    ),
+  )
 }

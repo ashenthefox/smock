@@ -11,8 +11,8 @@ pub(all) suberror DecodeError {
   /// view of, where the problem is, so a reader of a nested message reports
   /// offsets in the whole input. `message` says what the problem is.
   DecodeError(position~ : Int32, message~ : String)
-  /// A message whose decoded JSON, with what the decoder holds to print
-  /// it, passes `limit` octets, the limit `decode_json` was given.
+  /// A message whose decoded JSON, or what the decoder holds to print it,
+  /// passes `limit` octets, the limit `decode_json` was given.
   TooLarge(limit~ : Int32)
 }
 

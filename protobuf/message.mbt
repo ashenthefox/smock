@@ -111,6 +111,12 @@ let no_runs : Array[BytesView] = []
 /// printing stops as soon as it passes `limit` octets, so a small message
 /// whose JSON would be far larger, such as a list of empty messages each
 /// printed with every field at its default, costs no more than `limit`.
+/// What it holds meanwhile to print a message is bounded by `limit` too:
+/// views of the input, beyond one a field, of the records of a repeated
+/// field that do not come together, of a message field sent again, and of
+/// the entries of a map, each counted as about the memory it takes. It
+/// allocates nothing for a length before it has checked it against the
+/// octets left, and checks and repairs UTF-8 with no copy.
 ///
 /// Raises `DecodeError` when the input is not protobuf, when a proto3
 /// string is not UTF-8, when a message lacks a proto2 required field, as
@@ -120,8 +126,8 @@ let no_runs : Array[BytesView] = []
 /// holds nothing or NaN, or an Any whose type the set lacks, when a message
 /// it prints is a type of an editions file or a MessageSet, and when a
 /// message it prints is or has a field that it does not decode yet: one
-/// declared in an editions file. Raises `TooLarge` when the JSON passes
-/// `limit`.
+/// declared in an editions file. Raises `TooLarge` when the JSON, or what
+/// it holds to print it, passes `limit`.
 pub fn decode_json(
   set : DescriptorSet,
   message : MessageDescriptor,

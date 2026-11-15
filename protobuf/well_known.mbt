@@ -362,9 +362,9 @@ fn DescriptorSet::print_any(
   }
   // The message's fields follow `@type` in the Any's object: the message
   // is printed as an object, which then loses its braces.
-  let at = out.length
+  let at = out.wrapped()
   self.print_message(out, held, [value], depth + 1)
-  out.unwrap_object(at)
+  out.unwrap(at)
 }
 
 ///|

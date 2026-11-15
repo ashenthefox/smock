@@ -292,9 +292,14 @@ The JSON is bounded by `limit`, in octets. It is counted as it is
 printed, and `decode_json` raises `TooLarge` as soon as it passes the
 limit. A field without presence prints at its default even in an empty
 message, so a list of empty messages of 2 octets each could otherwise
-print far more than the message it comes from. smock passes
-`--body-limit`, so a gRPC call costs no more than the largest JSON body
-an HTTP request may send.
+print far more than the message it comes from. What the decoder holds
+meanwhile is bounded by `limit` too: a view of the input for each run of
+records of a repeated field that do not come together, each record of a
+message field after its first, and each map entry, until it has printed
+them. Messages as encoders write them need few. The decoder checks every
+length against the octets left before it reads the value, and checks and
+repairs UTF-8 with no copy. smock passes `--body-limit`, so a gRPC call
+costs no more than the largest JSON body an HTTP request may send.
 
 `set.encode_json(message, json)` encodes JSON, a message of the type
 `message`, a type of `set`, as ProtoJSON writes it, the way protoc encodes

@@ -1,9 +1,11 @@
 // The JSON text that `decode_json` prints, bounded by the limit it is
-// given. What is printed is counted as it is printed, with what the
-// decoder holds meanwhile to print it, and printing stops with `TooLarge`
-// as soon as the two pass the limit. So a message of a few octets whose
-// JSON would be far larger, such as a list of empty messages each printed
-// with every field at its default, costs no more than the limit.
+// given. What is printed is counted as it is printed, and printing stops
+// with `TooLarge` as soon as it passes the limit. So a message of a few
+// octets whose JSON would be far larger, such as a list of empty messages
+// each printed with every field at its default, costs no more than the
+// limit. What the decoder holds meanwhile to print the message, views of
+// the input beyond one a field, is counted too, against the same limit
+// on its own.
 
 ///|
 /// The octets the decoder counts for each view of the input that it holds
@@ -27,16 +29,20 @@ let held_entry : Int32 = 16
 let unbounded : Int32 = 0x7FFF_FFFF
 
 ///|
-/// JSON text being printed, which may take at most `limit` octets with
-/// what the decoder holds meanwhile (`Output::hold`).
+/// JSON text being printed, which may take at most `limit` octets, while
+/// what the decoder holds meanwhile may take at most `limit` too
+/// (`Output::hold`).
 priv struct Output {
   /// The text so far, at the start of `data`, which never grows past the
   /// most the text may take.
   mut data : FixedArray[Byte]
   /// The length of the text so far.
   mut length : Int32
-  /// The most octets the text, with what is held, may take.
+  /// The most octets the text may take, and what is held.
   limit : Int32
+  /// The most octets the text may take for now: `limit`, and one more
+  /// while the braces of an object are to come off (`Output::unwrap`).
+  mut most : Int32
   /// What the decoder holds, in octets, as `Output::hold` counts it.
   mut held : Int32
 }
@@ -45,30 +51,41 @@ priv struct Output {
 /// An output with no text yet, bounded by `limit`, with room for
 /// `size_hint` octets of text, or `limit` when it is smaller.
 fn Output::new(size_hint~ : Int32, limit~ : Int32) -> Output {
-  let limit = if limit < 0 { 0 } else { limit }
+  // Below the largest Int32, so that the text may pass it by an octet for
+  // a while (`Output::wrapped`).
+  let limit = if limit < 0 {
+    0
+  } else if limit > 0x7FFF_FFFE {
+    0x7FFF_FFFE
+  } else {
+    limit
+  }
   let capacity = if size_hint < 0 || size_hint > limit {
     limit
   } else {
     size_hint
   }
-  { data: FixedArray::make(capacity, b'\x00'), length: 0, limit, held: 0, }
+  {
+    data: FixedArray::make(capacity, b'\x00'),
+    length: 0,
+    limit,
+    most: limit,
+    held: 0,
+  }
 }
 
 ///|
-/// Makes room for `count` more octets, or raises `TooLarge` when they
-/// would take the text, with what is held, past the limit.
+/// Makes room for `count` more octets of text, or raises `TooLarge` when
+/// they would take it past the limit.
 fn Output::reserve(self : Output, count : Int32) -> Unit raise DecodeError {
-  // The most the text may still take.
-  let room = self.limit - self.held - self.length
-  if count > room {
+  if count > self.most - self.length {
     raise TooLarge(limit=self.limit)
   }
   let needed = self.length + count
   if needed > self.data.length() {
     // Doubled, but never past the most the text may take.
-    let most = self.length + room
-    let doubled = if self.data.length() > most / 2 {
-      most
+    let doubled = if self.data.length() > self.most / 2 {
+      self.most
     } else {
       2 * self.data.length()
     }
@@ -88,7 +105,7 @@ fn Output::reserve(self : Output, count : Int32) -> Unit raise DecodeError {
 ///|
 /// Writes `value`.
 fn Output::write_byte(self : Output, value : Byte) -> Unit raise DecodeError {
-  if self.length >= self.data.length() || self.length + self.held >= self.limit {
+  if self.length >= self.data.length() {
     self.reserve(1)
   }
   self.data[self.length] = value
@@ -119,11 +136,11 @@ fn Output::write_ascii(self : Output, text : String) -> Unit raise DecodeError {
 }
 
 ///|
-/// Counts `octets` more as held, or raises `TooLarge` when the text, with
-/// what is held, would pass the limit: what the decoder holds until it
-/// lets it go (`Output::release_to`).
+/// Counts `octets` more as held, or raises `TooLarge` when what is held
+/// would pass the limit: what the decoder holds until it lets it go
+/// (`Output::release_to`).
 fn Output::hold(self : Output, octets : Int32) -> Unit raise DecodeError {
-  if octets > self.limit - self.held - self.length {
+  if octets > self.limit - self.held {
     raise TooLarge(limit=self.limit)
   }
   self.held += octets
@@ -136,16 +153,31 @@ fn Output::release_to(self : Output, held : Int32) -> Unit {
 }
 
 ///|
-/// Takes the braces off the object printed last, from `at`, so that its
-/// members follow those of the object it is printed in: its `{` becomes
-/// the comma before them, and an empty object leaves only the `}` that
-/// ends the object it is printed in.
-fn Output::unwrap_object(self : Output, at : Int32) -> Unit {
+/// Where the object that is printed next starts, an object whose braces
+/// `Output::unwrap` takes off once it is printed: the text may pass the
+/// limit by its `{` meanwhile.
+fn Output::wrapped(self : Output) -> Int32 {
+  // The data never grows past the limit but by that octet.
+  self.most += 1
+  self.length
+}
+
+///|
+/// Takes the braces off the object printed last, from `at`, as
+/// `Output::wrapped` gave it, so that its members follow those of the
+/// object it is printed in: its `{` becomes the comma before them, and an
+/// empty object leaves only the `}` that ends the object it is printed in.
+/// Raises `TooLarge` when the text then passes the limit.
+fn Output::unwrap(self : Output, at : Int32) -> Unit raise DecodeError {
+  self.most -= 1
   if self.length - at == 2 {
     self.data[at] = b'}'
     self.length = at + 1
   } else {
     self.data[at] = b','
+  }
+  if self.length > self.most {
+    raise TooLarge(limit=self.limit)
   }
 }
 
