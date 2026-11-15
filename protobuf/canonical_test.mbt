@@ -190,3 +190,84 @@ test "a repeated field or a map that holds no element is left out, a packed reco
     ),
   )
 }
+
+///|
+test "the well-known types in their ProtoJSON forms: 64-bit wrappers as strings, wrappers at their defaults printed" {
+  inspect(
+    canonical(wellknown_set, "wellknown.Known", fixture(known)),
+    content=(
+      #|{"at":"2025-11-14T09:30:00.123456Z","ttl":"-3.250s","mask":"userName,address.cityName","aDouble":1.5,"aFloat":9.99,"anInt64":"9223372036854775807","aUint64":"18446744073709551615","anInt32":-2147483648,"aUint32":4294967295,"aBool":true,"aString":"Tom","aBytes":"+/8=","nothing":{},"history":["0001-01-01T00:00:00Z","9999-12-31T23:59:59.999999999Z"],"limits":{"read":"315576000000.999999999s","write":"0.000001s"},"ids":["1","0"]}
+    ),
+  )
+  // Each type set at its default: a message field has presence, and a
+  // wrapper prints the value it wraps.
+  inspect(
+    canonical(wellknown_set, "wellknown.Known", fixture(known_defaults)),
+    content=(
+      #|{"at":"1970-01-01T00:00:00Z","ttl":"0s","mask":"","aDouble":0,"aFloat":0,"anInt64":"0","aUint64":"0","anInt32":0,"aUint32":0,"aBool":false,"aString":"","aBytes":"","nothing":{}}
+    ),
+  )
+  inspect(
+    canonical(wellknown_set, "wellknown.Lease", fixture(lease)),
+    content=(
+      #|{"createdAt":"1970-01-01T00:00:01.500Z","ttl":"1.500s"}
+    ),
+  )
+  // Whole messages of a well-known type: an Int64Value of 5, an empty one,
+  // a Timestamp at the epoch, and Empty.
+  inspect(
+    [
+      canonical(wellknown_set, "google.protobuf.Int64Value", b"\x08\x05"),
+      canonical(wellknown_set, "google.protobuf.Int64Value", b""),
+      canonical(wellknown_set, "google.protobuf.UInt64Value", b"\x08\x05"),
+      canonical(wellknown_set, "google.protobuf.Timestamp", b""),
+      canonical(wellknown_set, "google.protobuf.Empty", b""),
+    ].join(" "),
+    content=(
+      #|"5" "0" "5" "1970-01-01T00:00:00Z" {}
+    ),
+  )
+}
+
+///|
+test "Struct, Value, ListValue, NullValue and Any in their ProtoJSON forms" {
+  inspect(
+    canonical(dynamic_set, "dynamic.Document", fixture(document)),
+    content=(
+      #|{"labels":{"count":3,"nested":{"empty":{},"sizes":[1.5,1e+21]},"none":null,"on":true,"team":"core"},"value":["x",null,[]],"list":[-0.25,false],"values":["a\"b",0],"byName":{"a":null,"b":"B"},"attachment":{"@type":"type.googleapis.com/helloworld.HelloRequest","name":"Tom"},"attachments":[{"@type":"type.googleapis.com/google.protobuf.Duration","value":"1.500s"},{"@type":"type.googleapis.com/google.protobuf.Empty"},{"@type":"type.googleapis.com/google.protobuf.Value","value":2},{"@type":"type.googleapis.com/google.protobuf.Struct","value":{"k":true}},{"@type":"type.googleapis.com/google.protobuf.Any","value":{"@type":"type.googleapis.com/helloworld.HelloRequest","name":"Ann"}}],"none":null,"maybe":null,"nothings":[null,null]}
+    ),
+  )
+  inspect(
+    canonical(dynamic_set, "dynamic.Document", fixture(document_nulls)),
+    content=(
+      #|{"labels":{"gone":null},"value":null,"list":[null],"values":[null],"byName":{"gone":null},"none":null,"maybe":null,"nothings":[null]}
+    ),
+  )
+  inspect(
+    [any_hello, any_duration, any_empty]
+    .map(any => canonical(dynamic_set, "google.protobuf.Any", fixture(any)))
+    .join(" "),
+    content=(
+      #|{"@type":"type.googleapis.com/helloworld.HelloRequest","name":"Tom"} {"@type":"type.googleapis.com/google.protobuf.Duration","value":"1.500s"} {"@type":"type.googleapis.com/google.protobuf.Empty"}
+    ),
+  )
+  inspect(
+    canonical(dynamic_set, "google.protobuf.Any", fixture(any_missing)),
+    content=(
+      #|error: octet 0: the Any holds the type missing.Greeting, which the Descriptor set does not define, so it cannot be printed
+    ),
+  )
+  // A NullValue without presence at its default is left out; a Struct, a
+  // ListValue and an Any of no fields print as an empty object or array.
+  inspect(
+    [
+      canonical(dynamic_set, "dynamic.Document", b"\x20\x00"),
+      canonical(dynamic_set, "google.protobuf.Struct", b""),
+      canonical(dynamic_set, "google.protobuf.ListValue", b""),
+      canonical(dynamic_set, "google.protobuf.Any", b""),
+    ].join(" "),
+    content=(
+      #|{} {} [] {}
+    ),
+  )
+}
