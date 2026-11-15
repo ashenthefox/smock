@@ -678,8 +678,16 @@ fn WorkingCopies::store(
 
 ///|
 /// The response to a request whose data write could not be applied: 500,
-/// with the write and what went wrong.
-fn data_write_failed(stub : String, error : DataError) -> ResponsePlan {
+/// with the write and what went wrong, or for a gRPC call (`grpc`),
+/// INTERNAL `data write failed` in gRPC's form (`grpc_failure`).
+fn data_write_failed(
+  stub : String,
+  error : DataError,
+  grpc~ : Bool = false,
+) -> ResponsePlan {
+  if grpc {
+    return grpc_failure(Internal, "data write failed")
+  }
   json_failure(500, {
     "error": "data write failed",
     "stub": Json::string(stub),

@@ -342,7 +342,7 @@ test "a call's JSON is cut at the Journal's body limit, and its size is still th
 }
 
 ///|
-test "a gRPC Stub that fails to render its reply plans smock's own answer, which has no gRPC part" {
+test "a gRPC Stub that fails to render its reply plans smock's own INTERNAL template failed, with the HTTP status 200" {
   let h = harness(
     [
       (
@@ -367,6 +367,12 @@ test "a gRPC Stub that fails to render its reply plans smock's own answer, which
     octets=10,
   )
   inspect(matched_id(outcome).unwrap_or("none"), content="hello")
-  inspect(outcome.plan.status, content="500")
-  inspect(grpc_part(outcome), content="none")
+  inspect(outcome.plan.status, content="200")
+  inspect(
+    grpc_part(outcome),
+    content=(
+      #|INTERNAL
+      #|grpc-message: template failed
+    ),
+  )
 }
