@@ -493,3 +493,35 @@ async test "health: a gRPC Stub on a health method answers in the service's plac
     })
   })
 }
+
+///|
+async test "health: a reply larger than the stream's window is sent as the client widens it, then its trailers, and is counted once it is sent" {
+  with_greeter_set([("greeter.yaml", health_example)], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      // A window of 8 octets for each stream the client opens.
+      let client = smock.h2c(
+        settings=@http2.Settings::new(initial_window_size=8),
+      )
+      defer client.close()
+      let list = client.call(list_path, body=framed(b""))
+      let whole = @buffer.Buffer()
+      for octets in list.data {
+        whole.write_bytes(octets)
+      }
+      inspect(
+        [
+          "DATA frames: \{list.data.length()}, each of 8 octets at most: \{list.data.iter().all(octets => octets.length() <= 8)}",
+          "the framed List reply: \{whole.to_bytes() == framed(health_fixture("list-greeter"))}",
+          "trailers: \{list.trailers}, \{list.ended}",
+          smock.metric("smock_requests_total"),
+        ].join("\n"),
+        content=(
+          #|DATA frames: 5, each of 8 octets at most: true
+          #|the framed List reply: true
+          #|trailers: Some([(grpc-status, 0)]), end
+          #|smock_requests_total{mock="greeter",stub=""} 1
+        ),
+      )
+    })
+  })
+}
