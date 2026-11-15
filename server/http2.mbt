@@ -702,7 +702,8 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
           self.stop_waiting(stream)
         }
         // A client that keeps deadlines resets each call at its own, so
-        // such a reset does not count.
+        // such a reset does not count. The stream is closed from here on,
+        // so a second reset of it counts among the frames that do no work.
         if early && !at_deadline && self.reset_early(octets) {
           return false
         }

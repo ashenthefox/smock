@@ -140,9 +140,8 @@ fn[S : @io.Writer + ReadOutput] H2Connection::wait_call(
 /// DEADLINE_EXCEEDED, as if smock had ended the call at its deadline,
 /// before the task commits it (`stop_waiting`). So the entry does not
 /// depend on which comes first, the client's reset or smock's deadline.
-/// Any other reset leaves the entry as planned. Such a reset counts once
-/// at most: the call no longer runs past its deadline. A connection without
-/// such a call pays one test.
+/// Any other reset leaves the entry as planned. A connection without such
+/// a call pays one test.
 fn H2Connection::reset_near_deadline(
   self : H2Connection,
   stream : Int32,
@@ -154,7 +153,6 @@ fn H2Connection::reset_near_deadline(
     self.read_at >= deadline - deadline_tolerance_ms else {
     return false
   }
-  self.past_deadline.remove(stream)
   if entry is Some(entry) {
     entry.set_grpc_status(DeadlineExceeded)
   }

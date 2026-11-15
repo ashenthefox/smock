@@ -152,3 +152,196 @@ async test "the ticket's example: 500 calls on one connection, each with grpc-ti
     })
   })
 }
+
+///|
+/// Reads frames until smock has ended `n` streams with HEADERS, as
+/// Trailers-Only does, or ends the connection, and shows how the reading
+/// ended: `open` once they have all come.
+async fn RawH2::trailers_only(self : RawH2, n : Int32) -> String {
+  let mut ended = 0
+  let frames = self.frames_until(@async.now(), frame => {
+    if frame is Headers(end_stream=true, ..) {
+      ended += 1
+    }
+    ended == n || is_goaway(frame)
+  })
+  "\{ended} calls ended by smock, then \{frames.how}"
+}
+
+///|
+async test "the exemption: 101 calls each reset in the last 100 ms before its deadline, while its delay runs past it, and 101 calls each reset after smock ended it with DEADLINE_EXCEEDED, leave their connections open; each one's second reset counts among the frames that do no work, and past the bound gets GOAWAY ENHANCE_YOUR_CALM" {
+  with_greeter_set([("greeter.yaml", slow_second)], dir => {
+    let stopped = with_smock(
+      ["--dir", dir, "--port", "0", "--http2-max-concurrent-streams", "128"],
+      smock => {
+        let hello = framed(@fs.read_file(hello_request_path).binary())
+        let out = []
+        // Each call is reset as soon as it is sent: a deadline of 50 ms is
+        // within 100 ms of its HEADERS.
+        let raw = smock.raw_h2()
+        let calls = []
+        for i in 0..<101 {
+          calls.append(raw.calls(1 + 2 * i, 1, hello, timeout="50m"))
+          calls.append(cancels(1 + 2 * i, 1))
+        }
+        raw.send(calls)
+        out.push("101 calls reset before their deadlines:")
+        out.push(raw.goaways())
+        raw.send(cancels(1, 101))
+        out.push("their second resets:")
+        out.push(raw.tally_until_closed())
+        raw.close()
+        // Each call is reset once smock has ended it at its deadline.
+        let raw = smock.raw_h2()
+        raw.send(raw.calls(1, 101, hello, timeout="50m"))
+        out.push("101 calls:")
+        out.push(raw.trailers_only(101))
+        raw.send(cancels(1, 101))
+        out.push("reset after smock ended them:")
+        out.push(raw.goaways())
+        raw.send(cancels(1, 101))
+        out.push("their second resets:")
+        out.push(raw.tally_until_closed())
+        raw.close()
+        out.push("Journal:")
+        out.push(smock.statuses(202))
+        inspect(
+          out.join("\n"),
+          content=(
+            #|101 calls reset before their deadlines:
+            #|then open
+            #|their second resets:
+            #|GOAWAY last=201 ENHANCE_YOUR_CALM
+            #|then a FIN
+            #|101 calls:
+            #|101 calls ended by smock, then open
+            #|reset after smock ended them:
+            #|then open
+            #|their second resets:
+            #|GOAWAY last=201 ENHANCE_YOUR_CALM
+            #|then a FIN
+            #|Journal:
+            #|"slow" 200 "DEADLINE_EXCEEDED" x202
+          ),
+        )
+      },
+    )
+    inspect(
+      defence_entries(stopped.logs),
+      content=(
+        #|{"level":"warn","msg":"HTTP/2 connection closed by a defence","pattern":"frames that do no work","frame":"RST_STREAM on a closed stream"}
+        #|{"level":"warn","msg":"HTTP/2 connection closed by a defence","pattern":"frames that do no work","frame":"RST_STREAM on a closed stream"}
+      ),
+    )
+  })
+}
+
+///|
+async test "other resets of gRPC calls count as spec E says: 100 calls without a timeout reset during their delays leave the connection open, and the 101st gets GOAWAY ENHANCE_YOUR_CALM; so do calls reset well before their deadlines, more than 100 ms before, though their delays run past them" {
+  with_greeter_set([("greeter.yaml", slow_second)], dir => {
+    let stopped = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let hello = framed(@fs.read_file(hello_request_path).binary())
+      let out = []
+      for timeout in [None, Some("500m")] {
+        let raw = smock.raw_h2()
+        let calls = []
+        for i in 0..<100 {
+          calls.append(raw.calls(1 + 2 * i, 1, hello, timeout?))
+          calls.append(cancels(1 + 2 * i, 1))
+        }
+        raw.send(calls)
+        let label = match timeout {
+          Some(timeout) => "grpc-timeout \{timeout}"
+          None => "no timeout"
+        }
+        out.push("100 calls with \{label}, reset at once:")
+        out.push(raw.goaways())
+        raw.send([..raw.calls(201, 1, hello, timeout?), ..cancels(201, 1)])
+        out.push("one more:")
+        out.push(raw.tally_until_closed())
+        raw.close()
+      }
+      out.push("Journal:")
+      out.push(smock.statuses(202))
+      inspect(
+        out.join("\n"),
+        content=(
+          #|100 calls with no timeout, reset at once:
+          #|then open
+          #|one more:
+          #|GOAWAY last=201 ENHANCE_YOUR_CALM
+          #|then a FIN
+          #|100 calls with grpc-timeout 500m, reset at once:
+          #|then open
+          #|one more:
+          #|GOAWAY last=201 ENHANCE_YOUR_CALM
+          #|then a FIN
+          #|Journal:
+          #|"slow" 200 "OK" x202
+        ),
+      )
+    })
+    inspect(
+      defence_entries(stopped.logs),
+      content=(
+        #|{"level":"warn","msg":"HTTP/2 connection closed by a defence","pattern":"Rapid Reset","frame":"RST_STREAM"}
+        #|{"level":"warn","msg":"HTTP/2 connection closed by a defence","pattern":"Rapid Reset","frame":"RST_STREAM"}
+      ),
+    )
+  })
+}
+
+///|
+async test "smock keeps the IDs of at most --http2-max-concurrent-streams calls it ended at their deadlines, and drops the oldest first: with a limit of 2, the resets of the last two of three such calls do not count, and the reset of the first counts among the frames that do no work" {
+  with_greeter_set([("greeter.yaml", slow_second)], dir => {
+    let stopped = with_smock(
+      ["--dir", dir, "--port", "0", "--http2-max-concurrent-streams", "2"],
+      smock => {
+        let hello = framed(@fs.read_file(hello_request_path).binary())
+        let out = []
+        let raw = smock.raw_h2()
+        defer raw.close()
+        // A timeout of 0 ends each delayed call at once.
+        raw.send(raw.calls(1, 2, hello, timeout="0m"))
+        out.push(raw.trailers_only(2))
+        raw.send(raw.calls(5, 1, hello, timeout="0m"))
+        out.push(raw.trailers_only(1))
+        // The client's SETTINGS and 99 PRIORITY frames come to 100 frames
+        // that do no work, the most the bound lets pass: one more reset that
+        // counts passes it.
+        let priorities = times(
+          Priority(stream_id=101, priority={
+            exclusive: false,
+            stream_dependency: 0,
+            weight: 16,
+          }),
+          99,
+        )
+        raw.send([..cancels(3, 2), ..priorities])
+        out.push("the resets of 3 and 5, and 99 PRIORITY frames:")
+        out.push(raw.goaways())
+        raw.send(cancels(1, 1))
+        out.push("the reset of 1:")
+        out.push(raw.tally_until_closed())
+        inspect(
+          out.join("\n"),
+          content=(
+            #|2 calls ended by smock, then open
+            #|1 calls ended by smock, then open
+            #|the resets of 3 and 5, and 99 PRIORITY frames:
+            #|then open
+            #|the reset of 1:
+            #|GOAWAY last=5 ENHANCE_YOUR_CALM
+            #|then a FIN
+          ),
+        )
+      },
+    )
+    inspect(
+      defence_entries(stopped.logs),
+      content=(
+        #|{"level":"warn","msg":"HTTP/2 connection closed by a defence","pattern":"frames that do no work","frame":"RST_STREAM on a closed stream"}
+      ),
+    )
+  })
+}
