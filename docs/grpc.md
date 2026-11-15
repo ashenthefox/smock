@@ -389,7 +389,7 @@ so that reflection sends custom options and every other field as the set
 holds them. Files written in proto2, in proto3 or in
 an edition all load. gRPC Stubs serve the types of proto3 and proto2
 files; a Stub whose method reaches a type of an editions file, or a
-MessageSet, is a problem ([proto2 types](#proto2-types)).
+MessageSet, is a problem ([What is not served](#what-is-not-served)).
 
 ### One set per Mock
 
@@ -453,9 +453,8 @@ A Mock without a set has no method of its own: a call to it gets
 UNIMPLEMENTED `the Mock has no Descriptor set` as soon as its HEADERS
 arrive ([Calls answered from their HEADERS](#calls-answered-from-their-headers)),
 unless its built-in services answer it. So `grpc: { health: true }`
-alone serves the health service, and nothing else. A Mock without `grpc`
-holds no set, and costs nothing more. With `grpc` or without, a Mock's
-HTTP Stubs answer its HTTP requests as before. The
+alone serves the health service, and nothing else. With `grpc` or
+without, a Mock's HTTP Stubs answer its HTTP requests as before. The
 [Definition-file reference](definition-files.md#grpc) describes the field.
 
 ### The call's Mock
