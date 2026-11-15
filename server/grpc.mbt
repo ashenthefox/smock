@@ -328,10 +328,8 @@ fn call_answer(
       EncodeError(pointer~, message~) =>
         return Internal(
           message=@engine.template_failed_message,
-          template_error=reply_error(
-            outcome,
-            "/grpc/details" + pointer,
-            message,
+          template_error=reply_error_within(
+            outcome, "/grpc/details", pointer, message,
           ),
         )
     }
@@ -346,7 +344,9 @@ fn call_answer(
         EncodeError(pointer~, message~) =>
           return Internal(
             message=@engine.template_failed_message,
-            template_error=reply_error(outcome, "/json" + pointer, message),
+            template_error=reply_error_within(
+              outcome, "/json", pointer, message,
+            ),
           )
       }
       Reply(part, reply)
@@ -525,7 +525,7 @@ fn H2Connection::answer_too_large(
     Internal,
     too_large_message,
     date~,
-    template_error?=reply_error(outcome, "", message),
+    template_error?=reply_error(outcome, message),
   )
   true
 }
@@ -677,18 +677,32 @@ fn status_details(
 ///|
 /// The template error that says why smock's own INTERNAL takes the place of
 /// the reply of the Stub that matched a gRPC call, which the engine decided
-/// `outcome` for: `message`, at the JSON Pointer of the reply that the
-/// Stub's pick chose (`reply_at`), followed by `within`, the pointer of the
-/// value at fault within the reply, such as `/json/name`, or `""` for the
-/// reply as a whole. `None` for a call without a Journal entry, which
-/// alone records it.
+/// `outcome` for, when the reply as a whole is at fault: `message`, at the
+/// JSON Pointer of the reply that the Stub's pick chose (`reply_at`).
+/// `None` for a call without a Journal entry, which alone records it.
 fn reply_error(
   outcome : @engine.Outcome,
-  within : String,
   message : String,
 ) -> @engine.TemplateError? {
   guard outcome.journal is Some(entry) else { return None }
-  Some({ at: reply_at(entry.response_index) + within, message, })
+  Some({ at: reply_at(entry.response_index), message, })
+}
+
+///|
+/// As `reply_error`, when a value within the reply is at fault: `message`,
+/// at the reply's JSON Pointer followed by `part`, the pointer of the part
+/// of the reply that holds the value, `/json` or `/grpc/details`, and by
+/// `pointer`, the pointer of the value within that part, such as `/name`.
+/// The three are joined only for a call with a Journal entry, so a call
+/// without one builds no string.
+fn reply_error_within(
+  outcome : @engine.Outcome,
+  part : String,
+  pointer : String,
+  message : String,
+) -> @engine.TemplateError? {
+  guard outcome.journal is Some(entry) else { return None }
+  Some({ at: reply_at(entry.response_index) + part + pointer, message, })
 }
 
 ///|

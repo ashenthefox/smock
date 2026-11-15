@@ -74,10 +74,7 @@ fn H2Connection::send_partial(
     outcome.plan.grpc is Some({ own: false, .. }) &&
     self.too_large("header block", head) is Some(why) {
     if entry is Some(entry) {
-      entry.set_grpc_status(
-        Internal,
-        template_error?=reply_error(outcome, "", why),
-      )
+      entry.set_grpc_status(Internal, template_error?=reply_error(outcome, why))
     }
     message = None
     head = own_head(headers, date~)
