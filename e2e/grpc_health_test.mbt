@@ -559,3 +559,35 @@ async test "health: gRPC's protocol checks come first, so a health call with no 
     })
   })
 }
+
+///|
+async test "health: the service answers over h2 on the TLS port as over h2c on the plain port" {
+  with_greeter_set([("greeter.yaml", health_example)], dir => {
+    with_certificates(certs => {
+      let _ = with_smock(["--dir", dir, "--port", "0", ..certs.args()], smock => {
+        let out = []
+        for port in ["h2c", "h2"] {
+          let client = smock.h2_on(port)
+          defer client.close()
+          let check = client.call(
+            check_path,
+            body=framed(health_fixture("check-greeter")),
+          )
+          let list = client.call(list_path, body=framed(b""))
+          out.push(
+            "\{port}: Check \{check.data == [framed(health_fixture("serving"))]}, List \{list.data == [framed(health_fixture("list-greeter"))]}, \{list.trailers}",
+          )
+        }
+        out.push(smock.metric("smock_requests_total"))
+        inspect(
+          out.join("\n"),
+          content=(
+            #|h2c: Check true, List true, Some([(grpc-status, 0)])
+            #|h2: Check true, List true, Some([(grpc-status, 0)])
+            #|smock_requests_total{mock="greeter",stub=""} 4
+          ),
+        )
+      })
+    })
+  })
+}
