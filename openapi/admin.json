@@ -2143,7 +2143,7 @@
             "maximum": 599
           },
           "grpcStatus": {
-            "description": "For a gRPC call, the name of the gRPC status the call got, such as `OK` or `NOT_FOUND`: the status its reply ended with, or the one smock answered with instead. `status` stays the HTTP status. Absent for an HTTP request.",
+            "description": "For a gRPC call, the name of the gRPC status the call got, such as `OK` or `NOT_FOUND`: the status its reply ended with, or the one smock answered with instead. `status` stays the HTTP status. Absent for an HTTP request, and for a gRPC call that a `reset` or `close` Fault ended before any status went out.",
             "enum": ["OK", "CANCELLED", "UNKNOWN", "INVALID_ARGUMENT", "DEADLINE_EXCEEDED", "NOT_FOUND", "ALREADY_EXISTS", "PERMISSION_DENIED", "RESOURCE_EXHAUSTED", "FAILED_PRECONDITION", "ABORTED", "OUT_OF_RANGE", "UNIMPLEMENTED", "INTERNAL", "UNAVAILABLE", "DATA_LOSS", "UNAUTHENTICATED"]
           },
           "fault": {
@@ -2198,7 +2198,7 @@
             "enum": ["HTTP/1.0", "HTTP/1.1", "HTTP/2"]
           },
           "headers": {
-            "description": "The header fields, in the order they were sent. Over HTTP/2, the names are in lower case, as HTTP/2 sends them, the pseudo-header fields are not listed, and a request's `cookie` fields are joined into one, with `; `, at the place of the first.",
+            "description": "The header fields, in the order they were sent. Over HTTP/2, the names are in lower case, as HTTP/2 sends them, the pseudo-header fields are not listed, and a request's `cookie` fields are joined into one, with `; `, at the place of the first. A gRPC call's header fields are its metadata, every field, and the value of binary metadata, whose name ends with `-bin`, is without the base64 padding that ends each comma-separated element.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Header"

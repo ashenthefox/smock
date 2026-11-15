@@ -13,6 +13,59 @@
 // rewritten, and must be printed keys. Patterns and operators are allowed
 // in any place. So matching a call costs nothing more than matching a JSON
 // body.
+//
+// Their exact `headers` conditions on binary metadata, whose name ends with
+// `-bin`, lose their base64 padding at load, as a call's values do when it
+// arrives, so that a condition written padded or not meets padded and
+// unpadded clients alike.
+
+///|
+/// `request`, the conditions of a gRPC Stub, with each exact `headers`
+/// condition on binary metadata, `$not`'s included, without the padding
+/// that ends each comma-separated element of its value
+/// (`@grpc.unpadded_elements`), as a call's values reach the Stubs.
+/// Patterns are kept, and see the unpadded values. The value is not
+/// checked as base64. `request` itself when no condition changes.
+fn unpadded_conditions(request : Conditions) -> Conditions {
+  let headers = []
+  let mut changed = false
+  for header in request.headers {
+    let (name, condition) = header
+    match unpadded_condition(name, condition) {
+      Some(unpadded) => {
+        headers.push((name, unpadded))
+        changed = true
+      }
+      None => headers.push(header)
+    }
+  }
+  guard changed else { return request }
+  { ..request, headers: ReadOnlyArray::from_array(headers), }
+}
+
+///|
+/// `condition`, a `headers` condition on `name`, with its exact value
+/// unpadded when `name` is that of binary metadata, or `None` when that
+/// changes nothing.
+fn unpadded_condition(
+  name : String,
+  condition : ValueCondition,
+) -> ValueCondition? {
+  guard @grpc.is_binary_name(name) else { return None }
+  match condition {
+    Has(Exact(value)) => {
+      let unpadded = @grpc.unpadded_elements(value)
+      guard !physical_equal(unpadded, value) else { return None }
+      Some(Has(Exact(unpadded)))
+    }
+    Not(inner) =>
+      match unpadded_condition(name, inner) {
+        Some(unpadded) => Some(Not(unpadded))
+        None => None
+      }
+    Has(Pattern(_) | Any) | Exists(_) => None
+  }
+}
 
 ///|
 /// Where a value of a gRPC Stub's `json` condition is, in the input type,

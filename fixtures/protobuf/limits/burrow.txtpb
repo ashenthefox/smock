@@ -1,0 +1,6 @@
+# A Burrow that holds another in each way: a message field, a group and a
+# map's value.
+name: "top"
+inner { name: "inner" }
+Layer { inner { name: "layer" } }
+rooms { key: "room" value { name: "room" } }

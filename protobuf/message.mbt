@@ -107,6 +107,17 @@ let no_runs : Array[BytesView] = []
 /// that the URL names, or its form as `value` when it is a well-known type
 /// that has one, an Empty's object of no fields included.
 ///
+/// The JSON is bounded by `limit`: it is counted as it is printed, and
+/// printing stops as soon as it passes `limit` octets, so a small message
+/// whose JSON would be far larger, such as a list of empty messages each
+/// printed with every field at its default, costs no more than `limit`.
+/// What it holds meanwhile to print a message is bounded by `limit` too:
+/// views of the input, beyond one a field, of the records of a repeated
+/// field that do not come together, of a message field sent again, and of
+/// the entries of a map, each counted as about the memory it takes. It
+/// allocates nothing for a length before it has checked it against the
+/// octets left, and checks and repairs UTF-8 with no copy.
+///
 /// Raises `DecodeError` when the input is not protobuf, when a proto3
 /// string is not UTF-8, when a message lacks a proto2 required field, as
 /// protobuf's parsers refuse it, when messages nest deeper than 100, a map
@@ -114,14 +125,16 @@ let no_runs : Array[BytesView] = []
 /// ProtoJSON cannot print, such as a Timestamp out of range, a Value that
 /// holds nothing or NaN, or an Any whose type the set lacks, when a message
 /// it prints is a type of an editions file or a MessageSet, and when a
-/// message it prints is or has a field that it does not decode yet: a
-/// group.
+/// message it prints is or has a field that it does not decode yet: one
+/// declared in an editions file. Raises `TooLarge` when the JSON, or what
+/// it holds to print it, passes `limit`.
 pub fn decode_json(
   set : DescriptorSet,
   message : MessageDescriptor,
   input : BytesView,
+  limit~ : Int32,
 ) -> Bytes raise DecodeError {
-  let out = @buffer.Buffer(size_hint=2 * input.length() + 16)
+  let out = Output::new(size_hint=json_size_hint(input, limit), limit~)
   set.print_message(out, message, [input], 0, canonical=false)
   out.to_bytes()
 }
@@ -143,16 +156,30 @@ pub fn decode_json(
 /// - A double or a float of negative zero is `-0`, and is not a default.
 ///
 /// Everything else is as `decode_json` prints it, and so are the errors it
-/// raises: field names, the order of fields and map entries, enums,
-/// numbers, bytes, the well-known types, extensions and groups.
+/// raises, `TooLarge` past `limit` included: field names, the order of
+/// fields and map entries, enums, numbers, bytes, the well-known types,
+/// extensions and groups.
 pub fn decode_canonical_json(
   set : DescriptorSet,
   message : MessageDescriptor,
   input : BytesView,
+  limit~ : Int32,
 ) -> Bytes raise DecodeError {
-  let out = @buffer.Buffer(size_hint=2 * input.length() + 16)
+  let out = Output::new(size_hint=json_size_hint(input, limit), limit~)
   set.print_message(out, message, [input], 0, canonical=true)
   out.to_bytes()
+}
+
+///|
+/// The room to make for the JSON text of `input` that may take at most
+/// `limit` octets: twice the input, as a guess, but never more than the
+/// limit.
+fn json_size_hint(input : BytesView, limit : Int32) -> Int32 {
+  if input.length() > (limit - 16) / 2 {
+    limit
+  } else {
+    2 * input.length() + 16
+  }
 }
 
 ///|
@@ -161,9 +188,12 @@ pub fn decode_canonical_json(
 /// `message.fields`; `None` for a field the message leaves out. A number
 /// that a closed enum does not define is skipped, as protobuf's parsers
 /// keep it as an unknown field: the field keeps the value it had, and a
-/// oneof the member it had.
+/// oneof the member it had. Each view a field's value holds beyond its
+/// first is held in `out`, which the caller lets go once it has printed
+/// the message.
 fn DescriptorSet::scan(
   self : DescriptorSet,
+  out : Output,
   message : MessageDescriptor,
   records : Array[BytesView],
 ) -> FixedArray[Value?] raise DecodeError {
@@ -254,6 +284,7 @@ fn DescriptorSet::scan(
             if from >= 0 && from + last.length() == start {
               runs[runs.length() - 1] = record[from:reader.pos]
             } else {
+              out.hold(held_view)
               runs.push(record[start:reader.pos])
             }
           }
@@ -278,16 +309,14 @@ fn DescriptorSet::scan(
         (String, Len) => {
           let at = reader.pos
           let value = reader.length_delimited()
-          if is_utf8(value) {
-            values[index] = Some(Octets(value))
-          } else if checked {
+          // One of a proto2 file is repaired as it is printed.
+          if checked && !is_utf8(value) {
             raise reader.error(
               at,
               "the field \{field.name} holds octets that are not UTF-8",
             )
-          } else {
-            values[index] = Some(Octets(repaired(value)))
           }
+          values[index] = Some(Octets(value))
         }
         (Bytes, Len) => values[index] = Some(Octets(reader.length_delimited()))
         (Message, Len) | (Group, StartGroup) => {
@@ -297,7 +326,10 @@ fn DescriptorSet::scan(
             reader.length_delimited()
           }
           match values[index] {
-            Some(Messages(list)) => list.push(value)
+            Some(Messages(list)) => {
+              out.hold(held_view)
+              list.push(value)
+            }
             _ => values[index] = Some(Messages([value]))
           }
         }
@@ -326,7 +358,7 @@ fn DescriptorSet::scan(
 /// so. The functions it calls take `canonical` with the same meaning.
 fn DescriptorSet::print_message(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   message : MessageDescriptor,
   records : Array[BytesView],
   depth : Int32,
@@ -344,12 +376,15 @@ fn DescriptorSet::print_message(
       message="the message \{message.full_name} is a MessageSet, which smock does not decode",
     )
   }
+  // What the message's scan holds is let go once it is printed.
+  let held = out.held
   if well_known_form(message) is Some(form) {
     self.print_well_known(out, message, form, records, depth, canonical~)
+    out.release_to(held)
     return
   }
   let fields = message.fields
-  let values = self.scan(message, records)
+  let values = self.scan(out, message, records)
   out.write_byte(b'{')
   // The fields, and the extensions that extend the message, in
   // field-number order.
@@ -398,8 +433,8 @@ fn DescriptorSet::print_message(
       continue
     }
     if canonical &&
-      value is Some(held) &&
-      self.leaves_out(field, held, extension~, proto2~) {
+      value is Some(given) &&
+      self.leaves_out(field, given, extension~, proto2~) {
       continue
     }
     if !first {
@@ -419,6 +454,7 @@ fn DescriptorSet::print_message(
     }
   }
   out.write_byte(b'}')
+  out.release_to(held)
 }
 
 ///|
@@ -525,7 +561,7 @@ fn DescriptorSet::holds_elements(
 /// array.
 fn DescriptorSet::print_repeated(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   field : FieldDescriptor,
   value : Value?,
   depth : Int32,
@@ -547,7 +583,7 @@ fn DescriptorSet::print_repeated(
 /// message `depth` messages deep, or its default when it is `None`.
 fn DescriptorSet::print_value(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   field : FieldDescriptor,
   value : Value?,
   depth : Int32,
@@ -572,7 +608,9 @@ fn DescriptorSet::print_value(
       if field.type_ is Bytes {
         write_base64(out, octets)
       } else {
-        write_json_string(out, octets)
+        // A string of a proto2 file need not be UTF-8: those of a proto3
+        // file were checked when the message was scanned.
+        write_json_string(out, octets, repair=field.syntax is Proto2)
       }
     Some(Number(bits)) => self.print_number(out, field, bits, canonical~)
     None | Some(Elements(_)) =>
@@ -592,7 +630,7 @@ fn DescriptorSet::print_value(
 /// as an array.
 fn DescriptorSet::print_list(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   field : FieldDescriptor,
   runs : Array[BytesView],
   depth : Int32,
@@ -632,9 +670,7 @@ fn DescriptorSet::print_list(
               self.print_message(out, type_, [element], depth + 1, canonical~)
             }
             None if field.type_ is Bytes => write_base64(out, element)
-            None if !checked && !is_utf8(element) =>
-              write_json_string(out, repaired(element))
-            None => write_json_string(out, element)
+            None => write_json_string(out, element, repair=!checked)
           }
         }
         // A packed record of values.
@@ -714,18 +750,27 @@ fn is_map_entry(entry : MessageDescriptor) -> Bool {
 /// define is skipped, as protobuf's parsers keep it as an unknown field.
 fn DescriptorSet::print_map(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   entry : MessageDescriptor,
   runs : Array[BytesView],
   depth : Int32,
   canonical~ : Bool,
 ) -> Unit raise DecodeError {
+  // Each entry is held, with its key and its place in the map's order,
+  // until the map is printed.
+  let held = out.held
+  let key_type = entry.fields[entry.field_index(1)].type_
+  let each = held_view +
+    held_entry +
+    (if key_type is String { held_view } else { 0 })
   let entries : Array[BytesView] = []
   for r in 0..<runs.length() {
     let reader = Reader(runs[r])
     while !reader.at_end() {
       ignore(reader.tag())
-      entries.push(reader.length_delimited())
+      let value = reader.length_delimited()
+      out.hold(each)
+      entries.push(value)
     }
   }
   if entries.length() == 0 {
@@ -780,7 +825,9 @@ fn DescriptorSet::print_map(
               "the field \{key_field.name} holds octets that are not UTF-8",
             )
           } else {
-            // Keys that print alike are one key.
+            // Keys that print alike are one key. The key repaired is held
+            // until the map is printed.
+            out.hold(repaired_length(text))
             repaired(text)
           }
         }
@@ -821,6 +868,7 @@ fn DescriptorSet::print_map(
     count += 1
   }
   if count == 0 {
+    out.release_to(held)
     out.write_bytes(b"{}")
     return
   }
@@ -837,9 +885,10 @@ fn DescriptorSet::print_map(
       out.write_byte(b',')
     }
     first = false
-    let values = self.scan(entry, [entries[i]])
+    let before = out.held
+    let values = self.scan(out, entry, [entries[i]])
     match values[key_index] {
-      Some(Octets(text)) => write_json_string(out, text)
+      Some(Octets(text)) => write_json_string(out, text, repair=!checked)
       Some(Number(bits)) => {
         out.write_byte(b'"')
         self.print_number(out, key_field, bits, canonical=false)
@@ -862,8 +911,10 @@ fn DescriptorSet::print_map(
       value => value
     }
     self.print_value(out, value_field, value, depth + 1, canonical~)
+    out.release_to(before)
   }
   out.write_byte(b'}')
+  out.release_to(held)
 }
 
 ///|
@@ -986,11 +1037,11 @@ fn sorted_entries(
 /// `-0`, as protobuf's printers keep its sign.
 fn DescriptorSet::print_number(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   field : FieldDescriptor,
   bits : UInt64,
   canonical~ : Bool,
-) -> Unit {
+) -> Unit raise DecodeError {
   match field.type_ {
     Int64 | SFixed64 | UInt64 | Fixed64 | SInt64 if canonical => {
       out.write_byte(b'"')
@@ -1022,7 +1073,7 @@ fn DescriptorSet::print_number(
       if value.is_nan() || value.is_inf() {
         write_double(out, value.to_double())
       } else {
-        out.write_string_utf8(value.to_string())
+        out.write_ascii(value.to_string())
       }
     }
     Enum => {
@@ -1114,7 +1165,7 @@ pub fn is_well_known(full_name : String) -> Bool {
 ///|
 /// Writes `value` as a JSON number, or as the string `"NaN"`, `"Infinity"`
 /// or `"-Infinity"`, which JSON has no number for.
-fn write_double(out : @buffer.Buffer, value : Double) -> Unit {
+fn write_double(out : Output, value : Double) -> Unit raise DecodeError {
   if value.is_nan() {
     out.write_bytes(b"\"NaN\"")
   } else if value.is_pos_inf() {
@@ -1122,13 +1173,13 @@ fn write_double(out : @buffer.Buffer, value : Double) -> Unit {
   } else if value.is_neg_inf() {
     out.write_bytes(b"\"-Infinity\"")
   } else {
-    out.write_string_utf8(value.to_string())
+    out.write_ascii(value.to_string())
   }
 }
 
 ///|
 /// Writes `value` in decimal, with a `-` when it is negative.
-fn write_signed(out : @buffer.Buffer, value : Int64) -> Unit {
+fn write_signed(out : Output, value : Int64) -> Unit raise DecodeError {
   if value < 0 {
     out.write_byte(b'-')
     // In two's complement, so that the smallest Int64 has its magnitude.
@@ -1140,7 +1191,7 @@ fn write_signed(out : @buffer.Buffer, value : Int64) -> Unit {
 
 ///|
 /// Writes `value` in decimal.
-fn write_unsigned(out : @buffer.Buffer, value : UInt64) -> Unit {
+fn write_unsigned(out : Output, value : UInt64) -> Unit raise DecodeError {
   // The power of ten of the first digit. It never passes `value`, so it
   // never overflows.
   let mut unit = 1UL
@@ -1159,7 +1210,7 @@ let base64_digits : Bytes = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 
 ///|
 /// Writes `octets` as a JSON string of standard base64, with padding.
-fn write_base64(out : @buffer.Buffer, octets : BytesView) -> Unit {
+fn write_base64(out : Output, octets : BytesView) -> Unit raise DecodeError {
   out.write_byte(b'"')
   let length = octets.length()
   let mut i = 0
@@ -1193,7 +1244,7 @@ fn write_base64(out : @buffer.Buffer, octets : BytesView) -> Unit {
 /// string. Such a name is ASCII without quotes or controls, unless a
 /// `json_name` makes it otherwise, so it is written one code unit at a time
 /// until a code unit needs more.
-fn write_json_name(out : @buffer.Buffer, name : String) -> Unit {
+fn write_json_name(out : Output, name : String) -> Unit raise DecodeError {
   for i in 0..<name.length() {
     let unit = name[i]
     if unit < 0x20 || unit >= 0x7F || unit == '"' || unit == '\\' {
@@ -1212,7 +1263,10 @@ fn write_json_name(out : @buffer.Buffer, name : String) -> Unit {
 /// Writes the key of an extension whose full name is `full_name`, as
 /// ProtoJSON writes it: the full name in brackets, as a JSON string, such
 /// as `"[shop.priority]"`.
-fn write_extension_name(out : @buffer.Buffer, full_name : String) -> Unit {
+fn write_extension_name(
+  out : Output,
+  full_name : String,
+) -> Unit raise DecodeError {
   // A full name is ASCII without quotes or controls, as protoc writes it,
   // but a set may hold any, so it is written as `write_json_name` writes a
   // name.
@@ -1231,26 +1285,138 @@ fn write_extension_name(out : @buffer.Buffer, full_name : String) -> Unit {
 }
 
 ///|
-/// `octets`, which are not UTF-8, as UTF-8, with U+FFFD for each bad
-/// sequence, as smock reads header values.
-fn repaired(octets : BytesView) -> BytesView {
-  @utf8.encode(@utf8.decode_lossy(octets))
+/// The length of the UTF-8 sequence that starts at `at` in `octets`, from
+/// 1 to 4, when it is well formed, or else minus the length of its maximal
+/// subpart: the longest start of a well-formed sequence there, or its first
+/// octet, which a decoder replaces with one U+FFFD (Unicode, section 3.9),
+/// as `@utf8.decode_lossy` does. It reads no octet past the sequence.
+fn utf8_sequence(octets : BytesView, at : Int32) -> Int32 {
+  let first = octets[at].to_int()
+  if first < 0x80 {
+    return 1
+  }
+  // The sequence's length, and the range of its second octet: the others
+  // are from 0x80 to 0xBF.
+  let mut length = 0
+  let mut low = 0x80
+  let mut high = 0xBF
+  if first >= 0xC2 && first <= 0xDF {
+    length = 2
+  } else if first == 0xE0 {
+    length = 3
+    low = 0xA0
+  } else if first == 0xED {
+    length = 3
+    high = 0x9F
+  } else if first >= 0xE1 && first <= 0xEF {
+    length = 3
+  } else if first == 0xF0 {
+    length = 4
+    low = 0x90
+  } else if first == 0xF4 {
+    length = 4
+    high = 0x8F
+  } else if first >= 0xF1 && first <= 0xF3 {
+    length = 4
+  } else {
+    return -1
+  }
+  for k in 1..<length {
+    if at + k >= octets.length() {
+      return -k
+    }
+    let octet = octets[at + k].to_int()
+    if octet < low || octet > high {
+      return -k
+    }
+    low = 0x80
+    high = 0xBF
+  }
+  length
 }
 
 ///|
-/// Whether `octets` are UTF-8.
+/// The length of `octets` repaired: each maximal subpart that is not UTF-8
+/// replaced with U+FFFD, 3 octets, as `repaired` repairs it.
+fn repaired_length(octets : BytesView) -> Int32 {
+  let mut length = 0
+  let mut i = 0
+  while i < octets.length() {
+    let sequence = utf8_sequence(octets, i)
+    if sequence > 0 {
+      length += sequence
+      i += sequence
+    } else {
+      length += 3
+      i -= sequence
+    }
+  }
+  length
+}
+
+///|
+/// `octets`, which are not UTF-8, as UTF-8, with U+FFFD for each maximal
+/// subpart that is not, as smock reads header values.
+fn repaired(octets : BytesView) -> BytesView {
+  let out = @buffer.Buffer(size_hint=repaired_length(octets))
+  let mut i = 0
+  while i < octets.length() {
+    let sequence = utf8_sequence(octets, i)
+    if sequence > 0 {
+      out.write_bytes(octets[i:i + sequence])
+      i += sequence
+    } else {
+      out.write_bytes(b"\xef\xbf\xbd")
+      i -= sequence
+    }
+  }
+  out.to_bytes()
+}
+
+///|
+/// Whether `octets` are UTF-8. It allocates nothing.
 fn is_utf8(octets : BytesView) -> Bool {
-  let _ = @utf8.decode(octets, ignore_bom=false) catch { _ => return false }
+  let mut i = 0
+  while i < octets.length() {
+    if octets[i] < b'\x80' {
+      i += 1
+      continue
+    }
+    let sequence = utf8_sequence(octets, i)
+    if sequence < 0 {
+      return false
+    }
+    i += sequence
+  }
   true
 }
 
 ///|
 /// Writes `octets`, UTF-8 text, as a JSON string: in quotes, with `"`, `\`
-/// and the control characters escaped as `@json` escapes them.
-fn write_json_string(out : @buffer.Buffer, octets : BytesView) -> Unit {
+/// and the control characters escaped as `@json` escapes them. With
+/// `repair`, `octets` need not be UTF-8: each maximal subpart that is not
+/// is written as U+FFFD, as `repaired` repairs it, with no copy made.
+fn write_json_string(
+  out : Output,
+  octets : BytesView,
+  repair~ : Bool = false,
+) -> Unit raise DecodeError {
   out.write_byte(b'"')
-  for octet in octets {
+  let mut i = 0
+  while i < octets.length() {
+    let octet = octets[i]
+    i += 1
     match octet {
+      _ if octet >= b'\x80' && repair => {
+        let sequence = utf8_sequence(octets, i - 1)
+        if sequence > 0 {
+          out.write_bytes(octets[i - 1:i - 1 + sequence])
+          i = i - 1 + sequence
+        } else {
+          out.write_bytes(b"\xef\xbf\xbd")
+          i = i - 1 - sequence
+        }
+      }
       b'"' => out.write_bytes(b"\\\"")
       b'\\' => out.write_bytes(b"\\\\")
       b'\n' => out.write_bytes(b"\\n")

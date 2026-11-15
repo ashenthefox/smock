@@ -7,14 +7,19 @@
 
 ///|
 /// `input` decoded as a message of the type whose full name is `name` in
-/// the set the script wrote in `hex`, as canonical ProtoJSON text, or the
-/// error that stops it.
-fn canonical(hex : String, name : String, input : Bytes) -> String {
+/// the set the script wrote in `hex`, as canonical ProtoJSON text of at
+/// most `limit` octets, or the error that stops it.
+fn canonical(
+  hex : String,
+  name : String,
+  input : Bytes,
+  limit~ : Int32 = no_limit,
+) -> String {
   let set = hex_set(hex)
   guard set.find_message(name) is Some(message) else {
     abort("no message \{name}")
   }
-  @utf8.decode(@protobuf.decode_canonical_json(set, message, input[:])) catch {
+  @utf8.decode(@protobuf.decode_canonical_json(set, message, input[:], limit~)) catch {
     err => "error: \{err}"
   }
 }
@@ -39,6 +44,22 @@ test "the ticket's example: a 64-bit integer as a string, and a field at its def
     content=(
       #|{"id":42,"name":""}
     ),
+  )
+}
+
+///|
+test "canonical ProtoJSON is bounded by its limit, as the decoded form is" {
+  // id: 42, and no name: `{"id":"42"}`, 11 octets.
+  let user = b"\x08\x2a"
+  inspect(
+    canonical(user_set, "demo.User", user, limit=11),
+    content=(
+      #|{"id":"42"}
+    ),
+  )
+  inspect(
+    canonical(user_set, "demo.User", user, limit=10),
+    content="error: the decoded message passes the limit of 10 octets",
   )
 }
 

@@ -3,20 +3,32 @@
 // type says. https://protobuf.dev/programming-guides/encoding/
 
 ///|
-/// Why bytes are not protobuf that the module accepts. `position` is the
-/// offset, from 0, in the bytes the reader's input is a view of, where the
-/// problem is, so a reader of a nested message reports offsets in the whole
-/// input. `message` says what the problem is.
+/// Why bytes are not protobuf that the module accepts.
 #derive(Eq, Debug)
 pub(all) suberror DecodeError {
+  /// Bytes that are not protobuf, or not a message the module decodes.
+  /// `position` is the offset, from 0, in the bytes the reader's input is a
+  /// view of, where the problem is, so a reader of a nested message reports
+  /// offsets in the whole input. `message` says what the problem is.
   DecodeError(position~ : Int32, message~ : String)
+  /// A message whose decoded JSON, or what the decoder holds to print it,
+  /// passes `limit` octets, the limit `decode_json` or
+  /// `decode_canonical_json` was given.
+  TooLarge(limit~ : Int32)
 }
 
 ///|
-/// Shows the error as `octet <n>: <message>`.
+/// Shows the error as `octet <n>: <message>`, or, for a message too large,
+/// as `the decoded message passes the limit of <limit> octets`.
 pub impl Show for DecodeError with fn output(self, logger) {
-  let DecodeError(position~, message~) = self
-  logger.write_string("octet \{position}: \{message}")
+  match self {
+    DecodeError(position~, message~) =>
+      logger.write_string("octet \{position}: \{message}")
+    TooLarge(limit~) =>
+      logger.write_string(
+        "the decoded message passes the limit of \{limit} octets",
+      )
+  }
 }
 
 ///|

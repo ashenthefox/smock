@@ -6,8 +6,9 @@ and checks the set when it loads the Definition files. Its gRPC Stubs then
 answer unary calls, on the plain port over h2c and on the TLS port over
 h2. This guide shows a first call, says which requests are gRPC calls, how
 a call reaches a Stub and how smock answers it, how a call's deadline
-meets a Stub's delay, which calls gRPC's rules refuse, how a Mock answers
-gRPC's health service, and how to build a set that smock reads. The
+meets a Stub's delay, which status each Fault gives a client, which calls
+gRPC's rules refuse, how a Mock answers gRPC's health service, and how to
+build a set that smock reads. The
 [Definition-file reference](definition-files.md#grpc) describes the
 Mock's `grpc` field and gRPC Stubs.
 
@@ -24,6 +25,8 @@ Mock's `grpc` field and gRPC Stubs.
   - [The call's Mock](#the-calls-mock)
   - [Reloads](#reloads)
   - [The call the Stubs see](#the-call-the-stubs-see)
+  - [Request metadata](#request-metadata)
+  - [Sessions](#sessions)
   - [The request message as JSON](#the-request-message-as-json)
   - [Well-known types](#well-known-types)
   - [JSON values: Struct, Value, ListValue and NullValue](#json-values-struct-value-listvalue-and-nullvalue)
@@ -45,14 +48,17 @@ Mock's `grpc` field and gRPC Stubs.
   - [The Near miss trailer](#the-near-miss-trailer)
 - [Deadlines](#deadlines)
   - [A client that resets at its deadline](#a-client-that-resets-at-its-deadline)
+  - [Resets and the connection's defences](#resets-and-the-connections-defences)
 - [Built-in services](#built-in-services)
   - [Health](#health)
 - [Protocol checks and limits](#protocol-checks-and-limits)
   - [The order of the checks](#the-order-of-the-checks)
   - [Timeouts](#timeouts)
   - [The body limit](#the-body-limit)
+  - [The decoder's limits](#the-decoders-limits)
 - [Compression](#compression)
 - [Faults](#faults)
+  - [HTTP/2's resets and refusals](#http2s-resets-and-refusals)
 - [Calls smock does not serve yet](#calls-smock-does-not-serve-yet)
 - [Building a set](#building-a-set)
   - [Self-contained sets](#self-contained-sets)
@@ -221,10 +227,11 @@ stubs:
   the status, message and trailing metadata the reply ends with
   ([Status and message](#status-and-message)). `template` and weighted
   `responses` work as on HTTP.
-- `priority`, `scenario`, `variables`, `dataWrites`, `fault.delay` and
-  `fault.seed` work as on HTTP. A delay waits before the reply's HEADERS,
-  and the call's deadline can cut it short ([Faults](#faults),
-  [Deadlines](#deadlines)).
+- `priority`, `scenario`, `variables`, `dataWrites` and `fault` work as
+  on HTTP. A delay waits before the reply's HEADERS, and the call's
+  deadline can cut it short ([Deadlines](#deadlines)). A connection Fault
+  resets the call's stream, sends half the reply, or closes the
+  connection ([Faults](#faults)).
 
 Fields that make no sense for gRPC are problems when the files load:
 `query` and `cookies` conditions, a body condition other than `json`, and
@@ -235,8 +242,7 @@ Fields that make no sense for gRPC are problems when the files load:
 greeter.yaml: /stubs/0/request/query: makes no sense on a gRPC Stub: a gRPC call's path has no query
 ```
 
-Connection Faults, which break a call's stream or its connection, are not
-served yet: a Stub that gives one fails to load. The
+The
 [Definition-file reference](definition-files.md#a-grpc-stubs-fields)
 lists every field. A [CRUD Stub](definition-files.md#crud-stubs) is never
 a gRPC Stub, whatever its path: it has no request path, so gRPC calls
@@ -381,7 +387,8 @@ A gRPC Stub sees a call as a request:
 
 - the method is `POST`, and the path is the call's `:path`;
 - the headers are the call's metadata, every field, `content-type` and
-  `te` included;
+  `te` included, with `-bin` values unpadded
+  ([Request metadata](#request-metadata));
 - the body is the request message as compact JSON, with its fields in
   field-number order, each under its JSON name
   ([The request message as JSON](#the-request-message-as-json)). So the
@@ -404,6 +411,83 @@ request:
 
 The Journal, the Near miss, `bodyText` and templates see the same JSON,
 so `${body.name}` in a templated reply reads the message's `name`.
+
+### Request metadata
+
+A call's metadata reaches the Stubs as its headers, every field, none
+hidden. That includes the fields gRPC sets itself, such as
+`content-type`, `te`, `grpc-timeout` and `user-agent`. Each field line is
+one value, as on HTTP, so a name sent twice has two values. `headers`
+conditions and `header.NAME` in templates see every field, with names in
+lower case, as HTTP/2 sends them:
+
+```yaml
+request:
+  path: /helloworld.Greeter/SayHello
+  headers:
+    authorization: { pattern: "Bearer .+" }
+    x-tenant: acme
+response:
+  template: true
+  headers: { x-request-id: "${header.x-request-id ?? 'none'}" }
+  json: { message: Hello }
+```
+
+`header.NAME` gives a name's first value, and a condition holds when one
+of its values meets it. The Journal records the metadata as the entry's
+headers, in the order received
+([The Journal and the metrics](#the-journal-and-the-metrics)).
+
+Binary metadata, whose name ends with `-bin`, holds base64. gRPC lets a
+client send it with or without its padding, and a server must take both.
+smock takes the padding off, so padded and unpadded clients look alike:
+
+- A call's `-bin` value loses the `=` that end each comma-separated
+  element, and keeps the commas, since a proxy may join repeated fields
+  with them. So `AAE=` becomes `AAE`, and `AAA=,BBB=` becomes `AAA,BBB`.
+  smock never decodes these values, and does not check that they are
+  base64.
+- An exact `headers` condition on a `-bin` field of a gRPC Stub loses its
+  padding when the files load, in each element, inside `$not` too. So
+  `trace-bin: "AAE="` and `trace-bin: AAE` are the same condition, and
+  both meet calls that send `AAE=` or `AAE`.
+- A pattern condition sees the unpadded value, so write it without the
+  padding: `{ pattern: "[A-Za-z0-9+/]+" }` meets a value of one element,
+  whether the call sent it padded or not.
+- The Journal stores the unpadded value, and a Journal filter must give it
+  so: `{"headers": {"trace-bin": "AAE"}}` finds the calls that sent `AAE=`
+  or `AAE`, and `"AAE="` finds none of them. smock does not rewrite
+  filters, since they also meet HTTP requests, whose `-bin` headers it
+  stores as received.
+
+Only gRPC calls lose the padding. An HTTP request's `-bin` header, and an
+HTTP Stub's condition on one, stay as written.
+
+### Sessions
+
+A call carries its [Session](../README.md#sessions-and-ephemeral-stubs)
+in its `baggage` metadata, as an HTTP request carries it in its `baggage`
+header: in the `smock-session` member, or wherever `--session-header` and
+`--session-member` say. There is no key of gRPC's own. With grpcurl:
+
+```sh
+grpcurl -plaintext -protoset defs/files/greeter.binpb \
+  -H "baggage: smock-session=test-a" \
+  -d '{"name": "Tom"}' localhost:8080 helloworld.Greeter/SayHello
+```
+
+The Session scopes a call as it scopes an HTTP request: its
+[Ephemeral gRPC Stubs](#ephemeral-grpc-stubs), its state of each
+Scenario, its Variables, its copies of the Data buckets and its Journal.
+Each call reads its own metadata, so the calls of two Sessions on one
+channel keep their state and their Journal apart, as two tests that share
+a gRPC client do. An Admin API call names its Session the same way, so
+a test reads its own calls from the Journal:
+
+```sh
+curl -H "Authorization: Bearer change-me" -H "baggage: smock-session=test-a" \
+  -d '{}' localhost:9090/v1/journal/query
+```
 
 ### The request message as JSON
 
@@ -1016,7 +1100,8 @@ The Journal records each call that reaches the Stubs, matched or not, and
 each call answered from its HEADERS, with an empty body
 ([Calls answered from their HEADERS](#calls-answered-from-their-headers)).
 Its entry shows the method `POST`, the call's `:path` as its target, the
-version `HTTP/2`, the metadata as headers, and the request message as JSON
+version `HTTP/2`, the metadata as headers, `-bin` values unpadded
+([Request metadata](#request-metadata)), and the request message as JSON
 as its body. The body's `size` counts the octets the call's DATA frames
 brought, as received, and `truncated` says whether the JSON was cut at
 `--journal-body-limit`.
@@ -1027,11 +1112,14 @@ the status smock answered with instead, such as `UNIMPLEMENTED` for an
 unmatched call, or `INTERNAL`. Its `status` stays
 the HTTP status, 200 for a reply and for an unmatched call, as gRPC sends
 them: a client learns of an error from `grpc-status`, not from
-`:status`. The entry of an HTTP request has no `grpcStatus`.
+`:status`. The entry of an HTTP request has no `grpcStatus`, nor has the
+entry of a call that a `reset` or `close` Fault ended
+([Faults](#faults)).
 
 Journal queries, verification and the unmatched list take calls as they
 take HTTP requests. A filter gives the Mock, the method `POST`, the path
-that names the gRPC method, and metadata as headers:
+that names the gRPC method, and metadata as headers, `-bin` values
+without their padding, as the entries hold them:
 
 ```json
 {
@@ -1594,6 +1682,34 @@ deadline, ends there, as any HTTP/2 stream does
 ([Streams that wait](http2.md#streams-that-wait)). Its entry keeps the
 HTTP status and the `grpcStatus` that its Stub's reply planned.
 
+### Resets and the connection's defences
+
+The defences of an HTTP/2 connection count two kinds of client reset
+([Defences](http2.md#defences)). A reset of a stream that smock has not
+finished answering counts toward the Rapid Reset bound, and a reset of a
+stream that has closed counts among the frames that do no work. Past
+either bound, the connection gets GOAWAY `ENHANCE_YOUR_CALM`.
+
+A client that keeps deadlines resets every call that times out, so these
+resets count toward neither bound:
+
+- a client reset that smock records as DEADLINE_EXCEEDED, as above: one
+  that arrives at most 100 ms before the deadline, while the delay runs
+  past it;
+- the first reset of a call that smock ended at its deadline with
+  DEADLINE_EXCEEDED.
+
+So a client whose calls time out against a slow Stub keeps its
+connection, however many calls time out. For the second kind, smock keeps
+the stream IDs of the calls it ended at their deadlines until their resets
+arrive. It keeps at most `--http2-max-concurrent-streams` of them per
+connection, and drops the oldest first, since a client that read the
+answer before its own deadline sends no reset.
+
+Each stream gets this once. Every other reset counts as on any HTTP/2
+stream: a second reset of the same stream, a reset of a call without a
+deadline, and a reset that arrives more than 100 ms before the deadline.
+
 ## Built-in services
 
 A Mock can answer gRPC's standard health service itself, with no Stub.
@@ -1755,6 +1871,7 @@ malformed `grpc-timeout`. Both carry `grpc-status: 13` (INTERNAL).
 | The request has no message | at the end | 200 | UNIMPLEMENTED | `the request has no message` |
 | The request has more than one message | at the end | 200 | UNIMPLEMENTED | `the request has more than one message` |
 | Its message does not parse, or holds a value that smock cannot print | at the end | 200 | INTERNAL | `the request message cannot be decoded` |
+| Its message's JSON passes `--body-limit` as smock prints it ([The decoder's limits](#the-decoders-limits)) | at the end, as soon as it shows | 200 | RESOURCE_EXHAUSTED | `the decoded request message is over the body limit` |
 
 A message is the 5-octet prefix, a flag and a length, then the octets
 the length announces. A message of zero octets, `00 00 00 00 00`, is one
@@ -1767,8 +1884,9 @@ A message does not parse, as protobuf's parsers refuse it, when it holds a
 proto3 string that is not UTF-8, field number 0 or one above 2^29-1, wire
 type 6 or 7, a varint, a fixed-size value or a length cut short, a packed
 field included, a group whose end tag names another field or that it ends
-inside, or messages nested deeper than 100, each map entry and each group
-counting as a message, or when it lacks a proto2 required field
+inside, or messages nested deeper than 100
+([The decoder's limits](#the-decoders-limits)), or when it lacks a proto2
+required field
 ([proto2 types](#proto2-types)). smock cannot print a Timestamp, a
 Duration or a FieldMask path out of its range or form
 ([Well-known types](#well-known-types)), a Value that holds no value, NaN
@@ -1850,14 +1968,59 @@ excess shows, before it reads the rest:
 - on a DATA frame, when the octets received pass the limit. smock keeps
   none of them.
 
-So with `--body-limit 10`, a call whose framed message takes 10 octets is
-served, and a prefix that announces 6 octets gets RESOURCE_EXHAUSTED at
-once, then RST_STREAM `NO_ERROR`.
+So with `--body-limit 32`, a call whose framed message takes 32 octets
+passes, and a prefix that announces 28 octets gets RESOURCE_EXHAUSTED at
+once, then RST_STREAM `NO_ERROR`. The message's JSON must fit within the
+limit too, so a small limit refuses messages that a body of its size can
+hold ([The decoder's limits](#the-decoders-limits)).
 
 `--header-size-limit` bounds a call's header list, as it bounds an HTTP
 request's, and also each block of a reply's metadata: a reply over it, or
 over the client's own limit, gets INTERNAL `reply metadata too large`
 ([Metadata size](#metadata-size)).
+
+`--body-limit` also bounds the JSON that smock decodes a message into
+([The decoder's limits](#the-decoders-limits)).
+
+### The decoder's limits
+
+A small message can ask a decoder for far more than its size. smock
+bounds what decoding a call's message may cost, so that a gRPC call costs
+no more than the largest JSON body an HTTP request may send:
+
+- **Nesting.** Messages may nest 100 deep, the default of protobuf's C++
+  and Java parsers. Each nested message is a level, and so is each group,
+  each map entry and the message an Any holds. So each object in a Struct
+  takes three levels, for the Struct, its entry and the Value, and each
+  list in a Value takes two, for the ListValue and the Value. A message
+  nested deeper does not parse, and gets INTERNAL.
+- **Lengths.** smock checks every length against the octets left before
+  it reads the value, and allocates nothing for a length it has not
+  checked. A length that runs past its message, or past the message that
+  holds it, makes the message not parse, and gets INTERNAL.
+- **The JSON.** smock counts the JSON as it prints it, and stops as soon
+  as the JSON passes `--body-limit`: the call gets RESOURCE_EXHAUSTED
+  `the decoded request message is over the body limit`. A field without
+  presence prints at its default, so an empty element of a list of
+  messages, 2 octets, prints every field of its type. Without the limit,
+  a 10 MiB message could print gigabytes.
+- **What smock holds to print it.** smock keeps a note of each place in
+  the message where the records of a list do not follow the list's last
+  ones, of each record of a message field after its first, and of each
+  map entry, until it has printed the message that holds them. It counts
+  48 octets for a note, 64 for a map entry, and 48 more for a map entry
+  with a string key, and these too may take at most `--body-limit`. A
+  message as clients encode it needs few such notes. One of 10 MiB whose
+  records alternate between two lists gets RESOURCE_EXHAUSTED.
+
+So a call holds its message once as it came, and once as JSON, each
+within `--body-limit`. For example, a message of 10 MiB of empty `Item`s
+in a `repeated Item items`, where an `Item` has a string, a list and a
+map, would print 160 MiB of JSON. smock answers RESOURCE_EXHAUSTED once
+the JSON passes 10 MiB, in well under a second. Such a call, like an
+HTTP request with a body of 10 MiB, holds tens of MiB at once. For a
+small Pod, lower `--body-limit`
+([Limits and timeouts](http2.md#limits-and-timeouts)).
 
 ## Compression
 
@@ -1897,21 +2060,93 @@ client's `grpc-accept-encoding` changes nothing.
 
 ## Faults
 
-A gRPC Stub's `fault` may give a delay, drawn as on HTTP, with its
-`probability` ([Delays](definition-files.md#delays)). smock decides it as
-for an HTTP request, with the same draws, so
-[`fault.seed` and `--seed`](definition-files.md#seeds) replay it.
-Connection Faults are not served on gRPC Stubs yet: a Stub that gives one
-fails to load.
+A gRPC Stub's `fault` may give a delay and a
+[connection Fault](definition-files.md#connection-faults), each drawn as
+on HTTP, with its `probability`. smock decides them as for an HTTP
+request, with the same draws, so
+[`fault.seed` and `--seed`](definition-files.md#seeds) replay them. A
+connection Fault takes its [HTTP/2 form](http2.md#faults), and sends no
+`content-length`:
 
 | Fault | On a gRPC call | The client sees |
 |---|---|---|
 | delay | Waits before the reply's HEADERS, on the call's stream alone: the other calls of the connection are answered meanwhile. The call's deadline can cut it short ([Deadlines](#deadlines)). | The reply, later; or DEADLINE_EXCEEDED |
+| `reset` | Once the call has arrived in full, RST_STREAM `INTERNAL_ERROR` on the call's stream alone. The other calls of the connection go on. | INTERNAL |
+| `partial` | The reply's HEADERS and the first half of its framed message, rounded down, then RST_STREAM `INTERNAL_ERROR`. A reply with no message, such as an error, sends the HEADERS it would send before its trailers, without the status fields and without ending the stream, then the reset. | INTERNAL |
+| `close` | GOAWAY `NO_ERROR`, then the connection closes. | UNAVAILABLE, for every call in flight on the connection |
 
-A delay holds back whatever the call gets from its Stub: its reply, its
-error, or smock's own answer when the Stub's reply cannot be sent, such as
-INTERNAL `template failed`. A call that no Stub matched gets UNIMPLEMENTED
-at once.
+A Stub that resets the calls of one tenant leaves the other calls of the
+channel be:
+
+```yaml
+stubs:
+  - id: broken
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello
+      headers: { x-tenant: broken }
+    response:
+      json: { message: never sent }
+    fault: { connection: { kind: reset } }
+```
+
+A call with `x-tenant: broken` fails with INTERNAL. grpc-go, and so
+grpcurl, reports it with the message `stream terminated by RST_STREAM
+with error code: INTERNAL_ERROR`, and a call that `partial` ends the same
+way. The next call on the same channel, to another Stub, gets its reply.
+
+`close` ends every call on the connection, not just the Stub's. A gRPC
+client sends its calls to one server over one connection, many at once,
+so each call in flight then fails with UNAVAILABLE, and the client opens
+a new connection for the next. Use `reset` to fail one call alone.
+grpcurl prints a call that `close` ended as:
+
+```text
+ERROR:
+  Code: Unavailable
+  Message: closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR
+```
+
+- **Probabilistic errors.** For a call that fails with a gRPC status
+  some of the time, such as UNAVAILABLE one call in ten, give the Stub
+  weighted `responses`, one of them with a `grpc` status
+  ([Status and message](#status-and-message)). That is no connection
+  Fault: the call gets the status itself, with its message.
+- **A delay first.** A Fault with a delay comes once the delay is over,
+  as on HTTP/2. A delay holds back whatever the call gets from its Stub:
+  its reply, its error, its Fault, or smock's own answer when the Stub's
+  reply cannot be sent, such as INTERNAL `template failed`. A call that
+  no Stub matched gets UNIMPLEMENTED at once.
+- **The deadline first.** A delay that the call's deadline cuts short
+  never ends, so its connection Fault never comes: the call gets
+  DEADLINE_EXCEEDED, and the connection stays open.
+- **What `partial` sends.** The HEADERS of the answer the call would get:
+  its initial metadata, and `smock-mock` when the Default Mock answered.
+  Its status, its message, its details and its trailing metadata never go
+  out. A reply that smock cannot send, such as one whose rendered message
+  does not fit the output type, sends smock's own HEADERS, with none of
+  the Stub's metadata, and so does a reply whose HEADERS are too large to
+  send ([Metadata size](#metadata-size)).
+- **The Journal.** The entry of a call that `reset` or `close` ended has
+  no `status` and no `grpcStatus`, since no status went out. A `partial`
+  one keeps both, as planned, or INTERNAL when smock sent its own HEADERS.
+  An entry has the Fault in `fault`; a call whose deadline came first has
+  none.
+
+### HTTP/2's resets and refusals
+
+smock's [HTTP/2 limits and defences](http2.md#limits-and-timeouts) reset
+or refuse a stream, or end a connection, whatever the request. A gRPC
+client derives a status from each, as gRPC's HTTP/2 protocol says:
+
+| What smock does | The client sees |
+|---|---|
+| RST_STREAM `REFUSED_STREAM`, for a stream past `--http2-max-concurrent-streams` | UNAVAILABLE. smock never began the call, so gRPC retries it on its own, without a retry policy. |
+| RST_STREAM `CANCEL`, for a call whose request is late past the read timeout, or a stream whose window stays at zero past the write timeout | CANCELLED |
+| RST_STREAM `ENHANCE_YOUR_CALM`, for a header list over twice `--header-size-limit` as received | RESOURCE_EXHAUSTED |
+| `:status` 431, for a header list over `--header-size-limit` or with more fields than `--header-count-limit` | UNKNOWN |
+| `:status` 400, for a request HTTP/1.1's rules refuse | INTERNAL |
+| GOAWAY, after one of the [defences](http2.md#defences) | The calls in flight on the connection end, and later calls get UNAVAILABLE. |
 
 ## Calls smock does not serve yet
 

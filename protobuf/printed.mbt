@@ -64,8 +64,10 @@ pub fn DescriptorSet::printed_value(
       guard json is String(text) else { raise unfit }
       let octets = base64_octets(text) catch { _ => raise unfit }
       // The printed form, as JSON text: the string in its quotes.
-      let out = @buffer.Buffer(size_hint=text.length() + 4)
-      write_base64(out, octets)
+      let out = Output::new(size_hint=text.length() + 4, limit=unbounded)
+      write_base64(out, octets) catch {
+        _ => raise unfit
+      }
       let printed = @utf8.decode(out.to_bytes()) catch { _ => raise unfit }
       if printed.length() == text.length() + 2 &&
         printed[1:printed.length() - 1] == text {
@@ -193,7 +195,7 @@ pub fn DescriptorSet::printed_message(
   self.write_well_known(writer, message, form, json, 0) catch {
     _ => raise unfit
   }
-  let out = @buffer.Buffer(size_hint=text.length() + 16)
+  let out = Output::new(size_hint=text.length() + 16, limit=unbounded)
   self.print_well_known(
     out,
     message,

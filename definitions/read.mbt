@@ -706,6 +706,11 @@ fn File::read_stub(self : File, pointer : String, json : Json) -> Stub? {
     Some(named) => self.check_grpc_stub(pointer, stub, named)
     None => { input: None, output: None, }
   }
+  if grpc is Some(_) {
+    // Its exact conditions on binary metadata are matched as a call's
+    // values reach the Stubs, without their padding.
+    request = unpadded_conditions(request)
+  }
   if grpc is Some(named) && served.input is Some(input) {
     // Its `json` condition is checked against its input type, and matched
     // as smock prints a call's message.

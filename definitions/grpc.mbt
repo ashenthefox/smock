@@ -134,8 +134,8 @@ priv struct ServedTypes {
 
 ///|
 /// Checks the gRPC Stub `stub`, at `pointer`, against `named`, the method
-/// its exact path names. Its fields must make sense on a gRPC Stub and be
-/// served, as `File::refuse_fields` says. The method must be unary. Its input type
+/// its exact path names. Its fields must make sense on a gRPC Stub, as
+/// `File::refuse_fields` says. The method must be unary. Its input type
 /// must be served, as `File::check_input` says, and its output type, as
 /// `File::check_output` says. Returns each of them that is served, and
 /// neither for a streaming method.
@@ -434,16 +434,15 @@ fn fields_and_extensions(
 
 ///|
 /// Reports each member of the gRPC Stub `stub`, at `pointer`, that a gRPC
-/// Stub cannot give, or that gRPC Stubs do not serve yet. They serve `id`,
-/// `mock`, `priority`, `scenario`, `variables`, `dataWrites`, `fault.seed`,
-/// `fault.delay`, `request.method` when it is `POST`, `request.path`,
-/// `request.headers`, a `json` body condition, and `headers`, `json`,
-/// `grpc`, `template` and `weight` in a reply. `query`, `cookies`, every
-/// other body condition, another method, and a reply's `status`, `body`,
-/// `bodyFile`, `events` and `llm` make no sense on a gRPC Stub
-/// (`File::refuse_reply`); `fault.connection` is not served yet. A member
-/// that no Stub has is reported as unknown where it is read, and a method
-/// that is not an HTTP token as such.
+/// Stub cannot give. It may give `id`, `mock`, `priority`, `scenario`,
+/// `variables`, `dataWrites`, `fault`, `request.method` when it is `POST`,
+/// `request.path`, `request.headers`, a `json` body condition, and
+/// `headers`, `json`, `grpc`, `template` and `weight` in a reply. `query`,
+/// `cookies`, every other body condition, another method, and a reply's
+/// `status`, `body`, `bodyFile`, `events` and `llm` make no sense on a gRPC
+/// Stub (`File::refuse_reply`). A member that no Stub has is reported as
+/// unknown where it is read, and a method that is not an HTTP token as
+/// such.
 fn File::refuse_fields(
   self : File,
   pointer : String,
@@ -452,12 +451,6 @@ fn File::refuse_fields(
   for key, value in stub {
     let at = child_pointer(pointer, key)
     match (key, value) {
-      ("fault", Object(fault)) =>
-        for name, _ in fault {
-          if name == "connection" {
-            self.not_served(child_pointer(at, name))
-          }
-        }
       ("request", Object(request)) =>
         for name, condition in request {
           let field = child_pointer(at, name)
@@ -541,12 +534,6 @@ fn File::refuse_reply(
 /// the reason `why`.
 fn File::no_sense(self : File, pointer : String, why : String) -> Unit {
   self.error(pointer, "makes no sense on a gRPC Stub: \{why}")
-}
-
-///|
-/// Reports that the member at `pointer` is not served on gRPC Stubs yet.
-fn File::not_served(self : File, pointer : String) -> Unit {
-  self.error(pointer, "is not served on gRPC Stubs yet")
 }
 
 ///|
