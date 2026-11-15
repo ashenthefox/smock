@@ -1,0 +1,4 @@
+$ grpcurl -plaintext -authority greeter.svc -H 'x-tenant: acme' -d '{"name":"Tom"}' localhost:8080 helloworld.Greeter/SayHello
+{
+  "message": "Hello Tom"
+}
