@@ -4,7 +4,10 @@ smock serves HTTP/2 beside HTTP/1.1, with the same Mocks and Stubs. This
 guide says how clients reach smock over HTTP/2, on a machine and behind a
 load balancer, and what a Stub and the Journal see of an HTTP/2 request.
 It then says how smock bounds what one HTTP/2 connection can cost: its
-limits, timeouts and defences.
+limits, timeouts and defences. gRPC calls are HTTP/2 requests too, which
+a Mock's gRPC Stubs answer; the [gRPC guide](grpc.md) describes them, and
+how these limits meet gRPC's channels
+([Connections](grpc.md#connections)).
 
 ## Contents
 
@@ -334,7 +337,9 @@ Admin API work as before.
 ## What a Stub sees
 
 Each HTTP/2 stream carries one request, which reaches the Mocks once the
-client has sent all of it, except a CONNECT ([below](#connect)):
+client has sent all of it, except a CONNECT ([below](#connect)) and a
+gRPC call that can reach no gRPC Stub, which is answered from its HEADERS
+([Calls answered from their HEADERS](grpc.md#calls-answered-from-their-headers)):
 
 - `:method` is the method, and `:path` is the target, as sent. The path
   and the query come from it as from an HTTP/1.1 request target, and `*`
@@ -910,6 +915,9 @@ suggests (section 6.8), so that no request the client has sent is lost.
 
 At the drain timeout (`--drain-timeout-ms`), what is still open is cut and
 counted in `connectionsCut`, as over HTTP/1.1. See [Run](../README.md#run).
+gRPC calls drain the same way, and the gRPC health service of a Mock
+that turns it on says NOT_SERVING from the moment SIGTERM arrives
+([The drain](grpc.md#the-drain)).
 
 ## Connection errors
 

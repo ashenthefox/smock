@@ -160,7 +160,9 @@ every Host the Mocks declare, both normalised:
 {"error":"no Mock for this Host","host":"usres.example.com","acceptedHosts":["users.example.com","users","orders.example.com"]}
 ```
 
-`host` is `null` for a request without a Host.
+`host` is `null` for a request without a Host. A gRPC call gets
+UNIMPLEMENTED `no Mock for this Host` instead, in gRPC's form
+([The call's Mock](grpc.md#the-calls-mock)).
 
 ## How a Stub matches a request
 
@@ -5783,8 +5785,11 @@ smock reads and checks the set with the Definition files, and its
 and on the TLS port over h2. `grpc` can also turn on gRPC's
 [health service](#the-health-service) and its server
 [reflection](#reflection). The [gRPC guide](grpc.md) shows a
-first call, says which requests are gRPC calls and how smock serves a
-call, and how to build a set, what smock checks in it and what it keeps.
+first call, says which requests are gRPC calls, how to build a set and
+what smock checks in it, and how smock serves a call and answers it: the
+JSON form of its message, its metadata, deadlines, Faults, the Journal
+and the metrics, gRPC's protocol checks and connections, and what smock
+does not serve.
 
 ### Descriptor sets
 
@@ -6217,7 +6222,7 @@ stubs:
   `reply metadata too large`, and the call's Journal entry says why in
   `templateError` ([Metadata size](grpc.md#metadata-size)).
 
-The [gRPC guide](grpc.md#metadata) shows the reply on the wire.
+The [gRPC guide](grpc.md#reply-metadata) shows the reply on the wire.
 
 ### gRPC error details
 
