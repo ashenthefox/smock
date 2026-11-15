@@ -305,6 +305,7 @@ fn plan_response(
       encoded: response.encoded,
       details,
       encoded_status,
+      own: false,
     }),
   }
 }
@@ -641,8 +642,16 @@ fn render_body(
 
 ///|
 /// The response to a request whose template could not be rendered: 500,
-/// with what went wrong.
-fn template_failed(stub : String, error : TemplateError) -> ResponsePlan {
+/// with what went wrong, or for a gRPC call (`grpc`), INTERNAL `template
+/// failed` in gRPC's form (`grpc_failure`).
+fn template_failed(
+  stub : String,
+  error : TemplateError,
+  grpc~ : Bool = false,
+) -> ResponsePlan {
+  if grpc {
+    return grpc_failure(Internal, "template failed")
+  }
   json_failure(500, {
     "error": "template failed",
     "stub": Json::string(stub),
@@ -662,5 +671,26 @@ fn json_failure(status : Int32, body : Json) -> ResponsePlan {
     delay_ms: 0,
     fault: None,
     grpc: None,
+  }
+}
+
+///|
+/// smock's own answer to a gRPC call whose Stub could not serve its
+/// content: the gRPC status `status`, with the fixed ASCII `message`, such
+/// as `template failed`, which the server sends as Trailers-Only, and no
+/// delay or Fault. smock's own HTTP answers never reach a gRPC call: the
+/// HTTP status is 200, as gRPC sends every answer, and there is no body and
+/// no header field, so that the answer has no initial metadata. The
+/// Journal entry records `status` as the call's gRPC status, and the
+/// content error, if any, says why.
+fn grpc_failure(status : @grpc.Status, message : String) -> ResponsePlan {
+  {
+    status: 200,
+    // Room for the Smock-Mock field the Default Mock adds.
+    headers: Array(capacity=1),
+    body: Bytes(b""),
+    delay_ms: 0,
+    fault: None,
+    grpc: Some({ ..grpc_ok, status, message: Some(message), own: true, }),
   }
 }

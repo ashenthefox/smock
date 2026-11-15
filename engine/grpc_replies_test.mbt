@@ -42,6 +42,7 @@ test "a static reply's plan carries the message encoded when the files were load
       #|    ),
       #|    details: <ReadOnlyArray: []>,
       #|    encoded_status: None,
+      #|    own: false,
       #|  },
       #|)
     ),
@@ -63,6 +64,7 @@ test "a static reply's plan carries the message encoded when the files were load
       #|    encoded: None,
       #|    details: <ReadOnlyArray: []>,
       #|    encoded_status: None,
+      #|    own: false,
       #|  },
       #|)
     ),

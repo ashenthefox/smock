@@ -116,7 +116,7 @@ async test "a call's entry records grpcStatus OK beside its HTTP status 200, an 
 }
 
 ///|
-async test "smock's INTERNAL answers to calls that reached the Stubs are journaled with grpcStatus INTERNAL: a template that fails, and a rendered reply that does not fit the output type" {
+async test "smock's INTERNAL answers to calls that reached the Stubs are journaled with grpcStatus INTERNAL and the HTTP status 200: a template that fails, and a rendered reply that does not fit the output type" {
   let yaml =
     #|mocks:
     #|  - name: greeter
@@ -146,7 +146,7 @@ async test "smock's INTERNAL answers to calls that reached the Stubs are journal
       inspect(
         answers(page),
         content=(
-          #|"fails" 500 "INTERNAL" x-tenant=fails templateError={"at":"/response/json/message","message":"body.missing.name is missing"}
+          #|"fails" 200 "INTERNAL" x-tenant=fails templateError={"at":"/response/json/message","message":"body.missing.name is missing"}
           #|"misfit" 200 "INTERNAL" x-tenant=misfit templateError={"at":"/response/json/mesage","message":"is not a field of helloworld.HelloReply"}
         ),
       )

@@ -27,15 +27,18 @@
 //
 // A call that cannot reach a gRPC Stub still goes to the engine, with an
 // empty body, which plans its UNIMPLEMENTED answer and journals it as
-// unmatched. A plan whose gRPC status is not OK, such as a gRPC Stub's
-// error or that UNIMPLEMENTED, is sent as Trailers-Only, one HEADERS block
-// that ends the stream, with `:status` 200, its `grpc-status`, its
-// `grpc-message`, its error details in google.rpc.Status, as
-// `grpc-status-details-bin`, and its trailers, such as the Near miss,
-// unless the reply has initial metadata: it then gets HEADERS with it, then
-// the trailers. Details as written were encoded when the files were
-// loaded; rendered ones are encoded here, and a detail that is not an Any
-// of a type of the set gets INTERNAL `template failed`.
+// unmatched. smock's own HTTP answers never reach a call: a Stub that
+// cannot serve its content gets the engine's plan in gRPC's form, INTERNAL
+// `template failed` or `data write failed`, or RESOURCE_EXHAUSTED `state
+// limit reached`. A plan whose gRPC status is not OK, such as a gRPC
+// Stub's error, that UNIMPLEMENTED or smock's own failure, is sent as
+// Trailers-Only, one HEADERS block that ends the stream, with `:status`
+// 200, its `grpc-status`, its `grpc-message`, its error details in
+// google.rpc.Status, as `grpc-status-details-bin`, and its trailers, such
+// as the Near miss, unless the reply has initial metadata: it then gets
+// HEADERS with it, then the trailers. Details as written were encoded
+// when the files were loaded; rendered ones are encoded here, and a detail
+// that is not an Any of a type of the set gets INTERNAL `template failed`.
 // Metadata goes out as spec E sends header fields: names in lower case,
 // values trimmed, and the fields HTTP/2 forbids left out. A `grpc-message`
 // is the status message percent-encoded, so any Unicode text fits in the
@@ -252,24 +255,25 @@ priv enum CallAnswer {
   /// it has error details (`status_details`).
   Status(@engine.GrpcPart, Bytes?)
   /// smock's own Trailers-Only INTERNAL, with the fixed `message`, in place
-  /// of a reply it cannot send, with the template error that says why, if
-  /// there is one.
+  /// of a reply that the plan holds but that smock cannot send, since it
+  /// does not fit its type, with the template error that says why, if there
+  /// is one.
   Internal(message~ : String, template_error~ : @engine.TemplateError?)
 }
 
 ///|
 /// The answer to a gRPC call to `rpc`, a unary method of `set`, that the
-/// engine decided `outcome` for. A plan without a gRPC part is smock's own
-/// answer to a gRPC Stub that could not serve its content, which gets
-/// INTERNAL. A plan whose status is OK gets its reply message encoded with
-/// the method's output type: a static reply was encoded when the files
-/// were loaded, with the output type of the set served then, which is
-/// `set` unless the Stub outlived a reload; a templated one is encoded
-/// here, once rendered, and one that does not fit the output type gets
-/// INTERNAL `template failed`. A plan whose status is not OK gets the
-/// google.rpc.Status of its error details, if it has any, as
-/// `status_details` builds it, and a detail that does not fit its type
-/// gets INTERNAL `template failed` too. It runs with no await after the
+/// engine decided `outcome` for, from the plan's gRPC part, which every
+/// plan of a gRPC call has. A plan whose status is OK gets its reply
+/// message encoded with the method's output type: a static reply was
+/// encoded when the files were loaded, with the output type of the set
+/// served then, which is `set` unless the Stub outlived a reload; a
+/// templated one is encoded here, once rendered, and one that does not fit
+/// the output type gets INTERNAL `template failed`. A plan whose status is
+/// not OK, smock's own failures included, gets the google.rpc.Status of
+/// its error details, if it has any, as `status_details` builds it, and a
+/// detail that does not fit its type gets INTERNAL `template failed` too.
+/// It runs with no await after the
 /// second lookup, the decoding and `handle`, so a reload never splits
 /// them, even when the answer then waits for the plan's delay.
 fn call_answer(
@@ -279,16 +283,12 @@ fn call_answer(
 ) -> CallAnswer {
   let plan = outcome.plan
   guard plan.grpc is Some(part) else {
-    let message = match outcome.content_error {
-      Some({ failure: Template(_), .. }) => "template failed"
-      Some({ failure: Data(_), .. }) => "data write failed"
-      None => "state limit reached"
-    }
-    return Internal(message~, template_error=None)
+    abort("every plan of a gRPC call has a gRPC part")
   }
   // Any status but OK, such as the UNIMPLEMENTED of a call that no Stub
-  // matched, ends the call without a message, and with its details, if
-  // it has any.
+  // matched, or smock's own failure when the Stub could not serve its
+  // content, ends the call without a message, and with its details, if it
+  // has any.
   guard part.status is Ok else {
     let details = status_details(set, part) catch {
       EncodeError(pointer~, message~) =>
@@ -406,8 +406,9 @@ fn H2Connection::send_answer(
 /// metadata. One without gets Trailers-Only, one HEADERS block that
 /// carries all of these, and `grpc-status-details-bin` with `details`, the
 /// reply's google.rpc.Status, when given. A Stub's reply too large to send
-/// gets INTERNAL instead (`answer_too_large`). `date` is the value of the
-/// answer's `date` field.
+/// gets INTERNAL instead (`answer_too_large`); smock's own answers, such as
+/// its failures, are sent as they are. `date` is the value of the answer's
+/// `date` field.
 fn H2Connection::answer_status(
   self : H2Connection,
   stream : Int32,
@@ -463,7 +464,8 @@ let too_large_message : String = "reply metadata too large"
 /// blocks are built before anything is sent, so the swap is always
 /// possible. The call's Journal entry records INTERNAL, with the reason in
 /// its `templateError`, at the reply's JSON Pointer. smock's own answers,
-/// such as an unmatched call's, are sent as they are.
+/// such as an unmatched call's or smock's own failure, carry nothing the
+/// Stub wrote, and are sent as they are.
 fn H2Connection::answer_too_large(
   self : H2Connection,
   stream : Int32,
@@ -472,7 +474,7 @@ fn H2Connection::answer_too_large(
   last : Array[@header.Header],
   date~ : String,
 ) -> Bool {
-  guard outcome.matched is Some(_) else { return false }
+  guard outcome.plan.grpc is Some({ own: false, .. }) else { return false }
   let why = match head {
     Some(head) =>
       match self.too_large("header block", head) {
