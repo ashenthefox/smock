@@ -82,6 +82,7 @@ in a definitions directory, such as `defs/`, that `smock serve --dir` and
   - [gRPC Stubs](#grpc-stubs)
   - [The status of a gRPC reply](#the-status-of-a-grpc-reply)
   - [gRPC reply metadata](#grpc-reply-metadata)
+  - [gRPC error details](#grpc-error-details)
   - [gRPC Stub conditions](#grpc-stub-conditions)
 - [Faults](#faults)
   - [Delays](#delays)
@@ -3622,6 +3623,9 @@ What is a template with `template: true`:
   header values are, after the message. A rendered value of its headers
   or trailers that gRPC's rules refuse fails the call
   ([gRPC reply metadata](#grpc-reply-metadata)).
+- Each of a gRPC Stub's `grpc.details` is a structured template, rendered
+  after the trailers, then encoded. A rendered detail that does not fit
+  its type fails the call ([gRPC error details](#grpc-error-details)).
 - `status`, a gRPC Stub's `grpc.status` and an event's `delay` are never
   templated.
 
@@ -5826,10 +5830,11 @@ stubs:
   bidi-streaming method is a problem at its `path`. Streaming methods are
   planned for R3, a later release.
 - A gRPC Stub's reply is `json`, the reply message, `headers`, its
-  initial metadata, and `grpc`, the gRPC status, message and trailing
-  metadata it ends with
+  initial metadata, and `grpc`, the gRPC status, message, trailing
+  metadata and error details it ends with
   ([The status of a gRPC reply](#the-status-of-a-grpc-reply),
-  [gRPC reply metadata](#grpc-reply-metadata)). It has no
+  [gRPC reply metadata](#grpc-reply-metadata),
+  [gRPC error details](#grpc-error-details)). It has no
   `status`: every gRPC reply has the HTTP status 200. `status` is
   required on HTTP Stubs only. smock adds no `Content-Type` for a gRPC
   Stub's `json`.
@@ -5909,7 +5914,7 @@ JSON Pointer, and so is a `method` other than `POST`:
 | `response`, or `responses` with `weight` | As on HTTP. |
 | `json` in a reply | The reply message. |
 | `headers` in a reply | The initial metadata, under gRPC's rules ([gRPC reply metadata](#grpc-reply-metadata)). |
-| `grpc` in a reply | The gRPC status, message and trailing metadata ([The status of a gRPC reply](#the-status-of-a-grpc-reply), [gRPC reply metadata](#grpc-reply-metadata)). |
+| `grpc` in a reply | The gRPC status, message, trailing metadata and error details ([The status of a gRPC reply](#the-status-of-a-grpc-reply), [gRPC reply metadata](#grpc-reply-metadata), [gRPC error details](#grpc-error-details)). |
 | `template` in a reply | As on HTTP. |
 | `status` in a reply | Makes no sense: every gRPC reply has the HTTP status 200, and `grpc.status` gives its gRPC status. |
 | `body` or `bodyFile` in a reply | Makes no sense: the reply message is `json`, which smock encodes with the method's output type. |
@@ -5993,10 +5998,11 @@ stubs:
       - { weight: 1, grpc: { status: UNAVAILABLE, message: "try again ☺" } }
 ```
 
-- `grpc` is an object with three fields, `status`, `message` and
-  `trailers`, all optional. A reply without it ends with `OK`, no message
-  and no trailing metadata. `trailers` is the reply's trailing metadata
-  ([gRPC reply metadata](#grpc-reply-metadata)).
+- `grpc` is an object with four fields, `status`, `message`, `trailers`
+  and `details`, all optional. A reply without it ends with `OK`, no
+  message, no trailing metadata and no details. `trailers` is the reply's
+  trailing metadata ([gRPC reply metadata](#grpc-reply-metadata)), and
+  `details` its error details ([gRPC error details](#grpc-error-details)).
 - `status` is a name of one of gRPC's seventeen status codes, from `OK`,
   0, to `UNAUTHENTICATED`, 16, as gRPC writes them: `OK`, `CANCELLED`,
   `UNKNOWN`, `INVALID_ARGUMENT`, `DEADLINE_EXCEEDED`, `NOT_FOUND`,
@@ -6098,6 +6104,72 @@ stubs:
   `templateError` ([Metadata size](grpc.md#metadata-size)).
 
 The [gRPC guide](grpc.md#metadata) shows the reply on the wire.
+
+### gRPC error details
+
+An error's reply may carry error details, such as `google.rpc.ErrorInfo`,
+`RetryInfo` or `BadRequest` from googleapis' `error_details.proto`, for
+clients that use gRPC's richer error model. A gRPC Stub gives them in
+`grpc.details`:
+
+```yaml
+stubs:
+  - id: hello-unknown
+    mock: greeter
+    request: { path: /helloworld.Greeter/SayHello }
+    response:
+      template: true
+      grpc:
+        status: NOT_FOUND
+        message: no user called ${body.name}
+        details:
+          - "@type": type.googleapis.com/google.rpc.ErrorInfo
+            reason: USER_UNKNOWN
+            domain: greeter.svc
+```
+
+- `details` is an array. Each element is an Any in ProtoJSON: an object
+  whose `@type` is a type URL, such as
+  `type.googleapis.com/google.rpc.ErrorInfo`, beside the fields of the
+  message it holds, or its form as `value` when its type is a well-known
+  type with one. An object without `@type` is a problem.
+- The type is the type of the Mock's set that the URL names after its last
+  `/`. A type the set lacks is a problem at `@type`, so the set must hold
+  the file that defines it, such as `google/rpc/error_details.proto`. Any
+  message type of the set can be a detail.
+- A detail type goes through the checks of a method's types: a type of an
+  editions file, or one that reaches such a type, and a MessageSet are
+  problems at `@type`.
+- Each detail is read as a reply is: names in either spelling, enums by
+  name or number, and a Duration such as `"1.5s"`. A detail that does not
+  fit its type is a problem at the value at fault. smock reports the
+  first problem of a reply's details.
+- smock builds `google.rpc.Status` from the reply's status, its message
+  and its details, each packed in an Any, and sends it in
+  `grpc-status-details-bin`, in base64 without padding. So the status a
+  client decodes never disagrees with `grpc-status`, and the set need not
+  hold `google/rpc/status.proto`.
+- Only an error gives details: details with `OK`, given or left out, are
+  a problem at `details`, since gRPC sends them only with an error. An
+  empty array sends no details.
+- Details as written are encoded when the files load, and count toward
+  the size of the block they go out in
+  ([gRPC reply metadata](#grpc-reply-metadata)). With `template: true`,
+  each detail is a structured template, rendered after the trailing
+  metadata, then encoded. A `@type` written without `${` must still name a
+  type of the set when the files load. A detail that fails to render, or
+  does not fit its type once rendered, gets INTERNAL `template failed`,
+  and the call's Journal entry says why in `templateError`, at the
+  detail's JSON Pointer.
+- The Journal records the call's status, not its details.
+
+```text
+greeter.yaml: /stubs/0/response/grpc/details/0/@type: names the type google.rpc.ErrorInfo, which the Descriptor set does not define
+greeter.yaml: /stubs/1/response/grpc/details: is not allowed with the gRPC status OK: gRPC sends error details only with an error
+```
+
+The [gRPC guide](grpc.md#error-details) shows how to build a set with
+googleapis' types, and what a client decodes.
 
 ### gRPC Stub conditions
 

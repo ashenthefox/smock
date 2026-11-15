@@ -36,6 +36,7 @@ Mock's `grpc` field and gRPC Stubs.
   - [The status](#the-status)
   - [The message](#the-message)
   - [Metadata](#metadata)
+  - [Error details](#error-details)
   - [Metadata size](#metadata-size)
   - [Trailers-Only](#trailers-only)
 - [Unmatched calls](#unmatched-calls)
@@ -289,7 +290,9 @@ call without the Session still gets the reply of the Stub from the files.
   reload, smock encodes it on each call, and a reply that no longer fits
   the output type gets INTERNAL `template failed`, with a `templateError`
   in the call's Journal entry that says why
-  ([The reply](#the-reply)).
+  ([The reply](#the-reply)). Its [error details](#error-details) are
+  encoded again the same way, and a detail whose type the new set lacks
+  gets INTERNAL too.
 
 ## How smock serves a call
 
@@ -1039,8 +1042,9 @@ an unmatched request of its Mock.
 ## Status and message
 
 A gRPC Stub's reply ends with a gRPC status, `OK` unless its `grpc` gives
-another, and may carry a status message. A Stub's reply, or each of its
-`responses`, gives them in `grpc`
+another, and may carry a status message, trailing metadata and, for an
+error, error details. A Stub's reply, or each of its `responses`, gives
+them in `grpc`
 ([The status of a gRPC reply](definition-files.md#the-status-of-a-grpc-reply)).
 With weighted `responses`, a dependency can fail one call in ten:
 
@@ -1138,7 +1142,8 @@ succeeded.
 A gRPC reply carries metadata in two places. A gRPC Stub's `headers` are
 its initial metadata, sent in the reply's HEADERS, and its
 `grpc.trailers` are its trailing metadata, sent in its trailers after
-`grpc-status` and `grpc-message`. Both take the shape of an HTTP Stub's
+`grpc-status`, `grpc-message` and `grpc-status-details-bin`. Both take the
+shape of an HTTP Stub's
 `headers`: a value by name, or an array of values, each sent as a field of
 its own:
 
@@ -1216,6 +1221,107 @@ the example above shows. An error without initial metadata is sent as
 [Trailers-Only](#trailers-only). `smock-mock`, which smock adds when the
 Default Mock answers, does not count as initial metadata.
 
+### Error details
+
+gRPC's richer error model lets an error carry details, such as
+`google.rpc.ErrorInfo`, `RetryInfo` or `BadRequest` from googleapis'
+[error_details.proto](https://github.com/googleapis/googleapis/blob/master/google/rpc/error_details.proto),
+which clients that use the model read. A gRPC Stub's error gives them in
+`grpc.details`, each in ProtoJSON with `@type`
+([gRPC error details](definition-files.md#grpc-error-details)):
+
+```yaml
+stubs:
+  - id: hello-unknown
+    mock: greeter
+    request: { path: /helloworld.Greeter/SayHello }
+    response:
+      template: true
+      grpc:
+        status: NOT_FOUND
+        message: no user called ${body.name}
+        trailers: { x-trace: abc }
+        details:
+          - "@type": type.googleapis.com/google.rpc.ErrorInfo
+            reason: USER_UNKNOWN
+            domain: greeter.svc
+```
+
+smock builds `google.rpc.Status` from the reply's status, its message and
+its details, each packed in an Any, encodes it itself, and sends it in
+`grpc-status-details-bin`, in base64 without padding. A call for Ann gets
+Trailers-Only:
+
+```text
+:status: 200
+content-type: application/grpc
+grpc-status: 5
+grpc-message: no user called Ann
+grpc-status-details-bin: CAUSEm5vIHVzZXIgY2FsbGVkIEFubhpHCih0eXBlLmdvb2dsZWFwaXMuY29tL2dvb2dsZS5ycGMuRXJyb3JJbmZvEhsKDFVTRVJfVU5LTk9XThILZ3JlZXRlci5zdmM
+x-trace: abc
+date: Sat, 14 Nov 2026 07:00:00 GMT
+```
+
+The status in `grpc-status-details-bin` has the code and the message of
+`grpc-status` and `grpc-message`, so the two never disagree. grpcurl
+decodes it with `-format-error`:
+
+```text
+{
+  "code": 5,
+  "message": "no user called Ann",
+  "details": [
+    {
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      "domain": "greeter.svc",
+      "reason": "USER_UNKNOWN"
+    }
+  ]
+}
+```
+
+A detail's type is looked up in the Mock's set, by the name after the
+last `/` of its `@type`. So the set must hold the file that defines it,
+and the files that file imports. Build it with googleapis' files on the
+import path, beside your own:
+
+```sh
+protoc --include_imports -I . -I googleapis -o greeter.binpb \
+  helloworld.proto google/rpc/error_details.proto
+```
+
+The set need not hold `google/rpc/status.proto`: smock encodes the status
+without it. A client that decodes the details needs their types too, so
+give grpcurl the same set with `-protoset`.
+
+- A type the set lacks is a problem when the files load, at the detail's
+  `@type`. Any message type of the set can be a detail, and a detail type
+  goes through the checks of a method's types, so a type of an editions
+  file and a MessageSet are problems.
+- Each detail is read as ProtoJSON reads an Any, as a reply is read
+  ([The reply](#the-reply)): `retry_delay` or `retryDelay`, and a
+  Duration such as `"1.5s"`. A detail that does not fit its type is a
+  problem at the value at fault.
+- Only an error gives details: details with `OK` are a problem, since gRPC
+  sends them only with an error. An empty `details` sends no status.
+- Details as written are encoded once, when the files load. With
+  `template: true`, each detail is a structured template, rendered after
+  the trailing metadata, then encoded, and a `@type` written without
+  `${` is looked up when the files load. A detail that fails to render,
+  or does not fit its type once rendered, gets Trailers-Only INTERNAL
+  `template failed`, and the Journal entry's `templateError` says why:
+
+  ```json
+  {
+    "at": "/response/grpc/details/0/retryDelay",
+    "message": "must be a duration from \"-315576000000.999999999s\" to \"315576000000.999999999s\": seconds, with at most 9 fractional digits, then \"s\", such as \"1.500s\": the field retry_delay of google.rpc.RetryInfo has the type google.protobuf.Duration"
+  }
+  ```
+
+- `grpc-status-details-bin` counts toward the size of the block it goes
+  out in ([Metadata size](#metadata-size)).
+- The Journal records the call's `grpcStatus`, not its details.
+
 ### Metadata size
 
 A reply goes out in blocks of header fields: its HEADERS, then its
@@ -1223,8 +1329,8 @@ trailers, or one [Trailers-Only](#trailers-only) block. smock counts each
 block as RFC 7541 counts a header list, the way HTTP/2 counts
 SETTINGS_MAX_HEADER_LIST_SIZE: each field's name and value, in octets,
 plus 32. smock's own fields count too: `:status`, `content-type`,
-`grpc-status`, `grpc-message` once percent-encoded, `smock-mock` and
-`date`. So the Trailers-Only answer of `try again ☺` takes 275 octets:
+`grpc-status`, `grpc-message` once percent-encoded,
+`grpc-status-details-bin`, `smock-mock` and `date`. So the Trailers-Only answer of `try again ☺` takes 275 octets:
 
 | Field | Octets |
 |---|---|
@@ -1289,6 +1395,8 @@ no trailers after it. Its fields are, in order:
 - `content-type: application/grpc`;
 - `grpc-status`, the status's code;
 - `grpc-message`, when the reply gives a message;
+- `grpc-status-details-bin`, when the reply gives
+  [error details](#error-details);
 - smock's own fields: `smock-mock` when the Default Mock answered, and
   `smock-near-miss` for an [unmatched call](#unmatched-calls);
 - the trailing metadata, the Stub's `grpc.trailers`;
@@ -1600,7 +1708,7 @@ fit the output type, whose `templateError` says why:
 
 | The call | `grpc-message` |
 |---|---|
-| The Stub's reply, its message, its metadata, a `variables` value or a `dataWrites` value fails to render, a rendered metadata value breaks gRPC's rules ([Metadata](#metadata)), or the rendered reply does not fit the output type | `template failed` |
+| The Stub's reply, its message, its metadata, its details, a `variables` value or a `dataWrites` value fails to render, a rendered metadata value breaks gRPC's rules ([Metadata](#metadata)), the rendered reply does not fit the output type, or a rendered detail does not fit its type ([Error details](#error-details)) | `template failed` |
 | A write of the Stub's `dataWrites` cannot be applied | `data write failed` |
 | The Stub's writes do not fit the bound on per-Session state | `state limit reached` |
 

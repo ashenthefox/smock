@@ -249,6 +249,21 @@ of each GitHub release include its section
   the reason in `templateError`. An error whose reply has initial
   metadata goes out as HEADERS, then trailers; `smock-mock` alone does not
   count as initial metadata. See [Metadata](docs/grpc.md#metadata).
+- Error details: an error's `grpc.details`, such as googleapis'
+  `ErrorInfo`, `RetryInfo` or `BadRequest`, each in ProtoJSON with
+  `@type`, whose type the Mock's set must define. smock builds
+  `google.rpc.Status` from the reply's status, its message and the details
+  packed as Any, encodes it itself, and sends it in
+  `grpc-status-details-bin`, in base64 without padding, so the two status
+  codes never disagree and the set need not hold `status.proto`. A detail
+  type the set lacks, a detail that does not fit its type, and details
+  with `OK` are load errors; detail types go through a method's type
+  checks. With `template: true`, each detail is a structured template, and
+  one that fails to render or does not fit its type gets Trailers-Only
+  INTERNAL `template failed`, with the reason in `templateError`. The
+  details count toward the size of the block they go out in.
+  `smock/protobuf` encodes the status. See
+  [Error details](docs/grpc.md#error-details).
 - A gRPC Stub's `json` condition is checked against its method's input
   type when the files load, and rewritten into the form in which smock
   prints a call's message, so matching costs nothing more per call. A key
@@ -433,8 +448,9 @@ of each GitHub release include its section
 - The Admin API document's description of a Journal entry's
   `templateError` says that a gRPC call got INTERNAL instead of 500, and
   that, for a gRPC call, it also says why a templated reply, once
-  rendered, is not a message of the method's output type, and why a
-  reply's metadata is too large to send.
+  rendered, is not a message of the method's output type, why a rendered
+  error detail is not a message of its type, and why a reply's metadata
+  is too large to send.
 - The Admin API document's `EphemeralStubInput` says that an Ephemeral
   Stub may be a gRPC Stub, checked against its Mock's set, and what a
   reload does to it.
