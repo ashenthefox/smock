@@ -402,10 +402,13 @@ of each GitHub release include its section
   HTTP status 200 and the `grpcStatus` `DEADLINE_EXCEEDED`. A client reset
   that arrives while such a delay runs, at most 100 ms before the
   deadline, is journaled the same way, as clients reset the stream at
-  their own deadline. A call cancelled earlier keeps the entry its Stub
-  planned. A timeout longer than 2^31-1 ms, such as `99999999H`, gives no
-  deadline, and a timeout of 0 ends a delayed call at once. `smock/grpc`
-  reads a timeout in whole milliseconds. See
+  their own deadline. Such a reset, and the first reset of a call smock
+  ended at its deadline, count neither toward the Rapid Reset bound nor
+  among the frames that do no work, so a client whose calls time out
+  keeps its connection. A call cancelled earlier keeps the entry its Stub
+  planned. A timeout longer than 2^31-1 ms, such as `99999999H`, gives
+  no deadline, and a timeout of 0 ends a delayed call at once.
+  `smock/grpc` reads a timeout in whole milliseconds. See
   [Deadlines](docs/grpc.md#deadlines) and [Faults](docs/grpc.md#faults).
 - A Mock's built-in health service. With `grpc: { health: true }`, a Mock
   answers gRPC's `grpc.health.v1.Health` as gRPC's health servers do:
