@@ -2078,7 +2078,9 @@ format writes its error line, and its `Transaction recorded` line gives
 `smock render` and the Admin render operation
 ([Rendering a template](definition-files.md#rendering-a-template)) show
 what a Stub answers, without a client. A gRPC Stub renders as a call to
-its method. The Stub decides this, not the sample: the sample's `method`
+its method. A rendering encodes and decodes the sample's message, and
+encodes the reply, as smock does for a call, so it shows what a call
+would get. The Stub decides this, not the sample: the sample's `method`
 and its `Content-Type` are checked only as conditions, as a call's are,
 and the rendering lists them among the conditions the sample fails. An
 HTTP Stub renders as a request, whatever the sample's `Content-Type`.
