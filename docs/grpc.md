@@ -1679,11 +1679,11 @@ HTTP status and the `grpcStatus` that its Stub's reply planned.
 
 ### Resets and the connection's defences
 
-The defences of an HTTP/2 connection count the streams a client resets
-before smock has finished their answers, against Rapid Reset, and the
-resets of streams that have closed, among the frames that do no work. Past
-either bound, the connection gets GOAWAY `ENHANCE_YOUR_CALM`
-([Defences](http2.md#defences)).
+The defences of an HTTP/2 connection count two kinds of client reset
+([Defences](http2.md#defences)). A reset of a stream that smock has not
+finished answering counts toward the Rapid Reset bound, and a reset of a
+stream that has closed counts among the frames that do no work. Past
+either bound, the connection gets GOAWAY `ENHANCE_YOUR_CALM`.
 
 A client that keeps deadlines resets every call that times out, so these
 resets count toward neither bound:
