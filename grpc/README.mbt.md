@@ -53,8 +53,10 @@ compressed, then the message's length in 4 octets, big-endian
   prefix. Each prefix is known as soon as its last octet arrives, so a
   length over a limit can be refused before the message arrives.
   `ending()` tells how the body ends: after `Whole(messages~)` messages,
-  `InPrefix` or `InMessage(length~)`. It copies nothing and keeps no
-  octet of a message.
+  `InPrefix` or `InMessage(length~)`. `whole_messages()` counts the
+  messages that have arrived whole so far, so the first message of a
+  stream that the client keeps open can be read before the body ends. It
+  copies nothing and keeps no octet of a message.
 - `@grpc.frame(message)` frames a message, uncompressed.
 
 ```mbt check
@@ -70,7 +72,9 @@ test "read the one message of a call's body as it arrives" {
   inspect(flag, content="b'\\x00'")
   inspect(length, content="5")
   inspect(body_length, content="10")
+  inspect(deframer.whole_messages(), content="0")
   inspect(deframer.take(rest) is All, content="true")
+  inspect(deframer.whole_messages(), content="1")
   debug_inspect(deframer.ending(), content="Whole(messages=1)")
 }
 
