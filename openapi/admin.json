@@ -2198,7 +2198,7 @@
             "enum": ["HTTP/1.0", "HTTP/1.1", "HTTP/2"]
           },
           "headers": {
-            "description": "The header fields, in the order they were sent. Over HTTP/2, the names are in lower case, as HTTP/2 sends them, the pseudo-header fields are not listed, and a request's `cookie` fields are joined into one, with `; `, at the place of the first.",
+            "description": "The header fields, in the order they were sent. Over HTTP/2, the names are in lower case, as HTTP/2 sends them, the pseudo-header fields are not listed, and a request's `cookie` fields are joined into one, with `; `, at the place of the first. A gRPC call's header fields are its metadata, every field, and the value of binary metadata, whose name ends with `-bin`, is without the base64 padding that ends each comma-separated element.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Header"

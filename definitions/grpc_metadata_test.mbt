@@ -1,7 +1,9 @@
 // A gRPC Stub's reply metadata at load: its `headers`, the initial
 // metadata, and its `grpc.trailers`, the trailing metadata, with the names
 // and values gRPC's grammar allows, `-bin` values in base64 without their
-// padding, and several values of one name as an array. The set is gRPC's
+// padding, and several values of one name as an array. Also its exact
+// `headers` conditions on `-bin` fields, which lose their padding as a
+// call's values do. The set is gRPC's
 // helloworld.proto (greeter_set_test.mbt), and `check_stubs`
 // (grpc_stubs_test.mbt) renders the problems.
 
@@ -237,5 +239,87 @@ test "an HTTP Stub's headers keep HTTP's rules: names that gRPC reserves and val
       ),
     ),
     content="plain: http: HTTP Stub",
+  )
+}
+
+///|
+/// `condition`, a `headers` condition, as `header_conditions` shows it.
+fn shown_header_condition(condition : @definitions.ValueCondition) -> String {
+  match condition {
+    Has(Exact(value)) => value.escape()
+    Has(Pattern(pattern)) => "pattern \{pattern.source.escape()}"
+    Has(Any) => "any"
+    Not(inner) => "$not \{shown_header_condition(inner)}"
+    Exists(present) => "$exists \{present}"
+  }
+}
+
+///|
+/// The `headers` conditions of `stub`, as matching sees them.
+fn header_conditions(stub : @definitions.Stub) -> String {
+  guard stub.serves is Ordinary(ordinary) else { return "not ordinary" }
+  let shown = ordinary.request.headers
+    .iter()
+    .map(header => "\{header.0}: \{shown_header_condition(header.1)}")
+    .collect()
+  "\{stub.id}: [\{shown.join(", ")}]"
+}
+
+///|
+test "a gRPC Stub's exact headers conditions on -bin fields lose their padding at load, in each element and inside $not, while patterns, other names and HTTP Stubs' conditions stay as written" {
+  let yaml =
+    #|mocks:
+    #|  - { name: greeter, grpc: { descriptorSet: greeter.binpb } }
+    #|stubs:
+    #|  - id: grpc
+    #|    mock: greeter
+    #|    request:
+    #|      path: /helloworld.Greeter/SayHello
+    #|      headers:
+    #|        Trace-Bin: "AAE="
+    #|        list-bin: "AAA=,BBB=,CCCC"
+    #|        skip-bin: { $not: "AA==" }
+    #|        tag-bin: { pattern: "AA==?" }
+    #|        x-padded: "AA=="
+    #|        any-bin: { $exists: true }
+    #|    response: { json: { message: Hi } }
+    #|  - id: http
+    #|    mock: greeter
+    #|    request: { path: /traced, headers: { trace-bin: "AAE=" } }
+    #|    response: { status: 200 }
+  let lines = []
+  match
+    @definitions.load({
+      files: [("a.yaml", @utf8.encode(yaml))],
+      body_files: [("greeter.binpb", set_bytes(greeter_set))],
+    }) {
+    Ok(snapshot) =>
+      for stub in snapshot.mocks[0].stubs {
+        lines.push(header_conditions(stub))
+      }
+    Err(problems) =>
+      fail(problems.map(problem => problem.to_string()).join("\n"))
+  }
+  // An Ephemeral gRPC Stub is read as a Stub in a file is.
+  match
+    @definitions.ephemeral_stub(
+      @json.parse(
+        "{\"request\":{\"path\":\"/helloworld.Greeter/SayHello\",\"headers\":{\"trace-bin\":\"AAE=\"}},\"response\":{\"json\":{\"message\":\"Hi\"}}}",
+      ),
+      id="eph-1",
+      mock="greeter",
+      descriptor_set=@protobuf.read_descriptor_set(set_bytes(greeter_set)),
+    ) {
+    Ok(stub) => lines.push(header_conditions(stub))
+    Err(problems) =>
+      fail(problems.map(problem => problem.to_string()).join("\n"))
+  }
+  inspect(
+    lines.join("\n"),
+    content=(
+      #|grpc: [trace-bin: "AAE", list-bin: "AAA,BBB,CCCC", skip-bin: $not "AA", tag-bin: pattern "AA==?", x-padded: "AA==", any-bin: $exists true]
+      #|http: [trace-bin: "AAE="]
+      #|eph-1: [trace-bin: "AAE"]
+    ),
   )
 }
