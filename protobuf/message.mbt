@@ -423,19 +423,19 @@ fn DescriptorSet::print_message(
 /// Whether canonical ProtoJSON leaves out `field`, a field of a message,
 /// of a proto2 file when `proto2` says so, or an extension that extends
 /// it, when `extension` says so, though the message holds `value` for it:
-/// when it is a field without presence at its default. A field has
-/// presence when it is an extension, a singular field of a proto2 message,
-/// a member of a oneof, a proto3 `optional` field included, or a message
-/// or a group.
+/// when it is a repeated field or a map that holds no element, or a field
+/// without presence at its default. A field has presence when it is an
+/// extension, a singular field of a proto2 message, a member of a oneof, a
+/// proto3 `optional` field included, or a message or a group.
 fn DescriptorSet::leaves_out(
   self : DescriptorSet,
   field : FieldDescriptor,
   value : Value,
   extension~ : Bool,
   proto2~ : Bool,
-) -> Bool {
-  ignore(self)
+) -> Bool raise DecodeError {
   match value {
+    Elements(runs) => !self.holds_elements(field, runs)
     _ if extension || proto2 || field.oneof_index is Some(_) => false
     // A 32-bit type keeps the low 32 bits of a varint, as protobuf's
     // parsers read it.
@@ -446,8 +446,75 @@ fn DescriptorSet::leaves_out(
         _ => bits.to_uint() == 0
       }
     Octets(octets) => octets.length() == 0
-    Messages(_) | Elements(_) => false
+    Messages(_) => false
   }
+}
+
+///|
+/// Whether `field`, a repeated field whose records are in `runs`, holds an
+/// element that `print_repeated` prints. It holds none when its records
+/// are packed records of no values, or numbers that a closed enum does not
+/// define, which a list leaves out, as a map leaves out entries whose
+/// values they are.
+fn DescriptorSet::holds_elements(
+  self : DescriptorSet,
+  field : FieldDescriptor,
+  runs : Array[BytesView],
+) -> Bool raise DecodeError {
+  if self.message_of(field) is Some(entry) &&
+    entry.map_entry &&
+    is_map_entry(entry) {
+    guard self.closed_enum_of(entry.fields[entry.field_index(2)])
+      is Some(closed) else {
+      return runs.length() > 0
+    }
+    for r in 0..<runs.length() {
+      let reader = Reader(runs[r])
+      while !reader.at_end() {
+        ignore(reader.tag())
+        let fields = Reader(reader.length_delimited())
+        // The entry's last value wins, as `print_map` reads it.
+        let mut defined = true
+        while !fields.at_end() {
+          match (fields.tag(), fields.wire_type()) {
+            (2, Varint) => defined = closed.defines(fields.varint())
+            _ => fields.skip()
+          }
+        }
+        if defined {
+          return true
+        }
+      }
+    }
+    return false
+  }
+  let closed = self.closed_enum_of(field)
+  for r in 0..<runs.length() {
+    let reader = Reader(runs[r])
+    while !reader.at_end() {
+      ignore(reader.tag())
+      match (field.type_, reader.wire_type()) {
+        (String | Bytes | Message | Group, _) => return true
+        // A packed record of values.
+        (_, Len) => {
+          let values = Reader(reader.length_delimited())
+          while !values.at_end() {
+            let bits = values.number(field.type_)
+            if !(closed is Some(type_) && !type_.defines(bits)) {
+              return true
+            }
+          }
+        }
+        _ => {
+          let bits = reader.number(field.type_)
+          if !(closed is Some(type_) && !type_.defines(bits)) {
+            return true
+          }
+        }
+      }
+    }
+  }
+  false
 }
 
 ///|

@@ -69,11 +69,7 @@ test "fields without presence are left out at their defaults, even when the mess
   inspect(canonical(scalars_set, "scalars.Every", defaults), content="{}")
   // A bool whose varint is 2, and an int64 past 32 bits.
   inspect(
-    canonical(
-      scalars_set,
-      "scalars.Every",
-      b"\x40\x02\x18\x80\x80\x80\x80\x10",
-    ),
+    canonical(scalars_set, "scalars.Every", b"\x40\x02\x18\x80\x80\x80\x80\x10"),
     content=(
       #|{"anInt64":"4294967296","aBool":true}
     ),
@@ -97,9 +93,7 @@ test "fields without presence are left out at their defaults, even when the mess
 test "a double or a float of negative zero is -0, not a default; other numbers print as in the decoded form" {
   inspect(
     canonical(
-      scalars_set,
-      "scalars.Every",
-      b"\x09\x00\x00\x00\x00\x00\x00\x00\x80\x15\x00\x00\x00\x80",
+      scalars_set, "scalars.Every", b"\x09\x00\x00\x00\x00\x00\x00\x00\x80\x15\x00\x00\x00\x80",
     ),
     content=(
       #|{"aDouble":-0,"aFloat":-0}
@@ -129,6 +123,70 @@ test "a double or a float of negative zero is -0, not a default; other numbers p
     specials.join(" "),
     content=(
       #|{"aDouble":"NaN"} {"aDouble":"Infinity"} {"aDouble":"-Infinity"}
+    ),
+  )
+}
+
+///|
+test "repeated fields and maps: 64-bit elements as strings, map keys as in the decoded form" {
+  inspect(
+    canonical(replies_set, "replies.Everything", fixture(everything_lists)),
+    content=(
+      #|{"int32s":[1,-1,300],"unpackedInt32s":[1,-2],"doubles":[0.5,1e+100],"floats":[0.1,9.99],"int64s":["9223372036854775807","-1"],"uint64s":["18446744073709551615","0"],"sint32s":[-1,1,-2147483648],"sint64s":["-9223372036854775808"],"fixed32s":[1,4294967295],"sfixed64s":["-1"],"bools":[true,false,true],"statuses":["ACTIVE","STATUS_UNSPECIFIED","SUSPENDED",7],"strings":["","x"],"byteStrings":["/w==",""],"nesteds":[{"label":"a"},{}]}
+    ),
+  )
+  // Map entries in key order, as `decode_json` prints them.
+  inspect(
+    canonical(replies_set, "replies.Everything", fixture(everything_maps)),
+    content=(
+      #|{"counts":{"":0,"a":1,"b":2},"names":{"-1":"minus one","2":"","10":"ten"},"byFlag":{"false":{},"true":{"label":"yes"}},"byId":{"-9223372036854775808":"ACTIVE","7":"STATUS_UNSPECIFIED"},"blobs":{"18446744073709551615":"AQ=="},"bySint":{"-2":1.5},"byFixed":{"1":true}}
+    ),
+  )
+  inspect(
+    canonical(collections_set, "collections.Tagged", fixture(tagged)),
+    content=(
+      #|{"tags":["a","b"],"counts":{"1":3,"2":5,"10":1}}
+    ),
+  )
+}
+
+///|
+test "a repeated field or a map that holds no element is left out, a packed record of no values and numbers a closed enum does not define included" {
+  // A packed record of no values.
+  inspect(
+    canonical(replies_set, "replies.Everything", b"\xa2\x01\x00"),
+    content="{}",
+  )
+  inspect(
+    decoded(replies_set, "replies.Everything", b"\xa2\x01\x00").contains(
+      "\"int32s\":[]",
+    ),
+    content="true",
+  )
+  // A proto2 Parcel whose history holds only 9, and whose map states only
+  // the entry "b": 9, which State does not define, and whose sizes come
+  // as a packed record of no values.
+  inspect(
+    canonical(
+      shipping_set, "shipping.Parcel", b"\x12\x01\x09\x3a\x05\x0a\x01\x62\x10\x09\x22\x00",
+    ),
+    content="{}",
+  )
+  // The same, with SHIPPED after the 9, and the entry "a": DELIVERED.
+  inspect(
+    canonical(
+      shipping_set, "shipping.Parcel", b"\x12\x02\x09\x01\x3a\x05\x0a\x01\x62\x10\x09\x3a\x05\x0a\x01\x61\x10\x02",
+    ),
+    content=(
+      #|{"history":["SHIPPED"],"states":{"a":"DELIVERED"}}
+    ),
+  )
+  // A oneof member and a proto3 optional field at their defaults, and an
+  // empty message, are printed.
+  inspect(
+    canonical(replies_set, "replies.Everything", fixture(everything_choice)),
+    content=(
+      #|{"nested":{},"maybe":0,"word":""}
     ),
   )
 }
