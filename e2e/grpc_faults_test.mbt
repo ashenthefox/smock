@@ -45,6 +45,7 @@ fn derived_status(reply : GrpcReply) -> String {
       return match field.1 {
         "0" => "OK"
         "4" => "DEADLINE_EXCEEDED"
+        "5" => "NOT_FOUND"
         "13" => "INTERNAL"
         "14" => "UNAVAILABLE"
         code => "code \{code}"
@@ -125,6 +126,124 @@ async test "the ticket's example: a gRPC Stub with a reset Fault makes the clien
           #|Journal:
           #|"broken" null - "reset"
           #|"hello" 200 "OK" null
+        ),
+      )
+    })
+  })
+}
+
+///|
+/// The Mock `greeter`, the Default Mock, with the set, and gRPC Stubs on
+/// SayHello with a partial Fault, one for each value of the call's
+/// `x-fault`: an OK reply (`partial`), an OK reply with an empty message
+/// (`partial-empty`), an error, sent as Trailers-Only without the Fault
+/// (`partial-error`), an error with initial metadata, sent as HEADERS then
+/// trailers without the Fault (`partial-error-metadata`), and a templated
+/// reply that does not fit the output type, which gets smock's own INTERNAL
+/// (`partial-failed`).
+let partial_greeter : String =
+  #|mocks:
+  #|  - name: greeter
+  #|    grpc: { descriptorSet: greeter.binpb }
+  #|stubs:
+  #|  - id: partial
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: partial } }
+  #|    response: { headers: { x-served-by: smock }, json: { message: Hello Tom }, grpc: { trailers: { x-trailer: t } } }
+  #|    fault: { connection: { kind: partial } }
+  #|  - id: partial-empty
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: partial-empty } }
+  #|    response: { json: {} }
+  #|    fault: { connection: { kind: partial } }
+  #|  - id: partial-error
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: partial-error } }
+  #|    response: { grpc: { status: NOT_FOUND, message: no such greeting, trailers: { x-trailer: t } } }
+  #|    fault: { connection: { kind: partial } }
+  #|  - id: partial-error-metadata
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: partial-error-metadata } }
+  #|    response: { headers: { x-served-by: smock }, grpc: { status: NOT_FOUND, message: no such greeting } }
+  #|    fault: { connection: { kind: partial } }
+  #|  - id: partial-failed
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: partial-failed } }
+  #|    response: { template: true, headers: { x-served-by: smock }, json: { mesage: "${body.name}" } }
+  #|    fault: { connection: { kind: partial } }
+
+///|
+async test "a partial Fault sends the reply's HEADERS, with no content-length, and the first half of its framed message, rounded down, then RST_STREAM INTERNAL_ERROR; an answer with no message sends the HEADERS it would send before its trailers, without ending the stream, then the reset; the client sees INTERNAL, and the entry keeps its status and gRPC status" {
+  with_greeter_set([("greeter.yaml", partial_greeter)], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      let out = []
+      for
+        fault in [
+          "partial", "partial-empty", "partial-error", "partial-error-metadata",
+          "partial-failed",
+        ] {
+        let reply = client.call("/helloworld.Greeter/SayHello", headers=[
+          ("x-fault", fault),
+        ])
+        out.push("x-fault: \{fault}:")
+        out.push(reply.render())
+        out.push("the client sees \{derived_status(reply)}")
+      }
+      inspect(
+        [..out, "Journal:", fault_answers(smock)].join("\n"),
+        content=(
+          #|x-fault: partial:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  x-served-by: smock
+          #|  smock-mock: greeter; via=default
+          #|  date: <now>
+          #|DATA 000000000b0a0948
+          #|(reset INTERNAL_ERROR)
+          #|the client sees INTERNAL
+          #|x-fault: partial-empty:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  smock-mock: greeter; via=default
+          #|  date: <now>
+          #|DATA 0000
+          #|(reset INTERNAL_ERROR)
+          #|the client sees INTERNAL
+          #|x-fault: partial-error:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  smock-mock: greeter; via=default
+          #|  date: <now>
+          #|(reset INTERNAL_ERROR)
+          #|the client sees INTERNAL
+          #|x-fault: partial-error-metadata:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  x-served-by: smock
+          #|  smock-mock: greeter; via=default
+          #|  date: <now>
+          #|(reset INTERNAL_ERROR)
+          #|the client sees INTERNAL
+          #|x-fault: partial-failed:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  smock-mock: greeter; via=default
+          #|  date: <now>
+          #|(reset INTERNAL_ERROR)
+          #|the client sees INTERNAL
+          #|Journal:
+          #|"partial" 200 "OK" "partial"
+          #|"partial-empty" 200 "OK" "partial"
+          #|"partial-error" 200 "NOT_FOUND" "partial"
+          #|"partial-error-metadata" 200 "NOT_FOUND" "partial"
+          #|"partial-failed" 200 "INTERNAL" "partial"
         ),
       )
     })

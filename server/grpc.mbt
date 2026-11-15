@@ -240,7 +240,7 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
         unsent.rest,
         outcome,
         out,
-        trailers=unsent.trailers,
+        trailers?=unsent.trailers,
       )
     None => self.ended_in_place(request, outcome)
   }
@@ -339,10 +339,11 @@ fn call_answer(
 
 ///|
 /// The part of a reply's framed message that did not fit when the reply
-/// was queued, and the trailers that follow it.
+/// was queued, and the trailers that follow it, or `None` after the half
+/// that a partial Fault sends, which RST_STREAM INTERNAL_ERROR follows.
 priv struct Unsent {
   rest : BytesView
-  trailers : Array[@header.Header]
+  trailers : Array[@header.Header]?
 }
 
 ///|
@@ -355,7 +356,9 @@ priv struct Unsent {
 /// bound leaves for one DATA frame (`H2Writer::frame_room`), gets as much
 /// as fits: the rest is returned, with the trailers that follow it, which
 /// the caller sends from the stream's task, with the entry still to
-/// commit. Otherwise it returns `None`.
+/// commit. Otherwise it returns `None`. With a partial Fault, it sends the
+/// first half of the answer instead (`send_partial`), and returns the rest
+/// of that half, if any, with no trailers.
 fn H2Connection::send_answer(
   self : H2Connection,
   stream : Int32,
@@ -364,6 +367,14 @@ fn H2Connection::send_answer(
   date~ : String,
   bounded~ : Bool = false,
 ) -> Unsent? {
+  if outcome.plan.fault is Some(Partial) {
+    let rest = self.send_partial(stream, outcome, answer, date~, bounded~)
+    return if rest.length() > 0 {
+      Some({ rest, trailers: None, })
+    } else {
+      None
+    }
+  }
   match answer {
     Internal(message~, template_error~) => {
       self.answer_own(
@@ -389,13 +400,13 @@ fn H2Connection::send_answer(
       let rest = self.queue_reply(
         stream,
         head,
-        @grpc.frame(reply),
+        @grpc.frame(reply)[:],
         trailers,
         outcome.journal,
         bounded~,
       )
       if rest.length() > 0 {
-        Some({ rest, trailers, })
+        Some({ rest, trailers: Some(trailers), })
       } else {
         None
       }
@@ -682,15 +693,20 @@ fn reply_at(index : Int32?) -> String {
 /// INTERNAL_ERROR, the entry committed just before (`reset_after`). In the
 /// stream's task, `bounded` is true: the message queued now is also no
 /// more than the output bound leaves for one DATA frame
-/// (`H2Writer::frame_room`), as `queue` holds a body to it.
+/// (`H2Writer::frame_room`), as `queue` holds a body to it. With
+/// `partial`, as for a partial Fault, `framed` is the half of the message
+/// that the Fault sends, and RST_STREAM INTERNAL_ERROR follows it in place
+/// of the trailers, the entry committed just before; a rest is reset by
+/// the caller once it is sent.
 fn H2Connection::queue_reply(
   self : H2Connection,
   stream : Int32,
   head : Array[@header.Header],
-  framed : Bytes,
+  framed : BytesView,
   trailers : Array[@header.Header],
   entry : @engine.JournalEntry?,
   bounded~ : Bool = false,
+  partial~ : Bool = false,
 ) -> BytesView {
   self.conn.headers(stream, head) catch {
     _ => {
@@ -716,6 +732,10 @@ fn H2Connection::queue_reply(
   // The message fits the windows, so the `Conn` takes it.
   self.conn.data(stream, framed) catch {
     _ => return framed[0:0]
+  }
+  if partial {
+    self.reset_after(stream, entry)
+    return framed[0:0]
   }
   self.ports.commit(entry)
   self.end_with_trailers(stream, trailers)

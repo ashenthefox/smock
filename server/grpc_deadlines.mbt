@@ -97,6 +97,9 @@ fn[S : @io.Writer + ReadOutput] H2Connection::wait_call(
     // within the output bound. A reset meanwhile, once the deadline has
     // passed, ends the call as DEADLINE_EXCEEDED.
     let mut finished = self.output_written(stream, out)
+    // Whether the task sent the rest of the half of a reply that a partial
+    // Fault sends, which a reset then ends.
+    let mut reset = false
     if finished {
       // From here on the answer ends the stream, and commits the entry.
       entry = None
@@ -121,12 +124,14 @@ fn[S : @io.Writer + ReadOutput] H2Connection::wait_call(
           out,
           end=false,
         )
-        if finished {
-          self.end_with_trailers(stream, unsent.trailers)
+        match unsent.trailers {
+          Some(trailers) if finished => self.end_with_trailers(stream, trailers)
+          Some(_) => ()
+          None => reset = true
         }
       }
     }
-    self.end_task(stream, out, finished~)
+    self.end_task(stream, out, finished~, reset~)
   })
   self.waiting[stream] = task
 }
