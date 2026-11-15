@@ -1132,10 +1132,10 @@ fn unmatched_call(mock : @definitions.Mock, path : String) -> String {
     return "the Mock has no Descriptor set"
   }
   guard set.find_method(path) is Some(rpc) else { return "unknown method" }
-  if rpc.client_streaming || rpc.server_streaming {
-    "streaming methods are not served yet"
-  } else {
+  if rpc.is_unary() {
     "no Stub matched"
+  } else {
+    "streaming methods are not served yet"
   }
 }
 

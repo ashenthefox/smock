@@ -12,6 +12,27 @@ pub fn DescriptorSet::find_method(
 }
 
 ///|
+/// The unary method that gRPC calls by `path`, as `find_method` finds a
+/// method: `None` when `path` names no method of the set, or one that
+/// streams.
+pub fn DescriptorSet::unary_method(
+  self : DescriptorSet,
+  path : String,
+) -> MethodDescriptor? {
+  guard self.methods.get(path) is Some(rpc) && rpc.is_unary() else {
+    return None
+  }
+  Some(rpc)
+}
+
+///|
+/// Whether the method is unary: neither the client nor the server sends a
+/// stream of messages.
+pub fn MethodDescriptor::is_unary(self : MethodDescriptor) -> Bool {
+  !self.client_streaming && !self.server_streaming
+}
+
+///|
 /// The message whose full name, without a leading dot, is `full_name`,
 /// such as `helloworld.HelloRequest`. Nested messages are found too, such
 /// as `shop.Order.Line`.

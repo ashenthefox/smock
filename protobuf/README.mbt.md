@@ -205,7 +205,9 @@ index built when the set is read, so none walks the set.
 
 - `set.find_method(path)`: a method by the path gRPC calls it by, such as
   `/helloworld.Greeter/SayHello`; `set.input_of(method)` and
-  `set.output_of(method)` give its types.
+  `set.output_of(method)` give its types. `set.unary_method(path)` finds
+  it only when it is unary, as `method.is_unary()` says: neither side
+  streams.
 - `set.find_message(full_name)`, `set.find_enum(full_name)` and
   `set.find_extension(full_name)`: by a full name without a leading dot,
   such as `helloworld.HelloRequest` or `shop.priority`.

@@ -77,22 +77,6 @@ fn is_served_subtype(subtype : BytesView) -> Bool {
 }
 
 ///|
-/// The unary method that a gRPC call to `path` calls in `set`, the
-/// Descriptor set of the call's Mock, or `None` when `path` names no method
-/// of the set, or names a streaming method: such a call cannot reach a gRPC
-/// Stub.
-fn unary_method(
-  set : @protobuf.DescriptorSet,
-  path : String,
-) -> @protobuf.MethodDescriptor? {
-  guard set.find_method(path) is Some(rpc) else { return None }
-  if rpc.client_streaming || rpc.server_streaming {
-    return None
-  }
-  Some(rpc)
-}
-
-///|
 /// Answers `stream`, a gRPC call whose HEADERS have just arrived, with
 /// `request` as they give it, when the call cannot reach a gRPC Stub: when
 /// its Host reaches no Mock, its Mock has no Descriptor set, or its `:path`
@@ -130,8 +114,10 @@ fn H2Connection::answer_from_headers(
     request.reflection = true
     return false
   }
+  // A call to a method of the set that streams, or to none, cannot reach a
+  // gRPC Stub.
   if mock is Some({ descriptor_set: Some(set), .. }) &&
-    unary_method(set, request.target) is Some(_) {
+    set.unary_method(request.target) is Some(_) {
     return false
   }
   self.requests.remove(stream)
@@ -213,7 +199,7 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
     return
   }
   guard mock is Some({ descriptor_set: Some(set), .. }) &&
-    unary_method(set, incoming.target) is Some(rpc) else {
+    set.unary_method(incoming.target) is Some(rpc) else {
     self.answer_unserved(stream, request, ended=true)
     return
   }
