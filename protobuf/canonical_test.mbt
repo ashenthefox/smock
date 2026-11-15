@@ -92,3 +92,43 @@ test "fields without presence are left out at their defaults, even when the mess
     ),
   )
 }
+
+///|
+test "a double or a float of negative zero is -0, not a default; other numbers print as in the decoded form" {
+  inspect(
+    canonical(
+      scalars_set,
+      "scalars.Every",
+      b"\x09\x00\x00\x00\x00\x00\x00\x00\x80\x15\x00\x00\x00\x80",
+    ),
+    content=(
+      #|{"aDouble":-0,"aFloat":-0}
+    ),
+  )
+  let floats = [0.1, 9.99, 16777217.0, 1.0e-7, 1.0e21, -2.5].map(value => {
+    let message = nested(w => {
+      w.tag(2, I32)
+      w.fixed32(Float::from_double(value).reinterpret_as_uint())
+    })
+    canonical(scalars_set, "scalars.Every", message)
+  })
+  inspect(
+    floats.join(" "),
+    content=(
+      #|{"aFloat":0.1} {"aFloat":9.99} {"aFloat":16777216} {"aFloat":1e-7} {"aFloat":1e+21} {"aFloat":-2.5}
+    ),
+  )
+  let specials = [0.0 / 0.0, 1.0 / 0.0, -1.0 / 0.0].map(value => {
+    let message = nested(w => {
+      w.tag(1, I64)
+      w.fixed64(value.reinterpret_as_uint64())
+    })
+    canonical(scalars_set, "scalars.Every", message)
+  })
+  inspect(
+    specials.join(" "),
+    content=(
+      #|{"aDouble":"NaN"} {"aDouble":"Infinity"} {"aDouble":"-Infinity"}
+    ),
+  )
+}

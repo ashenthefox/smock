@@ -913,7 +913,8 @@ fn sorted_entries(
 /// Prints to `out` the value of `field`, a scalar or an enum field other
 /// than a string or bytes, whose bits are `bits`: a varint, or a fixed
 /// 32-bit or 64-bit value. In canonical ProtoJSON, as `canonical` says, a
-/// 64-bit integer is a string.
+/// 64-bit integer is a string, and a double or a float of negative zero is
+/// `-0`, as protobuf's printers keep its sign.
 fn DescriptorSet::print_number(
   self : DescriptorSet,
   out : @buffer.Buffer,
@@ -927,6 +928,9 @@ fn DescriptorSet::print_number(
       self.print_number(out, field, bits, canonical=false)
       out.write_byte(b'"')
     }
+    Double if canonical && bits == 0x8000_0000_0000_0000UL =>
+      out.write_bytes(b"-0")
+    Float if canonical && bits == 0x8000_0000UL => out.write_bytes(b"-0")
     Bool => out.write_bytes(if bits != 0 { b"true" } else { b"false" })
     Int64 | SFixed64 => write_signed(out, bits.reinterpret_as_int64())
     UInt64 | Fixed64 => write_unsigned(out, bits)
