@@ -3,7 +3,9 @@
 // (https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md): the
 // grammar of a name, the names gRPC keeps for itself, the values of ASCII
 // metadata, and binary metadata, whose name ends with `-bin` and whose
-// value is base64, sent without padding.
+// value is base64, sent without padding. A call's binary metadata loses
+// its padding too, in each comma-separated element, so that padded and
+// unpadded clients look alike.
 
 ///|
 /// Whether `name`, a name in lower case, is a metadata name of gRPC's
@@ -70,4 +72,44 @@ pub fn unpadded_base64(value : StringView) -> StringView? {
     return None
   }
   Some(value.exact_view(start=0, end~))
+}
+
+///|
+/// `value`, the value of binary metadata as a call carries it, without the
+/// padding that ends each of its comma-separated elements, the commas
+/// kept: a proxy may join repeated fields with commas, so `AAA=,BBB=`
+/// becomes `AAA,BBB`. Only the `=` right before a comma or at the end are
+/// taken away, and the value is not checked as base64, nor decoded. It is
+/// `value` itself, not a copy, when no element ends with `=`.
+pub fn unpadded_elements(value : String) -> String {
+  let n = value.length()
+  // Most values have no padding to take away, and are kept as they are.
+  let mut padded = false
+  for i in 0..<n {
+    if value[i] == '=' && (i + 1 == n || value[i + 1] == ',') {
+      padded = true
+      break
+    }
+  }
+  guard padded else { return value }
+  let out = StringBuilder(size_hint=n)
+  // The start of the element being read, and the end of its characters
+  // before any padding.
+  let mut start = 0
+  while start <= n {
+    let mut end = start
+    while end < n && value[end] != ',' {
+      end += 1
+    }
+    let mut kept = end
+    while kept > start && value[kept - 1] == '=' {
+      kept -= 1
+    }
+    out.write_view(value.exact_view(start~, end=kept))
+    if end < n {
+      out.write_char(',')
+    }
+    start = end + 1
+  }
+  out.to_string()
 }

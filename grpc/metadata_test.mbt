@@ -1,6 +1,7 @@
-// The rules of reply metadata, through the module's public interface: the
-// names gRPC's grammar allows and those it reserves, the values of ASCII
-// metadata, and binary metadata in base64. The expected values follow
+// The rules of metadata, through the module's public interface: the names
+// gRPC's grammar allows and those it reserves, the values of ASCII
+// metadata, binary metadata in base64, and a call's binary metadata
+// without its padding. The expected values follow
 // gRPC's HTTP/2 protocol document
 // (https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md): a
 // Header-Name is 1 or more of `0-9`, `a-z`, `_`, `-` and `.`; an
@@ -78,5 +79,31 @@ test "a binary metadata value that is not base64 has no unpadded form" {
       " AAE", "AAE=,AAE=", "AAÉ",
     ] {
     inspect(@grpc.unpadded_base64(value) is None, content="true")
+  }
+}
+
+///|
+test "a call's binary metadata loses the padding that ends each comma-separated element, commas kept, without being checked as base64" {
+  inspect(@grpc.unpadded_elements("AAE="), content="AAE")
+  inspect(@grpc.unpadded_elements("AA=="), content="AA")
+  // A proxy may join repeated fields with commas.
+  inspect(@grpc.unpadded_elements("AAA=,BBB="), content="AAA,BBB")
+  inspect(@grpc.unpadded_elements("AA==,AAAA,B="), content="AA,AAAA,B")
+  inspect(@grpc.unpadded_elements("AAA=, BBB="), content="AAA, BBB")
+  // Only the `=` that end an element are padding; nothing is decoded.
+  inspect(@grpc.unpadded_elements("AA=A"), content="AA=A")
+  inspect(@grpc.unpadded_elements("AAA= ,B"), content="AAA= ,B")
+  inspect(@grpc.unpadded_elements("not base64!="), content="not base64!")
+  inspect(@grpc.unpadded_elements("=,==,"), content=",,")
+  inspect(@grpc.unpadded_elements(""), content="")
+}
+
+///|
+test "a call's binary metadata without padding is the very value, not a copy" {
+  for value in ["AAE", "AAA,BBB", "", ",", "AA=A", "AAAA,BBBB"] {
+    inspect(
+      physical_equal(@grpc.unpadded_elements(value), value),
+      content="true",
+    )
   }
 }
