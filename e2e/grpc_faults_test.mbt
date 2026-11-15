@@ -249,3 +249,105 @@ async test "a partial Fault sends the reply's HEADERS, with no content-length, a
     })
   })
 }
+
+///|
+/// The Mock `greeter`, the Default Mock, with the set, and two gRPC Stubs
+/// on SayHello: `closing`, for calls with `x-fault: close`, with a close
+/// Fault, and `slow`, for any other call, whose reply waits 3000 ms.
+let close_greeter : String =
+  #|mocks:
+  #|  - name: greeter
+  #|    grpc: { descriptorSet: greeter.binpb }
+  #|stubs:
+  #|  - id: closing
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: close } }
+  #|    response: { json: { message: never sent } }
+  #|    fault: { connection: { kind: close } }
+  #|  - id: slow
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello }
+  #|    response: { json: { message: Hello Tom } }
+  #|    fault: { delay: { fixed: 3000 } }
+
+///|
+/// The frames of a gRPC call to SayHello on `stream`, with the framed
+/// HelloRequest `{name: "Tom"}`, then `more` among its fields.
+async fn RawH2::hello_call(
+  self : RawH2,
+  stream : Int32,
+  more~ : Array[(String, String)] = [],
+) -> Array[@http2.Frame] {
+  [
+    headers_frame(
+      stream,
+      self.block(checked_call("POST", more~)),
+      end_stream=false,
+    ),
+    Data(
+      stream_id=stream,
+      data=framed(@fs.read_file(hello_request_path).binary()),
+      end_stream=true,
+      padding=0,
+    ),
+  ]
+}
+
+///|
+async test "a close Fault sends GOAWAY NO_ERROR, then closes the connection, which ends every call in flight on it: the client sees UNAVAILABLE for the call and for a second call that waits for its delay; the closed call's entry has no status and no gRPC status" {
+  with_greeter_set([("greeter.yaml", close_greeter)], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      // The frames: a call that waits for its delay, then the Fault's.
+      let raw = smock.raw_h2()
+      defer raw.close()
+      let start = @async.now()
+      raw.send(
+        [..raw.hello_call(1), ..raw.hello_call(3, more=[("x-fault", "close")])],
+      )
+      let frames = raw.frames_until(start, _ => false)
+      // The status a client derives, on a connection of its own.
+      let client = smock.h2c()
+      defer client.close()
+      let slow = client.start_call()
+      let closing = client.start_call(headers=[("x-fault", "close")])
+      let closed = client.reply(closing)
+      let waiting = client.reply(slow)
+      let ended_ms = @async.now() - start
+      inspect(
+        [
+          ..frames.shown,
+          "then \{frames.how}",
+          "x-fault: close:",
+          closed.render(),
+          "the client sees \{derived_status(closed)}",
+          "the call that waits:",
+          waiting.render(),
+          "the client sees \{derived_status(waiting)}",
+          "both before the delay is over: \{ended_ms < 3000}",
+          "Journal:",
+          fault_answers(smock),
+        ].join("\n"),
+        content=(
+          #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
+          #|SETTINGS ACK
+          #|GOAWAY last=3 NO_ERROR
+          #|then a FIN
+          #|x-fault: close:
+          #|HEADERS
+          #|(closed)
+          #|the client sees UNAVAILABLE
+          #|the call that waits:
+          #|HEADERS
+          #|(closed)
+          #|the client sees UNAVAILABLE
+          #|both before the delay is over: true
+          #|Journal:
+          #|"closing" null - "close"
+          #|"slow" 200 "OK" null
+          #|"closing" null - "close"
+          #|"slow" 200 "OK" null
+        ),
+      )
+    })
+  })
+}

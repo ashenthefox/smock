@@ -225,11 +225,20 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
     self.wait_call(stream, request, outcome, answer, out)
     return
   }
-  // A reset Fault ends the call in place of its answer (grpc_faults.mbt).
-  if outcome.plan.fault is Some(Reset) {
-    self.reset_after(stream, outcome.journal)
-    self.ended_in_place(request, outcome)
-    return
+  // A reset or close Fault ends the call in place of its answer
+  // (grpc_faults.mbt).
+  match outcome.plan.fault {
+    Some(Reset) => {
+      self.reset_after(stream, outcome.journal)
+      self.ended_in_place(request, outcome)
+      return
+    }
+    Some(Close) => {
+      self.close_by_fault(stream, outcome.journal, out)
+      self.ended_in_place(request, outcome)
+      return
+    }
+    _ => ()
   }
   match
     self.send_answer(stream, outcome, answer, date=ports.dates.at(self.now)) {
