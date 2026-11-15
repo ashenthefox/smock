@@ -20,14 +20,18 @@ such as Mock, Stub and Session.
   and behind a load balancer. It says what a Stub and the Journal see of
   an HTTP/2 request, and how smock bounds what one connection can cost.
 - [grpc.md](grpc.md) says how a Mock stands in for a gRPC service: a
-  first call, what a gRPC Stub can hold, Ephemeral ones included, how
-  smock serves a unary call and answers it, how Scenarios, Variables and
-  Data buckets work over gRPC, what a call gets when its Stub cannot serve
-  its content, how a call's deadline meets a Stub's delay, how
-  `smock render` shows a gRPC Stub's reply without a client, which status
-  each Fault gives a client, the health and reflection services a Mock can
-  turn on, and how to build the Descriptor set that the Mock names, what
-  smock checks in it and what it keeps.
+  first call, how to build the Descriptor set that the Mock names, what
+  smock checks in it and what it keeps, the Mock's `grpc` field, what a
+  gRPC Stub can hold, Ephemeral ones included, the JSON form of a call's
+  message, metadata, how a reply gives its status, message, trailers and
+  error details, how Scenarios, Variables and Data buckets work over
+  gRPC, what an unmatched call gets, what a call gets when its Stub cannot
+  serve its content, how `smock render` shows a gRPC Stub's reply without
+  a client, how a call's deadline meets a Stub's delay, which status each
+  Fault gives a client, what the Journal and the metrics record, the
+  reflection and health services a Mock can turn on, which calls gRPC's
+  rules refuse, idle channels, keepalive and the drain, and what smock
+  does not serve.
 - [importing-openapi.md](importing-openapi.md) turns an OpenAPI document
   into a Definition file with `smock import-openapi`, and says what is
   generated and how to regenerate it.
@@ -98,5 +102,13 @@ such as Mock, Stub and Session.
 - [`re2/README.mbt.md`](../re2/README.mbt.md) documents the RE2-syntax
   regular expressions behind pattern conditions, a module that does not
   depend on smock.
+- [`protobuf/README.mbt.md`](../protobuf/README.mbt.md) and
+  [`grpc/README.mbt.md`](../grpc/README.mbt.md) document the protobuf
+  codec and gRPC's wire rules behind gRPC calls, two modules that do not
+  depend on smock.
+  [`fixtures/protobuf/README.md`](../fixtures/protobuf/README.md) says how
+  the Descriptor sets that tests read are built, and
+  [`protobuf-conformance/README.md`](../protobuf-conformance/README.md)
+  how protobuf's conformance suite checks the codec.
 - [agents/](agents/) tells coding agents where issues live, which triage
   labels to use, and how to read the glossary and the ADRs.

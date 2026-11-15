@@ -1,6 +1,7 @@
 // Messages decoded from their descriptors into smock's decoded form, the
-// JSON text the engine, the Journal and templates see. For now the decoder
-// serves every field of the types of proto3 and proto2 files but groups;
+// JSON text the engine, the Journal and templates see. The decoder serves
+// every field of the types of proto3 and proto2 files, groups and
+// extensions included, and no type of an editions file and no MessageSet;
 // well_known.mbt prints the well-known types. encode.mbt encodes messages
 // from JSON.
 

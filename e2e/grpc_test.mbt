@@ -2,7 +2,7 @@
 // of its Mock, decoded from protobuf into JSON, and gets its reply encoded
 // with the method's output type, framed in one DATA frame, then trailers
 // with grpc-status 0. An unmatched call gets Trailers-Only UNIMPLEMENTED,
-// and calls this branch cannot serve yet get Trailers-Only INTERNAL. The
+// and a call whose message does not decode Trailers-Only INTERNAL. The
 // set is gRPC's helloworld.proto, and the messages are protoc-encoded
 // fixtures (scripts/gen-protobuf-fixtures.sh).
 

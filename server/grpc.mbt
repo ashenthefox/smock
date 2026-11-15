@@ -56,8 +56,8 @@
 // the call's stream or closes its connection in place of its answer, or
 // sends half of it (grpc_faults.mbt). An answer sent before the client
 // has ended its request is followed by RST_STREAM NO_ERROR (`end_early`).
-// What gRPC's rules refuse in a call, checked as soon as it arrives, and
-// what the layer cannot serve yet, get Trailers-Only too, with their
+// What gRPC's rules refuse in a call, checked as soon as it arrives, and a
+// message that does not decode, get Trailers-Only too, with their
 // `grpc-status` and a fixed `grpc-message`, and `:status` 200 but for a
 // method other than POST and a malformed `grpc-timeout`
 // (grpc_checks.mbt). A call that does not reach the engine is counted as
@@ -226,9 +226,10 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
     self.refuse_call(stream, refusal, ended=true)
     return
   }
-  // A message that does not parse, or whose type has a field that smock
-  // does not decode yet, does not decode, and neither does one whose
-  // decoded JSON passes the body limit as it is printed.
+  // A message that does not parse, that holds a value smock cannot print,
+  // or that is or holds a value of a type of an editions file or a
+  // MessageSet, does not decode, and neither does one whose decoded JSON
+  // passes the body limit as it is printed.
   let message = incoming.body[@grpc.prefix_length:]
   let json = @protobuf.decode_json(
     set,
