@@ -409,3 +409,42 @@ test "an Any's message is printed in place, after its @type: one with no field t
     ),
   )
 }
+
+///|
+test "a length that runs past its message, or past the message that holds it, makes the message not parse, at any level and before anything is allocated for it" {
+  let past = [
+    // A Burrow's name: 5 octets announced, 1 sent.
+    depth_outcome(limits_set, "limits.Burrow", b"\x0a\x05a"),
+    // The same in the Burrow it holds, whose 3 octets end before the name
+    // does, though a name of 1 octet follows them.
+    depth_outcome(limits_set, "limits.Burrow", b"\x12\x03\x0a\x05a\x0a\x01a"),
+    // In a group, and in a map entry.
+    depth_outcome(limits_set, "limits.Burrow", b"\x1b\x0a\x03\x0a\x05a\x1c"),
+    depth_outcome(limits_set, "limits.Burrow", b"\x22\x03\x0a\x05a"),
+    // A packed record of numbers.
+    depth_outcome(collections_set, "collections.Lists", b"\x0a\x05\x01"),
+    // The largest length a varint holds, 2^64 - 1.
+    depth_outcome(
+      limits_set, "limits.Burrow", b"\x0a\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01a",
+    ),
+    // A HelloRequest's name in an Any, and a Struct's key.
+    dynamic_depth(
+      "google.protobuf.Any",
+      any_of("type.googleapis.com/helloworld.HelloRequest", b"\x0a\x05a"),
+    ),
+    dynamic_depth("google.protobuf.Struct", b"\x0a\x03\x0a\x05a"),
+  ]
+  inspect(
+    past.join("\n"),
+    content=(
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+      #|a length of 18446744073709551615 runs past the end of the input, which has 1 octets left
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+    ),
+  )
+}
