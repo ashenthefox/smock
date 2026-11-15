@@ -115,6 +115,21 @@ test "read a call's timeout" {
 }
 ```
 
+`@grpc.timeout_ms(value)` gives the same timeout in whole milliseconds,
+rounded up, so that a timeout above 0 is never 0 ms. A server that keeps
+time in milliseconds counts a call's deadline with it.
+
+```mbt check
+///|
+test "read a call's timeout in milliseconds" {
+  debug_inspect(@grpc.timeout_ms("5S"), content="Some(5000)")
+  debug_inspect(@grpc.timeout_ms("1n"), content="Some(1)")
+  debug_inspect(@grpc.timeout_ms("0m"), content="Some(0)")
+  debug_inspect(@grpc.timeout_ms("99999999H"), content="Some(9223372036855)")
+  debug_inspect(@grpc.timeout_ms("1x"), content="None")
+}
+```
+
 ## Status codes
 
 `@grpc.Status` has gRPC's seventeen status codes

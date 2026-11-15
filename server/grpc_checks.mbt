@@ -114,8 +114,14 @@ fn CallRefusal::fields(self : CallRefusal) -> ReadOnlyArray[(String, String)] {
 /// What smock refuses in the HEADERS of `request`, a gRPC call, once spec
 /// E's checks have passed, or `None`: in this order, a method other than
 /// POST, a content subtype other than none and `proto`, a malformed
-/// `grpc-timeout`, then a `content-length` over `body_limit`.
-fn check_head(request : H2Request, body_limit : Int32) -> CallRefusal? {
+/// `grpc-timeout`, then a `content-length` over `body_limit`. As it reads
+/// the timeouts, it sets the call's deadline, which counts from `arrived`,
+/// when its HEADERS arrived (`H2Request::time_out`).
+fn check_head(
+  request : H2Request,
+  body_limit : Int32,
+  arrived~ : Int64,
+) -> CallRefusal? {
   if request.meth != "POST" {
     return Some(NotPost)
   }
@@ -123,14 +129,39 @@ fn check_head(request : H2Request, body_limit : Int32) -> CallRefusal? {
     return Some(UnservedSubtype)
   }
   for header in request.headers {
-    if header.0 == "grpc-timeout" && @grpc.timeout_ns(header.1) is None {
-      return Some(MalformedTimeout)
+    if header.0 == "grpc-timeout" {
+      guard @grpc.timeout_ms(header.1) is Some(timeout) else {
+        return Some(MalformedTimeout)
+      }
+      request.time_out(timeout, arrived~)
     }
   }
   if request.declared > body_limit.to_int64() {
     return Some(OverBodyLimit)
   }
   None
+}
+
+///|
+/// The longest delay smock can give, 2^31-1 ms, about 24.8 days: a call
+/// whose timeout is longer has no deadline, since no delay can outlast it.
+let longest_delay_ms : Int64 = 0x7FFF_FFFF
+
+///|
+/// Sets the deadline of `self`, a gRPC call whose `grpc-timeout` gives it
+/// `timeout` milliseconds from `arrived`, when its HEADERS arrived. A
+/// timeout longer than `longest_delay_ms` gives no deadline. Of several
+/// `grpc-timeout` fields, each well formed, the last decides.
+fn H2Request::time_out(
+  self : H2Request,
+  timeout : Int64,
+  arrived~ : Int64,
+) -> Unit {
+  self.call_deadline = if timeout > longest_delay_ms {
+    forever
+  } else {
+    arrived + timeout
+  }
 }
 
 ///|

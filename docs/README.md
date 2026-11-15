@@ -21,7 +21,8 @@ such as Mock, Stub and Session.
   an HTTP/2 request, and how smock bounds what one connection can cost.
 - [grpc.md](grpc.md) says how a Mock stands in for a gRPC service: a
   first call, what a gRPC Stub can hold, Ephemeral ones included, how
-  smock serves a unary call and answers it, and how to build the
+  smock serves a unary call and answers it, how a call's deadline meets a
+  Stub's delay, and how to build the
   Descriptor set that the Mock names, what smock checks in it and what it
   keeps.
 - [importing-openapi.md](importing-openapi.md) turns an OpenAPI document
