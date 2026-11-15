@@ -351,6 +351,19 @@ of each GitHub release include its section
   reads framed messages as they arrive, in pieces split anywhere. See
   [Protocol checks and limits](docs/grpc.md#protocol-checks-and-limits)
   and [Compression](docs/grpc.md#compression).
+- Delays and deadlines on gRPC calls. A gRPC Stub's `fault.delay` waits
+  before the reply's HEADERS, on the call's stream alone, as on HTTP/2. A
+  call's deadline comes from its `grpc-timeout`, counted from its HEADERS.
+  A delay that would end after it ends the call at the deadline with
+  Trailers-Only DEADLINE_EXCEEDED `deadline exceeded`, journaled with the
+  HTTP status 200 and the `grpcStatus` `DEADLINE_EXCEEDED`. A client reset
+  that arrives while such a delay runs, at most 100 ms before the
+  deadline, is journaled the same way, as clients reset the stream at
+  their own deadline. A call cancelled earlier keeps the entry its Stub
+  planned. A timeout longer than 2^31-1 ms, such as `99999999H`, gives no
+  deadline, and a timeout of 0 ends a delayed call at once. `smock/grpc`
+  reads a timeout in whole milliseconds. See
+  [Deadlines](docs/grpc.md#deadlines) and [Faults](docs/grpc.md#faults).
 - A Mock's built-in health service. With `grpc: { health: true }`, a Mock
   answers gRPC's `grpc.health.v1.Health` as gRPC's health servers do:
   `Check` says SERVING for `""` and for each service of the Mock's set,

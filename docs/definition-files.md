@@ -5934,7 +5934,8 @@ JSON Pointer, and so is a `method` other than `POST`:
 | `id`, `mock`, `priority` | As on every Stub. |
 | `scenario`, `variables`, `dataWrites` | As on HTTP. |
 | `fault.seed` | As on HTTP. |
-| `fault.delay`, `fault.connection` | Not served yet: a problem that says so. |
+| `fault.delay` | As on HTTP: it waits before the reply's HEADERS, and the call's deadline can cut it short ([Deadlines](grpc.md#deadlines)). |
+| `fault.connection` | Not served yet: a problem that says so. |
 | `request.method` | May be left out. When given, it must be `POST`, since every gRPC call is a POST. |
 | `request.path` | The method's path, exact: `/`, the service's full name, `/` and the method's name. |
 | `request.headers` | Conditions on the call's metadata. |
@@ -5981,7 +5982,7 @@ oneofs, and every well-known type, in its ProtoJSON form
 ([Well-known types](grpc.md#well-known-types)). What a gRPC Stub can hold
 is limited for now in one way, a problem that says it is not served yet:
 
-- `fault.delay` and `fault.connection`, as the table above says.
+- `fault.connection`, as the table above says.
 
 #### Ephemeral gRPC Stubs
 
@@ -6231,8 +6232,10 @@ seed:
 A `delay` makes smock wait before it writes the status line. Meanwhile it
 keeps serving other connections. Over HTTP/2, it waits before the stream's
 HEADERS and delays only that stream: the other streams of the connection
-are answered meanwhile ([HTTP/2](http2.md#streams-that-wait)). The delay is
-drawn from one distribution, in whole milliseconds:
+are answered meanwhile ([HTTP/2](http2.md#streams-that-wait)). A gRPC
+call's deadline can cut a delay short: the call then gets
+DEADLINE_EXCEEDED ([Deadlines](grpc.md#deadlines)). The delay is drawn
+from one distribution, in whole milliseconds:
 
 | Distribution | Delay |
 |---|---|

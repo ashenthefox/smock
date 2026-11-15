@@ -42,3 +42,23 @@ pub fn timeout_ns(value : StringView) -> Int64? {
   }
   Some(number * unit)
 }
+
+///|
+/// The timeout that `value`, the value of a `grpc-timeout` field, gives, in
+/// whole milliseconds, or `None` when it is malformed, as `timeout_ns`
+/// reads it. It is rounded up, so that a timeout above 0 is never 0 ms: a
+/// nanosecond is 1 ms, and so is a millisecond. A timeout of 0 is 0 ms.
+/// Eight digits of hours convert from the nanoseconds they saturate at,
+/// 9,223,372,036,855 ms; every other unit converts exactly before it is
+/// rounded.
+pub fn timeout_ms(value : StringView) -> Int64? {
+  guard timeout_ns(value) is Some(nanoseconds) else { return None }
+  // Divided before it is rounded, since adding first would overflow at
+  // the saturated value.
+  let milliseconds = nanoseconds / 1_000_000L
+  if nanoseconds % 1_000_000L > 0L {
+    Some(milliseconds + 1L)
+  } else {
+    Some(milliseconds)
+  }
+}

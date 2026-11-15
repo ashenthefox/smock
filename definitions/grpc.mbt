@@ -419,14 +419,14 @@ fn fields_and_extensions(
 /// Reports each member of the gRPC Stub `stub`, at `pointer`, that a gRPC
 /// Stub cannot give, or that gRPC Stubs do not serve yet. They serve `id`,
 /// `mock`, `priority`, `scenario`, `variables`, `dataWrites`, `fault.seed`,
-/// `request.method` when it is `POST`, `request.path`, `request.headers`,
-/// a `json` body condition, and `headers`, `json`, `grpc`, `template` and
-/// `weight` in a reply. `query`, `cookies`, every other body condition,
-/// another method, and a reply's `status`, `body`, `bodyFile`, `events`
-/// and `llm` make no sense on a gRPC Stub (`File::refuse_reply`);
-/// `fault.delay` and `fault.connection` are not served yet. A member that
-/// no Stub has is reported as unknown where it is read, and a method that
-/// is not an HTTP token as such.
+/// `fault.delay`, `request.method` when it is `POST`, `request.path`,
+/// `request.headers`, a `json` body condition, and `headers`, `json`,
+/// `grpc`, `template` and `weight` in a reply. `query`, `cookies`, every
+/// other body condition, another method, and a reply's `status`, `body`,
+/// `bodyFile`, `events` and `llm` make no sense on a gRPC Stub
+/// (`File::refuse_reply`); `fault.connection` is not served yet. A member
+/// that no Stub has is reported as unknown where it is read, and a method
+/// that is not an HTTP token as such.
 fn File::refuse_fields(
   self : File,
   pointer : String,
@@ -437,7 +437,7 @@ fn File::refuse_fields(
     match (key, value) {
       ("fault", Object(fault)) =>
         for name, _ in fault {
-          if name is ("delay" | "connection") {
+          if name == "connection" {
             self.not_served(child_pointer(at, name))
           }
         }
