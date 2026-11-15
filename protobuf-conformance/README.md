@@ -32,15 +32,17 @@ answers the runner's requests, each a `ConformanceRequest` of protobuf's
 - A request that gives or asks for JSPB or protobuf's text format, which
   smock does not have, is skipped, and so is a message of a type of an
   editions file, which smock/protobuf does not decode or encode yet.
-- smock/protobuf's error is a parse error when it reads the input, and a
-  serialize error when it writes the answer.
+- smock/protobuf's error is a parse error when it reads the input, the
+  input in the binary encoding printed as JSON included, since
+  smock/protobuf reads and prints it in one step; and a serialize error
+  when it writes the answer after that.
 
 ## How it runs
 
 `scripts/check-conformance.sh` builds the testee with moon, then runs the
-runner on it. Every case of the binary and JSON suite runs, editions cases
-included, with the Recommended cases enforced as the Required ones, and so
-does the text-format suite, whose cases are all skipped. The runner fails
+runner on it. Every case of the binary and JSON suite runs, with the
+Recommended cases enforced as the Required ones, and so do its editions
+cases and the text-format suite, which the testee skips. The runner fails
 the run on a case that fails and is not listed, on a listed case that
 passes, and on a listed case that fails with another message.
 
