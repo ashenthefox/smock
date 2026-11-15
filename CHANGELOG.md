@@ -519,6 +519,9 @@ of each GitHub release include its section
   UNIMPLEMENTED, INTERNAL or RESOURCE_EXHAUSTED. They say that, for a
   Mock, `stub=""` also counts the gRPC calls that its built-in health and
   reflection services answer, which are not unmatched requests.
+- The help texts of `--body-limit`, `--state-max-bytes` and
+  `smock_state_writes_refused_total` say what a gRPC call gets where an
+  HTTP request gets 413 or 507: RESOURCE_EXHAUSTED.
 - The help texts of `--header-size-limit` and `--read-timeout-ms` give
   their meaning over HTTP/2. A header list is counted as RFC 7541 counts
   it, each field with 32 octets more, and a larger one gets 431 on its
