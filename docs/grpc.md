@@ -2943,7 +2943,7 @@ When a condition, a template or a Near miss reads the message, smock
 parses its JSON, and the parsed values cost more memory than the text.
 The cost follows the Mock's own field and enum names, so it is a range.
 The ranges below were measured with field names of up to 29 characters
-and enum names of up to 40:
+and enum names of up to 40, for a call whose JSON smock parses once:
 
 - A value costs about 100 octets of memory, `true` and `false` less, and
   an empty object or map about 110 more. Each octet of the JSON text
@@ -2953,13 +2953,24 @@ and enum names of up to 40:
   do not add this up.
 - A message of 64 KiB may print 294,912 values, which cost 34 to
   112 MiB. The most is for empty maps whose JSON just fits
-  `--body-limit`. It is about 30 times the most that a JSON body of
-  64 KiB costs an HTTP request.
+  `--body-limit`. It is about 26 times the most that a JSON body of
+  64 KiB costs an HTTP request, which is for deeply nested arrays.
+- smock parses the JSON twice when a condition and a template both read
+  the message: once for the conditions, which the Near miss shares, and
+  once for the templates. It holds both sets of parsed values at once.
+  So a call to a Stub that matches on the message and renders its reply
+  from it costs 1.5 to 1.9 times as much. That is up to about 22 MiB for
+  the 32,768 values, and up to about 194 MiB for a message of 64 KiB. An
+  HTTP request pays the same way when a condition and a template both
+  read its JSON body.
 - A refused call costs the text printed before the bound, by the Mock's
-  names: up to 17 MiB for a message of 19 KB.
+  names: up to 17 MiB for a message of 19 KB. A larger message's text
+  costs at most about 30 MiB at the default `--body-limit`: its buffer
+  at the limit, and the smaller buffers it grew from.
 - Near `--body-limit` the JSON's octets are the bound that counts. The
   JSON of a call may then cost hundreds of MiB once parsed, as the JSON
-  body of an HTTP request of that size may.
+  body of an HTTP request of that size may, and more than 1 GiB when
+  smock parses it twice.
 
 So the bounds hold a call's cost down, and a small message can still cost
 far more memory than its size
@@ -3044,9 +3055,10 @@ carries, and an octet of padding counts as any other. The list of the
 example above is refused in a message of 19,000 octets. It is served in
 a message of 136,684 octets, where an unknown field of zeros takes the
 rest. Its JSON then costs about 78 MiB once parsed, as it would without
-the bound. So the bound sets how many octets a client must send for the
-values smock prints. It does not stop a message from costing far more
-memory than its size:
+the bound, or about 142 MiB when a condition and a template both read
+it. So the bound sets how many octets a client must send for the values
+smock prints. It does not stop a message from costing far more memory
+than its size:
 [The decoder's limits](#the-decoders-limits) gives the costs.
 
 To count a message's values, count the values of its JSON:

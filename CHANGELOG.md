@@ -368,9 +368,11 @@ of each GitHub release include its section
     changes the bound. It is a price in octets, not a cap on what a call
     costs: the same list passes in a message of 136,684 octets, and a
     message of 64 KiB can still cost about 112 MiB once its JSON is
-    parsed. `smock render` and the Admin render operation refuse a sample
-    past the bound too. What smock holds to print a message, such as its
-    map entries, is bounded by `--body-limit` too. See
+    parsed. A condition and a template each parse it, so a call whose
+    message both read can cost about 194 MiB. `smock render` and the
+    Admin render operation refuse a sample past the bound too. What smock
+    holds to print a message, such as its map entries, is bounded by
+    `--body-limit` too. See
     [The decoder's limits](docs/grpc.md#the-decoders-limits).
   - **Connections.** A gRPC channel's connection is an HTTP/2 connection
     like any other: an idle one gets GOAWAY after `--idle-timeout-ms`,
