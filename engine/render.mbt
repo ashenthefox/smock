@@ -313,7 +313,9 @@ pub(all) struct Rendering {
   grpc : GrpcPart?
   /// Why the Stub's template, or a value or key of its writes, could not be
   /// rendered, when it could not: the response is then the 500 a request
-  /// would get.
+  /// would get, or, for a gRPC Stub, the INTERNAL a call would get. For a
+  /// gRPC Stub, also why its rendered reply, or a rendered detail, is not a
+  /// message of its type, which a call gets INTERNAL for too.
   template_error : TemplateError?
   /// The conditions the sample fails, as in a Near miss, in the order
   /// method, path, query parameters, headers, cookies, body, form fields
@@ -496,6 +498,19 @@ fn spelled_out(words : ReadOnlyArray[String]) -> String {
 /// the same write (see `render_crud`). It has no response to pick: any
 /// `response_index` raises `UnknownResponse`. A sample whose method and
 /// path fit none of its operations raises `NoOperation`.
+///
+/// A gRPC Stub renders as a call to its method, whatever the sample's
+/// method and Content-Type, which it checks only as conditions. The
+/// sample's body is the request message as JSON, and its binary metadata
+/// loses its padding (`SampleRequest::call_request`); a body that is not a
+/// message of the method's input type raises `InvalidSampleMessage`. The
+/// rendering shows the answer a call gets (`call_answer`): the reply JSON
+/// as the body, the initial metadata as the headers, and the gRPC part,
+/// with the status, the message, the trailing metadata and the details,
+/// or smock's own INTERNAL, with the template error that says why, when
+/// the Stub cannot serve its content or its rendered reply or details do
+/// not fit their types. An HTTP Stub renders as a request, whatever the
+/// sample's Content-Type.
 ///
 /// Rendering decides no Fault, and changes nothing in the engine or in the
 /// sample: no generator advances, and no Variable or copy of a Data bucket

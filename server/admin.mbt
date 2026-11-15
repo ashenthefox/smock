@@ -522,7 +522,9 @@ fn liveness_probe(admin : Admin, _call : Call) -> Reply {
 /// make. Rendering changes nothing: it reads the Variables of the sample's
 /// `vars` and the Data buckets of its `data`, and writes none. Sample data
 /// that names a Data bucket the Stub's Mock does not declare, or breaks a
-/// keyed bucket's rules, is `invalid_data`.
+/// keyed bucket's rules, is `invalid_data`. A gRPC Stub renders as a call,
+/// and a sample whose body is not a message of its method's input type, as
+/// JSON, is `invalid_request`.
 fn render(admin : Admin, call : Call) -> Reply {
   let invalid = (message : String) => {
     admin.error(400, "invalid_request", message)
