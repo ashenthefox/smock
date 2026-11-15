@@ -1,12 +1,13 @@
 // Seam 2 tests of the decoder's bounds, beside spec E's denial-of-service
 // cases: a hostile message cannot make smock print more JSON than
-// `--body-limit`, nest deeper than 100, or read a length past the message.
-// A message whose decoded JSON passes the limit gets RESOURCE_EXHAUSTED as
-// soon as it does; one that nests too deep, or whose lengths run past it,
-// does not parse and gets INTERNAL. None is journaled; each counts as
-// rejected traffic. The hostile messages are written here, record by
-// record, as no encoder writes them; the sets are protoc's
-// (scripts/gen-protobuf-fixtures.sh).
+// `--body-limit`, print more JSON values than a message of its size may,
+// nest deeper than 100, or read a length past the message. A message whose
+// decoded JSON passes the limit, or holds more values than its size
+// allows, gets RESOURCE_EXHAUSTED as soon as it does; one that nests too
+// deep, or whose lengths run past it, does not parse and gets INTERNAL.
+// None is journaled; each counts as rejected traffic. The hostile messages
+// are written here, record by record, as no encoder writes them; the sets
+// are protoc's (scripts/gen-protobuf-fixtures.sh).
 
 ///|
 /// `count` copies of `record`, joined.
@@ -512,6 +513,103 @@ async test "the JSON's limit is --body-limit, on every path that decodes a messa
           #|an empty Fill: :status: 200, grpc-status: 8, grpc-message: the decoded request message is over the body limit, 0 DATA (end)
           #|a Check whose JSON fits: :status: 200, grpc-status: 5, grpc-message: unknown service, 0 DATA (end)
           #|a Check whose JSON passes it: :status: 200, grpc-status: 8, grpc-message: the decoded request message is over the body limit, 0 DATA (end)
+        ),
+      )
+    })
+  })
+}
+
+///|
+/// Runs `f` with a definitions directory holding `tables.yaml`: the Mock
+/// `tables`, the Default Mock, with wide.proto's set, and a gRPC Stub on
+/// Load that answers any message.
+async fn with_wide(f : async (String) -> Unit) -> Unit {
+  let yaml =
+    #|mocks:
+    #|  - name: tables
+    #|    default: true
+    #|    grpc: { descriptorSet: wide.binpb }
+    #|stubs:
+    #|  - id: load
+    #|    mock: tables
+    #|    request: { path: /wide.Tables/Load }
+    #|    response: { json: {} }
+  with_definitions([("tables.yaml", yaml)], dir => {
+    @fs.mkdir("\{dir}/files")
+    write_bytes(
+      dir,
+      "files/wide.binpb",
+      @fs.read_file("\{limits_dir}/wide.binpb").binary(),
+    )
+    f(dir)
+  })
+}
+
+///|
+async test "a message whose decoded JSON holds more values than a message of its size may print, 32,768 and 4 more for each octet, gets RESOURCE_EXHAUSTED with the two numbers in its grpc-message, is not journaled, and counts as rejected traffic; the same rows in a message one octet longer are served" {
+  with_wide(dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      // 619 empty Rows of 2 octets, each printed with its 60 fields at
+      // their default, hold 37,762 values with the Table, its `rows` and
+      // its `note`. A note of 8 letters takes the message to 1,248 octets,
+      // which may print 37,760 values, and one of 9 letters to 1,249,
+      // which may print 37,764.
+      let rows = copies(b"\x0a\x00", 619)
+      let load = "/wide.Tables/Load"
+      let refused = client.call(
+        load,
+        body=framed(rows + length_delimited(2, b"abcdefgh")),
+      )
+      let served = client.call(
+        load,
+        body=framed(rows + length_delimited(2, b"abcdefghi")),
+      )
+      inspect(
+        [
+          "1,248 octets: \{limits_reply(refused)}",
+          "1,249 octets: \{limits_reply(served)}",
+          "journaled: \{journaled_targets(smock)}",
+          smock.metric("smock_requests_total"),
+        ].join("\n"),
+        content=(
+          #|1,248 octets: :status: 200, grpc-status: 8, grpc-message: the decoded request message holds more than 37760 values, the most for a message of 1248 octets, 0 DATA (end)
+          #|1,249 octets: :status: 200, grpc-status: 0, 1 DATA (end)
+          #|journaled: /wide.Tables/Load
+          #|smock_requests_total{mock="",stub=""} 1
+          #|smock_requests_total{mock="tables",stub="load"} 1
+        ),
+      )
+    })
+  })
+}
+
+///|
+async test "9,500 empty Rows: a message of 19,000 octets whose JSON would hold 579,503 values gets RESOURCE_EXHAUSTED as soon as it passes the 108,768 that its size allows, and costs smock less than 6 MiB" {
+  with_wide(dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      let load = "/wide.Tables/Load"
+      // A small call first, so that what smock allocates for its first
+      // call does not count.
+      let small = client.call(load, body=framed(b""))
+      let before = peak_resident_set(smock.pid)
+      let reply = client.call(load, body=framed(copies(b"\x0a\x00", 9500)))
+      let after = peak_resident_set(smock.pid)
+      inspect(
+        [
+          "an empty Table: \{limits_reply(small)}",
+          "9,500 empty Rows: \{limits_reply(reply)}",
+          "peak RSS up by less than 6 MiB: \{after - before < 6.0 * 1048576.0}",
+          "journaled: \{journaled_targets(smock)}",
+        ].join("\n"),
+        content=(
+          #|an empty Table: :status: 200, grpc-status: 0, 1 DATA (end)
+          #|9,500 empty Rows: :status: 200, grpc-status: 8, grpc-message: the decoded request message holds more than 108768 values, the most for a message of 19000 octets, 0 DATA (end)
+          #|peak RSS up by less than 6 MiB: true
+          #|journaled: /wide.Tables/Load
         ),
       )
     })

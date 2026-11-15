@@ -95,6 +95,18 @@ priv enum Place {
 }
 
 ///|
+/// The check of the values of one `json` condition, or of one sample
+/// message, against the types of a Descriptor set. It holds what stays the
+/// same from value to value, while the JSON Pointer of the value moves.
+priv struct ConditionCheck {
+  /// The file that each problem is reported in.
+  file : File
+  /// The set whose types the values are checked against: that of the
+  /// Stub's Mock.
+  set : @protobuf.DescriptorSet
+}
+
+///|
 /// `request`, the conditions of the gRPC Stub `stub` at `pointer`, with its
 /// `json` body condition checked against `input`, the input type of its
 /// method, a type of `set`, and normalised, as this file's header says.
@@ -117,7 +129,8 @@ fn File::grpc_conditions(
     return request
   }
   let at = child_pointer(child_pointer(pointer, "body"), "json")
-  guard self.grpc_condition(at, set, Whole(input), json) is Some(normalised) &&
+  let check : ConditionCheck = { file: self, set, }
+  guard check.grpc_condition(at, Whole(input), json) is Some(normalised) &&
     self.read_json_condition(at, normalised) is Some(condition) else {
     return request
   }
@@ -153,7 +166,8 @@ pub fn sample_message(
     sets: no_declared_sets,
     header_size_limit: default_header_size_limit,
   }
-  match file.grpc_condition("", set, Whole(input), json) {
+  let check : ConditionCheck = { file, set, }
+  match check.grpc_condition("", Whole(input), json) {
     Some(normalised) if diagnostics.is_empty() => Ok(normalised)
     _ => Err(diagnostics)
   }
@@ -161,14 +175,13 @@ pub fn sample_message(
 
 ///|
 /// `json`, the value at `pointer` of a gRPC Stub's `json` condition, which
-/// is at `place` in a type of `set`, checked and normalised. A pattern
+/// is at `place` in a type of the set, checked and normalised. A pattern
 /// object is kept, wherever it is. An operator's operand is at the same
 /// place, but that of `$includes` and `$last` on a repeated field, which is
 /// one of its elements. `None` when it has a problem, each reported.
-fn File::grpc_condition(
-  self : File,
+fn ConditionCheck::grpc_condition(
+  self : ConditionCheck,
   pointer : String,
-  set : @protobuf.DescriptorSet,
   place : Place,
   json : Json,
 ) -> Json? {
@@ -184,52 +197,47 @@ fn File::grpc_condition(
       let operand_place = match place {
         Of(message, field) if key is ("$includes" | "$last") &&
           field.label is Repeated &&
-          map_fields(set, field) is None => Element(message, field)
+          map_fields(self.set, field) is None => Element(message, field)
         _ => place
       }
       return self
-        .grpc_condition(
-          child_pointer(pointer, key),
-          set,
-          operand_place,
-          operand,
-        )
+        .grpc_condition(child_pointer(pointer, key), operand_place, operand)
         .map(operand => Json::object(Map([(key, operand)])))
     }
   }
   match place {
     // A well-known type with a form of its own is checked in that form.
     Whole(message) | Held(message) =>
-      try set.printed_message(message, json) catch {
+      try self.set.printed_message(message, json) catch {
         error => {
           let subject = if place is Held(_) {
             "the Any holds a \{message.full_name}"
           } else {
             "the message is a \{message.full_name}"
           }
-          self.printed_error(pointer, error, subject)
+          self.file.printed_error(pointer, error, subject)
           None
         }
       } noraise {
-        printed => self.form_condition(pointer, set, message, printed)
+        printed => self.form_condition(pointer, message, printed)
       }
     Of(message, field) =>
-      match map_fields(set, field) {
+      match map_fields(self.set, field) {
         Some((key_field, value_field)) => {
           guard json is Object(entries) else {
-            self.error(
+            self.file.error(
               pointer,
               "must be an object: the field \{field.name} of \{message.full_name} is a map",
             )
             return None
           }
           self.map_condition(
-            pointer, set, message, field, key_field, value_field, entries,
+            pointer, message, field, key_field, value_field, entries,
           )
         }
         None if field.label is Repeated => {
           guard json is Array(items) else {
-            self.error(
+            self.file.error(
               pointer,
               "must be an array: the \{field_text(field, message)} is repeated",
             )
@@ -239,7 +247,6 @@ fn File::grpc_condition(
           for i, item in items {
             if self.grpc_condition(
                 child_pointer(pointer, i.to_string()),
-                set,
                 Element(message, field),
                 item,
               )
@@ -253,7 +260,6 @@ fn File::grpc_condition(
         None =>
           self.value_condition(
             pointer,
-            set,
             field,
             json,
             "the \{field_text(field, message)} has the type \{type_text(field)}",
@@ -262,7 +268,6 @@ fn File::grpc_condition(
     Element(message, field) =>
       self.value_condition(
         pointer,
-        set,
         field,
         json,
         "the elements of the \{field_text(field, message)} have the type \{type_text(field)}",
@@ -270,19 +275,18 @@ fn File::grpc_condition(
     Value(message, field, value_field) =>
       self.value_condition(
         pointer,
-        set,
         value_field,
         json,
         "the values of the map field \{field.name} of \{message.full_name} have the type \{type_text(value_field)}",
       )
     Data =>
       match json {
-        Object(members) => self.data_object(pointer, set, members)
-        Array(items) => self.data_array(pointer, set, items)
+        Object(members) => self.data_object(pointer, members)
+        Array(items) => self.data_array(pointer, items)
         _ =>
           try @protobuf.printed_json_value(json) catch {
             error => {
-              self.printed_error(
+              self.file.printed_error(
                 pointer, error, "it is a value of a google.protobuf.Value",
               )
               None
@@ -296,43 +300,41 @@ fn File::grpc_condition(
 
 ///|
 /// `printed`, the value at `pointer` of a condition on a message of the
-/// type `message`, a type of `set`, in the form `printed_message` or
+/// type `message`, a type of the set, in the form `printed_message` or
 /// `printed_value` returned it, with its members checked and normalised as
 /// the type's JSON form says: an object of fields as a message, a Struct's
 /// members and a ListValue's elements as values that a Value holds, a
 /// Value's object and array as a Struct and a ListValue, and an Any as
-/// `File::any_condition` says. Any other value is returned as it is.
-fn File::form_condition(
-  self : File,
+/// `any_condition` says. Any other value is returned as it is.
+fn ConditionCheck::form_condition(
+  self : ConditionCheck,
   pointer : String,
-  set : @protobuf.DescriptorSet,
   message : @protobuf.MessageDescriptor,
   printed : Json,
 ) -> Json? {
   match (message.json_form(), printed) {
     (Fields, Object(members)) =>
-      self.message_condition(pointer, set, message, members)
-    (Struct | Value, Object(members)) => self.data_object(pointer, set, members)
-    (ListValue | Value, Array(items)) => self.data_array(pointer, set, items)
-    (Any, Object(members)) => self.any_condition(pointer, set, members)
+      self.message_condition(pointer, message, members)
+    (Struct | Value, Object(members)) => self.data_object(pointer, members)
+    (ListValue | Value, Array(items)) => self.data_array(pointer, items)
+    (Any, Object(members)) => self.any_condition(pointer, members)
     (_, value) => Some(value)
   }
 }
 
 ///|
 /// `members`, the object at `pointer` that is a condition on a Struct, a
-/// type of `set`, with each value checked and normalised as a value that a
+/// type of the set, with each value checked and normalised as a value that a
 /// Value holds. Its keys are data and are kept as written, `$$` included.
-fn File::data_object(
-  self : File,
+fn ConditionCheck::data_object(
+  self : ConditionCheck,
   pointer : String,
-  set : @protobuf.DescriptorSet,
   members : Map[String, Json],
 ) -> Json? {
   let out : Map[String, Json] = Map([])
   let mut valid = true
   for key, value in members {
-    match self.grpc_condition(child_pointer(pointer, key), set, Data, value) {
+    match self.grpc_condition(child_pointer(pointer, key), Data, value) {
       Some(value) => out[key] = value
       None => valid = false
     }
@@ -346,22 +348,16 @@ fn File::data_object(
 
 ///|
 /// `items`, the array at `pointer` that is a condition on a ListValue, a
-/// type of `set`, with each element checked and normalised as a value that
+/// type of the set, with each element checked and normalised as a value that
 /// a Value holds.
-fn File::data_array(
-  self : File,
+fn ConditionCheck::data_array(
+  self : ConditionCheck,
   pointer : String,
-  set : @protobuf.DescriptorSet,
   items : Array[Json],
 ) -> Json? {
   let out = []
   for i, item in items {
-    if self.grpc_condition(
-        child_pointer(pointer, i.to_string()),
-        set,
-        Data,
-        item,
-      )
+    if self.grpc_condition(child_pointer(pointer, i.to_string()), Data, item)
       is Some(item) {
       out.push(item)
     }
@@ -372,17 +368,16 @@ fn File::data_array(
 
 ///|
 /// `members`, the object at `pointer` that is a condition on an Any, a type
-/// of `set`, checked and normalised against the type that its `@type`
+/// of the set, checked and normalised against the type that its `@type`
 /// names, as smock prints an Any: `@type` is a type URL, kept as written,
 /// whose type is a type of the set; the other members are the fields of a
 /// message of that type, or its form as `value` when it is a well-known
 /// type that has one. `{}` is kept. `@type` may be a pattern or an operator
 /// only when it is the only member, since the other members are checked
 /// against the type it names.
-fn File::any_condition(
-  self : File,
+fn ConditionCheck::any_condition(
+  self : ConditionCheck,
   pointer : String,
-  set : @protobuf.DescriptorSet,
   members : Map[String, Json],
 ) -> Json? {
   let at_type = child_pointer(pointer, "@type")
@@ -391,14 +386,14 @@ fn File::any_condition(
     if members.is_empty() {
       return Some(Json::object(members))
     }
-    self.error(
+    self.file.error(
       pointer, "must give \"@type\", the type URL of the message the Any holds, so that its other members can be checked against its type",
     )
     return None
   }
   guard type_url is String(url) else {
     if members.length() > 1 {
-      self.error(
+      self.file.error(
         at_type,
         "must be \{a_url}, when the Any gives other members: they are checked against the type it names",
       )
@@ -408,15 +403,15 @@ fn File::any_condition(
       // A pattern or an operator, which the condition reads.
       return Some(Json::object(members))
     }
-    self.error(at_type, "must be \{a_url}")
+    self.file.error(at_type, "must be \{a_url}")
     return None
   }
   guard @protobuf.type_name_of_url(url) is Some(name) else {
-    self.error(at_type, "must be \{a_url}")
+    self.file.error(at_type, "must be \{a_url}")
     return None
   }
-  guard set.find_message(name) is Some(held) else {
-    self.error(
+  guard self.set.find_message(name) is Some(held) else {
+    self.file.error(
       at_type,
       "names the type \{name}, which the Descriptor set does not define",
     )
@@ -430,7 +425,7 @@ fn File::any_condition(
         fields[key] = value
       }
     }
-    guard self.message_condition(pointer, set, held, fields)
+    guard self.message_condition(pointer, held, fields)
       is Some(Object(normalised)) else {
       return None
     }
@@ -445,17 +440,12 @@ fn File::any_condition(
       "@type" => ()
       "value" =>
         match
-          self.grpc_condition(
-            child_pointer(pointer, key),
-            set,
-            Held(held),
-            value,
-          ) {
+          self.grpc_condition(child_pointer(pointer, key), Held(held), value) {
           Some(value) => out[key] = value
           None => valid = false
         }
       _ => {
-        self.error(
+        self.file.error(
           child_pointer(pointer, key),
           "is not a member of an Any that holds a \{held.full_name}: give the \{held.full_name} as \"value\"",
         )
@@ -472,13 +462,12 @@ fn File::any_condition(
 
 ///|
 /// `members`, the object at `pointer` that is a condition on a message of
-/// the type `message`, a type of `set`, with each key, which must name a
+/// the type `message`, a type of the set, with each key, which must name a
 /// field by its proto name or its JSON name, once, as the field's JSON
 /// name, and each value checked and normalised at the field's place.
-fn File::message_condition(
-  self : File,
+fn ConditionCheck::message_condition(
+  self : ConditionCheck,
   pointer : String,
-  set : @protobuf.DescriptorSet,
   message : @protobuf.MessageDescriptor,
   members : Map[String, Json],
 ) -> Json? {
@@ -490,7 +479,7 @@ fn File::message_condition(
     let at = child_pointer(pointer, key)
     if is_extension_key(key) {
       // An extension has one key, its full name in brackets, which stays.
-      match self.extension_condition(at, set, message, key, value) {
+      match self.extension_condition(at, message, key, value) {
         Some(value) => out[key] = value
         None => valid = false
       }
@@ -501,12 +490,12 @@ fn File::message_condition(
       None => message.find_field_by_name(key)
     }
     guard field is Some(field) else {
-      self.error(at, "is not a field of \{message.full_name}")
+      self.file.error(at, "is not a field of \{message.full_name}")
       valid = false
       continue
     }
     if given.get(field.number) is Some(other) {
-      self.error(
+      self.file.error(
         at,
         "names the field \{field.name} of \{message.full_name}, as \{other.escape()} does: give a field once, by its proto name or its JSON name",
       )
@@ -514,7 +503,7 @@ fn File::message_condition(
       continue
     }
     given[field.number] = key
-    match self.grpc_condition(at, set, Of(message, field), value) {
+    match self.grpc_condition(at, Of(message, field), value) {
       Some(value) => out[field.json_name] = value
       None => valid = false
     }
@@ -536,21 +525,20 @@ fn is_extension_key(key : String) -> Bool {
 
 ///|
 /// `value`, the value at `pointer` of the member `key` of a condition on a
-/// message of the type `message`, a type of `set`, where `key` is an
+/// message of the type `message`, a type of the set, where `key` is an
 /// extension's full name in brackets, checked and normalised at the
 /// extension's place. The set must have an extension of that name that
 /// extends the type. `None` when it has a problem, each reported.
-fn File::extension_condition(
-  self : File,
+fn ConditionCheck::extension_condition(
+  self : ConditionCheck,
   pointer : String,
-  set : @protobuf.DescriptorSet,
   message : @protobuf.MessageDescriptor,
   key : String,
   value : Json,
 ) -> Json? {
   let name = key[1:key.length() - 1].to_owned()
-  guard set.find_extension(name) is Some(extension) else {
-    self.error(
+  guard self.set.find_extension(name) is Some(extension) else {
+    self.file.error(
       pointer,
       "is not an extension of \{message.full_name}: the Descriptor set has no extension \{name}",
     )
@@ -558,13 +546,13 @@ fn File::extension_condition(
   }
   guard message.find_extension(extension.number) is Some(found) &&
     physical_equal(found, extension) else {
-    self.error(
+    self.file.error(
       pointer,
       "is not an extension of \{message.full_name}: \{name} extends \{without_dot(extension.extendee)}",
     )
     return None
   }
-  self.grpc_condition(pointer, set, Of(message, extension), value)
+  self.grpc_condition(pointer, Of(message, extension), value)
 }
 
 ///|
@@ -600,10 +588,9 @@ fn field_text(
 /// the value field `value_field`, with each value checked and normalised.
 /// Its keys are data and are kept as written, `$$` included; each must be
 /// a key as smock prints it.
-fn File::map_condition(
-  self : File,
+fn ConditionCheck::map_condition(
+  self : ConditionCheck,
   pointer : String,
-  set : @protobuf.DescriptorSet,
   message : @protobuf.MessageDescriptor,
   field : @protobuf.FieldDescriptor,
   key_field : @protobuf.FieldDescriptor,
@@ -619,11 +606,11 @@ fn File::map_condition(
     let data = if key.has_prefix("$$") { key[1:].to_owned() } else { key }
     let key_valid = try key_field.check_printed_key(data) catch {
       NotOfType(wanted~) => {
-        self.error(at, "must be \{wanted}: \{keys}")
+        self.file.error(at, "must be \{wanted}: \{keys}")
         false
       }
       NotPrinted(printed~) => {
-        self.error(
+        self.file.error(
           at,
           "must be written \{printed}, as smock prints it: \{keys}",
         )
@@ -632,8 +619,7 @@ fn File::map_condition(
     } noraise {
       _ => true
     }
-    match
-      self.grpc_condition(at, set, Value(message, field, value_field), value) {
+    match self.grpc_condition(at, Value(message, field, value_field), value) {
       Some(value) if key_valid => out[key] = value
       _ => valid = false
     }
@@ -647,27 +633,26 @@ fn File::map_condition(
 
 ///|
 /// `json`, the value at `pointer` of a condition on one value of `field`,
-/// a field of a type of `set`, checked and normalised: an object of a
+/// a field of a type of the set, checked and normalised: an object of a
 /// message field is a condition on its message; any other value is a
 /// literal, in its printed form, a well-known type's value included.
 /// `subject` says what the value is a value of, as a problem says it.
-fn File::value_condition(
-  self : File,
+fn ConditionCheck::value_condition(
+  self : ConditionCheck,
   pointer : String,
-  set : @protobuf.DescriptorSet,
   field : @protobuf.FieldDescriptor,
   json : Json,
   subject : String,
 ) -> Json? {
-  try set.printed_value(field, json) catch {
+  try self.set.printed_value(field, json) catch {
     error => {
-      self.printed_error(pointer, error, subject)
+      self.file.printed_error(pointer, error, subject)
       None
     }
   } noraise {
     printed =>
-      match set.message_of(field) {
-        Some(message) => self.form_condition(pointer, set, message, printed)
+      match self.set.message_of(field) {
+        Some(message) => self.form_condition(pointer, message, printed)
         None => Some(printed)
       }
   }

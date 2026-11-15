@@ -436,10 +436,7 @@ pub fn Engine::has_grpc_stub(
     return false
   }
   for e in list {
-    if e.answers is GrpcCalls &&
-      e.stub.serves
-      is Ordinary({ request: { path: Some(Has(Exact(on))), .. }, .. }) &&
-      on == path {
+    if e.answers is GrpcCalls && e.stub.grpc_path() is Some(on) && on == path {
       return true
     }
   }
@@ -731,15 +728,7 @@ pub fn Engine::handle(
     let found = if grpc is Some(call) {
       // A gRPC call is matched against the gRPC Stubs on its method alone,
       // which the snapshot lists by path, with or without the match index.
-      let stubs = mock.grpc_candidates(call.path)
-      let mut found = None
-      for i in 0..<stubs.length() {
-        if incoming.matches(stubs[i], current) {
-          found = Some(stubs[i])
-          break
-        }
-      }
-      found
+      incoming.first_match(mock.grpc_candidates(call.path), current)
     } else if self.match_index {
       if gated {
         mock.first_candidate(request.meth, incoming.path, stub => {
@@ -751,15 +740,7 @@ pub fn Engine::handle(
         })
       }
     } else {
-      let stubs = mock.http_stubs
-      let mut found = None
-      for i in 0..<stubs.length() {
-        if incoming.matches(stubs[i], current) {
-          found = Some(stubs[i])
-          break
-        }
-      }
-      found
+      incoming.first_match(mock.http_stubs, current)
     }
     if found is Some(stub) {
       matched = Some({
@@ -966,25 +947,10 @@ pub fn Engine::handle(
               }
             }
           }
-          let ephemeral = match ephemeral {
-            Some(list) =>
-              list
-              .iter()
-              .filter(e => e.answers == answers)
-              .map(e => (e.stub, StubSource::Ephemeral))
-            None => Iter::empty()
-          }
           // A gRPC call's Near miss is chosen among every gRPC Stub of its
           // Mock, as an HTTP request's is among every HTTP Stub, so a call
           // to a method that no Stub is on has one too.
-          let stubs = match grpc {
-            Some(_) => mock.stubs.iter().filter(stub => stub.is_grpc())
-            None => mock.http_stubs.iter()
-          }
-          near_miss = incoming.near_miss(
-            ephemeral.concat(stubs.map(stub => (stub, StubSource::File))),
-            states,
-          )
+          near_miss = incoming.near_miss(ephemeral, mock, answers, states)
           if grpc is Some(call) {
             grpc_unimplemented(unmatched_call(mock, call.path), near_miss)
           } else {
@@ -1041,16 +1007,15 @@ pub fn Engine::handle(
 
 ///|
 /// Whether the ordinary Stub `ordinary` may answer `call`: when it is a
-/// gRPC call, the Stub's exact path is the call's `:path` as sent, as for
-/// the file gRPC Stubs a call is matched against
+/// gRPC call, the path of the Stub's method is the call's `:path` as sent,
+/// as for the file gRPC Stubs a call is matched against
 /// (`@definitions.Mock::grpc_candidates`), so a path with a query or an
 /// encoded octet, which names no method, reaches no Ephemeral gRPC Stub
 /// either. An HTTP request, with no `call`, may reach any.
 fn on_method(ordinary : @definitions.Ordinary, call : GrpcCall?) -> Bool {
   match call {
     None => true
-    Some(call) =>
-      ordinary.request.path is Some(Has(Exact(path))) && path == call.path
+    Some(call) => ordinary.grpc_path() is Some(path) && path == call.path
   }
 }
 
@@ -1097,6 +1062,23 @@ fn Incoming::matches(
       self.meets(ordinary.request) && scenario_allows(ordinary.scenario, states)
     Crud(crud) => crud.operation(self.request.meth, self.path) is Some(_)
   }
+}
+
+///|
+/// The first of `stubs`, file Stubs in the order they are tried, that the
+/// request matches in the current states, `states` (`matches`), or `None`
+/// when it matches none. A plain loop, as `handle` needs.
+fn Incoming::first_match(
+  self : Incoming,
+  stubs : ReadOnlyArray[@definitions.Stub],
+  states : Map[String, String]?,
+) -> @definitions.Stub? {
+  for i in 0..<stubs.length() {
+    if self.matches(stubs[i], states) {
+      return Some(stubs[i])
+    }
+  }
+  None
 }
 
 ///|
@@ -1147,10 +1129,10 @@ fn unmatched_call(mock : @definitions.Mock, path : String) -> String {
     return "the Mock has no Descriptor set"
   }
   guard set.find_method(path) is Some(rpc) else { return "unknown method" }
-  if rpc.client_streaming || rpc.server_streaming {
-    "streaming methods are not served yet"
-  } else {
+  if rpc.is_unary() {
     "no Stub matched"
+  } else {
+    "streaming methods are not served yet"
   }
 }
 

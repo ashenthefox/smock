@@ -197,35 +197,42 @@ priv enum Failed {
 }
 
 ///|
-/// The Near miss among `candidates`, each with where it comes from, in
-/// matching order, none of which the request meets in the current states,
-/// `states`: the one with the fewest failed conditions, the earlier one on
-/// a tie. There is none without candidates.
+/// The Near miss of a request to `mock` that no Stub matched, in the
+/// current states, `states`: among its candidates, in matching order, the
+/// one with the fewest failed conditions, the earlier one on a tie. The
+/// candidates are those of `ephemeral`, the Ephemeral Stubs of the Mock
+/// and the request's Session, that answer what the request is, `answers`,
+/// then the Mock's Stubs from Definition files: its HTTP Stubs for an HTTP
+/// request, and for a gRPC call every gRPC Stub, so that a call to a
+/// method that no Stub is on has a Near miss too. There is none without
+/// candidates.
 fn Incoming::near_miss(
   self : Incoming,
-  candidates : Iter[(@definitions.Stub, StubSource)],
+  ephemeral : Array[EphemeralStub]?,
+  mock : @definitions.Mock,
+  answers : Answers,
   states : Map[String, String]?,
 ) -> NearMiss? {
   let mut best : (@definitions.Stub, StubSource, Array[Failed])? = None
-  for candidate in candidates {
-    let (stub, source) = candidate
-    let failed = match stub.serves {
-      Ordinary(ordinary) => {
-        let failed = self.failed(ordinary.request)
-        // The state a Stub requires counts after its request conditions.
-        if ordinary.scenario is Some({ name, requires: Some(required), .. }) {
-          let current = current_state(states, name)
-          if current != required {
-            failed.push(Failed::Scenario(name~, required~, current~))
-          }
-        }
-        failed
+  if ephemeral is Some(list) {
+    for i in 0..<list.length() {
+      let e = list[i]
+      if e.answers == answers {
+        best = self.nearer(best, e.stub, Ephemeral, states)
       }
-      Crud(crud) => self.crud_failed(crud)
     }
-    match best {
-      Some((_, _, fewest)) if fewest.length() <= failed.length() => ()
-      _ => best = Some((stub, source, failed))
+  }
+  if answers is GrpcCalls {
+    let stubs = mock.stubs
+    for i in 0..<stubs.length() {
+      if stubs[i].is_grpc() {
+        best = self.nearer(best, stubs[i], File, states)
+      }
+    }
+  } else {
+    let stubs = mock.http_stubs
+    for i in 0..<stubs.length() {
+      best = self.nearer(best, stubs[i], File, states)
     }
   }
   best.map(best => {
@@ -236,6 +243,38 @@ fn Incoming::near_miss(
       failed: failed.map(failed => self.explain(failed)),
     }
   })
+}
+
+///|
+/// The nearer of `best`, the nearest candidate so far with its source and
+/// the conditions it fails, and `stub`, the next candidate, from `source`,
+/// none of which the request meets in the current states, `states`: `stub`
+/// when it fails fewer conditions, so that the earlier one stays on a tie.
+fn Incoming::nearer(
+  self : Incoming,
+  best : (@definitions.Stub, StubSource, Array[Failed])?,
+  stub : @definitions.Stub,
+  source : StubSource,
+  states : Map[String, String]?,
+) -> (@definitions.Stub, StubSource, Array[Failed])? {
+  let failed = match stub.serves {
+    Ordinary(ordinary) => {
+      let failed = self.failed(ordinary.request)
+      // The state a Stub requires counts after its request conditions.
+      if ordinary.scenario is Some({ name, requires: Some(required), .. }) {
+        let current = current_state(states, name)
+        if current != required {
+          failed.push(Failed::Scenario(name~, required~, current~))
+        }
+      }
+      failed
+    }
+    Crud(crud) => self.crud_failed(crud)
+  }
+  match best {
+    Some((_, _, fewest)) if fewest.length() <= failed.length() => best
+    _ => Some((stub, source, failed))
+  }
 }
 
 ///|

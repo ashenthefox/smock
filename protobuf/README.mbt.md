@@ -205,7 +205,9 @@ index built when the set is read, so none walks the set.
 
 - `set.find_method(path)`: a method by the path gRPC calls it by, such as
   `/helloworld.Greeter/SayHello`; `set.input_of(method)` and
-  `set.output_of(method)` give its types.
+  `set.output_of(method)` give its types. `set.unary_method(path)` finds
+  it only when it is unary, as `method.is_unary()` says: neither side
+  streams.
 - `set.find_message(full_name)`, `set.find_enum(full_name)` and
   `set.find_extension(full_name)`: by a full name without a leading dot,
   such as `helloworld.HelloRequest` or `shop.priority`.
@@ -337,6 +339,19 @@ length against the octets left before it reads the value, and checks and
 repairs UTF-8 with no copy. smock passes `--body-limit`, so a gRPC call
 costs no more than the largest JSON body an HTTP request may send.
 
+The JSON values it prints are bounded too, by the size of the input:
+32,768 values, and 4 more for each octet. A value is every JSON value of
+the text: each object, array, string, number, `true`, `false` and `null`.
+The whole message is one, and a member's name is none. A value that a
+message sends takes an octet or more, so only fields printed at their
+default can pass the bound, as in a list of thousands of empty messages
+of a type with many fields. `decode_json` raises `TooManyValues` before
+it prints the value that would pass the bound. Once parsed, JSON costs
+memory by its values more than by its octets, so the bound limits the
+tree that a message can grow into by the octets it takes. It is a price
+in octets, not a cap: each octet allows 4 more values, whatever it
+carries.
+
 `set.encode_json(message, json)` encodes JSON, a message of the type
 `message`, a type of `set`, as ProtoJSON writes it, the way protoc encodes
 it: fields in field-number order, a field without presence left out at its
@@ -424,13 +439,14 @@ Canonical ProtoJSON differs from the decoded form in three ways:
 
 Everything else is the same in both: field names and their order, map
 entries in key order, enums, bytes, the well-known types, extensions and
-groups, the errors, and the limit on the JSON and on what is held to
-print it. Numbers print in the shortest form that reads
-back as the same value, as protobuf-go writes them; protobuf's C++
-printer may write other digits for the same value, such as `1e-07` for
-`1e-7`, and reads both. An Any that holds an Empty prints its `@type`
-alone, as protobuf's C++ and Python printers write it, where protobuf-go
-adds `"value": {}`.
+groups, the errors, and the bounds on the JSON's octets, on its values
+and on what is held to print it. Canonical ProtoJSON prints no default,
+so it never reaches the bound on values. Numbers print in the shortest
+form that reads back as the same value, as protobuf-go writes them;
+protobuf's C++ printer may write other digits for the same value, such as
+`1e-07` for `1e-7`, and reads both. An Any that holds an Empty prints its
+`@type` alone, as protobuf's C++ and Python printers write it, where
+protobuf-go adds `"value": {}`.
 
 ```mbt check
 ///|

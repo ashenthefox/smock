@@ -448,3 +448,91 @@ test "a length that runs past its message, or past the message that holds it, ma
     ),
   )
 }
+
+///|
+/// What `input` prints as the type `name` of the set in `hex`, with no
+/// limit on the JSON's octets: the octets of its JSON, or the error that
+/// stops it.
+fn printed_size(hex : String, name : String, input : Bytes) -> String {
+  let text = bounded(hex, name, input, limit=no_limit)
+  if text.has_prefix("error: ") {
+    text
+  } else {
+    "\{text.length()} octets"
+  }
+}
+
+///|
+test "the values a message prints are bounded by its size, 32,768 and 4 more for each octet: a list of empty wide messages is refused as soon as it passes that, one that prints exactly that many is printed, and a list whose elements print 4 values an octet or fewer is printed at any length" {
+  // An empty Row, 2 octets, prints 61 values: itself and its 60 fields. A
+  // Table prints 3 more: itself, `rows` and `note`.
+  let rows = (count : Int32) => repeated(b"\x0a\x00", count)
+  let table = (input : Bytes) => printed_size(wide_set, "wide.Table", input)
+  let lists = (input : Bytes) => {
+    printed_size(collections_set, "collections.Lists", input)
+  }
+  inspect(
+    [
+      // 1,236 octets may print 37,712 values: 618 Rows print 37,701, and
+      // 619 print 37,762 where 1,238 octets may print 37,720.
+      table(rows(618)),
+      table(rows(619)),
+      // 621 Rows print 37,884 values. With a note of 35 letters the
+      // message takes 1,279 octets, which may print exactly 37,884; with
+      // one of 34 it may print 37,880.
+      table(rows(621) + b"\x12\x23" + repeated(b"a", 35)),
+      table(rows(621) + b"\x12\x22" + repeated(b"a", 34)),
+      // The guide's example in a Table: 9,500 empty Rows, 19,000 octets,
+      // 579,503 values.
+      table(rows(9500)),
+      // An empty Item, 2 octets, prints 4 values, so a list of them stays
+      // within 4 values an octet whatever its length: 10,000 print 40,011
+      // values, more than 32,768.
+      lists(repeated(b"\x52\x00", 10000)),
+      // A value that is sent takes an octet: 40,000 packed numbers.
+      lists(b"\x0a\xc0\xb8\x02" + repeated(b"\x01", 40000)),
+    ].join("\n"),
+    content=(
+      #|292334 octets
+      #|error: the decoded message holds more than 37720 values, the most for a message of its size
+      #|293788 octets
+      #|error: the decoded message holds more than 37880 values, the most for a message of its size
+      #|error: the decoded message holds more than 108768 values, the most for a message of its size
+      #|340117 octets
+      #|80117 octets
+    ),
+  )
+  // Canonical ProtoJSON prints no default, so each value it prints takes
+  // an octet or more of the message: the same 9,500 Rows print 9,502
+  // values, `{"rows":[{},{},...]}`.
+  let canonical = canonical(wide_set, "wide.Table", rows(9500))
+  inspect(canonical.length(), content="28510")
+}
+
+///|
+test "the values bound counts a message's octets as sent, whatever they carry: rows of 60 fields with one small number each are printed up to 728 and no further, and 9,500 empty Rows are printed once an unknown field of zeros takes their message to 136,684 octets" {
+  let table = (input : Bytes) => printed_size(wide_set, "wide.Table", input)
+  // A Row whose `f1` is 1 takes 4 octets and prints 61 values, as an empty
+  // one does: 728 print 44,411 values where 2,912 octets may print 44,416,
+  // and 729 print 44,472 where 2,916 octets may print 44,432.
+  let numbered = (count : Int32) => repeated(b"\x0a\x02\x08\x01", count)
+  // 9,500 empty Rows, 19,000 octets, then field 15, which a Table lacks,
+  // with 117,679 or 117,680 zeros: 136,683 octets, which may print 579,500
+  // values, or 136,684, which may print 579,504. The Table prints 579,503
+  // either way.
+  let rows = repeated(b"\x0a\x00", 9500)
+  inspect(
+    [
+      table(numbered(728)),
+      table(numbered(729)),
+      table(rows + b"\x7a\xaf\x97\x07" + repeated(b"\x00", 117679)),
+      table(rows + b"\x7a\xb0\x97\x07" + repeated(b"\x00", 117680)),
+    ].join("\n"),
+    content=(
+      #|344364 octets
+      #|error: the decoded message holds more than 44432 values, the most for a message of its size
+      #|error: the decoded message holds more than 579500 values, the most for a message of its size
+      #|4493520 octets
+    ),
+  )
+}

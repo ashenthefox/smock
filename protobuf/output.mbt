@@ -1,11 +1,24 @@
 // The JSON text that `decode_json` and `decode_canonical_json` print,
 // bounded by the limit each is given. What is printed is counted as it is
 // printed, and printing stops with `TooLarge` as soon as it passes the
-// limit. So a message of a few octets whose JSON would be far larger, such
-// as a list of empty messages each printed with every field at its
-// default, costs no more than the limit. What the decoder holds meanwhile
-// to print the message, views of the input beyond one a field, is counted
-// too, against the same limit on its own.
+// limit. So the text of a message of a few octets whose JSON would be far
+// larger, such as a list of empty messages each printed with every field
+// at its default, takes no more than the limit. The buffers that the text
+// grows through take more than the text: each is twice the last, until
+// the next would pass the limit and is the limit instead
+// (`Output::reserve`). Together they take up to four times a text that
+// has outgrown the first, and under three times the limit, or one buffer
+// more when the text passes the limit by the octet that `Output::wrapped`
+// allows it. What the decoder holds meanwhile to print the message, views
+// of the input beyond one a field, is counted too, against the same limit
+// on its own.
+//
+// The JSON values printed are counted as well, against a bound that
+// follows the size of the message (`values_bound`), and printing stops
+// with `TooManyValues` before the value that would pass it. Parsed, a
+// value costs far more memory than its text takes, and a field printed at
+// its default costs the message no octet, so the octets of the JSON alone
+// let a small message grow into a large tree.
 
 ///|
 /// The octets the decoder counts for each view of the input that it holds
@@ -29,9 +42,32 @@ let held_entry : Int32 = 16
 let unbounded : Int32 = 0x7FFF_FFFF
 
 ///|
-/// JSON text being printed, which may take at most `limit` octets, while
-/// what the decoder holds meanwhile may take at most `limit` too
-/// (`Output::hold`).
+/// The JSON values that a message of any size may print: the floor of
+/// `values_bound`.
+let values_floor : Int32 = 32768
+
+///|
+/// The JSON values that a message may print more for each of its octets.
+let values_per_octet : Int32 = 4
+
+///|
+/// The most JSON values that a message of `octets` octets may print:
+/// `values_floor`, and `values_per_octet` more for each octet, or
+/// `unbounded` when that passes it. A value is every JSON value of the
+/// text: each object, array, string, number, `true`, `false` and `null`,
+/// the whole message being one; a member's name is none.
+fn values_bound(octets : Int32) -> Int32 {
+  if octets > (unbounded - values_floor) / values_per_octet {
+    unbounded
+  } else {
+    values_floor + values_per_octet * octets
+  }
+}
+
+///|
+/// JSON text being printed, which may take at most `limit` octets and hold
+/// at most `most_values` JSON values, while what the decoder holds
+/// meanwhile may take at most `limit` octets too (`Output::hold`).
 priv struct Output {
   /// The text so far, at the start of `data`, which never grows past the
   /// most the text may take.
@@ -45,12 +81,23 @@ priv struct Output {
   mut most : Int32
   /// What the decoder holds, in octets, as `Output::hold` counts it.
   mut held : Int32
+  /// The JSON values printed so far, the message that is printed being
+  /// one, as `Output::count_value` counts them.
+  mut values : Int32
+  /// The most JSON values the text may hold.
+  most_values : Int32
 }
 
 ///|
 /// An output with no text yet, bounded by `limit`, with room for
-/// `size_hint` octets of text, or `limit` when it is smaller.
-fn Output::new(size_hint~ : Int32, limit~ : Int32) -> Output {
+/// `size_hint` octets of text, or `limit` when it is smaller. Its text may
+/// hold at most `most_values` JSON values, the value that is printed into
+/// it being the first: any number when none is given.
+fn Output::new(
+  size_hint~ : Int32,
+  limit~ : Int32,
+  most_values~ : Int32 = unbounded,
+) -> Output {
   // Below the largest Int32, so that the text may pass it by an octet for
   // a while (`Output::wrapped`).
   let limit = if limit < 0 {
@@ -71,7 +118,20 @@ fn Output::new(size_hint~ : Int32, limit~ : Int32) -> Output {
     limit,
     most: limit,
     held: 0,
+    values: 1,
+    most_values,
   }
+}
+
+///|
+/// Counts one more JSON value, a member of an object or an element of an
+/// array that is printed next, or raises `TooManyValues` when the text
+/// already holds the most it may: before anything of the value is written.
+fn Output::count_value(self : Output) -> Unit raise DecodeError {
+  if self.values >= self.most_values {
+    raise TooManyValues(limit=self.most_values)
+  }
+  self.values += 1
 }
 
 ///|

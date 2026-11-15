@@ -50,6 +50,37 @@ test "a method is found by the path gRPC calls it by, and its input and output t
 }
 
 ///|
+test "a unary method is one that neither side streams, and only such a method is found as one" {
+  let set = shop()
+  let out = []
+  for
+    path in [
+      "/shop.v1.Orders/Get", "/shop.v1.Orders/Watch", "/shop.v1.Orders/Upload", "/shop.v1.Orders/Chat",
+      "/shop.v1.Orders/Missing",
+    ] {
+    let unary = match set.unary_method(path) {
+      Some(rpc) => rpc.name
+      None => "-"
+    }
+    let found = match set.find_method(path) {
+      Some(rpc) => "\{rpc.name}, unary: \{rpc.is_unary()}"
+      None => "-"
+    }
+    out.push("\{path}: \{unary} (\{found})")
+  }
+  inspect(
+    out.join("\n"),
+    content=(
+      #|/shop.v1.Orders/Get: Get (Get, unary: true)
+      #|/shop.v1.Orders/Watch: - (Watch, unary: false)
+      #|/shop.v1.Orders/Upload: - (Upload, unary: false)
+      #|/shop.v1.Orders/Chat: - (Chat, unary: false)
+      #|/shop.v1.Orders/Missing: - (-)
+    ),
+  )
+}
+
+///|
 test "messages and enums are found by their full names, nested ones included, and each knows its file and that file's syntax" {
   let set = shop()
   let out = []

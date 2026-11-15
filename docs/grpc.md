@@ -15,10 +15,10 @@ and of a reply, the metadata of a call and of a reply, and how a reply
 gives its status, message, trailers and error details. It says what an
 unmatched call gets, how a call's deadline meets a Stub's delay, why
 smock never compresses, and which status each Fault gives a client. It
-says what the Journal and the metrics record of a call, how a Mock
-answers server reflection and gRPC's health service, which calls gRPC's
-rules refuse, how gRPC's channels meet smock's connection limits and its
-drain, and what smock does not serve. The
+says what the Journal and the metrics record of a call, and how a Mock
+answers server reflection and gRPC's health service. It says which calls
+gRPC's rules refuse, how gRPC's channels meet smock's connection limits
+and its drain, and what smock does not serve. The
 [Definition-file reference](definition-files.md#grpc) describes the
 Mock's `grpc` field and gRPC Stubs field by field.
 
@@ -237,10 +237,11 @@ push (`scripts/gen-protobuf-fixtures.sh`).
 smock serves gRPC on the ports that serve HTTP, beside HTTP. gRPC has no
 port of its own:
 
-- the plain port, over h2c: HTTP/2 without TLS, which grpcurl's
-  `-plaintext` and a channel without credentials send;
-- the TLS port, over h2: ALPN chooses HTTP/2 when the client offers `h2`,
-  as gRPC clients do ([h2 on the TLS port](http2.md#h2-on-the-tls-port)).
+- The plain port serves it over h2c: HTTP/2 without TLS, which grpcurl's
+  `-plaintext` and a channel without credentials send.
+- The TLS port serves it over h2: ALPN chooses HTTP/2 when the client
+  offers `h2`, as gRPC clients do
+  ([h2 on the TLS port](http2.md#h2-on-the-tls-port)).
 
 `--tls-http2 off` also turns off gRPC over TLS. The TLS port then offers
 `http/1.1` alone, so a gRPC client, which offers only `h2`, fails the
@@ -289,9 +290,9 @@ request metrics count it as a rejected request, with `mock=""` and
 Every other request is an HTTP request. The Mock's HTTP Stubs answer it,
 or its `noMatch` answer when none matches, as before:
 
-- an HTTP/2 request with another content type, gRPC-Web's
-  `application/grpc-web` included, or with none;
-- every HTTP/1.1 request, one with `content-type: application/grpc`
+- An HTTP/2 request with another content type, gRPC-Web's
+  `application/grpc-web` included, or with none, is an HTTP request.
+- So is every HTTP/1.1 request, one with `content-type: application/grpc`
   included. gRPC needs HTTP/2's trailers, so smock serves no gRPC over
   HTTP/1.1.
 
@@ -343,43 +344,44 @@ Each problem with a set is a problem at the JSON Pointer of
 A reload with a problem keeps serving the whole current definition set.
 smock refuses a set when:
 
-- the file is missing, or does not decode as a FileDescriptorSet;
-- a file is in the set more than once;
-- a file imports a file that is not in the set;
-- a full name is defined twice, such as a message `shop.Order` in two
+- The file is missing, or does not decode as a FileDescriptorSet.
+- A file is in the set more than once.
+- A file imports a file that is not in the set.
+- A full name is defined twice, such as a message `shop.Order` in two
   files. An enum value's full name is in the scope of its enum's package
-  or message, as protobuf scopes it, so two enums of one package cannot
-  share a value name;
-- a message uses a field number twice, or a field is in a oneof that its
-  message does not have;
-- a type that a field, a method or an extension names is not defined in
-  the set;
-- an extension's number is not one that its message declares for
-  extensions, or is taken by another extension of the message;
-- messages nest deeper than 100, or the full names of the set take more
+  or message, as protobuf scopes it. So two enums of one package cannot
+  share a value name.
+- A message uses a field number twice, or a field is in a oneof that its
+  message does not have.
+- A type that a field, a method or an extension names is not defined in
+  the set.
+- An extension's number is not one that its message declares for
+  extensions, or is taken by another extension of the message.
+- Messages nest deeper than 100, or the full names of the set take more
   than 16 MiB. No set built from real `.proto` files comes near either.
 
 buf and protoc never write a set with the other problems, but a set put
 together by hand, or joined from two sets, can have them. smock checks
 types only when every import is in the set and every name is defined
-once, so a missing import gives one problem, not one for each type the
+once. So a missing import gives one problem, not one for each type the
 missing file defines.
 
 ### What smock keeps
 
 smock keeps what it needs of each file: its name, package, syntax and
-imports; its messages, nested ones included, with their fields, oneofs,
-map entries and extension ranges; its enums and their values, aliases
-included; its extensions and groups; and its services and methods.
+imports. It keeps its messages, nested ones included, with their fields,
+oneofs, map entries and extension ranges. It keeps its enums and their
+values, aliases included, its extensions and groups, and its services and
+methods.
 
 It drops the rest, so it costs nothing:
 
-- source info, the comments and positions that `buf build` keeps by
-  default and that `protoc --include_source_info` adds;
-- options, custom options included, except the three that change how
+- Source info: the comments and positions that `buf build` keeps by
+  default and that `protoc --include_source_info` adds.
+- Options, custom options included, except the three that change how
   messages are encoded: `map_entry`, `packed` and
-  `message_set_wire_format`;
-- fields that FileDescriptorSet does not define, such as the extensions
+  `message_set_wire_format`.
+- Fields that FileDescriptorSet does not define, such as the extensions
   that a Buf image adds to each file.
 
 So a set built with `buf build -o` and its defaults, which is a Buf image
@@ -388,7 +390,7 @@ on also keeps each file as the set encodes it, without its source info,
 so that reflection sends custom options and every other field as the set
 holds them. Files written in proto2, in proto3 or in
 an edition all load. gRPC Stubs serve the types of proto3 and proto2
-files; a Stub whose method reaches a type of an editions file, or a
+files. A Stub whose method reaches a type of an editions file, or a
 MessageSet, is a problem ([What is not served](#what-is-not-served)).
 
 ### One set per Mock
@@ -420,9 +422,9 @@ about 0.15 s to load. Source info costs nothing once loaded, since smock
 drops it.
 
 A Mock with [reflection](#reflection) on also keeps each file of its set
-as encoded, without source info, about as many octets as the set built
-without source info: for the set of 4.8 MB above, built without source
-info, about 4.8 MB more in each replica.
+as encoded, without source info. That takes about as many octets as the
+set built without source info: for the set of 4.8 MB above, built without
+source info, about 4.8 MB more in each replica.
 
 To keep a set small, build it from the files of the services your Mocks
 stand in for, not from every file of a large repository: give protoc
@@ -449,7 +451,7 @@ mocks:
       health: true
 ```
 
-A Mock without a set has no method of its own: a call to it gets
+A Mock without a set has no method of its own. A call to it gets
 UNIMPLEMENTED `the Mock has no Descriptor set` as soon as its HEADERS
 arrive ([Calls answered from their HEADERS](#calls-answered-from-their-headers)),
 unless its built-in services answer it. So `grpc: { health: true }`
@@ -579,7 +581,7 @@ the files, `{"message": "Hello Tom"}`.
 
 - smock checks the Stub against the set, and normalises its `json`
   condition, as it does a Stub in a Definition file. One that does not fit
-  gets 400 `invalid_stub`, whose message gives each problem with its JSON
+  gets 400 `invalid_stub`. Its message gives each problem with its JSON
   Pointer, as `smock check` gives it:
 
   ```json
@@ -587,7 +589,7 @@ the files, `{"message": "Hello Tom"}`.
   ```
 
 - It answers the calls of its Session before the gRPC Stubs from the
-  files, and counts for their [Near miss](#the-near-miss-trailer). HTTP
+  files. It counts for their [Near miss](#the-near-miss-trailer). HTTP
   requests never reach it, and gRPC calls never reach an Ephemeral HTTP
   Stub.
 - It is not read again at a reload ([Reloads](#reloads)). While the Mock's
@@ -616,14 +618,14 @@ A call that cannot reach a gRPC Stub, since there is no such Mock, set or
 unary method, is answered at once, without waiting for its message
 ([Calls answered from their HEADERS](#calls-answered-from-their-headers)).
 
-When the call's request has ended, smock:
+When the call's request has ended, smock serves it in five steps:
 
-1. finds the call's Mock and its method again, from the Definition files
-   it serves then;
-2. takes the call's one message from its body, which must hold one;
-3. decodes the message into JSON with the method's input type;
-4. matches the call against the Mock's gRPC Stubs on that method;
-5. encodes the reply with the method's output type, and sends it.
+1. It finds the call's Mock and its method again, from the Definition
+   files it serves then.
+2. It takes the call's one message from its body, which must hold one.
+3. It decodes the message into JSON with the method's input type.
+4. It matches the call against the Mock's gRPC Stubs on that method.
+5. It encodes the reply with the method's output type, and sends it.
 
 ### Reloads
 
@@ -635,9 +637,9 @@ version of a set and answers it with another.
 
 A reload may come between a call's HEADERS and the end of its request.
 The call is looked up again at the end, so it is served with the new
-Definition files. When the reload has left the call without a gRPC Stub
-to reach, such as a Mock whose set is gone or no longer has the method,
-the call gets the answer its HEADERS would get then
+Definition files. The reload may have left the call without a gRPC Stub
+to reach, such as a Mock whose set is gone or no longer has the method.
+The call then gets the answer its HEADERS would get at that time
 ([Calls answered from their HEADERS](#calls-answered-from-their-headers)).
 A set that fails to load keeps the whole current definition set served.
 
@@ -649,23 +651,23 @@ method, and its reply is encoded with the new output type.
 
 A gRPC Stub sees a call as a request:
 
-- the method is `POST`, and the path is the call's `:path`;
-- the headers are the call's metadata, every field, `content-type` and
+- The method is `POST`, and the path is the call's `:path`.
+- The headers are the call's metadata, every field, `content-type` and
   `te` included, with `-bin` values unpadded
-  ([Request metadata](#request-metadata));
-- the body is the request message as compact JSON, with its fields in
+  ([Request metadata](#request-metadata)).
+- The body is the request message as compact JSON, with its fields in
   field-number order, each under its JSON name
   ([The request message as JSON](#the-request-message-as-json)). So the
   message `name: "Tom"` is `{"name":"Tom"}`.
 
 A call is matched only against the gRPC Stubs on its method, never
-against an HTTP Stub, even one whose conditions it meets: first its
-Session's [Ephemeral gRPC Stubs](#ephemeral-grpc-stubs), then those of the
-files, in the order Stubs are tried. A call that none of them matches
+against an HTTP Stub, even one whose conditions it meets. Its Session's
+[Ephemeral gRPC Stubs](#ephemeral-grpc-stubs) come first, then those of
+the files, in the order Stubs are tried. A call that none of them matches
 gets UNIMPLEMENTED ([Unmatched calls](#unmatched-calls)). A `json` body
-condition matches the decoded message, as it matches a JSON body, once
-smock has checked it against the input type and rewritten it into the
-same form ([Conditions on the message](#conditions-on-the-message)):
+condition matches the decoded message, as it matches a JSON body. By
+then, smock has checked it against the input type and rewritten it into
+the same form ([Conditions on the message](#conditions-on-the-message)):
 
 ```yaml
 request:
@@ -725,10 +727,10 @@ exactly.
 Which fields print depends on whether a field has presence:
 
 - A field without presence, such as a plain proto3 `string` or `int32`,
-  prints even when the message leaves it out, at its default: `0`,
-  `false`, `""`, or an enum's value numbered 0. A repeated field prints
-  `[]` and a map `{}`. So `{count: 0}`, `{name: ""}` and `{tags: []}`
-  match a message that leaves `count`, `name` or `tags` out.
+  prints even when the message leaves it out. It prints at its default:
+  `0`, `false`, `""`, or an enum's value numbered 0. A repeated field
+  prints `[]` and a map `{}`. So `{count: 0}`, `{name: ""}` and
+  `{tags: []}` match a message that leaves `count`, `name` or `tags` out.
 - A proto3 `optional` field, a member of a oneof, a message field and
   every singular field of a proto2 message print only when the message
   holds them, even at their default. So the condition
@@ -821,13 +823,17 @@ that sends `google.protobuf.Empty` is `{}`, and one that sends a
   response: {}                              # returns google.protobuf.Empty
 ```
 
-A message whose Timestamp is outside the range from
-0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, whose Duration
-is longer than 315,576,000,000 seconds either way or has seconds and
-nanoseconds of opposite signs, or whose FieldMask has a path with no
-lowerCamelCase form, such as `user__name`, cannot be printed, so it does
-not decode: the call gets INTERNAL, as a message that does not parse
-does.
+A message that holds one of these values cannot be printed, so it does
+not decode:
+
+- A Timestamp outside the range from 0001-01-01T00:00:00Z to
+  9999-12-31T23:59:59.999999999Z.
+- A Duration longer than 315,576,000,000 seconds either way, or one whose
+  seconds and nanoseconds have opposite signs.
+- A FieldMask with a path that has no lowerCamelCase form, such as
+  `user__name`.
+
+The call gets INTERNAL, as a message that does not parse does.
 
 ### JSON values: Struct, Value, ListValue and NullValue
 
@@ -872,16 +878,17 @@ response:
   json: { labels: { gone: null }, value: null, nothing: null }
 ```
 
-A Value that holds no value, or a number that JSON has none for, NaN or
-an infinity, cannot be printed, so a call whose message holds one does
-not decode and gets INTERNAL, as protobuf's JSON printers refuse it.
+A Value that holds no value cannot be printed. Neither can one that holds
+a number that JSON has none for, NaN or an infinity, as protobuf's JSON
+printers refuse them. So a call whose message holds one does not decode
+and gets INTERNAL.
 
 ### Any
 
 A `google.protobuf.Any` holds a message of any type, with the type's URL,
 such as `type.googleapis.com/helloworld.HelloRequest`. smock looks the
 type up in the Mock's Descriptor set, by the full name after the URL's
-last `/`, so the set must hold the file that defines it, as
+last `/`. So the set must hold the file that defines it, as
 `protoc --include_imports` puts it there when a file of the set imports
 it. An Any prints as an object of the URL as `"@type"`, then the message
 it holds: its fields, as any message prints, or, for a well-known type
@@ -908,9 +915,9 @@ in either spelling, and an Empty may also be given `"value": {}`, as
 grpcurl prints it.
 
 An Any whose type the set lacks cannot be printed. A call whose message
-holds one gets INTERNAL, as a message that does not parse does. In a
-condition or a static reply, it is a problem when the files load, and a
-templated reply that names one gets INTERNAL `template failed`:
+holds one gets INTERNAL, as a message that does not parse does. A
+templated reply that names one gets INTERNAL `template failed`. In a
+condition or a static reply, it is a problem when the files load:
 
 ```text
 documents.yaml: /stubs/0/request/body/json/@type: names the type missing.Greeting, which the Descriptor set does not define
@@ -919,9 +926,9 @@ documents.yaml: /stubs/0/request/body/json/@type: names the type missing.Greetin
 ### Conditions on the message
 
 When the files load, smock checks each gRPC Stub's `json` condition
-against the input type of its method, and rewrites it into the form in
-which it prints a call's message. Matching a call then costs no more than
-matching a JSON body. With this input type:
+against the input type of its method. It rewrites the condition into the
+form in which it prints a call's message. Matching a call then costs no
+more than matching a JSON body. With this input type:
 
 ```proto
 message Query {
@@ -952,14 +959,14 @@ meets it. A Near miss in the Journal shows the condition in that form.
 
 smock rewrites:
 
-- a field's name in the `.proto` file into its JSON name: `user_id` into
-  `userId`, at every depth;
-- an enum's number, or an alias, into the first name of its number:
+- A field's name in the `.proto` file into its JSON name: `user_id` into
+  `userId`, at every depth.
+- An enum's number, or an alias, into the first name of its number:
   `status: 1` and `status: ENABLED` into `status: ACTIVE`. A number that no
-  value has stays a number, as smock prints it for an open enum, and is a
+  value has stays a number, as smock prints it for an open enum. It is a
   problem for a closed enum, which never prints it
-  ([proto2 types](#proto2-types));
-- a `float`, or the value of a `google.protobuf.FloatValue`, into the
+  ([proto2 types](#proto2-types)).
+- A `float`, or the value of a `google.protobuf.FloatValue`, into the
   nearest 32-bit float, in the form smock prints it:
 
   | Written | Matched as | Meets a call of |
@@ -968,9 +975,9 @@ smock rewrites:
   | `ratio: 9.99` | `9.99` | `9.99` |
   | `ratio: 16777217` | `16777216` | `16777217`, which a float holds as 16777216 |
 
-- an integer written with an exponent or a fraction of zeros, such as
-  `1e3`, into its digits, `1000`;
-- a NullValue's name or number into `null`, and a number that a Value
+- An integer written with an exponent or a fraction of zeros, such as
+  `1e3`, into its digits, `1000`.
+- A NullValue's name or number into `null`, and a number that a Value
   holds into the form a `double` prints
   ([JSON values](#json-values-struct-value-listvalue-and-nullvalue)).
 
@@ -985,18 +992,20 @@ An extension is written by its full name in brackets, as ProtoJSON writes
 it, such as `"[shop.priority]": 3`, and the key stays as written
 ([proto2 types](#proto2-types)).
 
-smock refuses, as a problem at the JSON Pointer of the value at fault:
+smock refuses the following, each as a problem at the JSON Pointer of the
+value at fault.
 
-- a key that names no field of the type at its place, a key in brackets
+- A key that names no field of the type at its place, a key in brackets
   that names no extension of the set that extends the type, and a field
-  given by both its names in one object;
-- a literal that is not a value of its field's type as smock prints it,
-  and so can never match: an integer out of its type's range or with a
-  fraction, an enum name the enum lacks, a `float` outside the float range,
-  a string for a number or a number for a string, an array for a field
-  that is not repeated, a map or a message that is not an object, and
-  `null`, which smock prints only for a Value and a NullValue;
-- a literal that ProtoJSON reads but smock never prints
+  given by both its names in one object.
+- A literal that is not a value of its field's type as smock prints it,
+  and so can never match. Such a literal is an integer out of its type's
+  range or with a fraction, an enum name the enum lacks, a `float` outside
+  the float range, or a string for a number or a number for a string. So
+  is an array for a field that is not repeated, a map or a message that
+  is not an object, and `null`, which smock prints only for a Value and a
+  NullValue.
+- A literal that ProtoJSON reads but smock never prints
   ([Printed forms](#printed-forms)).
 
 Patterns and operators are allowed in any place. An operator's condition
@@ -1047,8 +1056,8 @@ leases.yaml: /stubs/0/request/body/json/ttl: must be written "1.500s", as smock 
 ```
 
 The same holds for bytes whose base64 has bits after its last octet, such
-as `"QR=="`, which smock prints `"QQ=="`, for an integer key such as
-`"-0"` or `"1e3"`, and for a wrapper's value as for its type's: an
+as `"QR=="`, which smock prints `"QQ=="`, and for an integer key such as
+`"-0"` or `"1e3"`. It holds for a wrapper's value as for its type's: an
 `Int64Value` written `"42"` names `42`. A FieldMask's paths are data,
 which smock does not check against any type, so its printed form is the
 one ProtoJSON reads: lowerCamelCase paths, joined by commas.
@@ -1056,7 +1065,7 @@ one ProtoJSON reads: lowerCamelCase paths, joined by commas.
 ### The reply
 
 A gRPC Stub's reply is `json`, the reply message, read as ProtoJSON reads
-JSON, so a reply that grpcurl or another tool printed can be pasted as it
+JSON. So a reply that grpcurl or another tool printed can be pasted as it
 is:
 
 | Field | In `json` |
@@ -1092,9 +1101,9 @@ that names no field is a problem. A Stub without `json` answers an empty
 message, with every field at its default.
 
 The reply's output type may be any message of a proto3 or a proto2 file,
-with any of these fields, a well-known type such as
-`google.protobuf.Timestamp` included, whose value is then the whole
-`json`, such as `json: "1970-01-01T00:00:01.5Z"`. A Stub on a method whose
+with any of these fields. It may be a well-known type such as
+`google.protobuf.Timestamp`, whose value is then the whole `json`, such
+as `json: "1970-01-01T00:00:01.5Z"`. A Stub on a method whose
 output type reaches a type of an editions file or a MessageSet, through
 its fields or its extensions, is a problem at its `path`
 ([proto2 types](#proto2-types)).
@@ -1110,7 +1119,7 @@ replies.yaml: /stubs/0/response/json/tags/1: cannot be null: it is an element of
 A reply with `template: true` is rendered as JSON, its values escaped as
 in any `json` template, then read and encoded on each call. One that is
 not a message of the output type gets Trailers-Only INTERNAL with the
-message `template failed`, and the call's Journal entry says why in
+message `template failed`. The call's Journal entry says why in
 `templateError`, at the JSON Pointer of the value at fault within the
 Stub:
 
@@ -1121,25 +1130,28 @@ Stub:
 }
 ```
 
-smock encodes the reply as protoc encodes it: fields in field-number
-order; a field without presence left out at its default, while a message
-field, a member of a oneof, a proto3 `optional` field and every singular
-field of a proto2 message are written whenever they are set; repeated
-scalars of a proto3 message packed, unless the field says
-`packed = false`, and those of a proto2 message packed only when the
-field says `packed = true`; map entries sorted by key, each with its
-key and its value; extensions among the fields in field-number order;
-and groups between their start and end tags. It sends what a gRPC server
-sends:
+smock encodes the reply as protoc encodes it:
+
+- Fields go in field-number order, and extensions among them.
+- A field without presence is left out at its default. A message field,
+  a member of a oneof, a proto3 `optional` field and every singular field
+  of a proto2 message are written whenever they are set.
+- Repeated scalars of a proto3 message are packed, unless the field says
+  `packed = false`. Those of a proto2 message are packed only when the
+  field says `packed = true`.
+- Map entries are sorted by key, each with its key and its value.
+- A group goes between its start and end tags.
+
+It sends what a gRPC server sends:
 
 - HEADERS with `:status` 200, `content-type: application/grpc`, the
   Stub's `headers`, its initial metadata
   ([Reply metadata](#reply-metadata)), `smock-mock` when the Default Mock
-  answered, and `date`;
-- one DATA frame with the reply message, framed;
-- trailers with `grpc-status: 0`, `grpc-message` when the Stub gives
+  answered, and `date`.
+- One DATA frame with the reply message, framed.
+- Trailers with `grpc-status: 0`, `grpc-message` when the Stub gives
   a message ([Status and message](#status-and-message)), and its
-  `grpc.trailers`, its trailing metadata, which end the stream.
+  `grpc.trailers`, its trailing metadata. They end the stream.
 
 A reply larger than the client's flow-control windows goes out as the
 client widens them, and the trailers follow it.
@@ -1182,8 +1194,8 @@ journaled as `{"id":7}`, and a call without `id` gets INTERNAL.
   shipping.yaml: /stubs/0/response/json: lacks the required field id of shipping.Order
   ```
 
-  A templated reply that lacks one gets INTERNAL `template failed`, and
-  its Journal entry's `templateError` says the same.
+  A templated reply that lacks one gets INTERNAL `template failed`. Its
+  Journal entry's `templateError` says the same.
 - **Closed enums.** An enum of a proto2 file is closed: a number it does
   not define is kept as an unknown field, as protobuf keeps it, so it
   never prints. A singular field keeps the value it had, a repeated field
@@ -1204,12 +1216,13 @@ journaled as `{"id":7}`, and a call without `id` gets INTERNAL.
   are one key, and the last entry wins.
 - **Groups.** A group is a message field that protobuf delimits with a
   start tag and an end tag instead of a length. smock prints, matches and
-  writes it as a message, under the JSON name of its field:
+  writes it as a message, under the JSON name of its field, groups nested
+  in groups included. So
   `repeated group Stop = 2 { optional string city = 3; }` prints as
-  `"stop":[{"city":"Paris"}]`, groups nested in groups included. A group
-  whose end tag names another field, or that the message ends inside,
-  does not parse, as protobuf's parsers refuse it: the call gets
-  INTERNAL `the request message cannot be decoded`.
+  `"stop":[{"city":"Paris"}]`. A group whose end tag names another field,
+  or that the message ends inside, does not parse, as protobuf's parsers
+  refuse it: the call gets INTERNAL
+  `the request message cannot be decoded`.
 
 #### Extensions
 
@@ -1259,16 +1272,17 @@ packs its repeated numbers, though the message it extends is proto2.
 
 #### What is not served
 
-Three kinds of type are not served, each a problem at the `path` of a
-Stub whose method's input or output type is, or reaches, one through its
-fields or its extensions:
+Three kinds of type are not served:
 
-- a type of an editions file, such as a file with `edition = "2023"`, an
-  enum included. Editions come in a later spec;
-- a type that an extension declared in an editions file extends, since
-  what such an extension is depends on features that smock does not read;
-- a MessageSet, a message with the option `message_set_wire_format`,
+- A type of an editions file, such as a file with `edition = "2023"`, an
+  enum included. Editions come in a later spec.
+- A type that an extension declared in an editions file extends, since
+  what such an extension is depends on features that smock does not read.
+- A MessageSet, a message with the option `message_set_wire_format`,
   whose extensions use another wire form.
+
+Each is a problem at the `path` of a Stub whose method's input or output
+type is one, or reaches one through its fields or its extensions:
 
 ```text
 shipping.yaml: /stubs/0/request/path: the input type labels.Label is not served yet: labels.proto, which defines it, is an editions file, and editions come in a later spec
@@ -1356,12 +1370,12 @@ grpcurl -plaintext -authority greeter.svc -H 'x-tenant: acme' \
   -d '{"name":"Tom"}' localhost:8080 helloworld.Greeter/SayHello
 ```
 
-The Session scopes a call as it scopes an HTTP request: its
+The Session scopes a call as it scopes an HTTP request. It scopes its
 [Ephemeral gRPC Stubs](#ephemeral-grpc-stubs), its state of each
 Scenario, its Variables, its copies of the Data buckets and its Journal.
 Each call reads its own metadata, so the calls of two Sessions on one
 channel keep their state and their Journal apart, as two tests that share
-a gRPC client do. An Admin API call names its Session the same way, so
+a gRPC client do. An Admin API call names its Session the same way. So
 a test reads its own calls from the Journal:
 
 ```sh
@@ -1433,7 +1447,7 @@ a value are trimmed when it is sent.
 With `template: true`, the values of both are text templates, rendered as
 header values are: the control characters they render become spaces, and
 tabs stay. Trailer values render after the message. smock checks a
-rendered value as it checks one as written: a value outside 0x20 to 0x7E,
+rendered value as it checks one as written. A value outside 0x20 to 0x7E,
 a tab included, or a `-bin` value that is not base64 gets Trailers-Only
 INTERNAL `template failed`, and the Journal entry's `templateError` says
 why:
@@ -1525,14 +1539,14 @@ call has `:status` 200, and the client reads the outcome from
 percent-encoded, as gRPC's protocol requires, and a gRPC client decodes it
 back. smock encodes the text's UTF-8:
 
-- each octet from 0x20 to 0x7E, other than `%`, stays as it is;
-- every other octet becomes `%` and two upper-case hex digits;
-- a space at either end becomes `%20`, since HTTP/2 refuses a field value
+- Each octet from 0x20 to 0x7E, other than `%`, stays as it is.
+- Every other octet becomes `%` and two upper-case hex digits.
+- A space at either end becomes `%20`, since HTTP/2 refuses a field value
   with a space at either end.
 
-So `try again ☺` goes out as `try again %E2%98%BA`, and gRPC's own test
+So `try again ☺` goes out as `try again %E2%98%BA`. gRPC's own test
 message, `"\t\ntest with whitespace\r\nand Unicode BMP ☺ and non-BMP 😈\t\n"`,
-as:
+goes out as:
 
 ```text
 grpc-message: %09%0Atest with whitespace%0D%0Aand Unicode BMP %E2%98%BA and non-BMP %F0%9F%98%88%09%0A
@@ -1585,7 +1599,7 @@ stubs:
 ```
 
 smock builds `google.rpc.Status` from the reply's status, its message and
-its details, each packed in an Any, encodes it itself, and sends it in
+its details, each packed in an Any. It encodes it itself, and sends it in
 `grpc-status-details-bin`, in base64 without padding. A call for Ann gets
 Trailers-Only:
 
@@ -1737,15 +1751,15 @@ An error without initial metadata goes out as Trailers-Only, as gRPC
 servers send it: one HEADERS block that ends the stream, with no DATA and
 no trailers after it. Its fields are, in order:
 
-- `:status: 200`;
-- `content-type: application/grpc`;
-- `grpc-status`, the status's code;
-- `grpc-message`, when the reply gives a message;
+- `:status: 200`.
+- `content-type: application/grpc`.
+- `grpc-status`, the status's code.
+- `grpc-message`, when the reply gives a message.
 - `grpc-status-details-bin`, when the reply gives
-  [error details](#error-details);
+  [error details](#error-details).
 - smock's own fields: `smock-mock` when the Default Mock answered, and
-  `smock-near-miss` for an [unmatched call](#unmatched-calls);
-- the trailing metadata, the Stub's `grpc.trailers`;
+  `smock-near-miss` for an [unmatched call](#unmatched-calls).
+- The trailing metadata, the Stub's `grpc.trailers`.
 - `date`.
 
 ```text
@@ -1757,8 +1771,8 @@ date: Sat, 14 Nov 2026 07:00:00 GMT
 ```
 
 No gRPC reply carries `content-length` or `grpc-encoding`: smock never
-compresses a reply ([Compression](#compression)). A gRPC client reads every field of a Trailers-Only
-answer as trailing metadata.
+compresses a reply ([Compression](#compression)). A gRPC client reads
+every field of a Trailers-Only answer as trailing metadata.
 
 ## State over gRPC
 
@@ -2016,8 +2030,8 @@ trailers.
 
 A call has no Near miss, and its answer no `smock-near-miss` field, when
 its Host reaches no Mock, or its Mock has no gRPC Stub, which a Mock
-without a set never has. An HTTP Stub is never a call's Near miss, even one whose
-path pattern takes the call's path.
+without a set never has. An HTTP Stub is never a call's Near miss, even
+one whose path pattern takes the call's path.
 
 ## smock's own failures
 
@@ -2080,8 +2094,11 @@ format writes its error line, and its `Transaction recorded` line gives
 what a Stub answers, without a client. A gRPC Stub renders as a call to
 its method. The Stub decides this, not the sample: the sample's `method`
 and its `Content-Type` are checked only as conditions, as a call's are,
-and the rendering lists them among the conditions the sample fails. An
-HTTP Stub renders as a request, whatever the sample's `Content-Type`.
+and the rendering lists them among the conditions the sample fails. The
+rendering of a gRPC Stub encodes and decodes the sample's message, and
+encodes the reply, as smock does for a call, so it shows what a call
+would get. An HTTP Stub renders as a request, whatever the sample's
+`Content-Type`.
 
 For the `hello-unknown` Stub of [Error details](#error-details), with
 `sample.json` holding
@@ -2105,8 +2122,8 @@ smock render --dir defs hello-unknown --request sample.json | jq -c .response
 The sample's `body` is the request message as JSON, in a string. smock
 checks it against the input type of the Stub's method, and normalises it
 as it normalises a Stub's conditions
-([Conditions on the message](#conditions-on-the-message)): a field may be
-named by its proto name, and an enum by its number. A value that smock
+([Conditions on the message](#conditions-on-the-message)). So a field may
+be named by its proto name, and an enum by its number. A value that smock
 never prints in that form is refused, such as a Duration of `"1.5s"`
 ([Printed forms](#printed-forms)). smock then reads the message as it
 reads a call's ([The request message as JSON](#the-request-message-as-json)),
@@ -2116,15 +2133,26 @@ default, as in a call. An empty body is the empty message.
 A body that is not such a message is refused with every problem, each at
 its JSON Pointer in the message. So is a message whose JSON takes more
 than `--body-limit` once read, as a call's would be
-([The body limit](#the-body-limit)): the Admin render operation uses the
-limit of the smock that serves it, and `smock render`, which takes no
-`--body-limit`, the default, 10 MiB. `smock render` exits with status 1,
-and the Admin render operation answers 400 `invalid_request`.
+([The body limit](#the-body-limit)). The Admin render operation uses the
+limit of the smock that serves it. `smock render`, which takes no
+`--body-limit`, uses the default, 10 MiB. `smock render` exits with
+status 1, and the Admin render operation answers 400 `invalid_request`.
 For the [quick start](#quick-start)'s `hello` Stub and the body
 `{"nmae": "Tom"}`:
 
 ```text
 smock render: the sample request's body must be a helloworld.HelloRequest as JSON, the message that the method of the gRPC Stub "hello" takes: /nmae is not a field of helloworld.HelloRequest
+```
+
+A sample whose message would be refused for its values is refused the
+same way ([The values a message may print](#the-values-a-message-may-print)).
+The sample is JSON, so the problem gives the octets it encodes to, which
+the bound follows. A field written at its default, such as `"f1": 0`,
+encodes to no octet. For a Stub `load` and a sample of 619 empty rows of
+a message with 60 fields:
+
+```text
+smock render: the sample request's body must be a wide.Table as JSON, the message that the method of the gRPC Stub "load" takes: encodes to 1238 octets and holds more than 37720 values as JSON once decoded, the most for a call's message of that size
 ```
 
 The sample's binary metadata, a header field whose name ends with `-bin`,
@@ -2137,10 +2165,10 @@ The rendering shows the reply as JSON, never its protobuf bytes:
 - `response.body` is the reply message as JSON, as written or rendered.
   It is empty for an error, which has no message.
 - `response.headers` is the initial metadata.
-- `response.grpc` is how the reply ends: `status`, the gRPC status's
-  name; `message`, as written or rendered, before smock percent-encodes
-  it, or null; `trailers`, the trailing metadata; and `details`, the error
-  details as JSON, each with its `@type`.
+- `response.grpc` is how the reply ends. `status` is the gRPC status's
+  name. `message` is the message as written or rendered, before smock
+  percent-encodes it, or null. `trailers` is the trailing metadata, and
+  `details` the error details as JSON, each with its `@type`.
 - `response.status` stays 200, the HTTP status of every gRPC reply.
 
 smock encodes a templated reply, once rendered, with the output type, as
@@ -2168,8 +2196,8 @@ smock watches the deadline only while a Stub's delay runs
 ([Faults](#faults)). When the delay would end after the deadline, the call
 ends at the deadline instead, as a gRPC server ends a call whose deadline
 passes. smock sends [Trailers-Only](#trailers-only) DEADLINE_EXCEEDED with
-the fixed `grpc-message` `deadline exceeded`. So with a Stub whose `fault`
-is `{delay: {fixed: 3000}}`, a call with `grpc-timeout: 5S` gets its reply
+the fixed `grpc-message` `deadline exceeded`. Take a Stub whose `fault`
+is `{delay: {fixed: 3000}}`. A call with `grpc-timeout: 5S` gets its reply
 after 3 s, and a call with `grpc-timeout: 1S` gets this about 1 s after
 its HEADERS:
 
@@ -2203,7 +2231,7 @@ of its own end and the deadline.
 Clients that keep deadlines, such as grpc-go, grpc-java and grpcurl with
 `-max-time`, reset the stream with `CANCEL` at their own deadline. A
 client puts the time it has left in `grpc-timeout` when it builds the
-HEADERS, so smock's deadline comes about one transit after the client's,
+HEADERS. So smock's deadline comes about one transit after the client's,
 about when the client's reset arrives: either can come first.
 
 smock records such a reset as DEADLINE_EXCEEDED too. A client reset that
@@ -2224,13 +2252,13 @@ finished answering counts toward the Rapid Reset bound, and a reset of a
 stream that has closed counts among the frames that do no work. Past
 either bound, the connection gets GOAWAY `ENHANCE_YOUR_CALM`.
 
-A client that keeps deadlines resets every call that times out, so these
-resets count toward neither bound:
+A client that keeps deadlines resets every call that times out. So two
+kinds of reset count toward neither bound:
 
-- a client reset that smock records as DEADLINE_EXCEEDED, as above: one
+- A client reset that smock records as DEADLINE_EXCEEDED, as above: one
   that arrives at most 100 ms before the deadline, while the delay runs
-  past it;
-- the first reset of a call that smock ended at its deadline with
+  past it.
+- The first reset of a call that smock ended at its deadline with
   DEADLINE_EXCEEDED.
 
 So a client whose calls time out against a slow Stub keeps its
@@ -2348,8 +2376,8 @@ ERROR:
   Its status, its message, its details and its trailing metadata never go
   out. A reply that smock cannot send, such as one whose rendered message
   does not fit the output type, sends smock's own HEADERS, with none of
-  the Stub's metadata, and so does a reply whose HEADERS are too large to
-  send ([Metadata size](#metadata-size)) and
+  the Stub's metadata. So does a reply whose HEADERS are too large to
+  send ([Metadata size](#metadata-size)), and so does
   [smock's own failure](#smocks-own-failures) when the Stub cannot serve
   its content.
 - **The Journal.** The entry of a call that `reset` or `close` ended has
@@ -2385,15 +2413,16 @@ as its body. The body's `size` counts the octets the call's DATA frames
 brought, as received, and `truncated` says whether the JSON was cut at
 `--journal-body-limit`.
 
-The entry's `grpcStatus` is the name of the gRPC status the call got:
-the status of the Stub's reply, `OK` unless its `grpc` names another, or
-the status smock answered with instead, such as `UNIMPLEMENTED` for an
-unmatched call, or `INTERNAL` or `RESOURCE_EXHAUSTED` for
-[smock's own failures](#smocks-own-failures). Its `status` stays the HTTP
-status, 200 for every answer smock sends a call, as gRPC sends them: a
-client learns of an error from `grpc-status`, not from `:status`. The
-entry of an HTTP request has no `grpcStatus`, nor has the entry of a call
-that a `reset` or `close` Fault ended ([Faults](#faults)).
+The entry's `grpcStatus` is the name of the gRPC status the call got.
+That is the status of the Stub's reply, `OK` unless its `grpc` names
+another, or the status smock answered with instead. For example, it is
+`UNIMPLEMENTED` for an unmatched call, and `INTERNAL` or
+`RESOURCE_EXHAUSTED` for [smock's own failures](#smocks-own-failures).
+Its `status` stays the HTTP status, 200 for every answer smock sends a
+call, as gRPC sends them: a client learns of an error from `grpc-status`,
+not from `:status`. The entry of an HTTP request has no `grpcStatus`, nor
+has the entry of a call that a `reset` or `close` Fault ended
+([Faults](#faults)).
 
 Journal queries, verification and the unmatched list take calls as they
 take HTTP requests. A filter gives the Mock, the method `POST`, the path
@@ -2433,10 +2462,11 @@ otherwise fill the Journal and evict the calls that tests verify.
 In the `mockoon` log format, a call that a Stub answered, or that no Stub
 matched, gets a `Transaction recorded` line, with `POST`, the method's
 path and the HTTP status 200, as an HTTP/2 request does
-([Logs](http2.md#logs)), after an `Error while serving the content: …`
-line when its Stub's template or data write failed. The line carries no
-gRPC status. A call that a built-in service answered, or that the
-protocol checks refused, gets no line.
+([Logs](http2.md#logs)). An `Error while serving the content: …` line
+comes before it when the Stub's template or data write failed. The
+`Transaction recorded` line carries no gRPC status. A call that a
+built-in service answered, or that the protocol checks refused, gets no
+line.
 
 ## Built-in services
 
@@ -2533,7 +2563,7 @@ answers from the Mock's set:
 
 Reflection's method, `ServerReflectionInfo`, is bidirectional streaming,
 and smock serves no streaming method yet. So smock answers one request
-per call: it reads the first request message as soon as it has arrived
+per call. It reads the first request message as soon as it has arrived
 whole, sends one response message and the OK trailers, then RST_STREAM
 `NO_ERROR` if the client is still sending. Messages after the first are
 not read. Clients open a new call for their next request, as grpcurl,
@@ -2546,8 +2576,9 @@ gets INTERNAL `the request message cannot be decoded`.
 #### A Stub wins
 
 As for [health](#health), a call goes to the Stubs, not to the service,
-when the Mock has a gRPC Stub on its path. Reflection's method streams, and a gRPC
-Stub on a streaming method is a problem, so no Stub can be on it today.
+when the Mock has a gRPC Stub on its path. Reflection's method streams,
+and a gRPC Stub on a streaming method is a problem, so no Stub can be on
+it today.
 
 #### In the Journal and the metrics
 
@@ -2560,8 +2591,8 @@ they get no line.
 #### Memory
 
 With reflection on, the Mock keeps each file of its set as the set
-encodes it, without its source info, beside the set's decoded model, so
-that answers carry every field and option as the set holds them. This
+encodes it, without its source info, beside the set's decoded model. So
+answers carry every field and option as the set holds them. This
 costs about as much memory as the set built without source info, in
 every replica ([Memory](#memory)). A Mock without reflection keeps
 nothing more.
@@ -2616,9 +2647,9 @@ moment.
 #### A Stub wins
 
 A call to a health method goes to the Stubs, not to the service, when
-the Mock has a gRPC Stub on that path: one in a Definition file, or an
-Ephemeral one of the call's Session. So a Scenario can make the service
-NOT_SERVING:
+the Mock has a gRPC Stub on that path. The Stub may be one in a Definition
+file, or an Ephemeral one of the call's Session. So a Scenario can make
+the service NOT_SERVING:
 
 ```yaml
 mocks:
@@ -2721,9 +2752,11 @@ request. In the `mockoon` log format, they get no line.
 smock refuses a call that gRPC's rules refuse before the call reaches
 the Stubs, and answers it as gRPC servers answer it. The answer is
 [Trailers-Only](#trailers-only), with `:status` 200, its gRPC status and
-a fixed `grpc-message`, except for two that get another `:status`, as
-grpc-go answers them: 405 for a method other than `POST`, and 400 for a
-malformed `grpc-timeout`. Both carry `grpc-status: 13` (INTERNAL).
+a fixed `grpc-message`. Two answers get another `:status`, as grpc-go
+answers them: 405 for a method other than `POST`, and 400 for a
+malformed `grpc-timeout`. Both carry `grpc-status: 13` (INTERNAL). Two
+messages name what the call sent: the encoding of a compressed message,
+and the numbers of a message whose JSON holds too many values.
 
 | The call | Checked | `:status` | gRPC status | `grpc-message` |
 |---|---|---|---|---|
@@ -2740,6 +2773,7 @@ malformed `grpc-timeout`. Both carry `grpc-status: 13` (INTERNAL).
 | The request has more than one message | at the end | 200 | UNIMPLEMENTED | `the request has more than one message` |
 | Its message does not parse, or holds a value that smock cannot print | at the end | 200 | INTERNAL | `the request message cannot be decoded` |
 | Its message's JSON passes `--body-limit` as smock prints it ([The decoder's limits](#the-decoders-limits)) | at the end, as soon as it shows | 200 | RESOURCE_EXHAUSTED | `the decoded request message is over the body limit` |
+| Its message's JSON holds more values than a message of its size may print ([The values a message may print](#the-values-a-message-may-print)) | at the end, as soon as it shows | 200 | RESOURCE_EXHAUSTED | `the decoded request message holds more than 108768 values, the most for a message of 19000 octets`, with the two numbers of the call |
 
 A message is the 5-octet prefix, a flag and a length, then the octets
 the length announces. A message of zero octets, `00 00 00 00 00`, is one
@@ -2748,21 +2782,27 @@ takes `google.protobuf.Empty` is served. A unary method takes exactly one
 message, so a request with none or with several is refused, as gRPC
 libraries refuse it.
 
-A message does not parse, as protobuf's parsers refuse it, when it holds a
-proto3 string that is not UTF-8, field number 0 or one above 2^29-1, wire
-type 6 or 7, a varint, a fixed-size value or a length cut short, a packed
-field included, a group whose end tag names another field or that it ends
-inside, or messages nested deeper than 100
-([The decoder's limits](#the-decoders-limits)), or when it lacks a proto2
-required field
-([proto2 types](#proto2-types)). smock cannot print a Timestamp, a
-Duration or a FieldMask path out of its range or form
-([Well-known types](#well-known-types)), a Value that holds no value, NaN
-or an infinity
-([JSON values](#json-values-struct-value-listvalue-and-nullvalue)), an
-Any whose type the set lacks ([Any](#any)), or a value of a type that it
-does not serve, of an editions file or a MessageSet
-([What is not served](#what-is-not-served)).
+A message does not parse, as protobuf's parsers refuse it, when:
+
+- It holds a proto3 string that is not UTF-8.
+- It holds field number 0 or one above 2^29-1, or wire type 6 or 7.
+- A varint, a fixed-size value or a length is cut short, a packed field
+  included.
+- A group's end tag names another field, or the message ends inside a
+  group.
+- Its messages nest deeper than 100
+  ([The decoder's limits](#the-decoders-limits)).
+- It lacks a proto2 required field ([proto2 types](#proto2-types)).
+
+smock cannot print:
+
+- A Timestamp, a Duration or a FieldMask path out of its range or form
+  ([Well-known types](#well-known-types)).
+- A Value that holds no value, NaN or an infinity
+  ([JSON values](#json-values-struct-value-listvalue-and-nullvalue)).
+- An Any whose type the set lacks ([Any](#any)).
+- A value of a type that it does not serve, of an editions file or a
+  MessageSet ([What is not served](#what-is-not-served)).
 
 A refused call never reaches the Stubs. It is not in the Journal, it
 moves no Scenario, and the request metrics count it as a rejected
@@ -2790,17 +2830,17 @@ call without it is served.
 ### The order of the checks
 
 A call that breaks several rules gets the answer of the first check it
-fails. On its HEADERS, smock checks, in this order:
+fails. On its HEADERS, smock makes six checks, in this order:
 
-1. smock's checks of every HTTP/2 request: a header list over
+1. It makes its checks of every HTTP/2 request. A header list over
    `--header-size-limit` or with more fields than `--header-count-limit`
    gets 431, and a request that HTTP/1.1's rules refuse gets 400, with no
-   gRPC status ([Ports and detection](#ports-and-detection));
-2. the method, which must be `POST`;
-3. the subtype;
-4. each `grpc-timeout`;
-5. the body limit, by `content-length`;
-6. the call's Mock, its set and its method
+   gRPC status ([Ports and detection](#ports-and-detection)).
+2. It checks the method, which must be `POST`.
+3. It checks the subtype.
+4. It checks each `grpc-timeout`.
+5. It checks the body limit, by `content-length`.
+6. It looks up the call's Mock, its set and its method
    ([Calls answered from their HEADERS](#calls-answered-from-their-headers)).
 
 So a `PUT` with `content-type: application/grpc+json` gets 405, and a
@@ -2832,10 +2872,10 @@ the status gRPC gives a message over a server's limit, with `:status`
 ([Request bodies](http2.md#request-bodies)). smock answers as soon as the
 excess shows, before it reads the rest:
 
-- on HEADERS, when `content-length` declares more octets than the limit;
-- on a message's prefix, when the length it announces takes the body
-  over the limit, before any octet of the message arrives;
-- on a DATA frame, when the octets received pass the limit. smock keeps
+- On HEADERS, when `content-length` declares more octets than the limit.
+- On a message's prefix, when the length it announces takes the body
+  over the limit, before any octet of the message arrives.
+- On a DATA frame, when the octets received pass the limit. smock keeps
   none of them.
 
 So with `--body-limit 32`, a call whose framed message takes 32 octets
@@ -2849,8 +2889,9 @@ request's, and also each block of a reply's metadata: a reply over it, or
 over the client's own limit, gets INTERNAL `reply metadata too large`
 ([Metadata size](#metadata-size)).
 
-`--body-limit` also bounds the JSON that smock decodes a message into
-([The decoder's limits](#the-decoders-limits)).
+`--body-limit` also bounds the JSON that smock decodes a message into.
+The values of that JSON have a bound of their own, which follows the size
+of the message ([The decoder's limits](#the-decoders-limits)).
 
 ### The decoder's limits
 
@@ -2858,12 +2899,12 @@ A small message can ask a decoder for far more than its size. smock
 bounds what decoding a call's message may cost, so that a gRPC call costs
 no more than the largest JSON body an HTTP request may send:
 
-- **Nesting.** Messages may nest 100 deep, the default of protobuf's C++
-  and Java parsers. Each nested message is a level, and so is each group,
-  each map entry and the message an Any holds. So each object in a Struct
-  takes three levels, for the Struct, its entry and the Value, and each
-  list in a Value takes two, for the ListValue and the Value. A message
-  nested deeper does not parse, and gets INTERNAL.
+- **Nesting.** Messages may nest 100 deep. That is the default of
+  protobuf's C++ and Java parsers. Each nested message is a level, and so
+  is each group, each map entry and the message an Any holds. So each
+  object in a Struct takes three levels, for the Struct, its entry and
+  the Value, and each list in a Value takes two, for the ListValue and
+  the Value. A message nested deeper does not parse, and gets INTERNAL.
 - **Lengths.** smock checks every length against the octets left before
   it reads the value, and allocates nothing for a length it has not
   checked. A length that runs past its message, or past the message that
@@ -2874,23 +2915,203 @@ no more than the largest JSON body an HTTP request may send:
   presence prints at its default, so an empty element of a list of
   messages, 2 octets, prints every field of its type. Without the limit,
   a 10 MiB message could print gigabytes.
-- **What smock holds to print it.** smock keeps a note of each place in
-  the message where the records of a list do not follow the list's last
-  ones, of each record of a message field after its first, and of each
-  map entry, until it has printed the message that holds them. It counts
-  48 octets for a note, 64 for a map entry, and 48 more for a map entry
-  with a string key, and these too may take at most `--body-limit`. A
-  message as clients encode it needs few such notes. One of 10 MiB whose
-  records alternate between two lists gets RESOURCE_EXHAUSTED.
+- **The JSON's values.** smock counts the JSON values it prints too, and
+  stops before the one that would pass what a message of that size may
+  print: 32,768 values, and 4 more for each octet of the message. The
+  call gets RESOURCE_EXHAUSTED, with the two numbers in its
+  `grpc-message`. [The values a message may print](#the-values-a-message-may-print)
+  says what counts as a value, and which messages pass.
+- **What smock holds to print it.** smock keeps notes of a message until
+  it has printed that message. It notes each place where the records of a
+  list do not follow the list's last ones, each record of a message field
+  after its first, and each map entry. It counts 48 octets for a note, 64
+  for a map entry, and 48 more for a map entry with a string key, and
+  these too may take at most `--body-limit`. A message as clients encode
+  it needs few such notes. One of 10 MiB whose records alternate between
+  two lists gets RESOURCE_EXHAUSTED.
 
-So a call holds its message once as it came, and once as JSON, each
-within `--body-limit`. For example, a message of 10 MiB of empty `Item`s
-in a `repeated Item items`, where an `Item` has a string, a list and a
-map, would print 160 MiB of JSON. smock answers RESOURCE_EXHAUSTED once
-the JSON passes 10 MiB, in well under a second. Such a call, like an
-HTTP request with a body of 10 MiB, holds tens of MiB at once. For a
-small Pod, lower `--body-limit`
-([Limits and timeouts](http2.md#limits-and-timeouts)).
+So once smock has decoded a call's message, the call holds it once as it
+came, and once as JSON, each within `--body-limit`. While smock decodes
+the message, the call holds more. The buffers that the JSON's text grows
+through may take up to three times `--body-limit`, as the list below
+explains, and the notes that smock holds to print the message up to one
+more. For example, a message of 10 MiB of empty `Item`s in a
+`repeated Item items`, where an `Item` has a string, a list and a map,
+would print 160 MiB of JSON. smock answers RESOURCE_EXHAUSTED once the
+JSON passes 10 MiB, in well under a second. Such a call, like an HTTP
+request with a body of 10 MiB, holds tens of MiB at once.
+
+When a condition, a template or a Near miss reads the message, smock
+parses its JSON, and the parsed values cost more memory than the text.
+The cost follows the Mock's own field and enum names, so it is a range.
+The ranges below were measured with field names of up to 29 characters
+and enum names of up to 40, for a call whose JSON smock parses once:
+
+- A value costs about 100 octets of memory, `true` and `false` less, and
+  an empty object or map about 110 more. Each octet of the JSON text
+  costs about 5 more.
+- The 32,768 values that a message of any size may print cost 3 to
+  15 MiB. smock decodes and matches one call at a time, so calls at once
+  do not add this up.
+- A message of 64 KiB may print 294,912 values, which cost 34 to
+  112 MiB. The most is for empty maps whose JSON just fits
+  `--body-limit`. It is about 26 times the most that a JSON body of
+  64 KiB costs an HTTP request, which is for deeply nested arrays.
+- smock parses the JSON twice when a condition and a template both read
+  the message: once for the conditions, which the Near miss shares, and
+  once for the templates. It holds both sets of parsed values at once.
+  So a call to a Stub that matches on the message and renders its reply
+  from it costs 1.5 to 1.9 times as much. That is up to about 24 MiB for
+  the 32,768 values, and up to about 194 MiB for a message of 64 KiB. An
+  HTTP request pays the same way when a condition and a template both
+  read its JSON body.
+- smock never parses the JSON of a refused call. Such a call costs the
+  text that smock printed before the bound, and the buffers that the
+  text grew through. The buffer starts at twice the message's size and
+  doubles as the text grows, up to `--body-limit`. At its peak, a call
+  may hold every buffer the text grew through. So the text costs up to
+  four times its size, and at most about three times `--body-limit`,
+  30 MiB by default. The message itself, and the notes that smock holds
+  to print it, come on top of that. The example of
+  [The values a message may print](#the-values-a-message-may-print),
+  9,500 empty elements of 60 `int64` fields, costs 2.4 MiB. For empty
+  elements of 120 enum fields, with field names of 29 characters and
+  enum names of 40, a message of up to 2 KB costs up to about 11 MiB,
+  and one of up to 10 KB up to about 20 MiB. The cost steps: where a
+  slightly larger message saves the buffer one doubling, the cost
+  halves. So a message of 1.4 KB costs up to about 11 MiB, and one of
+  2 KB up to about 8 MiB.
+- The text of a served call grows through the same buffers, whatever
+  reads the message, and smock then copies the text out of the last
+  one. So a served call's text costs up to about five times its size
+  once it outgrows its first buffer, and at most about four times
+  `--body-limit`, 40 MiB by default. For example, a message of 544
+  octets that prints 2.4 MB of JSON costs about 9 MiB when no
+  condition, template or Near miss reads it. The costs of a parsed
+  call, above, include this one.
+- Near `--body-limit` the JSON's octets are the bound that counts. The
+  JSON of a call may then cost hundreds of MiB once parsed, as the JSON
+  body of an HTTP request of that size may, and more than 1 GiB when
+  smock parses it twice.
+
+So the bounds hold a call's cost down, and a small message can still cost
+far more memory than its size
+([The values a message may print](#the-values-a-message-may-print)). For
+a small Pod, lower `--body-limit`
+([Limits and timeouts](http2.md#limits-and-timeouts)): the JSON's octets
+bound its values too.
+
+#### The values a message may print
+
+Once parsed, JSON costs memory by its values more than by its octets. A
+field without presence prints at its default and costs the message no
+octet. So a small message could print JSON that fits `--body-limit` and
+still costs thousands of times the message's size to hold. For example,
+a list of 9,500 empty elements of a message with 60 `int64` fields takes
+19,000 octets. A message that holds only that list would print 4.5 MB of
+JSON that holds 579,502 values.
+
+smock bounds the values by the size of the message:
+
+- A **value** is every JSON value of the decoded text: each object,
+  array, string, number, `true`, `false` and `null`. The whole message is
+  one. A member's name is none. So `{"name":"","sizes":[]}` holds 3.
+- A message of N octets, without its 5-octet prefix, may print at most
+  **32,768 + 4 × N** values: 32,768 for a message of any size, and 4 more
+  for each octet. An empty message may print 32,768 values, one of 1 KiB
+  36,864, and one of 1 MiB 4,227,072. The example above may print
+  108,768.
+- A call past the bound gets RESOURCE_EXHAUSTED, as one whose JSON passes
+  `--body-limit` does: Trailers-Only, not journaled, counted as rejected
+  traffic. smock stops printing at the bound. So its `grpc-message` gives
+  the bound and the message's octets, not the values the message holds:
+  `the decoded request message holds more than 108768 values, the most
+  for a message of 19000 octets`.
+- The bound applies whatever the Mock's Stubs read. A Mock whose Stubs
+  read only the metadata refuses the same messages.
+- Whichever bound the JSON passes first, as smock prints it, answers.
+  For a small message that is the values. For a message of a few hundred
+  KB or more it is `--body-limit`, with `the decoded request message is
+  over the body limit`.
+
+A value that a message sends takes an octet or more, so the values a
+message sends never number more than its octets. Only fields printed at
+their default can take a message past the bound. Those are the fields
+without presence, an empty list or map among them. A message field, a
+member of a oneof and a proto3 `optional` field have presence, and print
+only when the message holds them
+([The request message as JSON](#the-request-message-as-json)). In
+practice the bound refuses long lists of wide, almost empty messages.
+
+An element of a list that prints f fields, and takes n octets with its
+tag and its length, prints f + 1 values and allows 4 × n. So a list
+passes at any length, until `--body-limit`, when n is at least
+(f + 1) / 4. Otherwise it passes up to about 32,766 / (f + 1 − 4 × n)
+elements:
+
+| The elements | Octets each | Pass at any length | Wider elements |
+|---|---|---|---|
+| default-constructed, with no field set | 2 | up to 7 printed fields | up to about 32,766 / (f − 7) of them: 10,922 of 10 fields, 2,520 of 20, 618 of 60 |
+| with one small field set, such as a bool or a small number | 4 | up to 15 printed fields | up to about 32,766 / (f − 15) of them: 728 of 60 fields |
+| with a name of 8 characters | 12 | up to 47 printed fields | up to about 32,766 / (f − 47) of them: 2,520 of 60 fields |
+
+A list whose field number is 16 or more has a tag of 2 octets, so each
+of its elements takes one octet more, and allows 4 more values.
+
+So a list of thousands of default-constructed or almost empty wide
+messages is refused, and so is a large sparse grid of wide cells. A wide
+element can have a field set and still be almost empty: 1,000 rows of 60
+fields with one small number each are refused. No flag changes the bound
+or turns it off, and `--body-limit` does not move it. To send such a
+list, set fields in the elements, since each octet sent allows four more
+values, such as one field in every cell of a grid. Or send fewer
+elements, or split the call.
+
+The octets are counted as sent. A client that writes every zero, or
+writes a list unpacked, sends more octets for the same message, and
+passes where the message as generated code encodes it is refused.
+
+So the bound is a price in octets, not a cap on what a call may cost.
+Each octet that a client sends allows 4 more values, whatever the octet
+carries, and an octet of padding counts as any other. The list of the
+example above is refused in a message of 19,000 octets. It is served in
+a message of 136,684 octets, where an unknown field of zeros takes the
+rest. Its JSON then costs about 78 MiB once parsed, as it would without
+the bound, or about 142 MiB when a condition and a template both read
+it. So the bound sets how many octets a client must send for the values
+smock prints. It does not stop a message from costing far more memory
+than its size:
+[The decoder's limits](#the-decoders-limits) gives the costs.
+
+To count a message's values, count the values of its JSON:
+`jq '[..] | length'` does it for a JSON text. The Journal shows the JSON
+of a served message, cut at `--journal-body-limit`, 4,096 octets by
+default, so raise that limit to count a large message there. Keep
+`--journal-max-bytes` above the JSON's size too: the Journal evicts at
+once an entry that takes more. smock never shows the JSON of a refused
+message, so count such a message with protobuf's own printer, told to
+print the fields without presence. In Python, with protobuf 5.26 or
+later:
+
+```python
+from google.protobuf import json_format
+
+
+def values(json):
+    if isinstance(json, dict):
+        return 1 + sum(values(member) for member in json.values())
+    if isinstance(json, list):
+        return 1 + sum(values(element) for element in json)
+    return 1
+
+
+decoded = json_format.MessageToDict(
+    message, always_print_fields_with_no_presence=True
+)
+print(values(decoded), "values from", message.ByteSize(), "octets")
+```
+
+A [rendering](#the-samples-message) refuses a sample past the bound too.
 
 ## Connections
 
@@ -2926,7 +3147,7 @@ grpc-java's `keepAliveTime`. smock answers each PING, under the bound it
 keeps on frames that do no work
 ([Frames that do no work](http2.md#frames-that-do-no-work)). A PING
 counts among them, beyond one for each HEADERS or DATA frame that smock
-has sent on the connection, and a connection whose client sends more
+has sent on the connection. A connection whose client sends more
 than 100 such frames in any one second gets GOAWAY `ENHANCE_YOUR_CALM`.
 A keepalive every few seconds, or a PING for each frame received, as
 clients that estimate their bandwidth send, stays far below it.
@@ -2953,7 +3174,7 @@ HTTP/2 connection ([The drain](http2.md#the-drain)):
 
 From the moment SIGTERM arrives, the health service of every Mock that
 turns it on says NOT_SERVING ([During the drain](#during-the-drain)), and
-`/readyz` fails, so clients that health-check smock, and Kubernetes,
+`/readyz` fails. So clients that health-check smock, and Kubernetes,
 send no more calls to it. The connection closes once no call is in
 progress. At `--drain-timeout-ms`, calls still in progress are cut, and
 their clients see UNAVAILABLE ([Run](../README.md#run)).

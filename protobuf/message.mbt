@@ -111,13 +111,28 @@ let no_runs : Array[BytesView] = []
 /// The JSON is bounded by `limit`: it is counted as it is printed, and
 /// printing stops as soon as it passes `limit` octets, so a small message
 /// whose JSON would be far larger, such as a list of empty messages each
-/// printed with every field at its default, costs no more than `limit`.
-/// What it holds meanwhile to print a message is bounded by `limit` too:
-/// views of the input, beyond one a field, of the records of a repeated
-/// field that do not come together, of a message field sent again, and of
-/// the entries of a map, each counted as about the memory it takes. It
+/// printed with every field at its default, prints no more than `limit`
+/// octets. The buffers that the text grows through, each twice the last,
+/// take more until the text is returned: up to four times a text that
+/// has outgrown the first, and at most about three times `limit`. What it
+/// holds meanwhile to print a message is bounded by `limit` too: views of
+/// the input, beyond one a field, of the records of a repeated field that
+/// do not come together, of a message field sent again, and of the
+/// entries of a map, each counted as about the memory it takes. It
 /// allocates nothing for a length before it has checked it against the
 /// octets left, and checks and repairs UTF-8 with no copy.
+///
+/// The JSON values it prints are bounded by the size of `input`: 32,768
+/// values, and 4 more for each octet. A value is every JSON value of the
+/// text: each object, array, string, number, `true`, `false` and `null`.
+/// The whole message is one, and a member's name is none. A value that a
+/// message sends takes an octet or more, so only fields printed at their
+/// default can pass the bound, as in a list of thousands of empty messages
+/// of a type with many fields. Printing stops before the value that would
+/// pass it. Once parsed, JSON costs memory by its values more than by its
+/// octets, so the bound limits the tree that a message can grow into by
+/// the octets it takes. It is a price in octets, not a cap: each octet
+/// allows 4 more values, whatever it carries.
 ///
 /// Raises `DecodeError` when the input is not protobuf, when a proto3
 /// string is not UTF-8, when a message lacks a proto2 required field, as
@@ -128,14 +143,19 @@ let no_runs : Array[BytesView] = []
 /// it prints is a type of an editions file or a MessageSet, and when a
 /// message it prints is or has a field that it does not decode yet: one
 /// declared in an editions file. Raises `TooLarge` when the JSON, or what
-/// it holds to print it, passes `limit`.
+/// it holds to print it, passes `limit`, and `TooManyValues` when the JSON
+/// would hold more values than a message of the size of `input` may print.
 pub fn decode_json(
   set : DescriptorSet,
   message : MessageDescriptor,
   input : BytesView,
   limit~ : Int32,
 ) -> Bytes raise DecodeError {
-  let out = Output::new(size_hint=json_size_hint(input, limit), limit~)
+  let out = Output::new(
+    size_hint=json_size_hint(input, limit),
+    limit~,
+    most_values=values_bound(input.length()),
+  )
   set.print_message(out, message, [input], 0, canonical=false)
   out.to_bytes()
 }
@@ -159,14 +179,21 @@ pub fn decode_json(
 /// Everything else is as `decode_json` prints it, and so are the errors it
 /// raises, `TooLarge` past `limit` included: field names, the order of
 /// fields and map entries, enums, numbers, bytes, the well-known types,
-/// extensions and groups.
+/// extensions and groups. The bound on the values printed is the same too,
+/// and canonical ProtoJSON never reaches it: it prints no default, so each
+/// value it prints but the message itself takes an octet or more of
+/// `input`.
 pub fn decode_canonical_json(
   set : DescriptorSet,
   message : MessageDescriptor,
   input : BytesView,
   limit~ : Int32,
 ) -> Bytes raise DecodeError {
-  let out = Output::new(size_hint=json_size_hint(input, limit), limit~)
+  let out = Output::new(
+    size_hint=json_size_hint(input, limit),
+    limit~,
+    most_values=values_bound(input.length()),
+  )
   set.print_message(out, message, [input], 0, canonical=true)
   out.to_bytes()
 }
@@ -438,6 +465,7 @@ fn DescriptorSet::print_message(
       self.leaves_out(field, given, extension~, proto2~) {
       continue
     }
+    out.count_value()
     if !first {
       out.write_byte(b',')
     }
@@ -656,6 +684,7 @@ fn DescriptorSet::print_list(
           } else {
             reader.length_delimited()
           }
+          out.count_value()
           if !first {
             out.write_byte(b',')
           }
@@ -682,6 +711,7 @@ fn DescriptorSet::print_list(
             if closed is Some(type_) && !type_.defines(bits) {
               continue
             }
+            out.count_value()
             if !first {
               out.write_byte(b',')
             }
@@ -694,6 +724,7 @@ fn DescriptorSet::print_list(
           if closed is Some(type_) && !type_.defines(bits) {
             continue
           }
+          out.count_value()
           if !first {
             out.write_byte(b',')
           }
@@ -882,6 +913,7 @@ fn DescriptorSet::print_map(
     if n + 1 < count && same_key(keys, texts, i, order[n + 1]) {
       continue
     }
+    out.count_value()
     if !first {
       out.write_byte(b',')
     }

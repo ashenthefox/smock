@@ -205,6 +205,17 @@ pub fn Stub::is_grpc(self : Stub) -> Bool {
 }
 
 ///|
+/// The path of the method that the Stub is on, when it is a gRPC Stub, such
+/// as `/helloworld.Greeter/SayHello`: a gRPC call reaches it by that
+/// `:path` alone. `None` for an HTTP Stub.
+pub fn Stub::grpc_path(self : Stub) -> String? {
+  match self.serves {
+    Ordinary(ordinary) => ordinary.grpc_path()
+    Crud(_) => None
+  }
+}
+
+///|
 /// The Stub's Scenario clause, if it has one: an ordinary Stub's
 /// `scenario`, and none for a CRUD Stub, which has no Scenario clause.
 pub fn Stub::scenario(self : Stub) -> ScenarioClause? {
@@ -242,6 +253,18 @@ pub struct Ordinary {
   /// names, when it is a gRPC Stub. HTTP requests never match a gRPC Stub.
   /// `None` for an HTTP Stub.
   grpc_method : @protobuf.MethodDescriptor?
+}
+
+///|
+/// The path of the method that the Stub is on, when what it serves is a
+/// gRPC Stub's: its exact path, which names `grpc_method`. `None` for an
+/// HTTP Stub's.
+pub fn Ordinary::grpc_path(self : Ordinary) -> String? {
+  guard self.grpc_method is Some(_) &&
+    self.request.path is Some(Has(Exact(path))) else {
+    return None
+  }
+  Some(path)
 }
 
 ///|

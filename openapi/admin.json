@@ -2436,7 +2436,7 @@
             }
           },
           "body": {
-            "description": "The body, as text in UTF-8. Default empty. For a gRPC Stub, the request message as JSON: it is checked against the input type of the Stub's method and normalised as the loader normalises a gRPC Stub's `json` condition, so fields may be named by their proto names and enums by their numbers, while a value that smock never prints in that form, such as a Duration of `\"1.5s\"`, is refused. It is then read as a call's message is, so the fields without presence that it leaves out are at their defaults. Empty is the empty message. A body that is not such a message, or whose JSON then takes more than `--body-limit`, is `invalid_request`.",
+            "description": "The body, as text in UTF-8. Default empty. For a gRPC Stub, the request message as JSON: it is checked against the input type of the Stub's method and normalised as the loader normalises a gRPC Stub's `json` condition, so fields may be named by their proto names and enums by their numbers, while a value that smock never prints in that form, such as a Duration of `\"1.5s\"`, is refused. It is then read as a call's message is, so the fields without presence that it leaves out are at their defaults. Empty is the empty message. A body that is not such a message, or whose JSON then takes more than `--body-limit`, or holds more values than a call's message of its encoded size may print (32,768, and 4 more for each octet), is `invalid_request`.",
             "type": "string",
             "default": ""
           },

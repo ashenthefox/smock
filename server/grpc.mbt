@@ -77,22 +77,6 @@ fn is_served_subtype(subtype : BytesView) -> Bool {
 }
 
 ///|
-/// The unary method that a gRPC call to `path` calls in `set`, the
-/// Descriptor set of the call's Mock, or `None` when `path` names no method
-/// of the set, or names a streaming method: such a call cannot reach a gRPC
-/// Stub.
-fn unary_method(
-  set : @protobuf.DescriptorSet,
-  path : String,
-) -> @protobuf.MethodDescriptor? {
-  guard set.find_method(path) is Some(rpc) else { return None }
-  if rpc.client_streaming || rpc.server_streaming {
-    return None
-  }
-  Some(rpc)
-}
-
-///|
 /// Answers `stream`, a gRPC call whose HEADERS have just arrived, with
 /// `request` as they give it, when the call cannot reach a gRPC Stub: when
 /// its Host reaches no Mock, its Mock has no Descriptor set, or its `:path`
@@ -130,8 +114,10 @@ fn H2Connection::answer_from_headers(
     request.reflection = true
     return false
   }
+  // A call to a method of the set that streams, or to none, cannot reach a
+  // gRPC Stub.
   if mock is Some({ descriptor_set: Some(set), .. }) &&
-    unary_method(set, request.target) is Some(_) {
+    set.unary_method(request.target) is Some(_) {
     return false
   }
   self.requests.remove(stream)
@@ -213,7 +199,7 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
     return
   }
   guard mock is Some({ descriptor_set: Some(set), .. }) &&
-    unary_method(set, incoming.target) is Some(rpc) else {
+    set.unary_method(incoming.target) is Some(rpc) else {
     self.answer_unserved(stream, request, ended=true)
     return
   }
@@ -229,7 +215,8 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
   // A message that does not parse, that holds a value smock cannot print,
   // or that is or holds a value of a type of an editions file or a
   // MessageSet, does not decode, and neither does one whose decoded JSON
-  // passes the body limit as it is printed.
+  // passes the body limit as it is printed, or holds more values than a
+  // message of its size may print.
   let message = incoming.body[@grpc.prefix_length:]
   let json = @protobuf.decode_json(
     set,
@@ -238,7 +225,11 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
     limit=self.body_limit,
   ) catch {
     error => {
-      self.refuse_call(stream, decoding_refusal(error), ended=true)
+      self.refuse_call(
+        stream,
+        decoding_refusal(error, message.length()),
+        ended=true,
+      )
       return
     }
   }
@@ -336,15 +327,10 @@ fn call_answer(
     let details = status_details(set, part) catch {
       EncodeError(pointer~, message~) =>
         return Internal(
-          message="template failed",
-          template_error=match outcome.journal {
-            Some(entry) =>
-              Some(@engine.TemplateError::{
-                at: reply_at(entry.response_index) + "/grpc/details" + pointer,
-                message,
-              })
-            None => None
-          },
+          message=@engine.template_failed_message,
+          template_error=reply_error_within(
+            outcome, "/grpc/details", pointer, message,
+          ),
         )
     }
     return Status(part, details)
@@ -357,15 +343,10 @@ fn call_answer(
       let reply = encode_reply(set, output, plan.body) catch {
         EncodeError(pointer~, message~) =>
           return Internal(
-            message="template failed",
-            template_error=match outcome.journal {
-              Some(entry) =>
-                Some(@engine.TemplateError::{
-                  at: reply_pointer(entry.response_index) + pointer,
-                  message,
-                })
-              None => None
-            },
+            message=@engine.template_failed_message,
+            template_error=reply_error_within(
+              outcome, "/json", pointer, message,
+            ),
           )
       }
       Reply(part, reply)
@@ -538,21 +519,13 @@ fn H2Connection::answer_too_large(
     None => self.too_large("Trailers-Only block", last)
   }
   guard why is Some(message) else { return false }
-  let template_error = match outcome.journal {
-    Some(entry) =>
-      Some(@engine.TemplateError::{
-        at: reply_at(entry.response_index),
-        message,
-      })
-    None => None
-  }
   self.answer_own(
     stream,
     outcome,
     Internal,
     too_large_message,
     date~,
-    template_error?,
+    template_error?=reply_error(outcome, message),
   )
   true
 }
@@ -702,10 +675,34 @@ fn status_details(
 }
 
 ///|
-/// The JSON Pointer, within its Stub, of the `json` of the reply that the
-/// Stub's pick chose (`reply_at`).
-fn reply_pointer(index : Int32?) -> String {
-  reply_at(index) + "/json"
+/// The template error that says why smock's own INTERNAL takes the place of
+/// the reply of the Stub that matched a gRPC call, which the engine decided
+/// `outcome` for, when the reply as a whole is at fault: `message`, at the
+/// JSON Pointer of the reply that the Stub's pick chose (`reply_at`).
+/// `None` for a call without a Journal entry, which alone records it.
+fn reply_error(
+  outcome : @engine.Outcome,
+  message : String,
+) -> @engine.TemplateError? {
+  guard outcome.journal is Some(entry) else { return None }
+  Some({ at: reply_at(entry.response_index), message, })
+}
+
+///|
+/// As `reply_error`, when a value within the reply is at fault: `message`,
+/// at the reply's JSON Pointer followed by `part`, the pointer of the part
+/// of the reply that holds the value, `/json` or `/grpc/details`, and by
+/// `pointer`, the pointer of the value within that part, such as `/name`.
+/// The three are joined only for a call with a Journal entry, so a call
+/// without one builds no string.
+fn reply_error_within(
+  outcome : @engine.Outcome,
+  part : String,
+  pointer : String,
+  message : String,
+) -> @engine.TemplateError? {
+  guard outcome.journal is Some(entry) else { return None }
+  Some({ at: reply_at(entry.response_index) + part + pointer, message, })
 }
 
 ///|

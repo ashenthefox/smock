@@ -890,11 +890,16 @@ fn DescriptorSet::wanted(
     Double => "a number, or \"NaN\", \"Infinity\" or \"-Infinity\""
     Float =>
       "a number within the range of a float, or \"NaN\", \"Infinity\" or \"-Infinity\""
-    Int32 | SInt32 | SFixed32 => "an integer from -2147483648 to 2147483647"
-    Int64 | SInt64 | SFixed64 =>
-      "an integer from -9223372036854775808 to 9223372036854775807"
-    UInt32 | Fixed32 => "an integer from 0 to 4294967295"
-    UInt64 | Fixed64 => "an integer from 0 to 18446744073709551615"
+    Int32
+    | SInt32
+    | SFixed32
+    | Int64
+    | SInt64
+    | SFixed64
+    | UInt32
+    | Fixed32
+    | UInt64
+    | Fixed64 => integers_wanted(field.type_)
     Bool => "true or false"
     String => "a string of Unicode text"
     Bytes => "a string in base64, standard or URL-safe, with or without padding"
@@ -904,7 +909,7 @@ fn DescriptorSet::wanted(
         Some(type_) if type_.syntax is Proto2 =>
           "the name or the number of a value of \{type_.full_name}"
         Some(type_) =>
-          "the name of a value of \{type_.full_name}, or an integer from -2147483648 to 2147483647"
+          "the name of a value of \{type_.full_name}, or \{integers_wanted(Int32)}"
         None => "an enum value"
       }
     Message | Group =>

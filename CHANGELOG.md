@@ -338,21 +338,41 @@ of each GitHub release include its section
     compressed. A request that ends inside a message gets INTERNAL, and
     one with no message or several UNIMPLEMENTED; a message of zero octets
     is one message, and a message that does not parse gets INTERNAL.
-    `te: trailers` is not required. Each refusal has a fixed message, is
-    followed by RST_STREAM `NO_ERROR` while the client still sends, is not
-    journaled, and counts as rejected traffic. See
+    `te: trailers` is not required. Each refusal has a fixed message, but
+    for two that name what the call sent: the encoding of a compressed
+    message, and the numbers of a message whose JSON holds too many
+    values. Each is followed by RST_STREAM `NO_ERROR` while the client
+    still sends, is not journaled, and counts as rejected traffic. See
     [Protocol checks and limits](docs/grpc.md#protocol-checks-and-limits)
     and [Compression](docs/grpc.md#compression).
-  - **Bounds on decoding.** A small hostile message cannot use up smock's
-    CPU or memory. A message nested deeper than 100, through messages,
-    groups, map entries, Anys, Structs and their Values, gets INTERNAL,
-    and so does one with a length that runs past it. smock counts the
-    decoded JSON as it prints it, and a call gets RESOURCE_EXHAUSTED
-    `the decoded request message is over the body limit` as soon as it
-    passes `--body-limit`: an empty element of a list of messages, 2
-    octets, prints every field of its type, so a 10 MiB message could
-    otherwise print gigabytes. What smock holds to print a message, such
-    as its map entries, is bounded by `--body-limit` too. See
+  - **Bounds on decoding.** smock bounds the CPU and the memory that a
+    small hostile message can cost. A message nested deeper than 100,
+    through messages, groups, map entries, Anys, Structs and their Values,
+    gets INTERNAL, and so does one with a length that runs past it. smock
+    counts the decoded JSON as it prints it, and a call gets
+    RESOURCE_EXHAUSTED `the decoded request message is over the body
+    limit` as soon as it passes `--body-limit`: an empty element of a list
+    of messages, 2 octets, prints every field of its type, so a 10 MiB
+    message could otherwise print gigabytes. smock counts the JSON's
+    values too, since parsed JSON costs memory by its values: each object,
+    array, string, number, `true`, `false` and `null` is one. A message of
+    N octets may print 32,768 + 4 × N of them, and a call past that gets
+    RESOURCE_EXHAUSTED `the decoded request message holds more than
+    108768 values, the most for a message of 19000 octets`, with its own
+    two numbers. That call is a list of 9,500 empty elements of a message
+    with 60 fields, which would print 579,502 values. A list passes at any
+    length when an element of n octets prints at most 4 × n − 1 fields: 7
+    for a default-constructed element, 15 for one with a small field set.
+    Wider elements pass in smaller numbers, such as 618 default-constructed
+    elements of 60 fields, or 728 with one small number each. No flag
+    changes the bound. It is a price in octets, not a cap on what a call
+    costs: the same list passes in a message of 136,684 octets, and a
+    message of 64 KiB can still cost about 112 MiB once its JSON is
+    parsed. A condition and a template each parse it, so a call whose
+    message both read can cost about 194 MiB. `smock render` and the
+    Admin render operation refuse a sample past the bound too. What smock
+    holds to print a message, such as its map entries, is bounded by
+    `--body-limit` too. See
     [The decoder's limits](docs/grpc.md#the-decoders-limits).
   - **Connections.** A gRPC channel's connection is an HTTP/2 connection
     like any other: an idle one gets GOAWAY after `--idle-timeout-ms`,
@@ -506,6 +526,9 @@ of each GitHub release include its section
   UNIMPLEMENTED, INTERNAL or RESOURCE_EXHAUSTED. They say that, for a
   Mock, `stub=""` also counts the gRPC calls that its built-in health and
   reflection services answer, which are not unmatched requests.
+- The help texts of `--body-limit`, `--state-max-bytes` and
+  `smock_state_writes_refused_total` say what a gRPC call gets where an
+  HTTP request gets 413 or 507: RESOURCE_EXHAUSTED.
 - The help texts of `--header-size-limit` and `--read-timeout-ms` give
   their meaning over HTTP/2. A header list is counted as RFC 7541 counts
   it, each field with 32 octets more, and a larger one gets 431 on its

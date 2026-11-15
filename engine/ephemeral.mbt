@@ -212,15 +212,9 @@ fn Engine::recheck_ephemeral(
     guard mocks.get(mock) is Some(declared) else { continue }
     for _, list in by_session {
       for e in list {
-        if e.stub.serves
-          is Ordinary(
-            {
-              grpc_method: Some(_),
-              request: { path: Some(Has(Exact(path))), .. },
-              ..
-            }
-          ) {
-          e.answers = if has_unary_method(declared, path) {
+        if e.stub.grpc_path() is Some(path) {
+          e.answers = if declared.descriptor_set is Some(set) &&
+            set.unary_method(path) is Some(_) {
             GrpcCalls
           } else {
             Nothing
@@ -229,17 +223,6 @@ fn Engine::recheck_ephemeral(
       }
     }
   }
-}
-
-///|
-/// Whether the Descriptor set of `mock` has `path`, the path of a gRPC
-/// call, such as `/helloworld.Greeter/SayHello`, as a unary method. There is
-/// none without a set.
-fn has_unary_method(mock : @definitions.Mock, path : String) -> Bool {
-  mock.descriptor_set is Some(set) &&
-  set.find_method(path) is Some(rpc) &&
-  !rpc.client_streaming &&
-  !rpc.server_streaming
 }
 
 ///|

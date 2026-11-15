@@ -16,8 +16,9 @@
 // announces, then by its flag (`H2Connection::check_messages`). Once the
 // request has ended, its framing: a request that ends inside a prefix or
 // a message, and one with no message or several (`check_end`). Then its
-// message, as it is decoded: one that does not parse, and one whose
-// decoded JSON passes `--body-limit` (`decoding_refusal`).
+// message, as it is decoded: one that does not parse, one whose decoded
+// JSON passes `--body-limit`, and one whose decoded JSON holds more values
+// than a message of its size may print (`decoding_refusal`).
 
 ///|
 /// Why smock refuses a gRPC call, and so how it answers it.
@@ -54,6 +55,11 @@ priv enum CallRefusal {
   /// A message whose decoded JSON passes `--body-limit` as it is printed:
   /// RESOURCE_EXHAUSTED.
   DecodedOverBodyLimit
+  /// A message of `octets` octets whose decoded JSON holds more than
+  /// `limit` JSON values, the most a message of its size may print:
+  /// RESOURCE_EXHAUSTED. Its `grpc-message` carries both numbers, since
+  /// nothing else records the refusal.
+  DecodedTooManyValues(limit~ : Int32, octets~ : Int32)
 }
 
 ///|
@@ -79,7 +85,8 @@ fn CallRefusal::status(self : CallRefusal) -> @grpc.Status {
     | Undecodable => Internal
     UnservedSubtype | Compressed(_) | NoMessage | SeveralMessages =>
       Unimplemented
-    OverBodyLimit | DecodedOverBodyLimit => ResourceExhausted
+    OverBodyLimit | DecodedOverBodyLimit | DecodedTooManyValues(..) =>
+      ResourceExhausted
   }
 }
 
@@ -102,6 +109,8 @@ fn CallRefusal::message(self : CallRefusal) -> String {
     SeveralMessages => "the request has more than one message"
     Undecodable => "the request message cannot be decoded"
     DecodedOverBodyLimit => "the decoded request message is over the body limit"
+    DecodedTooManyValues(limit~, octets~) =>
+      "the decoded request message holds more than \{limit} values, the most for a message of \{octets} octets"
   }
 }
 
@@ -232,12 +241,15 @@ fn check_end(deframer : @grpc.Deframer) -> CallRefusal? {
 }
 
 ///|
-/// The refusal of a call whose message did not decode with `error`: a
-/// message whose decoded JSON passed `--body-limit`, or else one that does
-/// not parse, or that smock cannot print.
-fn decoding_refusal(error : Error) -> CallRefusal {
+/// The refusal of a call whose message, of `octets` octets without its
+/// prefix, did not decode with `error`: a message whose decoded JSON passed
+/// `--body-limit`, one whose decoded JSON holds more values than a message
+/// of its size may print, or else one that does not parse, or that smock
+/// cannot print.
+fn decoding_refusal(error : Error, octets : Int32) -> CallRefusal {
   match error {
     @protobuf.TooLarge(..) => DecodedOverBodyLimit
+    @protobuf.TooManyValues(limit~) => DecodedTooManyValues(limit~, octets~)
     _ => Undecodable
   }
 }
