@@ -125,6 +125,41 @@ fn File::grpc_conditions(
 }
 
 ///|
+/// `json`, the message of a sample request that renders a gRPC Stub, a
+/// message of the type `input`, a type of `set`, as JSON, checked against
+/// the type and normalised as a gRPC Stub's `json` condition is when the
+/// files load, as this file's header says: a key that names a field by its
+/// proto name becomes its JSON name, an enum number or alias the enum's
+/// first name, and a float is rounded to 32 bits, while a value that smock
+/// never prints in that form, such as a Duration of `"1.5s"`, is refused.
+/// A pattern or an operator is kept as a condition's is; the encoder, which
+/// the caller runs next, refuses it as a value of no field.
+///
+/// Returns the normalised message, or every problem found, with the
+/// messages a condition gets. A problem has no file (`""`), and its JSON
+/// Pointer points into `json`.
+pub fn sample_message(
+  set : @protobuf.DescriptorSet,
+  input : @protobuf.MessageDescriptor,
+  json : Json,
+) -> Result[Json, Array[Diagnostic]] {
+  let diagnostics = []
+  let file = File::{
+    name: "",
+    diagnostics,
+    body_files: None,
+    env: @template.no_env,
+    buckets: Map([]),
+    sets: no_declared_sets,
+    header_size_limit: default_header_size_limit,
+  }
+  match file.grpc_condition("", set, Whole(input), json) {
+    Some(normalised) if diagnostics.is_empty() => Ok(normalised)
+    _ => Err(diagnostics)
+  }
+}
+
+///|
 /// `json`, the value at `pointer` of a gRPC Stub's `json` condition, which
 /// is at `place` in a type of `set`, checked and normalised. A pattern
 /// object is kept, wherever it is. An operator's operand is at the same

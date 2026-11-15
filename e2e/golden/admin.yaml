@@ -1525,6 +1525,14 @@ stubs:
               id: string
               data: string
               json: null
+          grpc:
+            status: OK
+            message: string
+            trailers:
+              - name: string
+                value: string
+            details:
+              - {}
         templateError:
           at: string
           message: string

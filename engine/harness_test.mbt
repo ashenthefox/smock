@@ -20,8 +20,9 @@ let fixed_now : Int64 = 1_791_815_405_123L
 /// `match_index=false`, the engine tries every Stub in matching order, as
 /// the oracle of the match index does. Templates may read the environment
 /// variables `env`, by default none. Per-Session state is bounded by
-/// `state_max_bytes`, by default the engine's 64 MiB. Fails the test if the
-/// set is invalid.
+/// `state_max_bytes`, by default the engine's 64 MiB, and the message of a
+/// sample request that renders a gRPC Stub by `body_limit`, by default the
+/// engine's 10 MiB. Fails the test if the set is invalid.
 fn harness(
   files : Array[(String, String)],
   body_files~ : Array[(String, Bytes)] = [],
@@ -30,6 +31,7 @@ fn harness(
   match_index~ : Bool = true,
   env~ : @template.Env = @template.no_env,
   state_max_bytes~ : Int32 = @engine.default_state_max_bytes,
+  body_limit~ : Int32 = @engine.default_body_limit,
 ) -> Harness {
   let set : @definitions.DefinitionSet = {
     files: files.map(file => (file.0, @utf8.encode(file.1))),
@@ -44,6 +46,7 @@ fn harness(
           match_index~,
           env~,
           state_max_bytes~,
+          body_limit~,
         ),
         rand: @prng.Generator(process_seed),
         now: fixed_now,
