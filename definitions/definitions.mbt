@@ -841,6 +841,59 @@ pub struct GrpcReply {
   /// values are text templates, rendered as header values are, after the
   /// message.
   trailers : ResponseHeaders
+  /// The error details, from `details`, which an error's reply sends in
+  /// google.rpc.Status, in `grpc-status-details-bin`. None without
+  /// `details`.
+  details : GrpcDetails
+}
+
+///|
+/// The error details of a gRPC Stub's reply: each an Any in ProtoJSON, an
+/// object whose `@type` names a type of the Mock's set beside the fields of
+/// its message.
+#derive(Debug, Eq)
+pub enum GrpcDetails {
+  /// As written, in the order written, with google.rpc.Status built from
+  /// the reply's status, its message and the details, encoded when the
+  /// files were loaded. `None` without details.
+  Written(ReadOnlyArray[Json], EncodedStatus?)
+  /// With `template` on: each detail a structured template, parsed when
+  /// the definition set was loaded or the Stub was added, and rendered for
+  /// each call after the trailing metadata, then encoded.
+  Templated(ReadOnlyArray[@template.Structured])
+}
+
+///|
+/// No error details: those of a reply without `details`.
+pub let no_grpc_details : GrpcDetails = Written(
+  ReadOnlyArray::from_array([]),
+  None,
+)
+
+///|
+/// google.rpc.Status of a gRPC reply with error details as written, built
+/// when the files were loaded.
+pub struct EncodedStatus {
+  /// The set it was encoded with, whose types the details' are. The reply
+  /// sends it only while that set is served.
+  set : @protobuf.DescriptorSet
+  /// The value of `grpc-status-details-bin`: the status, in protobuf's
+  /// binary encoding, in standard base64 without padding, as the octets of
+  /// its ASCII.
+  value : Bytes
+}
+
+///|
+/// Encoded statuses are equal when they are encoded with the same set, not
+/// merely an equal one, into the same value.
+pub impl Eq for EncodedStatus with fn equal(self, other) {
+  physical_equal(self.set, other.set) && self.value == other.value
+}
+
+///|
+/// Shows the value.
+pub impl Debug for EncodedStatus with fn to_repr(self) {
+  Repr::ctor("EncodedStatus", [(Some("value"), Debug::to_repr(self.value))])
 }
 
 ///|
