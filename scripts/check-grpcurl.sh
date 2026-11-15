@@ -3,9 +3,10 @@
 # what grpcurl prints against committed transcripts, as CI does on every
 # push; then checks that the gRPC guide, docs/grpc.md, shows only those
 # calls, with what grpcurl prints. smock serves scripts/grpcurl/definitions,
-# the example of the guide's quick start, on free ports. Before the calls,
-# the guide's Ephemeral gRPC Stub for the Session test-a is added through
-# the Admin API.
+# the example of the guide's quick start, on free ports, once `smock check`
+# finds no problem and no warning in it. Before the calls, the guide's
+# Ephemeral gRPC Stub for the Session test-a is added through the Admin
+# API.
 #
 # Each file scripts/grpcurl/calls/<name>.txt is one call's transcript: a
 # first line `$ grpcurl ...`, the command as the guide writes it for the
@@ -72,6 +73,13 @@ work=$tmp/work
 mkdir -p "$work/grpc/health"
 ln -s "$repo/scripts/grpcurl/definitions" "$work/defs"
 ln -s "$repo/fixtures/protobuf/health/grpc/health/v1" "$work/grpc/health/v1"
+
+# The set loads without a problem or a warning.
+if ! "$smock" check "$work/defs" >"$tmp/check.out" 2>&1 || [ -s "$tmp/check.out" ]; then
+  sed 's/^/    /' "$tmp/check.out" >&2
+  echo "check-grpcurl: smock check found problems or warnings in scripts/grpcurl/definitions" >&2
+  exit 1
+fi
 
 # smock, on free ports, with the Admin API token of the guide's examples.
 # Without certificate files, the TLS port presents a self-signed

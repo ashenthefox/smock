@@ -1,8 +1,9 @@
 #!/bin/sh
 # Tests of scripts/check-grpcurl.sh, which CI runs on every push: that it
-# passes as committed, and fails, naming what differs, when a transcript,
-# the guide's commands, the guide's output or the guide's Definition file
-# differ from what grpcurl and the set give. Each test runs the check, as
+# passes as committed, and fails, naming what differs, when the definition
+# set has a problem, or a transcript, the guide's commands, the guide's
+# output or the guide's Definition file differ from what grpcurl and the
+# set give. Each test runs the check, as
 # CI does, against the given smock binary, in a fresh copy of the files the
 # check reads, after changing the copy, and checks its exit status and what
 # it prints.
@@ -116,6 +117,14 @@ sed -i '1s/^\$ grpcurl -plaintext /$ grpcurl -insecure /' "$copy/$example"
 check plain-port
 expect plain-port 1 \
   "check-grpcurl: $example: its first line should be"
+
+# A definition set with a problem is not served.
+fresh
+printf 'mocks:\n  - name: other-greeter\n    hosts: [greeter.svc]\n' >"$copy/scripts/grpcurl/definitions/twice.yaml"
+check definitions
+expect definitions 1 \
+  'the Host "greeter.svc" is already claimed by the Mock "greeter"' \
+  "check-grpcurl: smock check found problems or warnings in scripts/grpcurl/definitions"
 
 # A grpcurl command in the guide that no transcript has.
 fresh
