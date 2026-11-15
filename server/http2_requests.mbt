@@ -23,7 +23,9 @@ priv struct H2Request {
   /// The regular fields, in the order received, with their names in lower
   /// case as HTTP/2 sends them. Several `cookie` fields are one field, their
   /// values joined with `; `, in their order, at the place of the first
-  /// (RFC 9113, section 8.2.3), as one Cookie line is over HTTP/1.1.
+  /// (RFC 9113, section 8.2.3), as one Cookie line is over HTTP/1.1. A gRPC
+  /// call's binary metadata, whose name ends with `-bin`, is without the
+  /// base64 padding that ends each comma-separated element of its value.
   headers : Array[(String, String)]
   /// The body length its `content-length` declares, or -1 without one. Of
   /// several, the largest, so that none over `--body-limit` passes.
@@ -198,6 +200,12 @@ fn H2Request::new(
   if cookies is Some(joined) {
     headers[cookie] = ("cookie", joined.to_string())
   }
+  // A gRPC call's binary metadata loses its padding, so that padded and
+  // unpadded clients look alike to the Stubs and in the Journal. An HTTP
+  // request's fields stay as received.
+  if grpc {
+    unpad_binary_metadata(headers)
+  }
   // Only a CONNECT has no `:path`, as moonhttp sees to: its target is
   // `:authority`, as an HTTP/1.1 CONNECT's target is in authority-form.
   if target == "" && authority is Some(authority) {
@@ -221,6 +229,24 @@ fn H2Request::new(
       None
     },
     call_deadline: forever,
+  }
+}
+
+///|
+/// Takes the base64 padding off the value of each field of binary metadata
+/// among `headers`, the regular fields of a gRPC call, whose name ends with
+/// `-bin`: the `=` that end each comma-separated element go, the commas
+/// stay, and the value is not decoded (`@grpc.unpadded_elements`). A value
+/// without padding is kept, so only a padded one costs a new String.
+fn unpad_binary_metadata(headers : Array[(String, String)]) -> Unit {
+  for i in 0..<headers.length() {
+    let (name, value) = headers[i]
+    if @grpc.is_binary_name(name) {
+      let unpadded = @grpc.unpadded_elements(value)
+      if !physical_equal(unpadded, value) {
+        headers[i] = (name, unpadded)
+      }
+    }
   }
 }
 

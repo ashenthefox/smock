@@ -249,6 +249,21 @@ of each GitHub release include its section
   the reason in `templateError`. An error whose reply has initial
   metadata goes out as HEADERS, then trailers; `smock-mock` alone does not
   count as initial metadata. See [Metadata](docs/grpc.md#metadata).
+- Request metadata as headers: every field of a call's metadata,
+  `content-type`, `te`, `grpc-timeout` and `user-agent` included, reaches
+  `headers` conditions, `header.NAME` in templates and the Journal as a
+  header, one value per field line. A call's `-bin` values lose the base64
+  padding that ends each comma-separated element, commas kept, so
+  `AAA=,BBB=` becomes `AAA,BBB`; smock never decodes them. An exact
+  `headers` condition on a `-bin` field of a gRPC Stub loses its padding
+  when the files load, so padded and unpadded clients match alike, and a
+  pattern sees the unpadded value. The Journal stores the values unpadded,
+  so a Journal filter gives them so; filters are not rewritten, and HTTP
+  requests keep their `-bin` headers as received. A call's Session comes
+  from its `baggage` metadata, with `--session-header` and
+  `--session-member`, as an HTTP request's does. `smock/grpc` takes the
+  padding off. See [Request metadata](docs/grpc.md#request-metadata) and
+  [Sessions](docs/grpc.md#sessions).
 - Error details: an error's `grpc.details`, such as googleapis'
   `ErrorInfo`, `RetryInfo` or `BadRequest`, each in ProtoJSON with
   `@type`, whose type the Mock's set must define. smock builds
