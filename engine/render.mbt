@@ -205,6 +205,69 @@ fn SampleRequest::to_request(self : SampleRequest) -> Request {
 }
 
 ///|
+/// The call the sample stands for when it renders a gRPC Stub on `rpc`, a
+/// unary method of `set`, `stub` by its ID: the sample's method, path,
+/// query and header fields, each value of binary metadata, whose name ends
+/// with `-bin`, without its padding, as a call's (`@grpc.unpadded_elements`),
+/// and as the body the request message that the sample's body gives as
+/// JSON. The message is checked against the method's input type and
+/// normalised as a gRPC Stub's `json` condition is when the files load
+/// (`@definitions.sample_message`), then encoded and decoded as a call's
+/// message is, so the body is the JSON text that a call carrying it hands
+/// the Stubs: every field without presence that it leaves out is there at
+/// its default. An empty body is the empty message.
+///
+/// Raises `InvalidSampleMessage` when the body is not JSON, is not a
+/// message of the input type, or is one whose JSON passes `body_limit`
+/// octets once decoded, as a call's would be refused.
+fn SampleRequest::call_request(
+  self : SampleRequest,
+  stub : String,
+  set : @protobuf.DescriptorSet,
+  rpc : @protobuf.MethodDescriptor,
+  body_limit : Int32,
+) -> Request raise RenderFailure {
+  let input = set.input_of(rpc)
+  let refused = (pointer : String, message : String) => {
+    InvalidSampleMessage(stub~, input=input.full_name, problems=[
+      { file: "", pointer, message, },
+    ])
+  }
+  let json = if self.body == "" {
+    Json::object(Map([]))
+  } else {
+    @json.parse(self.body) catch {
+      _ => raise refused("", "is not JSON")
+    }
+  }
+  let normalised = match @definitions.sample_message(set, input, json) {
+    Ok(normalised) => normalised
+    Err(problems) =>
+      raise InvalidSampleMessage(stub~, input=input.full_name, problems~)
+  }
+  let encoded = set.encode_json(input, normalised) catch {
+    EncodeError(pointer~, message~) => raise refused(pointer, message)
+  }
+  let body = @protobuf.decode_json(set, input, encoded, limit=body_limit) catch {
+    TooLarge(limit~) =>
+      raise refused(
+        "",
+        "takes more than \{limit} octets as JSON once decoded, the body limit of a call's message (--body-limit)",
+      )
+    DecodeError(message~, ..) => raise refused("", message)
+  }
+  let request = self.to_request()
+  let headers = request.headers
+  for i in 0..<headers.length() {
+    let (name, value) = headers[i]
+    if @grpc.is_binary_name(name.to_lower()) {
+      headers[i] = (name, @grpc.unpadded_elements(value))
+    }
+  }
+  { ..request, headers, body, }
+}
+
+///|
 /// A Stub's response, rendered for a sample request, with the Stub's
 /// conditions that the sample fails. For a CRUD Stub, the answer of the
 /// operation the sample asks of it. Its JSON form is the `Rendering`
@@ -317,6 +380,15 @@ pub suberror RenderFailure {
     meth~ : String,
     path~ : String
   )
+  /// The sample request's body is not a message of `input`, the full name
+  /// of the input type of the method of the gRPC Stub `stub`, as JSON, in
+  /// each of the ways `problems` gives, with JSON Pointers into the
+  /// message. A call cannot carry such a message.
+  InvalidSampleMessage(
+    stub~ : String,
+    input~ : String,
+    problems~ : Array[@definitions.Diagnostic]
+  )
 }
 
 ///|
@@ -350,6 +422,20 @@ pub fn RenderFailure::message(self : RenderFailure) -> String {
       let at_list = spelled_out(@definitions.crud_methods(Some(ListPath)))
       let at_item = spelled_out(@definitions.crud_methods(Some(ItemPath)))
       "the CRUD Stub \{stub.escape()} serves no operation for \{meth.escape()} at \{path.escape()}: it serves \{at_list} at \{crud_path.escape()}, and \{at_item} at \{item.escape()}"
+    }
+    InvalidSampleMessage(stub~, input~, problems~) => {
+      let each = StringBuilder()
+      for i, problem in problems {
+        if i > 0 {
+          each.write_string("; ")
+        }
+        if problem.pointer != "" {
+          each.write_string(problem.pointer)
+          each.write_char(' ')
+        }
+        each.write_string(problem.message)
+      }
+      "the sample request's body must be a \{input} as JSON, the message that the method of the gRPC Stub \{stub.escape()} takes: \{each}"
     }
   }
 }
@@ -439,7 +525,18 @@ pub fn Engine::render(
   }
   match stub.serves {
     Ordinary(ordinary) => {
-      let incoming = Incoming::new(sample.to_request())
+      // A gRPC Stub renders as a call, whatever the sample's method and
+      // Content-Type, which are only conditions.
+      let grpc = match (ordinary.grpc_method, mock.descriptor_set) {
+        (Some(rpc), Some(set)) => Some((set, rpc))
+        _ => None
+      }
+      let request = match grpc {
+        Some((set, rpc)) =>
+          sample.call_request(stub.id, set, rpc, self.body_limit)
+        None => sample.to_request()
+      }
+      let incoming = Incoming::new(request)
       // The sample's data stands for the copies of a Session.
       let copies = if sample.data.is_empty() { None } else { Some(sample.data) }
       // The steps of the match decision that build the response, as for a
@@ -509,7 +606,7 @@ pub fn Engine::render(
               vars=Some(sample.vars),
               data=mock.initial_data,
               copies~,
-              grpc=ordinary.grpc_method is Some(_),
+              grpc=grpc is Some(_),
             )
           catch {
             RenderError(at~, message~) => {
