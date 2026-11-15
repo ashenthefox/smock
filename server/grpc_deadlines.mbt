@@ -47,10 +47,13 @@ priv struct PastDeadline {
 /// end after the call's deadline, the task sleeps until the deadline
 /// instead, and then ends the call with Trailers-Only DEADLINE_EXCEEDED
 /// `deadline exceeded`, which the call's Journal entry records before it
-/// is committed. Scenario moves, Variables and data writes stand, as after
-/// any delay. A deadline that has already passed, as a timeout of 0 gives,
-/// ends the call at once. From the end of the sleep on, the deadline no
-/// longer counts: a reply whose HEADERS are out finishes as planned.
+/// is committed, and the plan's connection Fault, which would come after
+/// the delay, never comes: the entry has the plan's HTTP status, and no
+/// Fault, whatever ends the call. Scenario moves, Variables and data
+/// writes stand, as after any delay. A deadline that has already passed,
+/// as a timeout of 0 gives, ends the call at once. From the end of the
+/// sleep on, the deadline no longer counts: a reply whose HEADERS are out
+/// finishes as planned.
 ///
 /// The task ends with its stream, as `wait`'s does. While a delay runs
 /// past the deadline, the call is among those `past_deadline` holds, so
@@ -71,8 +74,10 @@ fn[S : @io.Writer + ReadOutput] H2Connection::wait_call(
   let delay = outcome.plan.delay_ms
   let deadline = request.call_deadline
   // Whether the delay would end after the deadline, which `forever` never
-  // passes.
+  // passes. The plan's connection Fault, which would come after the delay,
+  // then never comes, whatever ends the call.
   let cut = delay.to_int64() > deadline - self.now
+  let outcome = if cut { outcome.without_fault() } else { outcome }
   if cut {
     self.past_deadline[stream] = { deadline, entry: outcome.journal, }
   }

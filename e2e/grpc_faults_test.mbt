@@ -438,3 +438,93 @@ async test "a Fault with a delay comes in its call's task once the delay is over
     })
   })
 }
+
+///|
+/// The Mock `greeter`, the Default Mock, with the set, and gRPC Stubs on
+/// SayHello whose Faults come after a delay of 3000 ms, one for each value
+/// of the call's `x-fault`: `cut-reset`, `cut-partial` and `cut-close`.
+let cut_greeter : String =
+  #|mocks:
+  #|  - name: greeter
+  #|    grpc: { descriptorSet: greeter.binpb }
+  #|stubs:
+  #|  - id: cut-reset
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: cut-reset } }
+  #|    response: { json: { message: never sent } }
+  #|    fault: { delay: { fixed: 3000 }, connection: { kind: reset } }
+  #|  - id: cut-partial
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: cut-partial } }
+  #|    response: { json: { message: never sent } }
+  #|    fault: { delay: { fixed: 3000 }, connection: { kind: partial } }
+  #|  - id: cut-close
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: cut-close } }
+  #|    response: { json: { message: never sent } }
+  #|    fault: { delay: { fixed: 3000 }, connection: { kind: close } }
+
+///|
+async test "a deadline that cuts a delay short comes before the Fault, which would come after the delay and never comes: the call gets DEADLINE_EXCEEDED, the connection stays open, and the entry has the HTTP status 200 and no Fault" {
+  with_greeter_set([("greeter.yaml", cut_greeter)], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      let start = @async.now()
+      let streams = []
+      for fault in ["cut-reset", "cut-partial", "cut-close"] {
+        streams.push(
+          client.start_call(timeout="500m", headers=[("x-fault", fault)]),
+        )
+      }
+      let out = []
+      for stream in streams {
+        let reply = client.reply(stream)
+        out.push(reply.render())
+        out.push("the client sees \{derived_status(reply)}")
+      }
+      inspect(
+        [
+          ..out,
+          "before the delay is over: \{@async.now() - start < 3000}",
+          "Journal:",
+          fault_answers(smock),
+        ].join("\n"),
+        content=(
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  grpc-status: 4
+          #|  grpc-message: deadline exceeded
+          #|  smock-mock: greeter; via=default
+          #|  date: <now>
+          #|(end)
+          #|the client sees DEADLINE_EXCEEDED
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  grpc-status: 4
+          #|  grpc-message: deadline exceeded
+          #|  smock-mock: greeter; via=default
+          #|  date: <now>
+          #|(end)
+          #|the client sees DEADLINE_EXCEEDED
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  grpc-status: 4
+          #|  grpc-message: deadline exceeded
+          #|  smock-mock: greeter; via=default
+          #|  date: <now>
+          #|(end)
+          #|the client sees DEADLINE_EXCEEDED
+          #|before the delay is over: true
+          #|Journal:
+          #|"cut-reset" 200 "DEADLINE_EXCEEDED" null
+          #|"cut-partial" 200 "DEADLINE_EXCEEDED" null
+          #|"cut-close" 200 "DEADLINE_EXCEEDED" null
+        ),
+      )
+    })
+  })
+}
