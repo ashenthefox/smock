@@ -228,3 +228,65 @@ test "the sample's body is normalised as the loader normalises conditions, and r
     ),
   )
 }
+
+///|
+test "a sample's body that is not a message of the input type is refused, with every problem, as is one whose JSON passes the body limit once decoded" {
+  let h = harness(
+    [("catalog.yaml", render_catalog)],
+    body_files=catalog_body_files(),
+  )
+  inspect(
+    [
+      h.catalog("find-books", "FindItems", "{\"kind\": BOOK}"),
+      h.catalog("find-books", "FindItems", "[]"),
+      h.catalog(
+        "find-books", "FindItems", "{\"prize\": 1, \"price\": \"42\", \"kind\": \"NOVEL\"}",
+      ),
+      // What the loader keeps in a condition is not a message.
+      h.catalog("find-books", "FindItems", "{\"kind\": {\"$eq\": 1}}"),
+      h.catalog(
+        "count-in-stock", "CountItems", "{\"shelf\": {\"pattern\": \"a.*\"}}",
+      ),
+    ].join("\n"),
+    content=(
+      #|refused: the sample request's body must be a catalog.Item as JSON, the message that the method of the gRPC Stub "find-books" takes: is not JSON
+      #|refused: the sample request's body must be a catalog.Item as JSON, the message that the method of the gRPC Stub "find-books" takes: must be an object: the message is a catalog.Item
+      #|refused: the sample request's body must be a catalog.Item as JSON, the message that the method of the gRPC Stub "find-books" takes: /prize is not a field of catalog.Item; /price must be written 42, as smock prints it: the field price of catalog.Item has the type int64; /kind must be the name of a value of catalog.Kind, or an integer from -2147483648 to 2147483647: the field kind of catalog.Item has the type catalog.Kind
+      #|refused: the sample request's body must be a catalog.Item as JSON, the message that the method of the gRPC Stub "find-books" takes: /kind must be the name of a value of catalog.Kind, or an integer from -2147483648 to 2147483647: the field kind of catalog.Item has the type catalog.Kind
+      #|refused: the sample request's body must be a catalog.CountRequest as JSON, the message that the method of the gRPC Stub "count-in-stock" takes: /shelf must be a string of Unicode text: the field shelf of catalog.CountRequest has the type string
+    ),
+  )
+  // The JSON of this CountRequest, whose shelf is 40 letters, takes 67
+  // octets.
+  let shelf = "a".repeat(40)
+  let small = harness(
+    [("catalog.yaml", render_catalog)],
+    body_files=catalog_body_files(),
+    body_limit=66,
+  )
+  inspect(
+    small.catalog(
+      "count-in-stock",
+      "CountItems",
+      "{\"shelf\": \"\{shelf}\", \"inStock\": true}",
+    ),
+    content=(
+      #|refused: the sample request's body must be a catalog.CountRequest as JSON, the message that the method of the gRPC Stub "count-in-stock" takes: takes more than 66 octets as JSON once decoded, the body limit of a call's message (--body-limit)
+    ),
+  )
+  let enough = harness(
+    [("catalog.yaml", render_catalog)],
+    body_files=catalog_body_files(),
+    body_limit=67,
+  )
+  inspect(
+    enough.catalog(
+      "count-in-stock",
+      "CountItems",
+      "{\"shelf\": \"\{shelf}\", \"inStock\": true}",
+    ),
+    content=(
+      #|OK {"count":2,"shelf":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"} failed=[]
+    ),
+  )
+}
