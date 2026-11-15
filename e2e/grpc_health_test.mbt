@@ -525,3 +525,37 @@ async test "health: a reply larger than the stream's window is sent as the clien
     })
   })
 }
+
+///|
+async test "health: gRPC's protocol checks come first, so a health call with no message, with two, or whose message does not decode is refused as any call is, counted as rejected traffic" {
+  with_greeter_set([("greeter.yaml", health_example)], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      let out = []
+      for
+        call in [
+          ("no message", b""),
+          ("two messages", framed(b"") + framed(b"")),
+          // `service`, field 1, a string that is not UTF-8.
+          ("a string that is not UTF-8", framed(b"\x0a\x01\xff")),
+        ] {
+        let (what, body) = call
+        let reply = client.call(check_path, body~)
+        out.push(
+          "\{what}: \{reply.trailers}, \{reply.head.filter(field => field.0.has_prefix("grpc-"))}",
+        )
+      }
+      out.push(smock.metric("smock_requests_total"))
+      inspect(
+        out.join("\n"),
+        content=(
+          #|no message: None, [(grpc-status, 12), (grpc-message, the request has no message)]
+          #|two messages: None, [(grpc-status, 12), (grpc-message, the request has more than one message)]
+          #|a string that is not UTF-8: None, [(grpc-status, 13), (grpc-message, the request message cannot be decoded)]
+          #|smock_requests_total{mock="",stub=""} 3
+        ),
+      )
+    })
+  })
+}
