@@ -306,19 +306,20 @@ async test "smock keeps the IDs of at most --http2-max-concurrent-streams calls 
         out.push(raw.trailers_only(2))
         raw.send(raw.calls(5, 1, hello, timeout="0m"))
         out.push(raw.trailers_only(1))
-        // The client's SETTINGS and 99 PRIORITY frames come to 100 frames
-        // that do no work, the most the bound lets pass: one more reset that
-        // counts passes it.
+        // Once the client's SETTINGS is more than a second old, 100
+        // PRIORITY frames are the most frames that do no work the bound
+        // lets pass in one second: one more reset that counts passes it.
+        @async.sleep(1100)
         let priorities = times(
           Priority(stream_id=101, priority={
             exclusive: false,
             stream_dependency: 0,
             weight: 16,
           }),
-          99,
+          100,
         )
         raw.send([..cancels(3, 2), ..priorities])
-        out.push("the resets of 3 and 5, and 99 PRIORITY frames:")
+        out.push("the resets of 3 and 5, and 100 PRIORITY frames:")
         out.push(raw.goaways())
         raw.send(cancels(1, 1))
         out.push("the reset of 1:")
@@ -328,7 +329,7 @@ async test "smock keeps the IDs of at most --http2-max-concurrent-streams calls 
           content=(
             #|2 calls ended by smock, then open
             #|1 calls ended by smock, then open
-            #|the resets of 3 and 5, and 99 PRIORITY frames:
+            #|the resets of 3 and 5, and 100 PRIORITY frames:
             #|then open
             #|the reset of 1:
             #|GOAWAY last=5 ENHANCE_YOUR_CALM
