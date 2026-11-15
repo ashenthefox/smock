@@ -1,0 +1,6 @@
+# A message of a type of an editions file, which smock/protobuf does not
+# decode yet.
+protobuf_payload: "\010\001"
+requested_output_format: JSON
+message_type: "protobuf_test_messages.editions.proto3.TestAllTypesProto3"
+test_category: BINARY_TEST

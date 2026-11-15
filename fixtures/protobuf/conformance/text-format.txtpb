@@ -1,0 +1,5 @@
+# A message in protobuf's text format, which smock does not read.
+text_payload: "optional_int32: 1"
+requested_output_format: PROTOBUF
+message_type: "protobuf_test_messages.proto3.TestAllTypesProto3"
+test_category: TEXT_FORMAT_TEST

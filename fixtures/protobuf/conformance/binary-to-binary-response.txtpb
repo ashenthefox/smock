@@ -1,0 +1,3 @@
+# The answer to binary-to-binary.txtpb, as protoc encodes the message: in
+# field-number order, the last optional_int32, and repeated_int32 packed.
+protobuf_payload: "\010\002r\005smock\372\001\002\001\002"

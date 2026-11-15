@@ -1,0 +1,76 @@
+# The cases of protobuf's conformance suite that smock/protobuf fails, with
+# the message the runner gives for each, by reason. scripts/check-conformance.sh
+# passes this list to the runner, which fails on a case that fails and is
+# not here, on a case here that passes, and on a case here that fails with
+# another message. README.md says how to update it.
+#
+# The text-format suite, JSPB and the types of editions files are skipped,
+# not listed: the testee answers them as skipped.
+
+# smock/protobuf raises one error, DecodeError, for bytes that are not a
+# message of the type and for a value that ProtoJSON cannot print, such as
+# a Duration out of range. So the testee answers a parse error where the
+# suite expects a serialize error. smock refuses both kinds of input.
+Recommended.Proto3.FieldMaskNumbersDontRoundTrip.JsonOutput # Should have failed to serialize, but didn't.
+Recommended.Proto3.FieldMaskPathsDontRoundTrip.JsonOutput # Should have failed to serialize, but didn't.
+Recommended.Proto3.FieldMaskTooManyUnderscore.JsonOutput # Should have failed to serialize, but didn't.
+Recommended.Proto3.ValueRejectInfNumberValue.JsonOutput # Should have failed to serialize, but didn't.
+Recommended.Proto3.ValueRejectNanNumberValue.JsonOutput # Should have failed to serialize, but didn't.
+Required.Proto3.DurationProtoInputTooLarge.JsonOutput # Should have failed to serialize, but didn't.
+Required.Proto3.DurationProtoInputTooSmall.JsonOutput # Should have failed to serialize, but didn't.
+Required.Proto3.DurationProtoNanosTooLarge.JsonOutput # Should have failed to serialize, but didn't.
+Required.Proto3.DurationProtoNanosTooSmall.JsonOutput # Should have failed to serialize, but didn't.
+Required.Proto3.DurationProtoNanosWrongSign.JsonOutput # Should have failed to serialize, but didn't.
+Required.Proto3.DurationProtoNanosWrongSignNegativeSecs.JsonOutput # Should have failed to serialize, but didn't.
+Required.Proto3.TimestampProtoInputTooLarge.JsonOutput # Should have failed to serialize, but didn't.
+Required.Proto3.TimestampProtoInputTooSmall.JsonOutput # Should have failed to serialize, but didn't.
+Required.Proto3.TimestampProtoNanoTooLarge.JsonOutput # Should have failed to serialize, but didn't.
+Required.Proto3.TimestampProtoNegativeNanos.JsonOutput # Should have failed to serialize, but didn't.
+
+# Requests of the category JSON_IGNORE_UNKNOWN_PARSING_TEST, which asks a
+# parser to ignore unknown fields and unknown enum names. smock has no such
+# option: encode_json refuses them, as smock refuses them in a gRPC Stub's
+# reply.
+Recommended.Proto2.JsonInput.IgnoreUnknownEnumStringValueInMapPart.ProtobufOutput # Failed to parse input or produce output.
+Recommended.Proto2.JsonInput.IgnoreUnknownEnumStringValueInMapValue.ProtobufOutput # Failed to parse input or produce output.
+Recommended.Proto2.JsonInput.IgnoreUnknownEnumStringValueInOptionalField.ProtobufOutput # Failed to parse input or produce output.
+Recommended.Proto2.JsonInput.IgnoreUnknownEnumStringValueInRepeatedField.ProtobufOutput # Failed to parse input or produce output.
+Recommended.Proto2.JsonInput.IgnoreUnknownEnumStringValueInRepeatedPart.ProtobufOutput # Failed to parse input or produce output.
+Recommended.Proto3.JsonInput.IgnoreUnknownEnumStringValueInMapPart.ProtobufOutput # Failed to parse input or produce output.
+Recommended.Proto3.JsonInput.IgnoreUnknownEnumStringValueInMapValue.ProtobufOutput # Failed to parse input or produce output.
+Recommended.Proto3.JsonInput.IgnoreUnknownEnumStringValueInOptionalField.ProtobufOutput # Failed to parse input or produce output.
+Recommended.Proto3.JsonInput.IgnoreUnknownEnumStringValueInRepeatedField.ProtobufOutput # Failed to parse input or produce output.
+Recommended.Proto3.JsonInput.IgnoreUnknownEnumStringValueInRepeatedPart.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto2.JsonInput.IgnoreUnknownJsonFalse.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto2.JsonInput.IgnoreUnknownJsonNull.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto2.JsonInput.IgnoreUnknownJsonNumber.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto2.JsonInput.IgnoreUnknownJsonObject.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto2.JsonInput.IgnoreUnknownJsonString.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto2.JsonInput.IgnoreUnknownJsonTrue.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto3.JsonInput.IgnoreUnknownJsonFalse.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto3.JsonInput.IgnoreUnknownJsonNull.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto3.JsonInput.IgnoreUnknownJsonNumber.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto3.JsonInput.IgnoreUnknownJsonObject.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto3.JsonInput.IgnoreUnknownJsonString.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto3.JsonInput.IgnoreUnknownJsonTrue.ProtobufOutput # Failed to parse input or produce output.
+
+# Unknown fields: smock/protobuf skips them when it decodes a message, as
+# smock skips them in a request, so a message decoded and encoded again
+# loses them.
+Required.Proto2.ProtobufInput.UnknownOrdering.ProtobufOutput # Unknown field mismatch
+Required.Proto2.ProtobufInput.UnknownVarint.ProtobufOutput # Output was not equivalent to reference message: Expect: \250\037\001, but got:
+Required.Proto3.ProtobufInput.UnknownOrdering.ProtobufOutput # Unknown field mismatch
+Required.Proto3.ProtobufInput.UnknownVarint.ProtobufOutput # Output was not equivalent to reference message: Expect: \250\037\001, but got:
+
+# MessageSets, which smock/protobuf does not decode or encode: their
+# extensions use another wire form (spec F's FX2).
+Recommended.Proto2.ProtobufInput.ValidMessageSetEncoding.SubmessageEncoding.NotUnknown.ProtobufOutput # Failed to parse input or produce output.
+Recommended.Proto2.ProtobufInput.ValidMessageSetEncoding.SubmessageEncoding.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto2.ProtobufInput.MessageSetEncoding.UnknownExtension.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto2.ProtobufInput.ValidMessageSetEncoding.OutOfOrderGroupsEntries.ProtobufOutput # Failed to parse input or produce output.
+Required.Proto2.ProtobufInput.ValidMessageSetEncoding.ProtobufOutput # Failed to parse input or produce output.
+
+# A JSON object with a key twice: @json.parse keeps the last value, as
+# smock reads the JSON of a gRPC Stub's reply.
+Recommended.Proto2.JsonInput.FieldNameDuplicate # Should have failed to parse, but didn't.
+Recommended.Proto3.JsonInput.FieldNameDuplicate # Should have failed to parse, but didn't.
