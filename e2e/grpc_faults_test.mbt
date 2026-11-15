@@ -528,3 +528,142 @@ async test "a deadline that cuts a delay short comes before the Fault, which wou
     })
   })
 }
+
+///|
+/// The Mock `greeter`, the Default Mock, with the set, and two gRPC Stubs
+/// on SayHello with a partial Fault on a reply whose message is 150,000
+/// octets of `x`, a framed message of 150,009 octets: `big`, for calls with
+/// `x-fault: big`, at once, and `late-big`, for any other call, after a
+/// delay of 200 ms.
+fn big_partial() -> String {
+  let message = "x".repeat(150000)
+  (
+    $|mocks:
+    $|  - name: greeter
+    $|    grpc: { descriptorSet: greeter.binpb }
+    $|stubs:
+    $|  - id: big
+    $|    mock: greeter
+    $|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: big } }
+    $|    response: { json: { message: \{message} } }
+    $|    fault: { connection: { kind: partial } }
+    $|  - id: late-big
+    $|    mock: greeter
+    $|    request: { path: /helloworld.Greeter/SayHello }
+    $|    response: { json: { message: \{message} } }
+    $|    fault: { delay: { fixed: 200 }, connection: { kind: partial } }
+    $|
+  )
+}
+
+///|
+async test "the half of a framed message that a partial Fault sends, larger than the client's windows, goes out as the client widens them, at once or after a delay, then the reset" {
+  with_greeter_set([("greeter.yaml", big_partial())], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      let out = []
+      for case in [("at once", [("x-fault", "big")]), ("after its delay", [])] {
+        let (when, headers) = case
+        let reply = client.call("/helloworld.Greeter/SayHello", headers~)
+        let mut octets = 0
+        for data in reply.data {
+          octets += data.length()
+        }
+        // The prefix, flag 0 and the length 150,004, then the message's
+        // field 1, its tag and its length, 150,000, as a varint.
+        let first = hex(reply.data[0][0:9].to_owned())
+        out.push(
+          "\{when}: \{octets} octets, from \{first}, more than the initial window: \{reply.data.length() > 1}, then (\{reply.ended}): the client sees \{derived_status(reply)}",
+        )
+      }
+      inspect(
+        [..out, "Journal:", fault_answers(smock)].join("\n"),
+        content=(
+          #|at once: 75004 octets, from 00000249f40af09309, more than the initial window: true, then (reset INTERNAL_ERROR): the client sees INTERNAL
+          #|after its delay: 75004 octets, from 00000249f40af09309, more than the initial window: true, then (reset INTERNAL_ERROR): the client sees INTERNAL
+          #|Journal:
+          #|"big" 200 "OK" "partial"
+          #|"late-big" 200 "OK" "partial"
+        ),
+      )
+    })
+  })
+}
+
+///|
+/// The Mock `greeter`, the Default Mock, with the set, and two gRPC Stubs
+/// on SayHello with a partial Fault on a reply with the initial metadata
+/// `x-pad`: `padded`, for calls with `x-fault: padded`, with 2,000 octets
+/// of it, and `small`, for any other call, with 3.
+fn padded_partial() -> String {
+  (
+    $|mocks:
+    $|  - name: greeter
+    $|    grpc: { descriptorSet: greeter.binpb }
+    $|stubs:
+    $|  - id: padded
+    $|    mock: greeter
+    $|    request: { path: /helloworld.Greeter/SayHello, headers: { x-fault: padded } }
+    $|    response: { headers: { x-pad: \{"a".repeat(2000)} }, json: { message: Hello Tom } }
+    $|    fault: { connection: { kind: partial } }
+    $|  - id: small
+    $|    mock: greeter
+    $|    request: { path: /helloworld.Greeter/SayHello }
+    $|    response: { headers: { x-pad: aaa }, json: { message: Hello Tom } }
+    $|    fault: { connection: { kind: partial } }
+    $|
+  )
+}
+
+///|
+async test "a partial Fault's HEADERS too large for the SETTINGS_MAX_HEADER_LIST_SIZE the client advertised go out as smock's own, without the Stub's metadata or message, then the reset, and the entry records INTERNAL and why" {
+  with_greeter_set([("greeter.yaml", padded_partial())], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c(
+        settings=@http2.Settings::new(max_header_list_size=Some(1024)),
+      )
+      defer client.close()
+      let padded = client.call("/helloworld.Greeter/SayHello", headers=[
+        ("x-fault", "padded"),
+      ])
+      let small = client.call("/helloworld.Greeter/SayHello")
+      let (_, page) = smock.journal()
+      inspect(
+        [
+          "x-pad of 2000:",
+          padded.render(),
+          "the client sees \{derived_status(padded)}",
+          "x-pad of 3:",
+          small.render(),
+          "the client sees \{derived_status(small)}",
+          "Journal:",
+          answers(page),
+        ].join("\n"),
+        content=(
+          #|x-pad of 2000:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  smock-mock: greeter; via=default
+          #|  date: <now>
+          #|(reset INTERNAL_ERROR)
+          #|the client sees INTERNAL
+          #|x-pad of 3:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  x-pad: aaa
+          #|  smock-mock: greeter; via=default
+          #|  date: <now>
+          #|DATA 000000000b0a0948
+          #|(reset INTERNAL_ERROR)
+          #|the client sees INTERNAL
+          #|Journal:
+          #|"padded" 200 "INTERNAL" templateError={"at":"/response","message":"the reply's header block would take 2266 bytes, over the 1024 that the client allows in its SETTINGS_MAX_HEADER_LIST_SIZE"}
+          #|"small" 200 "OK"
+        ),
+      )
+    })
+  })
+}
