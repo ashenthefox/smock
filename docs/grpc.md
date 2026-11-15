@@ -24,6 +24,8 @@ Mock's `grpc` field and gRPC Stubs.
   - [The call's Mock](#the-calls-mock)
   - [Reloads](#reloads)
   - [The call the Stubs see](#the-call-the-stubs-see)
+  - [Request metadata](#request-metadata)
+  - [Sessions](#sessions)
   - [The request message as JSON](#the-request-message-as-json)
   - [Well-known types](#well-known-types)
   - [JSON values: Struct, Value, ListValue and NullValue](#json-values-struct-value-listvalue-and-nullvalue)
@@ -381,7 +383,8 @@ A gRPC Stub sees a call as a request:
 
 - the method is `POST`, and the path is the call's `:path`;
 - the headers are the call's metadata, every field, `content-type` and
-  `te` included;
+  `te` included, with `-bin` values unpadded
+  ([Request metadata](#request-metadata));
 - the body is the request message as compact JSON, with its fields in
   field-number order, each under its JSON name
   ([The request message as JSON](#the-request-message-as-json)). So the
@@ -404,6 +407,83 @@ request:
 
 The Journal, the Near miss, `bodyText` and templates see the same JSON,
 so `${body.name}` in a templated reply reads the message's `name`.
+
+### Request metadata
+
+A call's metadata reaches the Stubs as its headers, every field, none
+hidden. That includes the fields gRPC sets itself, such as
+`content-type`, `te`, `grpc-timeout` and `user-agent`. Each field line is
+one value, as on HTTP, so a name sent twice has two values. `headers`
+conditions and `header.NAME` in templates see every field, with names in
+lower case, as HTTP/2 sends them:
+
+```yaml
+request:
+  path: /helloworld.Greeter/SayHello
+  headers:
+    authorization: { pattern: "Bearer .+" }
+    x-tenant: acme
+response:
+  template: true
+  headers: { x-request-id: "${header.x-request-id ?? 'none'}" }
+  json: { message: Hello }
+```
+
+`header.NAME` gives a name's first value, and a condition holds when one
+of its values meets it. The Journal records the metadata as the entry's
+headers, in the order received
+([The Journal and the metrics](#the-journal-and-the-metrics)).
+
+Binary metadata, whose name ends with `-bin`, holds base64. gRPC lets a
+client send it with or without its padding, and a server must take both.
+smock takes the padding off, so padded and unpadded clients look alike:
+
+- A call's `-bin` value loses the `=` that end each comma-separated
+  element, and keeps the commas, since a proxy may join repeated fields
+  with them. So `AAE=` becomes `AAE`, and `AAA=,BBB=` becomes `AAA,BBB`.
+  smock never decodes these values, and does not check that they are
+  base64.
+- An exact `headers` condition on a `-bin` field of a gRPC Stub loses its
+  padding when the files load, in each element, inside `$not` too. So
+  `trace-bin: "AAE="` and `trace-bin: AAE` are the same condition, and
+  both meet calls that send `AAE=` or `AAE`.
+- A pattern condition sees the unpadded value, so write it without the
+  padding: `{ pattern: "[A-Za-z0-9+/]+" }` meets a value of one element,
+  whether the call sent it padded or not.
+- The Journal stores the unpadded value, and a Journal filter must give it
+  so: `{"headers": {"trace-bin": "AAE"}}` finds the calls that sent `AAE=`
+  or `AAE`, and `"AAE="` finds none of them. smock does not rewrite
+  filters, since they also meet HTTP requests, whose `-bin` headers it
+  stores as received.
+
+Only gRPC calls lose the padding. An HTTP request's `-bin` header, and an
+HTTP Stub's condition on one, stay as written.
+
+### Sessions
+
+A call carries its [Session](../README.md#sessions-and-ephemeral-stubs)
+in its `baggage` metadata, as an HTTP request carries it in its `baggage`
+header: in the `smock-session` member, or wherever `--session-header` and
+`--session-member` say. There is no key of gRPC's own. With grpcurl:
+
+```sh
+grpcurl -plaintext -protoset defs/files/greeter.binpb \
+  -H "baggage: smock-session=test-a" \
+  -d '{"name": "Tom"}' localhost:8080 helloworld.Greeter/SayHello
+```
+
+The Session scopes a call as it scopes an HTTP request: its
+[Ephemeral gRPC Stubs](#ephemeral-grpc-stubs), its state of each
+Scenario, its Variables, its copies of the Data buckets and its Journal.
+Each call reads its own metadata, so the calls of two Sessions on one
+channel keep their state and their Journal apart, as two tests that share
+a gRPC client do. An Admin API call names its Session the same way, so
+a test reads its own calls from the Journal:
+
+```sh
+curl -H "Authorization: Bearer change-me" -H "baggage: smock-session=test-a" \
+  -d '{}' localhost:9090/v1/journal/query
+```
 
 ### The request message as JSON
 
@@ -1016,7 +1096,8 @@ The Journal records each call that reaches the Stubs, matched or not, and
 each call answered from its HEADERS, with an empty body
 ([Calls answered from their HEADERS](#calls-answered-from-their-headers)).
 Its entry shows the method `POST`, the call's `:path` as its target, the
-version `HTTP/2`, the metadata as headers, and the request message as JSON
+version `HTTP/2`, the metadata as headers, `-bin` values unpadded
+([Request metadata](#request-metadata)), and the request message as JSON
 as its body. The body's `size` counts the octets the call's DATA frames
 brought, as received, and `truncated` says whether the JSON was cut at
 `--journal-body-limit`.
@@ -1031,7 +1112,8 @@ them: a client learns of an error from `grpc-status`, not from
 
 Journal queries, verification and the unmatched list take calls as they
 take HTTP requests. A filter gives the Mock, the method `POST`, the path
-that names the gRPC method, and metadata as headers:
+that names the gRPC method, and metadata as headers, `-bin` values
+without their padding, as the entries hold them:
 
 ```json
 {

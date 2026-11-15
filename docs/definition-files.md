@@ -6279,6 +6279,14 @@ compared once rewritten for the
 [warning about a Stub that can never match](#a-stub-that-can-never-match).
 The [gRPC guide](grpc.md#conditions-on-the-message) has more examples.
 
+A gRPC Stub's `headers` conditions read the call's metadata, every field.
+An exact condition on a field whose name ends with `-bin` loses its
+base64 padding when the files load, in each comma-separated element and
+inside `$not`, as a call's `-bin` values lose theirs when it arrives. So
+`trace-bin: "AAE="` meets calls that send `AAE=` or `AAE`. A pattern sees
+the unpadded value. An HTTP Stub's conditions stay as written
+([Request metadata](grpc.md#request-metadata)).
+
 ## Faults
 
 A Stub can inject Faults, to test how a client handles slow and failing
