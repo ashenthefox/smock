@@ -166,18 +166,22 @@ async test "a call the client cancels during a delay ends there with its entry a
           ),
         ]
       }
-      let cancel = (stream : Int32) => @http2.Frame::RstStream(
-        stream_id=stream,
-        error_code=@http2.error_cancel,
-      )
+      let cancel = (stream : Int32) => {
+        @http2.Frame::RstStream(
+          stream_id=stream,
+          error_code=@http2.error_cancel,
+        )
+      }
       let start = @async.now()
       // Each delay of 3000 ms outlasts every deadline but the first.
-      raw.send([
-        ..call(1, None),
-        ..call(3, Some("2S")),
-        ..call(5, Some("1S")),
-        ..call(7, Some("500m")),
-      ])
+      raw.send(
+        [
+          ..call(1, None),
+          ..call(3, Some("2S")),
+          ..call(5, Some("1S")),
+          ..call(7, Some("500m")),
+        ],
+      )
       // Well before the deadline of 3, which has 2 s.
       @async.sleep(300)
       raw.send([cancel(1), cancel(3)])
@@ -214,5 +218,82 @@ async test "a call the client cancels during a delay ends there with its entry a
         ),
       )
     })
+  })
+}
+
+///|
+async test "a delay shorter than the call's deadline is served, and so is a delay under 99999999H, which acts as no deadline; under a timeout of 0, a delayed call gets DEADLINE_EXCEEDED at once and frees its stream, and a call without a delay is served" {
+  let yaml =
+    #|mocks:
+    #|  - name: greeter
+    #|    grpc: { descriptorSet: greeter.binpb }
+    #|stubs:
+    #|  - id: at-once
+    #|    mock: greeter
+    #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-delay: none } }
+    #|    response: { json: { message: Hello Tom } }
+    #|  - id: slow
+    #|    mock: greeter
+    #|    request: { path: /helloworld.Greeter/SayHello }
+    #|    response: { json: { message: Hello Tom } }
+    #|    fault: { delay: { fixed: 400 } }
+  with_greeter_set([("greeter.yaml", yaml)], dir => {
+    // One stream at a time: each call needs the one before to have freed
+    // its stream.
+    let _ = with_smock(
+      ["--dir", dir, "--port", "0", "--http2-max-concurrent-streams", "1"],
+      smock => {
+        let client = smock.h2c()
+        defer client.close()
+        let out = []
+        let cases = [
+          ("5S", []),
+          ("99999999H", []),
+          ("0m", []),
+          ("0m", [("x-delay", "none")]),
+        ]
+        for timed in cases {
+          let (timeout, headers) = timed
+          let start = @async.now()
+          let reply = client.call(
+            "/helloworld.Greeter/SayHello",
+            headers=[("grpc-timeout", timeout), ..headers],
+          )
+          let ms = @async.now() - start
+          // A Trailers-Only answer carries its status in its HEADERS.
+          let last = match reply.trailers {
+            Some(trailers) => trailers
+            None => reply.head
+          }
+          let status = last
+            .filter(field => field.0.has_prefix("grpc-"))
+            .map(field => "\{field.0}: \{field.1}")
+            .join(", ")
+          let at_once = if headers.is_empty() {
+            " "
+          } else {
+            " x-delay: none, "
+          }
+          out.push(
+            "grpc-timeout \{timeout},\{at_once}\{reply.data.length()} message: \{status}, after 400 ms: \{ms >= 400}",
+          )
+        }
+        let (_, page) = smock.journal()
+        inspect(
+          [..out, "Journal:", answers(page)].join("\n"),
+          content=(
+            #|grpc-timeout 5S, 1 message: grpc-status: 0, after 400 ms: true
+            #|grpc-timeout 99999999H, 1 message: grpc-status: 0, after 400 ms: true
+            #|grpc-timeout 0m, 0 message: grpc-status: 4, grpc-message: deadline exceeded, after 400 ms: false
+            #|grpc-timeout 0m, x-delay: none, 1 message: grpc-status: 0, after 400 ms: false
+            #|Journal:
+            #|"slow" 200 "OK"
+            #|"slow" 200 "OK"
+            #|"slow" 200 "DEADLINE_EXCEEDED"
+            #|"at-once" 200 "OK"
+          ),
+        )
+      },
+    )
   })
 }
