@@ -2959,14 +2959,22 @@ and enum names of up to 40, for a call whose JSON smock parses once:
   the message: once for the conditions, which the Near miss shares, and
   once for the templates. It holds both sets of parsed values at once.
   So a call to a Stub that matches on the message and renders its reply
-  from it costs 1.5 to 1.9 times as much. That is up to about 22 MiB for
+  from it costs 1.5 to 1.9 times as much. That is up to about 24 MiB for
   the 32,768 values, and up to about 194 MiB for a message of 64 KiB. An
   HTTP request pays the same way when a condition and a template both
   read its JSON body.
-- A refused call costs the text printed before the bound, by the Mock's
-  names: up to 17 MiB for a message of 19 KB. A larger message's text
-  costs at most about 30 MiB at the default `--body-limit`: its buffer
-  at the limit, and the smaller buffers it grew from.
+- smock never parses the JSON of a refused call. Such a call costs the
+  text that smock printed before the bound, and the buffers that the
+  text grew through. The buffer starts at twice the message's size and
+  doubles as the text grows, up to `--body-limit`. At its peak, a call
+  may hold every buffer the text grew through. So the text costs up to
+  four times its size, and at most about three times `--body-limit`,
+  30 MiB by default. The example of
+  [The values a message may print](#the-values-a-message-may-print),
+  9,500 empty elements of 60 `int64` fields, costs 2.4 MiB. For empty
+  elements of 120 enum fields, with field names of 29 characters and
+  enum names of 40, a message of 2 KB costs up to 8 MiB, and one of
+  10 KB up to 20 MiB.
 - Near `--body-limit` the JSON's octets are the bound that counts. The
   JSON of a call may then cost hundreds of MiB once parsed, as the JSON
   body of an HTTP request of that size may, and more than 1 GiB when
