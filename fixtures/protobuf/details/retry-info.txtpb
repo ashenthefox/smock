@@ -1,0 +1,11 @@
+# UNAVAILABLE, with a RetryInfo whose retry_delay, a Duration, is 1.5 s.
+code: 14
+message: "try again"
+details {
+  [type.googleapis.com/google.rpc.RetryInfo] {
+    retry_delay {
+      seconds: 1
+      nanos: 500000000
+    }
+  }
+}
