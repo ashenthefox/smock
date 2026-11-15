@@ -349,7 +349,7 @@
           "additionalProperties": { "$ref": "#/$defs/valueCondition" }
         },
         "headers": {
-          "description": "Header fields, by name, each with a value condition. Names are compared case-insensitively. An exact string or a pattern holds when one of the header's values equals the string or matches the pattern as a whole, so it fails when the header is absent, and a repeated header matches when any of its values does. Each header field line is one value: a line that joins values with commas, such as `b, a`, matches only as a whole. `$not` and `$exists` are about the header as a whole instead, and may hold when it is absent: see valueCondition. Headers that are not listed are ignored.",
+          "description": "Header fields, by name, each with a value condition. Names are compared case-insensitively. An exact string or a pattern holds when one of the header's values equals the string or matches the pattern as a whole, so it fails when the header is absent, and a repeated header matches when any of its values does. Each header field line is one value: a line that joins values with commas, such as `b, a`, matches only as a whole. `$not` and `$exists` are about the header as a whole instead, and may hold when it is absent: see valueCondition. Headers that are not listed are ignored. On a gRPC Stub, they are the call's metadata, every field, and an exact value on a field whose name ends with -bin loses its base64 padding when the files load, in each comma-separated element, as a call's -bin values lose theirs.",
           "type": "object",
           "propertyNames": { "$ref": "#/$defs/headerName" },
           "additionalProperties": { "$ref": "#/$defs/valueCondition" }

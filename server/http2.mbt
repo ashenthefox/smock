@@ -165,6 +165,7 @@ async fn[S : @io.Reader + @io.Writer + ReadOutput] MockPorts::serve_http2(
       first_message: 0,
       waiting: Map([]),
       past_deadline: Map([]),
+      deadline_ended: [],
       blocked: Map([]),
       claimed: 0,
       window_deadline: forever,
@@ -297,6 +298,12 @@ priv struct H2Connection {
   /// the last `deadline_tolerance_ms` before its deadline ends it as
   /// DEADLINE_EXCEEDED (`reset_near_deadline`).
   past_deadline : Map[Int32, PastDeadline]
+  /// The gRPC calls smock ended at their deadlines with DEADLINE_EXCEEDED,
+  /// by stream, oldest first, until the client's reset of each arrives: at
+  /// most `max_concurrent_streams` of them (`ended_at_deadline`). The first
+  /// reset of each does not count among the frames that do no work
+  /// (`deadline_reset`).
+  deadline_ended : Array[Int32]
   /// The slow writes waiting for the client to widen a window, by stream,
   /// in the order they began to wait, which a `Map` keeps.
   blocked : Map[Int32, WindowWait]
@@ -714,6 +721,8 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
         if stream == self.continuing {
           self.continuing = 0
         }
+        // Whether the reset ends a gRPC call as DEADLINE_EXCEEDED.
+        let mut at_deadline = false
         if self.requests.contains(stream) {
           self.requests.remove(stream)
           self.end_stream()
@@ -721,11 +730,14 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
           // A gRPC call's entry records DEADLINE_EXCEEDED for a client
           // reset near its deadline before its task commits it.
           if remote {
-            self.reset_near_deadline(stream)
+            at_deadline = self.reset_near_deadline(stream)
           }
           self.stop_waiting(stream)
         }
-        if early && self.reset_early(octets) {
+        // A client that keeps deadlines resets each call at its own, so
+        // such a reset does not count. The stream is closed from here on,
+        // so a second reset of it counts among the frames that do no work.
+        if early && !at_deadline && self.reset_early(octets) {
           return false
         }
       }

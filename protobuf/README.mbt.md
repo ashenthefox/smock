@@ -275,10 +275,10 @@ test "find the file that defines a method, and send it without its source info" 
 
 ## Messages
 
-`@protobuf.decode_json(set, message, input)` decodes a message of the
-type `message`, a `MessageDescriptor` of `set`, into smock's decoded form:
-compact JSON text in UTF-8, with one member per field, in field-number
-order, under the field's JSON name, as `json_name` gives it.
+`@protobuf.decode_json(set, message, input, limit~)` decodes a message of
+the type `message`, a `MessageDescriptor` of `set`, into smock's decoded
+form: compact JSON text in UTF-8, with one member per field, in
+field-number order, under the field's JSON name, as `json_name` gives it.
 
 - 64-bit integers are JSON numbers, exact at any size, and so are 32-bit
   integers. A double is printed as `Double::to_string` prints it, and a
@@ -322,6 +322,19 @@ MessageSets, and raises its error for a message that is or has one. The
 well-known types print in their ProtoJSON forms
 ([below](#well-known-types)).
 
+The JSON is bounded by `limit`, in octets. It is counted as it is
+printed, and `decode_json` raises `TooLarge` as soon as it passes the
+limit. A field without presence prints at its default even in an empty
+message, so a list of empty messages of 2 octets each could otherwise
+print far more than the message it comes from. What the decoder holds
+meanwhile is bounded by `limit` too: a view of the input for each run of
+records of a repeated field that do not come together, each record of a
+message field after its first, and each map entry, until it has printed
+them. Messages as encoders write them need few. The decoder checks every
+length against the octets left before it reads the value, and checks and
+repairs UTF-8 with no copy. smock passes `--body-limit`, so a gRPC call
+costs no more than the largest JSON body an HTTP request may send.
+
 `set.encode_json(message, json)` encodes JSON, a message of the type
 `message`, a type of `set`, as ProtoJSON writes it, the way protoc encodes
 it: fields in field-number order, a field without presence left out at its
@@ -352,8 +365,25 @@ test "decode a message, and encode one" {
     b"\x0a\x48\x0a\x07a.proto\x12\x04demo\x22\x2f\x0a\x0cCountRequest\x12\x0d\x0a\x05shelf\x18\x01\x20\x01\x28\x09\x12\x10\x0a\x08in_stock\x18\x02\x20\x01\x28\x08\x62\x06proto3"[:],
   )
   let count = set.files[0].messages[0]
-  let json = @protobuf.decode_json(set, count, b"\x0a\x02A1\x10\x01"[:])
+  let json = @protobuf.decode_json(
+    set,
+    count,
+    b"\x0a\x02A1\x10\x01"[:],
+    limit=1024,
+  )
   inspect(@utf8.decode(json), content="{\"shelf\":\"A1\",\"inStock\":true}")
+  // Its JSON is 29 octets.
+  let too_large = try
+    @protobuf.decode_json(set, count, b"\x0a\x02A1\x10\x01"[:], limit=28)
+  catch {
+    error => error.to_string()
+  } noraise {
+    _ => "decoded"
+  }
+  inspect(
+    too_large,
+    content="the decoded message passes the limit of 28 octets",
+  )
   inspect(
     set.encode_json(count, { "in_stock": true, "shelf": "A1" }) ==
     b"\x0a\x02A1\x10\x01",
@@ -418,6 +448,7 @@ test "a Duration in its ProtoJSON form" {
     set,
     duration,
     b"\x08\x01\x10\x80\xca\xb5\xee\x01"[:],
+    limit=1024,
   )
   inspect(@utf8.decode(json), content="\"1.500s\"")
   inspect(

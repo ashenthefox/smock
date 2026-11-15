@@ -5980,7 +5980,7 @@ JSON Pointer, and so is a `method` other than `POST`:
 | `scenario`, `variables`, `dataWrites` | As on HTTP. |
 | `fault.seed` | As on HTTP. |
 | `fault.delay` | As on HTTP: it waits before the reply's HEADERS, and the call's deadline can cut it short ([Deadlines](grpc.md#deadlines)). |
-| `fault.connection` | Not served yet: a problem that says so. |
+| `fault.connection` | As on HTTP/2: `reset` and `partial` give the client INTERNAL, and `close` gives every call on the connection UNAVAILABLE ([Faults](grpc.md#faults)). |
 | `request.method` | May be left out. When given, it must be `POST`, since every gRPC call is a POST. |
 | `request.path` | The method's path, exact: `/`, the service's full name, `/` and the method's name. |
 | `request.headers` | Conditions on the call's metadata. |
@@ -6024,10 +6024,7 @@ may hold them for methods that no Stub uses:
 Every other type is served on both sides, with fields of every type:
 scalars, enums, nested messages, `optional` fields, repeated fields, maps,
 oneofs, and every well-known type, in its ProtoJSON form
-([Well-known types](grpc.md#well-known-types)). What a gRPC Stub can hold
-is limited for now in one way, a problem that says it is not served yet:
-
-- `fault.connection`, as the table above says.
+([Well-known types](grpc.md#well-known-types)).
 
 #### Ephemeral gRPC Stubs
 
@@ -6319,6 +6316,14 @@ compared once rewritten for the
 [warning about a Stub that can never match](#a-stub-that-can-never-match).
 The [gRPC guide](grpc.md#conditions-on-the-message) has more examples.
 
+A gRPC Stub's `headers` conditions read the call's metadata, every field.
+An exact condition on a field whose name ends with `-bin` loses its
+base64 padding when the files load, in each comma-separated element and
+inside `$not`, as a call's `-bin` values lose theirs when it arrives. So
+`trace-bin: "AAE="` meets calls that send `AAE=` or `AAE`. A pattern sees
+the unpadded value. An HTTP Stub's conditions stay as written
+([Request metadata](grpc.md#request-metadata)).
+
 ## Faults
 
 A Stub can inject Faults, to test how a client handles slow and failing
@@ -6400,6 +6405,11 @@ on its stream, or the connection for `close`
   resets the stream with RST_STREAM `INTERNAL_ERROR`. A response with no
   body to halve sends its HEADERS without ending the stream, then the
   reset.
+
+A gRPC call takes these HTTP/2 forms, with no `content-length`: `partial`
+sends the first half of the framed reply message. A gRPC client sees
+INTERNAL for `reset` and `partial`, and UNAVAILABLE for `close`, which
+ends every call on the connection ([Faults](grpc.md#faults)).
 
 `probability`, from 0 to 1, is the share of matched requests that fail;
 without it, every matched request fails. A Stub with both a delay and a

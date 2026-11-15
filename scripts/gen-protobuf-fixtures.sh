@@ -409,6 +409,13 @@ build_set "" annotated descriptor-file.binpb google/protobuf/descriptor.proto
 "$protoc" -I "$fixtures/health/grpc/health/v1" --descriptor_set_out="$(target "$fixtures/reflection/health-proto.binpb")" health.proto
 wrote "$fixtures/reflection/health-proto.binpb"
 
+# A type that holds itself through a message field, a group and a map's
+# values, for the decoder's bound on nesting, and a message of it.
+descriptor_set limits limits.binpb limits.proto
+message limits limits.proto limits.Burrow burrow
+hex_test limits/limits.binpb limits_set "The Descriptor set of fixtures/protobuf/limits/limits.proto, fixtures/protobuf/limits/limits.binpb, in hex." protobuf
+hex_test limits/burrow.binpb burrow "A Burrow that holds another in each way, as protoc encodes it: fixtures/protobuf/limits/burrow.binpb, in hex." protobuf
+
 # The end of the list of fixtures. With --check: every file the script
 # wrote, compared with the committed one.
 if [ -n "$check" ]; then
