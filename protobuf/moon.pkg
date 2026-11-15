@@ -12,3 +12,7 @@ import {
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/json",
 } for "test"
+
+import {
+  "moonbitlang/core/encoding/hex",
+} for "wbtest"

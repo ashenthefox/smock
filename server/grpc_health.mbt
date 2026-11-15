@@ -187,7 +187,11 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_health(
     limit=self.body_limit,
   ) catch {
     error => {
-      self.refuse_call(stream, decoding_refusal(error), ended=true)
+      self.refuse_call(
+        stream,
+        decoding_refusal(error, message.length()),
+        ended=true,
+      )
       return
     }
   }

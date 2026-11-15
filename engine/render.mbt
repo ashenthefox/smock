@@ -219,7 +219,8 @@ fn SampleRequest::to_request(self : SampleRequest) -> Request {
 ///
 /// Raises `InvalidSampleMessage` when the body is not JSON, is not a
 /// message of the input type, or is one whose JSON passes `body_limit`
-/// octets once decoded, as a call's would be refused.
+/// octets once decoded, or holds more values than a message of its
+/// encoded size may print, as a call's would be refused.
 fn SampleRequest::call_request(
   self : SampleRequest,
   stub : String,
@@ -253,6 +254,11 @@ fn SampleRequest::call_request(
       raise refused(
         "",
         "takes more than \{limit} octets as JSON once decoded, the body limit of a call's message (--body-limit)",
+      )
+    TooManyValues(limit~) =>
+      raise refused(
+        "",
+        "encodes to \{encoded.length()} octets and holds more than \{limit} values as JSON once decoded, the most for a call's message of that size",
       )
     DecodeError(message~, ..) => raise refused("", message)
   }

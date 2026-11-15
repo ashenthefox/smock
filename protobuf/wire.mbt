@@ -15,11 +15,16 @@ pub(all) suberror DecodeError {
   /// passes `limit` octets, the limit `decode_json` or
   /// `decode_canonical_json` was given.
   TooLarge(limit~ : Int32)
+  /// A message whose decoded JSON holds more than `limit` JSON values, the
+  /// most a message of its size may print.
+  TooManyValues(limit~ : Int32)
 }
 
 ///|
 /// Shows the error as `octet <n>: <message>`, or, for a message too large,
-/// as `the decoded message passes the limit of <limit> octets`.
+/// as `the decoded message passes the limit of <limit> octets`, or, for
+/// one that prints too many values, as `the decoded message holds more
+/// than <limit> values, the most for a message of its size`.
 pub impl Show for DecodeError with fn output(self, logger) {
   match self {
     DecodeError(position~, message~) =>
@@ -27,6 +32,10 @@ pub impl Show for DecodeError with fn output(self, logger) {
     TooLarge(limit~) =>
       logger.write_string(
         "the decoded message passes the limit of \{limit} octets",
+      )
+    TooManyValues(limit~) =>
+      logger.write_string(
+        "the decoded message holds more than \{limit} values, the most for a message of its size",
       )
   }
 }

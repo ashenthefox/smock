@@ -229,7 +229,8 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
   // A message that does not parse, that holds a value smock cannot print,
   // or that is or holds a value of a type of an editions file or a
   // MessageSet, does not decode, and neither does one whose decoded JSON
-  // passes the body limit as it is printed.
+  // passes the body limit as it is printed, or holds more values than a
+  // message of its size may print.
   let message = incoming.body[@grpc.prefix_length:]
   let json = @protobuf.decode_json(
     set,
@@ -238,7 +239,11 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
     limit=self.body_limit,
   ) catch {
     error => {
-      self.refuse_call(stream, decoding_refusal(error), ended=true)
+      self.refuse_call(
+        stream,
+        decoding_refusal(error, message.length()),
+        ended=true,
+      )
       return
     }
   }

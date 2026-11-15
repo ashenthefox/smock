@@ -264,3 +264,68 @@ async test "a sample made with GET and no gRPC content type still renders hello-
     ),
   )
 }
+
+///|
+/// Renders the gRPC Stub `load`, on wide.proto's Load, for a sample whose
+/// body is a Table of `rows` empty Rows, `{"rows":[{},{},...]}`, with
+/// `smock render` and with the Admin render operation of a smock serving
+/// the same directory. A rendering shows as `rendered`; a failure as the
+/// CLI's exit status and output, then the Admin API's status and body.
+async fn render_table(rows : Int32) -> String {
+  let yaml =
+    #|mocks:
+    #|  - name: tables
+    #|    default: true
+    #|    grpc: { descriptorSet: wide.binpb }
+    #|stubs:
+    #|  - id: load
+    #|    mock: tables
+    #|    request: { path: /wide.Tables/Load }
+    #|    response: { json: {} }
+  let mut out = ""
+  with_definitions([("tables.yaml", yaml)], dir => {
+    @fs.mkdir("\{dir}/files")
+    write_bytes(
+      dir,
+      "files/wide.binpb",
+      @fs.read_file("\{limits_dir}/wide.binpb").binary(),
+    )
+    let elements = Array::make(rows, "{}").join(",")
+    let sample = Json::object({
+      "method": "POST",
+      "path": "/wide.Tables/Load",
+      "body": Json::string("{\"rows\":[\{elements}]}"),
+    })
+    let file = "\{dir}/samples/table.json"
+    write(dir, "samples/table.json", sample.stringify())
+    let cli = render(["--dir", dir, "load", "--request", file])
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let admin = smock.render("load", sample=file)
+      out = if cli.has_prefix("status 0\n") && admin.status == 200 {
+        "rendered"
+      } else {
+        "\{cli}---\n\{admin.status}\n\{admin.body}"
+      }
+    })
+  })
+  out
+}
+
+///|
+async test "a sample whose message would hold more values as JSON than a call's message of its size may print fails the rendering as the call would be refused: smock render exits with status 1 and the Admin render answers 400 invalid_request, each with the octets the sample encodes to and the most it may hold; one row fewer renders" {
+  // An empty Row encodes to 2 octets and prints 61 values: 618 hold 37,701
+  // values where 1,236 octets may print 37,712, and 619 hold 37,762 where
+  // 1,238 octets may print 37,720.
+  inspect(render_table(618), content="rendered")
+  inspect(
+    render_table(619),
+    content=(
+      #|status 1
+      #|stderr:
+      #|smock render: the sample request's body must be a wide.Table as JSON, the message that the method of the gRPC Stub "load" takes: encodes to 1238 octets and holds more than 37720 values as JSON once decoded, the most for a call's message of that size
+      #|---
+      #|400
+      #|{"error":"invalid_request","message":"the sample request's body must be a wide.Table as JSON, the message that the method of the gRPC Stub \"load\" takes: encodes to 1238 octets and holds more than 37720 values as JSON once decoded, the most for a call's message of that size","warnings":[]}
+    ),
+  )
+}
