@@ -6217,7 +6217,7 @@ stubs:
   `reply metadata too large`, and the call's Journal entry says why in
   `templateError` ([Metadata size](grpc.md#metadata-size)).
 
-The [gRPC guide](grpc.md#metadata) shows the reply on the wire.
+The [gRPC guide](grpc.md#reply-metadata) shows the reply on the wire.
 
 ### gRPC error details
 
