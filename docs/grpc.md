@@ -1746,8 +1746,25 @@ A call that no gRPC Stub on its method matches gets UNIMPLEMENTED, the
 status gRPC servers give a method they do not serve. smock sends it as
 [Trailers-Only](#trailers-only): one HEADERS block that ends the stream,
 with `:status` 200, `content-type: application/grpc`, `grpc-status: 12`
-and the fixed `grpc-message` `no Stub matched`. With the quick start's Stub, a call with
-`{"name": "Ann"}` gets:
+and the fixed `grpc-message` `no Stub matched`. Take a lone Mock, which is
+the Default Mock, with one Stub for Tom:
+
+```yaml
+mocks:
+  - name: greeter
+    grpc:
+      descriptorSet: greeter.binpb
+stubs:
+  - id: hello
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello
+      body: { json: { name: Tom } }
+    response:
+      json: { message: Hello Tom }
+```
+
+A call with `{"name": "Ann"}` then gets:
 
 ```text
 :status: 200
@@ -1786,9 +1803,10 @@ wait for a timeout. Each case has its own fixed `grpc-message`:
 
 The answer is Trailers-Only, as for a call that no Stub matched. When the
 client is still sending its request, RST_STREAM `NO_ERROR` follows the
-answer and tells it to stop. So with the quick start's Mock and Stub, a
-call to `/helloworld.Greeter/SayGoodbye`, a method that helloworld.proto
-lacks, gets:
+answer and tells it to stop. So with the Mock and Stub of
+[Unmatched calls](#unmatched-calls), a call to
+`/helloworld.Greeter/SayGoodbye`, a method that helloworld.proto lacks,
+gets:
 
 ```text
 :status: 200
