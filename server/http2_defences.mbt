@@ -86,7 +86,10 @@ fn NoWorkFrames::count(self : NoWorkFrames, at : Int64) -> Bool {
 /// - a CONTINUATION frame with no octets that ends no header block;
 /// - a DATA, WINDOW_UPDATE or RST_STREAM frame on a stream already closed,
 ///   and HEADERS on a stream this side reset, which the `Conn` ignores, as
-///   the record of the client's streams (`StreamRecord`) tells them;
+///   the record of the client's streams (`StreamRecord`) tells them. The
+///   first RST_STREAM on a gRPC call that smock ended at its deadline with
+///   DEADLINE_EXCEEDED is the exception (`deadline_reset`): a client that
+///   keeps deadlines resets the call at its own;
 /// - a frame of a type RFC 9113 does not define, which is ignored.
 ///
 /// `frame` is the whole frame, its header included. It runs before
@@ -114,7 +117,7 @@ fn H2Connection::no_work(
       None
     }
   } else if ftype == @http2.frame_rst_stream {
-    if self.closed(head.stream_id) {
+    if self.closed(head.stream_id) && !self.deadline_reset(head.stream_id) {
       Some("RST_STREAM on a closed stream")
     } else {
       None
