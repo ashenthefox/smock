@@ -355,7 +355,7 @@ test "a gRPC Stub's method may be left out, and when given must be POST; a metho
 }
 
 ///|
-test "a gRPC Stub's connection Faults are not served yet, at their pointer, while its delay and its reply headers are" {
+test "a gRPC Stub serves every field that makes sense for gRPC: its delay, its connection Faults and its reply headers included" {
   inspect(
     check_stubs(
       (
@@ -373,7 +373,7 @@ test "a gRPC Stub's connection Faults are not served yet, at their pointer, whil
         #|    responses:
         #|      - { weight: 2, template: true, json: { message: "Hello ${body.name}" } }
         #|      - { json: {} }
-        #|  - id: not-served
+        #|  - id: faults
         #|    mock: greeter
         #|    fault: { delay: { fixed: 50 }, connection: { kind: reset, probability: 1 } }
         #|    request: { path: /helloworld.Greeter/SayHello }
@@ -381,7 +381,8 @@ test "a gRPC Stub's connection Faults are not served yet, at their pointer, whil
       ),
     ),
     content=(
-      #|a.yaml: /stubs/1/fault/connection: is not served on gRPC Stubs yet
+      #|greeter: served: gRPC Stub of SayHello
+      #|greeter: faults: gRPC Stub of SayHello
     ),
   )
 }

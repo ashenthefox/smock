@@ -112,7 +112,8 @@ pub struct JournalEntry {
   status : Int32?
   /// The gRPC status a gRPC call got: its plan's, or the one the server
   /// sets with `set_grpc_status` before it commits the entry. `None` for an
-  /// HTTP request.
+  /// HTTP request, and for a gRPC call that a connection Fault ended before
+  /// a status was written.
   mut grpc_status : @grpc.Status?
   /// The connection Fault injected instead of the response, if any.
   fault : @definitions.ConnectionKind?
@@ -321,9 +322,11 @@ fn Journal::entry(
     crud,
     near_miss,
     status,
+    // A call that a reset or close Fault ends gets no status, gRPC's no more
+    // than HTTP's.
     grpc_status: match plan.grpc {
-      Some(part) => Some(part.status)
-      None => None
+      Some(part) if status is Some(_) => Some(part.status)
+      _ => None
     },
     fault: plan.fault,
     template_error,
