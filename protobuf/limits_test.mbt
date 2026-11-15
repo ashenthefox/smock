@@ -570,6 +570,177 @@ test "the JSON is held to the limit after an Any's object too: a message that en
 }
 
 ///|
+/// How `decode_json` holds the JSON of `input`, a message of the type
+/// whose full name is `name` in `set`, to every limit from 0 to the JSON's
+/// size and two more: `held` when it raises `TooLarge` with each limit
+/// under the size, and prints the text that it prints with no limit with
+/// every other. Or else the first limit with which it does not, and what
+/// it does with it.
+fn swept(set : @protobuf.DescriptorSet, name : String, input : Bytes) -> String {
+  guard set.find_message(name) is Some(message) else {
+    abort("no message \{name}")
+  }
+  let whole = @protobuf.decode_json(set, message, input[:], limit=no_limit) catch {
+    err => return "error: \{err}"
+  }
+  for limit in 0..<=(whole.length() + 2) {
+    let outcome = try
+      @protobuf.decode_json(set, message, input[:], limit~)
+    catch {
+      TooLarge(limit=passed) => "refused at \{passed}"
+      err => "error: \{err}"
+    } noraise {
+      text =>
+        if text == whole {
+          "printed"
+        } else {
+          "printed otherwise, as \{text.length()} octets"
+        }
+    }
+    let wanted = if limit < whole.length() {
+      "refused at \{limit}"
+    } else {
+      "printed"
+    }
+    if outcome != wanted {
+      return "with the limit \{limit}, \{outcome}"
+    }
+  }
+  "held"
+}
+
+///|
+test "the JSON is held to every limit wherever an Any is printed: last, first and in the middle of its message, in a list, in a map and in another Any, with a message of no field, one with a field and a well-known type, in the first room made for the text or past it" {
+  let set = any_holders()
+  let url = (name : String) => "type.googleapis.com/\{name}"
+  // An F whose name is `name`.
+  let f = (name : Bytes) => {
+    nested(w => {
+      w.tag(1, Len)
+      w.length_delimited(name)
+    })
+  }
+  let empty = any_of(url("e.E"), b"")
+  let filled = any_of(url("e.F"), f(b"Tom"))
+  // 30 control characters, which the JSON prints with six octets each: a
+  // text that outgrows the room first made for it, twice the message and
+  // 16 octets.
+  let controls = repeated(b"\x01", 30)
+  let long = any_of(url("e.F"), f(controls))
+  let only = (any : Bytes) => nested(w => message_field(w, 1, any))
+  let last = (pad : Bytes, any : Bytes) => {
+    nested(w => {
+      w.tag(1, Len)
+      w.length_delimited(pad)
+      message_field(w, 2, any)
+    })
+  }
+  let first = (any : Bytes) => {
+    nested(w => {
+      message_field(w, 1, any)
+      string_field(w, 2, "p")
+    })
+  }
+  let middle = (any : Bytes) => {
+    nested(w => {
+      string_field(w, 1, "b")
+      message_field(w, 2, any)
+      string_field(w, 3, "a")
+    })
+  }
+  let list = (anys : Array[Bytes]) => {
+    nested(w => {
+      for any in anys {
+        message_field(w, 1, any)
+      }
+    })
+  }
+  let map = (entries : Array[(String, Bytes)]) => {
+    nested(w => {
+      for entry in entries {
+        message_field(
+          w,
+          1,
+          nested(e => {
+            string_field(e, 1, entry.0)
+            message_field(e, 2, entry.1)
+          }),
+        )
+      }
+    })
+  }
+  let cases : Array[(String, Bytes)] = [
+    // The Any alone, last, first and in the middle of its message.
+    ("e.Only", only(empty)),
+    ("e.Only", only(filled)),
+    ("e.Last", last(b"p", empty)),
+    ("e.Last", last(b"p", filled)),
+    ("e.First", first(empty)),
+    ("e.First", first(filled)),
+    ("e.Middle", middle(empty)),
+    ("e.Middle", middle(filled)),
+    // In a repeated field, and as a map's values, under keys long enough
+    // for the JSON to take more than what is held to print the map.
+    ("e.List", list([empty, filled, empty])),
+    ("e.Map", map([("k".repeat(80), empty), ("l".repeat(80), filled)])),
+    // An Any in an Any, printed as its `value`, and one in the message
+    // that an Any holds, both with their braces to come off.
+    ("google.protobuf.Any", any_of(url("google.protobuf.Any"), empty)),
+    ("google.protobuf.Any", any_of(url("e.Only"), only(empty))),
+    ("google.protobuf.Any", any_of(url("e.Middle"), middle(filled))),
+    // A well-known type, printed as `value`.
+    (
+      "e.Last",
+      last(
+        b"p",
+        any_of(
+          url("google.protobuf.Duration"),
+          seconds_and_nanos(1, 500_000_000),
+        ),
+      ),
+    ),
+    // Texts that outgrow their first room: before an Any that ends the
+    // message, in an Any, and in an Any that another holds in a list.
+    ("e.Last", last(controls, empty)),
+    ("e.Last", last(b"p", long)),
+    ("e.List", list([any_of(url("e.Only"), only(long)), empty])),
+  ]
+  let out = []
+  for case in cases {
+    let (name, input) = case
+    let text = bounded_in(set, name, input, limit=no_limit)
+    let shown = if text.length() > 100 {
+      "\{name}, \{text.length()} octets"
+    } else {
+      text
+    }
+    out.push("\{swept(set, name, input)}: \{shown}")
+  }
+  inspect(
+    out.join("\n"),
+    content=(
+      #|held: {"a":{"@type":"type.googleapis.com/e.E"}}
+      #|held: {"a":{"@type":"type.googleapis.com/e.F","name":"Tom"}}
+      #|held: {"pad":"p","a":{"@type":"type.googleapis.com/e.E"}}
+      #|held: {"pad":"p","a":{"@type":"type.googleapis.com/e.F","name":"Tom"}}
+      #|held: {"a":{"@type":"type.googleapis.com/e.E"},"pad":"p"}
+      #|held: {"a":{"@type":"type.googleapis.com/e.F","name":"Tom"},"pad":"p"}
+      #|held: {"before":"b","a":{"@type":"type.googleapis.com/e.E"},"after":"a"}
+      #|held: {"before":"b","a":{"@type":"type.googleapis.com/e.F","name":"Tom"},"after":"a"}
+      #|held: e.List, 132 octets
+      #|held: e.Map, 262 octets
+      #|held: {"@type":"type.googleapis.com/google.protobuf.Any","value":{"@type":"type.googleapis.com/e.E"}}
+      #|held: {"@type":"type.googleapis.com/e.Only","a":{"@type":"type.googleapis.com/e.E"}}
+      #|held: google.protobuf.Any, 118 octets
+      #|held: {"pad":"p","a":{"@type":"type.googleapis.com/google.protobuf.Duration","value":"1.500s"}}
+      #|held: e.Last, 230 octets
+      #|held: e.Last, 241 octets
+      #|held: e.List, 316 octets
+    ),
+  )
+}
+
+///|
 test "a length that runs past its message, or past the message that holds it, makes the message not parse, at any level and before anything is allocated for it" {
   let past = [
     // A Burrow's name: 5 octets announced, 1 sent.
