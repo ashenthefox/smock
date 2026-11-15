@@ -2896,8 +2896,9 @@ of the message ([The decoder's limits](#the-decoders-limits)).
 ### The decoder's limits
 
 A small message can ask a decoder for far more than its size. smock
-bounds what decoding a call's message may cost, so that a gRPC call costs
-no more than the largest JSON body an HTTP request may send:
+bounds what decoding a call's message may cost, so that its JSON, once
+decoded, costs no more than the largest JSON body an HTTP request may
+send:
 
 - **Nesting.** Messages may nest 100 deep. That is the default of
   protobuf's C++ and Java parsers. Each nested message is a level, and so

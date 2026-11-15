@@ -336,8 +336,9 @@ records of a repeated field that do not come together, each record of a
 message field after its first, and each map entry, until it has printed
 them. Messages as encoders write them need few. The decoder checks every
 length against the octets left before it reads the value, and checks and
-repairs UTF-8 with no copy. smock passes `--body-limit`, so a gRPC call
-costs no more than the largest JSON body an HTTP request may send.
+repairs UTF-8 with no copy. smock passes `--body-limit`, so the JSON of a
+gRPC call, once decoded, costs no more than the largest JSON body an HTTP
+request may send.
 
 The JSON values it prints are bounded too, by the size of the input:
 32,768 values, and 4 more for each octet. A value is every JSON value of
