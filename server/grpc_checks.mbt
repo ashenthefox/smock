@@ -15,7 +15,9 @@
 // then each message's prefix as soon as it arrives, by the length it
 // announces, then by its flag (`H2Connection::check_messages`). Once the
 // request has ended, its framing: a request that ends inside a prefix or
-// a message, and one with no message or several (`check_end`).
+// a message, and one with no message or several (`check_end`). Then its
+// message, as it is decoded: one that does not parse, and one whose
+// decoded JSON passes `--body-limit` (`decoding_refusal`).
 
 ///|
 /// Why smock refuses a gRPC call, and so how it answers it.
@@ -49,6 +51,9 @@ priv enum CallRefusal {
   SeveralMessages
   /// A message that does not parse, or that smock cannot print: INTERNAL.
   Undecodable
+  /// A message whose decoded JSON passes `--body-limit` as it is printed:
+  /// RESOURCE_EXHAUSTED.
+  DecodedOverBodyLimit
 }
 
 ///|
@@ -74,7 +79,7 @@ fn CallRefusal::status(self : CallRefusal) -> @grpc.Status {
     | Undecodable => Internal
     UnservedSubtype | Compressed(_) | NoMessage | SeveralMessages =>
       Unimplemented
-    OverBodyLimit => ResourceExhausted
+    OverBodyLimit | DecodedOverBodyLimit => ResourceExhausted
   }
 }
 
@@ -96,6 +101,7 @@ fn CallRefusal::message(self : CallRefusal) -> String {
     NoMessage => "the request has no message"
     SeveralMessages => "the request has more than one message"
     Undecodable => "the request message cannot be decoded"
+    DecodedOverBodyLimit => "the decoded request message is over the body limit"
   }
 }
 
@@ -222,5 +228,16 @@ fn check_end(deframer : @grpc.Deframer) -> CallRefusal? {
     Whole(messages=0) => Some(NoMessage)
     Whole(messages=1) => None
     Whole(..) => Some(SeveralMessages)
+  }
+}
+
+///|
+/// The refusal of a call whose message did not decode with `error`: a
+/// message whose decoded JSON passed `--body-limit`, or else one that does
+/// not parse, or that smock cannot print.
+fn decoding_refusal(error : Error) -> CallRefusal {
+  match error {
+    @protobuf.TooLarge(..) => DecodedOverBodyLimit
+    _ => Undecodable
   }
 }

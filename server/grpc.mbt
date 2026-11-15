@@ -204,11 +204,17 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
     return
   }
   // A message that does not parse, or whose type has a field that smock
-  // does not decode yet, does not decode.
+  // does not decode yet, does not decode, and neither does one whose
+  // decoded JSON passes the body limit as it is printed.
   let message = incoming.body[@grpc.prefix_length:]
-  let json = @protobuf.decode_json(set, set.input_of(rpc), message) catch {
-    _ => {
-      self.refuse_call(stream, Undecodable, ended=true)
+  let json = @protobuf.decode_json(
+    set,
+    set.input_of(rpc),
+    message,
+    limit=self.body_limit,
+  ) catch {
+    error => {
+      self.refuse_call(stream, decoding_refusal(error), ended=true)
       return
     }
   }

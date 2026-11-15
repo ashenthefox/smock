@@ -54,6 +54,7 @@ Mock's `grpc` field and gRPC Stubs.
   - [The order of the checks](#the-order-of-the-checks)
   - [Timeouts](#timeouts)
   - [The body limit](#the-body-limit)
+  - [The decoder's limits](#the-decoders-limits)
 - [Compression](#compression)
 - [Faults](#faults)
 - [Calls smock does not serve yet](#calls-smock-does-not-serve-yet)
@@ -1866,6 +1867,7 @@ malformed `grpc-timeout`. Both carry `grpc-status: 13` (INTERNAL).
 | The request has no message | at the end | 200 | UNIMPLEMENTED | `the request has no message` |
 | The request has more than one message | at the end | 200 | UNIMPLEMENTED | `the request has more than one message` |
 | Its message does not parse, or holds a value that smock cannot print | at the end | 200 | INTERNAL | `the request message cannot be decoded` |
+| Its message's JSON passes `--body-limit` as smock prints it ([The decoder's limits](#the-decoders-limits)) | at the end, as soon as it shows | 200 | RESOURCE_EXHAUSTED | `the decoded request message is over the body limit` |
 
 A message is the 5-octet prefix, a flag and a length, then the octets
 the length announces. A message of zero octets, `00 00 00 00 00`, is one
@@ -1878,8 +1880,9 @@ A message does not parse, as protobuf's parsers refuse it, when it holds a
 proto3 string that is not UTF-8, field number 0 or one above 2^29-1, wire
 type 6 or 7, a varint, a fixed-size value or a length cut short, a packed
 field included, a group whose end tag names another field or that it ends
-inside, or messages nested deeper than 100, each map entry and each group
-counting as a message, or when it lacks a proto2 required field
+inside, or messages nested deeper than 100
+([The decoder's limits](#the-decoders-limits)), or when it lacks a proto2
+required field
 ([proto2 types](#proto2-types)). smock cannot print a Timestamp, a
 Duration or a FieldMask path out of its range or form
 ([Well-known types](#well-known-types)), a Value that holds no value, NaN
@@ -1961,14 +1964,59 @@ excess shows, before it reads the rest:
 - on a DATA frame, when the octets received pass the limit. smock keeps
   none of them.
 
-So with `--body-limit 10`, a call whose framed message takes 10 octets is
-served, and a prefix that announces 6 octets gets RESOURCE_EXHAUSTED at
-once, then RST_STREAM `NO_ERROR`.
+So with `--body-limit 32`, a call whose framed message takes 32 octets
+passes, and a prefix that announces 28 octets gets RESOURCE_EXHAUSTED at
+once, then RST_STREAM `NO_ERROR`. The message's JSON must fit within the
+limit too, so a small limit refuses messages that a body of its size can
+hold ([The decoder's limits](#the-decoders-limits)).
 
 `--header-size-limit` bounds a call's header list, as it bounds an HTTP
 request's, and also each block of a reply's metadata: a reply over it, or
 over the client's own limit, gets INTERNAL `reply metadata too large`
 ([Metadata size](#metadata-size)).
+
+`--body-limit` also bounds the JSON that smock decodes a message into
+([The decoder's limits](#the-decoders-limits)).
+
+### The decoder's limits
+
+A small message can ask a decoder for far more than its size. smock
+bounds what decoding a call's message may cost, so that a gRPC call costs
+no more than the largest JSON body an HTTP request may send:
+
+- **Nesting.** Messages may nest 100 deep, the default of protobuf's C++
+  and Java parsers. Each nested message is a level, and so is each group,
+  each map entry and the message an Any holds. So each object in a Struct
+  takes three levels, for the Struct, its entry and the Value, and each
+  list in a Value takes two, for the ListValue and the Value. A message
+  nested deeper does not parse, and gets INTERNAL.
+- **Lengths.** smock checks every length against the octets left before
+  it reads the value, and allocates nothing for a length it has not
+  checked. A length that runs past its message, or past the message that
+  holds it, makes the message not parse, and gets INTERNAL.
+- **The JSON.** smock counts the JSON as it prints it, and stops as soon
+  as the JSON passes `--body-limit`: the call gets RESOURCE_EXHAUSTED
+  `the decoded request message is over the body limit`. A field without
+  presence prints at its default, so an empty element of a list of
+  messages, 2 octets, prints every field of its type. Without the limit,
+  a 10 MiB message could print gigabytes.
+- **What smock holds to print it.** smock keeps a note of each place in
+  the message where the records of a list do not follow the list's last
+  ones, of each record of a message field after its first, and of each
+  map entry, until it has printed the message that holds them. It counts
+  48 octets for a note, 64 for a map entry, and 48 more for a map entry
+  with a string key, and these too may take at most `--body-limit`. A
+  message as clients encode it needs few such notes. One of 10 MiB whose
+  records alternate between two lists gets RESOURCE_EXHAUSTED.
+
+So a call holds its message once as it came, and once as JSON, each
+within `--body-limit`. For example, a message of 10 MiB of empty `Item`s
+in a `repeated Item items`, where an `Item` has a string, a list and a
+map, would print 160 MiB of JSON. smock answers RESOURCE_EXHAUSTED once
+the JSON passes 10 MiB, in well under a second. Such a call, like an
+HTTP request with a body of 10 MiB, holds tens of MiB at once. For a
+small Pod, lower `--body-limit`
+([Limits and timeouts](http2.md#limits-and-timeouts)).
 
 ## Compression
 

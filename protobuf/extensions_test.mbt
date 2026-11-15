@@ -255,7 +255,7 @@ test "an extension follows the syntax of the file that declares it: one of a pro
   let set = proto3_extensions()
   guard set.find_message("p.Order") is Some(order) else { fail("no Order") }
   let decoded = (input : Bytes) => {
-    @utf8.decode(@protobuf.decode_json(set, order, input[:])) catch {
+    @utf8.decode(@protobuf.decode_json(set, order, input[:], limit=no_limit)) catch {
       err => "error: \{err}"
     }
   }
@@ -341,7 +341,7 @@ test "groups count as messages toward the depth of 100, decoded and encoded" {
     out.to_bytes()
   }
   let decoded = (input : Bytes) => {
-    @utf8.decode(@protobuf.decode_json(set, g, input[:])) catch {
+    @utf8.decode(@protobuf.decode_json(set, g, input[:], limit=no_limit)) catch {
       err => "error: \{err}"
     }
   }
