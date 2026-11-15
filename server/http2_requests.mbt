@@ -362,17 +362,20 @@ fn H2Request::without_body(self : H2Request) -> @engine.Request {
 /// once its HEADERS have arrived: `:method` is the method, `:path` the
 /// target as sent (`:authority` for a CONNECT), the version `HTTP/2`, and
 /// the headers the regular fields; pseudo-header fields are not among them.
-/// `authority` goes to the engine beside it.
+/// `authority` goes to the engine beside it. A body that came in several
+/// DATA frames is joined into one, and the buffer that held them is let
+/// go, so that the request holds its body once while the engine, or the
+/// gRPC layer's decoder, works on it.
 fn H2Request::to_engine(self : H2Request) -> @engine.Request {
-  let body = match self.parts {
-    Some(parts) => parts.to_bytes()
-    None => self.body
+  if self.parts is Some(parts) {
+    self.body = parts.to_bytes()
+    self.parts = None
   }
   {
     meth: self.meth,
     target: self.target,
     version: "HTTP/2",
     headers: self.headers,
-    body,
+    body: self.body,
   }
 }

@@ -178,8 +178,8 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_health(
     message,
     limit=self.body_limit,
   ) catch {
-    _ => {
-      self.refuse_call(stream, Undecodable, ended=true)
+    error => {
+      self.refuse_call(stream, decoding_refusal(error), ended=true)
       return
     }
   }
