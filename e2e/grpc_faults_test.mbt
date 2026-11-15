@@ -133,6 +133,58 @@ async test "the ticket's example: a gRPC Stub with a reset Fault makes the clien
 }
 
 ///|
+async test "a reset Fault reads the whole call, its message split over DATA frames included, then resets its stream alone with RST_STREAM INTERNAL_ERROR, while another call on the connection is answered" {
+  with_greeter_set([("greeter.yaml", reset_greeter)], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let raw = smock.raw_h2()
+      defer raw.close()
+      let hello = framed(@fs.read_file(hello_request_path).binary())
+      let out = []
+      // Half the message: smock waits for the rest, and answers another
+      // call meanwhile.
+      raw.send(
+        [
+          headers_frame(
+            1,
+            raw.block(checked_call("POST", more=[("x-fault", "reset")])),
+            end_stream=false,
+          ),
+          Data(
+            stream_id=1,
+            data=hello[0:5].to_owned(),
+            end_stream=false,
+            padding=0,
+          ),
+          ..raw.hello_call(3),
+          fence,
+        ],
+      )
+      out.push(raw.frames_until_ping_ack())
+      out.push("--- the rest of the message")
+      raw.send([
+        Data(stream_id=1, data=hello[5:].to_owned(), end_stream=true, padding=0),
+      ])
+      out.push(raw.frames_until_stream_ends(1))
+      inspect(
+        [..out, "Journal:", fault_answers(smock)].join("\n"),
+        content=(
+          #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
+          #|SETTINGS ACK
+          #|HEADERS 3 END_HEADERS [:status: 200, content-type: application/grpc, smock-mock: greeter; via=default, date: <now>]
+          #|DATA 3 16 octets
+          #|HEADERS 3 END_STREAM END_HEADERS [grpc-status: 0]
+          #|--- the rest of the message
+          #|RST_STREAM 1 INTERNAL_ERROR
+          #|Journal:
+          #|"hello" 200 "OK" null
+          #|"broken" null - "reset"
+        ),
+      )
+    })
+  })
+}
+
+///|
 /// The Mock `greeter`, the Default Mock, with the set, and gRPC Stubs on
 /// SayHello with a partial Fault, one for each value of the call's
 /// `x-fault`: an OK reply (`partial`), an OK reply with an empty message
