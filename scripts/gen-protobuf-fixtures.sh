@@ -390,6 +390,25 @@ for name in error-info retry-info bad-request several; do
   hex_test "details/$name.binpb" "$(echo "$name" | tr - _)_status" "The google.rpc.Status of fixtures/protobuf/details/$name.txtpb, as protoc encodes it, in hex." protobuf
 done
 
+# gRPC's reflection.proto, whose messages the tests of a Mock's built-in
+# reflection service send and expect: requests, and their replies. A reply
+# that carries files has an empty file_descriptor_response, which the
+# tests fill with the files of the sets below, each a set of one file
+# without source info, as reflection sends files: annotated.proto alone,
+# protobuf's descriptor.proto alone, and gRPC's health.proto built from its
+# own directory, so that the set names it health.proto.
+reflection_requests="list by-filename by-symbol by-extension extension-numbers health-symbol health-filename missing-file missing-symbol missing-extension missing-type"
+for name in $reflection_requests; do
+  message reflection grpc/reflection/v1/reflection.proto grpc.reflection.v1.ServerReflectionRequest "$name"
+done
+for name in $reflection_requests nothing list-health health-filename-missing; do
+  message reflection grpc/reflection/v1/reflection.proto grpc.reflection.v1.ServerReflectionResponse "$name-reply"
+done
+build_set "" annotated annotated-file.binpb annotated.proto
+build_set "" annotated descriptor-file.binpb google/protobuf/descriptor.proto
+"$protoc" -I "$fixtures/health/grpc/health/v1" --descriptor_set_out="$(target "$fixtures/reflection/health-proto.binpb")" health.proto
+wrote "$fixtures/reflection/health-proto.binpb"
+
 # The end of the list of fixtures. With --check: every file the script
 # wrote, compared with the committed one.
 if [ -n "$check" ]; then
