@@ -1,0 +1,10 @@
+mocks:
+  - name: greeter
+    hosts: [greeter.svc]
+    grpc:
+      descriptorSet: greeter.binpb
+      health: true
+  - name: probed
+    hosts: [probed.svc]
+    grpc:
+      health: true
