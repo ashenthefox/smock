@@ -1,0 +1,9 @@
+valid_host: "reflected.svc"
+original_request {
+  file_containing_extension {
+    containing_type: "google.protobuf.FieldOptions"
+    extension_number: 50000
+  }
+}
+# The files, which the tests add.
+file_descriptor_response {}

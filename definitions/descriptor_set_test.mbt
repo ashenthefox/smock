@@ -60,14 +60,15 @@ test "a Mock's grpc.descriptorSet names a Descriptor set in the body-file subdir
 }
 
 ///|
-test "grpc is a closed object whose descriptorSet is a string and health a boolean" {
+test "grpc is a closed object whose descriptorSet is a string, and health and reflection booleans" {
   inspect(
     mock_sets(
       (
         #|[{ "name": "a", "grpc": "greeter.binpb" },
         #| { "name": "b", "grpc": { "health": "yes" } },
         #| { "name": "c", "grpc": { "descriptorSet": 1 } },
-        #| { "name": "d", "grpc": { "descriptorSet": "a.binpb", "reflection": true } }]
+        #| { "name": "d", "grpc": { "descriptorSet": "a.binpb", "streaming": true } },
+        #| { "name": "e", "grpc": { "descriptorSet": "a.binpb", "reflection": "true" } }]
       ),
       body_files=[("a.binpb", one_file_set)],
     ),
@@ -75,7 +76,45 @@ test "grpc is a closed object whose descriptorSet is a string and health a boole
       #|a.json: /mocks/0/grpc: must be an object
       #|a.json: /mocks/1/grpc/health: must be true or false
       #|a.json: /mocks/2/grpc/descriptorSet: must be a string
-      #|a.json: /mocks/3/grpc/reflection: is not a known field
+      #|a.json: /mocks/3/grpc/streaming: is not a known field
+      #|a.json: /mocks/4/grpc/reflection: must be true or false
+    ),
+  )
+}
+
+///|
+test "grpc.reflection, false by default, makes the Mock keep each file of its set as the set encodes it, without its source info, and a Mock without it keeps none" {
+  // a.proto, with source info, field 9, after its name.
+  let with_source_info = b"\x0a\x0d\x0a\x07a.proto\x4a\x02\x0a\x00"
+  let snapshot = load_mocks(
+    (
+      #|[{ "name": "a", "grpc": { "reflection": true, "descriptorSet": "a.binpb" } },
+      #| { "name": "b", "grpc": { "descriptorSet": "a.binpb", "reflection": false } },
+      #| { "name": "c", "grpc": { "descriptorSet": "a.binpb" } },
+      #| { "name": "d", "grpc": { "reflection": true } },
+      #| { "name": "e" }]
+    ),
+    body_files=[("a.binpb", with_source_info)],
+  ).unwrap()
+  inspect(
+    snapshot.mocks
+    .iter()
+    .map(mock => {
+      let kept = match mock.reflection {
+        Some(files) =>
+          "reflection, files [\{files.iter().map(file => @hex.encode(file)).collect().join(", ")}]"
+        None => "no reflection"
+      }
+      "\{mock.name}: \{kept}"
+    })
+    .collect()
+    .join("\n"),
+    content=(
+      #|a: reflection, files [0a07612e70726f746f]
+      #|b: no reflection
+      #|c: no reflection
+      #|d: reflection, files []
+      #|e: no reflection
     ),
   )
 }

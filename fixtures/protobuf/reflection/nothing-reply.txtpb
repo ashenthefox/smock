@@ -1,0 +1,6 @@
+valid_host: "reflected.svc"
+original_request {}
+error_response {
+  error_code: 3
+  error_message: "the request asks for nothing"
+}

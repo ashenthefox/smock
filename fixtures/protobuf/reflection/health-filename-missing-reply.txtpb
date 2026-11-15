@@ -1,0 +1,8 @@
+valid_host: "reflected.svc"
+original_request {
+  file_by_filename: "grpc/health/v1/health.proto"
+}
+error_response {
+  error_code: 5
+  error_message: "file not found: grpc/health/v1/health.proto"
+}

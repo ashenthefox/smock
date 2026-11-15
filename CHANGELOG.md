@@ -434,6 +434,21 @@ of each GitHub release include its section
   hold it, and `descriptorSet` may now be left out of `grpc`. smock's own
   probes stay on the admin port's `/readyz`. See
   [Health](docs/grpc.md#health).
+- A Mock's built-in server reflection. With `grpc: { reflection: true }`,
+  a Mock answers gRPC's `grpc.reflection.v1` and `grpc.reflection.v1alpha`,
+  so grpcurl and Postman can list and describe its services without a
+  local copy of its set: `list_services`, `file_by_filename`,
+  `file_containing_symbol`, `file_containing_extension` and
+  `all_extension_numbers_of_type`, from the Mock's set, each file with
+  the files it imports, as the set holds them but without source info;
+  a name the set lacks gets NOT_FOUND. With `health` on, it lists the
+  health service too, from the descriptor smock embeds unless the set
+  defines `grpc.health.v1`. It answers one request per call, once the
+  request's message is whole, then resets the stream with NO_ERROR if
+  the client still sends. Reflection answers are not journaled, and count
+  under their Mock with `stub=""`. A Mock with reflection on keeps its
+  set's files as encoded, beside the set's model. See
+  [Reflection](docs/grpc.md#reflection).
 
 ### Changed
 
