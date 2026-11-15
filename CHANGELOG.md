@@ -205,7 +205,7 @@ of each GitHub release include its section
   `smock/protobuf` decodes and encodes messages. See [gRPC](docs/grpc.md).
 - `grpcStatus` in the Journal. A gRPC call's entry records the name of the
   gRPC status the call got, such as `OK` or `UNIMPLEMENTED`, beside its
-  HTTP status, which is 200 for a reply and for an unmatched call. An HTTP
+  HTTP status, which is 200 for every answer smock sends a call. An HTTP
   request's entry has none. Queries,
   verification and the unmatched list take calls by their Mock, `POST`,
   the method's path and their metadata as headers. See
@@ -449,6 +449,20 @@ of each GitHub release include its section
   under their Mock with `stub=""`. A Mock with reflection on keeps its
   set's files as encoded, beside the set's model. See
   [Reflection](docs/grpc.md#reflection).
+- State over gRPC. gRPC Stubs require and move Scenarios, read and write
+  Variables and Data buckets, and pick one of their weighted `responses`
+  for each call, as HTTP Stubs do. A Mock's HTTP requests and gRPC calls
+  share its state: an item a call writes, a CRUD Stub's GET reads over
+  HTTP, and one an HTTP request creates, a call reads. smock's own HTTP
+  answers never reach a gRPC call. A gRPC Stub whose template fails, a
+  `variables` value or a `dataWrites` key or value included, gets
+  Trailers-Only INTERNAL `template failed`; one whose data write cannot be
+  applied, INTERNAL `data write failed`; and one whose writes would pass
+  the state bound, RESOURCE_EXHAUSTED `state limit reached` instead of
+  507. Each is journaled with the HTTP status 200, its `grpcStatus`, and
+  `templateError` or `dataError` as on HTTP. See
+  [State over gRPC](docs/grpc.md#state-over-grpc) and
+  [smock's own failures](docs/grpc.md#smocks-own-failures).
 
 ### Changed
 
@@ -554,6 +568,10 @@ of each GitHub release include its section
 - The Admin API document's `EphemeralStubInput` says that an Ephemeral
   Stub may be a gRPC Stub, checked against its Mock's set, and what a
   reload does to it.
+- The Admin API document's description of a Journal entry's `dataError`
+  says that a gRPC call got INTERNAL instead of 500, with the message
+  `data write failed`. Its `EphemeralStubInput` says the same of a data
+  write whose bucket a reload removed.
 - `--header-size-limit` also bounds a gRPC reply's metadata. Each block a
   reply goes out in, its HEADERS and its trailers, or its one
   Trailers-Only block, may take at most the limit, counted as RFC 7541

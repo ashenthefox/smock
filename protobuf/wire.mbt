@@ -12,7 +12,8 @@ pub(all) suberror DecodeError {
   /// offsets in the whole input. `message` says what the problem is.
   DecodeError(position~ : Int32, message~ : String)
   /// A message whose decoded JSON, or what the decoder holds to print it,
-  /// passes `limit` octets, the limit `decode_json` was given.
+  /// passes `limit` octets, the limit `decode_json` or
+  /// `decode_canonical_json` was given.
   TooLarge(limit~ : Int32)
 }
 

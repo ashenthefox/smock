@@ -280,7 +280,7 @@ async test "with template on, metadata values render as header values do, a -bin
         answers(page),
         content=(
           #|"templated" 200 "OK"
-          #|"templated" 500 "INTERNAL" templateError={"at":"/response/grpc/trailers/x-trace","message":"the rendered value holds U+00E9, and gRPC metadata values hold only characters from 0x20 to 0x7E"}
+          #|"templated" 200 "INTERNAL" templateError={"at":"/response/grpc/trailers/x-trace","message":"the rendered value holds U+00E9, and gRPC metadata values hold only characters from 0x20 to 0x7E"}
         ),
       )
     })

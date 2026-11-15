@@ -584,13 +584,27 @@ pub fn Engine::render(
             sample.data,
           )
         catch {
+          // A gRPC Stub's failures are smock's own answers in gRPC's form,
+          // as a call gets them.
           ValueFailed(error) =>
-            failed = Some((template_failed(stub.id, error), Some(error)))
+            failed = Some(
+              (
+                template_failed(stub.id, error, grpc=grpc is Some(_)),
+                Some(error),
+              ),
+            )
           ApplyFailed(error) =>
-            failed = Some((data_write_failed(stub.id, error), None))
+            failed = Some(
+              (data_write_failed(stub.id, error, grpc=grpc is Some(_)), None),
+            )
           // Never raised: a rendering applies no bound.
           StateLimitReached(message) =>
-            failed = Some((state_limit_reached(stub.id, message), None))
+            failed = Some(
+              (
+                state_limit_reached(stub.id, message, grpc=grpc is Some(_)),
+                None,
+              ),
+            )
         } noraise {
           preview => {
             variables = preview.variables
@@ -626,7 +640,11 @@ pub fn Engine::render(
           catch {
             RenderError(at~, message~) => {
               let error = TemplateError::{ at, message, }
-              (response_index, template_failed(stub.id, error), Some(error))
+              (
+                response_index,
+                template_failed(stub.id, error, grpc=grpc is Some(_)),
+                Some(error),
+              )
             }
           } noraise {
             plan => (response_index, plan, None)
@@ -669,10 +687,8 @@ pub fn Engine::render(
 /// the index of the response rendered among the Stub's `responses`, or
 /// `None` for its `response`.
 ///
-/// - A plan without a gRPC part is smock's answer to a Stub that could not
-///   serve its content: Trailers-Only INTERNAL, with the message `template
-///   failed` when a template failed, as `error` says, or else `data write
-///   failed`, since a rendering applies no bound on per-Session state.
+/// - smock's own answer to a Stub that could not serve its content, such as
+///   INTERNAL `template failed`, is shown as it is, with `error`.
 /// - A reply with the status OK whose message was not encoded when the
 ///   files loaded, which a templated one never is, is encoded with the
 ///   method's output type; one that does not fit gets INTERNAL `template
@@ -683,7 +699,8 @@ pub fn Engine::render(
 ///   INTERNAL `template failed` too, with a template error in the reply's
 ///   `grpc/details`.
 ///
-/// smock's own answers carry none of the Stub's metadata, and no message.
+/// smock's own answers (`grpc_failure`) carry none of the Stub's metadata,
+/// and no message.
 fn call_answer(
   set : @protobuf.DescriptorSet,
   rpc : @protobuf.MethodDescriptor,
@@ -696,12 +713,7 @@ fn call_answer(
     None => "/response"
   }
   guard plan.grpc is Some(part) else {
-    let message = if error is Some(_) {
-      "template failed"
-    } else {
-      "data write failed"
-    }
-    return (own_answer(message), error)
+    abort("every plan of a gRPC Stub has a gRPC part")
   }
   if part.status is Ok {
     if part.encoded is None {
@@ -715,7 +727,7 @@ fn call_answer(
         let json = @json.parse(@utf8.decode_lossy(body)) catch {
           _ =>
             return (
-              own_answer("template failed"),
+              grpc_failure(Internal, "template failed"),
               Some({
                 at: reply + "/json",
                 message: "the rendered reply is not JSON",
@@ -725,7 +737,7 @@ fn call_answer(
         let _ : Bytes = set.encode_json(set.output_of(rpc), json) catch {
           EncodeError(pointer~, message~) =>
             return (
-              own_answer("template failed"),
+              grpc_failure(Internal, "template failed"),
               Some({ at: reply + "/json" + pointer, message, }),
             )
         }
@@ -739,27 +751,12 @@ fn call_answer(
     ) catch {
       EncodeError(pointer~, message~) =>
         return (
-          own_answer("template failed"),
+          grpc_failure(Internal, "template failed"),
           Some({ at: reply + "/grpc/details" + pointer, message, }),
         )
     }
   }
   (plan, error)
-}
-
-///|
-/// smock's own Trailers-Only answer to a gRPC call, INTERNAL with the
-/// fixed `message`, as a rendering shows it: the HTTP status 200, no
-/// metadata and no message.
-fn own_answer(message : String) -> ResponsePlan {
-  {
-    status: 200,
-    headers: [],
-    body: Bytes(b""),
-    delay_ms: 0,
-    fault: None,
-    grpc: Some({ ..grpc_ok, status: Internal, message: Some(message), }),
-  }
 }
 
 ///|

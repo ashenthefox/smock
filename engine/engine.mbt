@@ -90,8 +90,9 @@ pub(all) struct Outcome {
   scenario : ScenarioMove?
   /// Why the Stub that matched could not serve its own content, when it
   /// could not: the response is then the 500 `template failed` or
-  /// `data write failed`. There is none for a request answered as planned,
-  /// so that it pays nothing for it.
+  /// `data write failed`, or for a gRPC call INTERNAL with that message.
+  /// There is none for a request answered as planned, so that it pays
+  /// nothing for it.
   content_error : ContentError?
 }
 
@@ -115,10 +116,12 @@ pub(all) struct ContentError {
 #derive(Debug)
 pub(all) enum ContentFailure {
   /// A template could not be rendered, a value of the Stub's `variables` or
-  /// `dataWrites` included: the response is the 500 `template failed`.
+  /// `dataWrites` included: the response is the 500 `template failed`, or
+  /// for a gRPC call INTERNAL `template failed`.
   Template(TemplateError)
   /// A write of the Stub's `dataWrites` could not be applied: the response
-  /// is the 500 `data write failed`.
+  /// is the 500 `data write failed`, or for a gRPC call INTERNAL
+  /// `data write failed`.
   Data(DataError)
 }
 
@@ -204,10 +207,11 @@ pub(all) struct ResponsePlan {
   /// A connection Fault to inject instead of a normal response.
   fault : @definitions.ConnectionKind?
   /// The gRPC part of the plan of a gRPC call: how its answer ends, a gRPC
-  /// Stub's reply or the UNIMPLEMENTED of a call that no Stub matched. The
-  /// server sends the reply's message only when its status is `OK`. `None`
-  /// for an HTTP request, and for smock's own answers to a gRPC Stub that
-  /// could not serve its content.
+  /// Stub's reply, the UNIMPLEMENTED of a call that no Stub matched, or
+  /// smock's own failure when the Stub that matched could not serve its
+  /// content (`grpc_failure`). The server sends the reply's message only
+  /// when its status is `OK`. `None` for an HTTP request: every plan of a
+  /// gRPC call has one.
   grpc : GrpcPart?
 }
 
@@ -236,6 +240,12 @@ pub(all) struct GrpcPart {
   /// loaded; `None` for rendered ones, which the server encodes, and
   /// without details.
   encoded_status : @definitions.EncodedStatus?
+  /// Whether the answer is smock's own rather than a Stub's reply: the
+  /// UNIMPLEMENTED of a call that no Stub matched, or smock's own failure
+  /// when the Stub that matched could not serve its content. It carries
+  /// nothing the Stub wrote, so it is sent as it is, never replaced by the
+  /// INTERNAL of a reply too large to send.
+  own : Bool
 }
 
 ///|
@@ -249,6 +259,7 @@ let grpc_ok : GrpcPart = {
   encoded: None,
   details: [],
   encoded_status: None,
+  own: false,
 }
 
 ///|
@@ -821,7 +832,8 @@ pub fn Engine::handle(
           //    A value that fails to render, a data write that cannot be
           //    applied, or writes that do not fit, write nothing, and no
           //    response is picked: the request gets the template failure,
-          //    the data write failure, or 507.
+          //    the data write failure, or 507, and a gRPC call each in
+          //    gRPC's form, INTERNAL or RESOURCE_EXHAUSTED.
           let mut context : @template.Context? = None
           let mut failed : ResponsePlan? = None
           if ordinary.writes_variables() || ordinary.writes_data() {
@@ -844,14 +856,20 @@ pub fn Engine::handle(
             catch {
               ValueFailed(error) => {
                 content_error = Some(ContentError::new(stub, Template(error)))
-                failed = Some(template_failed(stub.id, error))
+                failed = Some(
+                  template_failed(stub.id, error, grpc=grpc is Some(_)),
+                )
               }
               ApplyFailed(error) => {
                 content_error = Some(ContentError::new(stub, Data(error)))
-                failed = Some(data_write_failed(stub.id, error))
+                failed = Some(
+                  data_write_failed(stub.id, error, grpc=grpc is Some(_)),
+                )
               }
               StateLimitReached(message) =>
-                failed = Some(state_limit_reached(stub.id, message))
+                failed = Some(
+                  state_limit_reached(stub.id, message, grpc=grpc is Some(_)),
+                )
             } noraise {
               written => {
                 context = Some(written.context)
@@ -895,7 +913,7 @@ pub fn Engine::handle(
                 RenderError(at~, message~) => {
                   let error = TemplateError::{ at, message, }
                   content_error = Some(ContentError::new(stub, Template(error)))
-                  template_failed(stub.id, error)
+                  template_failed(stub.id, error, grpc=grpc is Some(_))
                 }
               }
             }
@@ -1161,6 +1179,7 @@ fn grpc_unimplemented(message : String, near_miss : NearMiss?) -> ResponsePlan {
       encoded: None,
       details: [],
       encoded_status: None,
+      own: true,
     }),
   }
 }

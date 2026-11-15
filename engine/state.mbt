@@ -140,8 +140,17 @@ fn member_bytes(name : String, value : Json) -> Int64 {
 
 ///|
 /// The response to a request whose writes the bound on per-Session state
-/// refused: 507, with what the bound counts.
-fn state_limit_reached(stub : String, message : String) -> ResponsePlan {
+/// refused: 507, with what the bound counts, or for a gRPC call (`grpc`),
+/// RESOURCE_EXHAUSTED `state limit reached` in gRPC's form
+/// (`grpc_failure`), as gRPC names a lack of resources.
+fn state_limit_reached(
+  stub : String,
+  message : String,
+  grpc~ : Bool = false,
+) -> ResponsePlan {
+  if grpc {
+    return grpc_failure(ResourceExhausted, "state limit reached")
+  }
   json_failure(507, state_limit_body(stub, message))
 }
 

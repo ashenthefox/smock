@@ -1,11 +1,11 @@
-// The JSON text that `decode_json` prints, bounded by the limit it is
-// given. What is printed is counted as it is printed, and printing stops
-// with `TooLarge` as soon as it passes the limit. So a message of a few
-// octets whose JSON would be far larger, such as a list of empty messages
-// each printed with every field at its default, costs no more than the
-// limit. What the decoder holds meanwhile to print the message, views of
-// the input beyond one a field, is counted too, against the same limit
-// on its own.
+// The JSON text that `decode_json` and `decode_canonical_json` print,
+// bounded by the limit each is given. What is printed is counted as it is
+// printed, and printing stops with `TooLarge` as soon as it passes the
+// limit. So a message of a few octets whose JSON would be far larger, such
+// as a list of empty messages each printed with every field at its
+// default, costs no more than the limit. What the decoder holds meanwhile
+// to print the message, views of the input beyond one a field, is counted
+// too, against the same limit on its own.
 
 ///|
 /// The octets the decoder counts for each view of the input that it holds
