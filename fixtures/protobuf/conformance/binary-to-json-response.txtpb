@@ -1,0 +1,2 @@
+# The answer to binary-to-json.txtpb: a 64-bit integer as a string.
+json_payload: "{\"optionalInt32\":1,\"optionalInt64\":\"-5\",\"optionalString\":\"smock\"}"

@@ -1,0 +1,6 @@
+# The message of binary-to-json.txtpb as JSON, with a proto name and a
+# 64-bit integer as a string, asked for in protobuf's binary encoding.
+json_payload: "{\"optional_int32\": 1, \"optionalInt64\": \"-5\", \"optionalString\": \"smock\"}"
+requested_output_format: PROTOBUF
+message_type: "protobuf_test_messages.proto3.TestAllTypesProto3"
+test_category: JSON_TEST

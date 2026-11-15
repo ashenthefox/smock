@@ -588,7 +588,13 @@ rendered even when the sample fails them, and a
 [templated](docs/definition-files.md#templates) response is rendered for the
 sample. An [LLM response](docs/definition-files.md#llm-responses) shows the
 reply the sample's body asks for: the JSON body, or a stream's events,
-each with its wait. `--time` (RFC 3339) and `--seed` fix the clock and the
+each with its wait. A [gRPC Stub](docs/grpc.md#rendering-a-grpc-stub)
+renders as a call to its method, whatever the sample's method and
+Content-Type, which are only conditions: the sample's body is the request
+message as JSON, checked against the method's input type, and the
+rendering shows the reply message as JSON, its initial metadata, and its
+gRPC status, message, trailing metadata and error details as
+`response.grpc`, never protobuf bytes. `--time` (RFC 3339) and `--seed` fix the clock and the
 random source of the rendering; without a seed, it uses the Stub's
 `fault.seed`, or a fresh one. A Stub with
 [`responses`](docs/definition-files.md#several-responses) renders the one
@@ -611,7 +617,9 @@ with the problem on stderr, for:
 - a sample that cannot be read or is not valid;
 - sample data for a bucket the Stub's Mock does not declare, or that
   breaks a keyed bucket's rules;
-- a sample whose method and path fit no operation of a CRUD Stub.
+- a sample whose method and path fit no operation of a CRUD Stub;
+- a sample whose body is not a message of a gRPC Stub's input type, as
+  JSON.
 
 `smock import-openapi api/petstore.yaml --mock petstore --output defs/petstore.yaml`
 converts an OpenAPI 3.0, 3.1 or 3.2 document into one Definition file,
@@ -1233,6 +1241,11 @@ Packages of `smock/smock`:
   times it writes, which the Admin API and the CLI also read.
 - `buildinfo`: the version, commit and toolchain the binary was built with.
 - `e2e`: tests that run the `smock` binary as a black box (native).
+- `protobuf-conformance`: the testee of protobuf's conformance suite, a
+  program built on `smock/protobuf`, with the list of the suite's cases
+  that the module fails (native). smock's image does not hold it.
+  `scripts/check-conformance.sh` runs the suite on it
+  ([protobuf-conformance/README.md](protobuf-conformance/README.md)).
 - `schema`: a test over every Definition-file fixture in
   `schema/v1/fixtures/` that needs no `smock` binary: each, written as YAML
   by `smock/yaml`, reads back as the same tree (native).
@@ -1317,6 +1330,8 @@ scripts/check-ci-artifacts.sh        # CI keeps the release binary of each archi
 scripts/install-protoc.sh            # the pinned protoc, into ~/.local/bin, with its well-known types
 PROTOC=~/.local/bin/protoc scripts/gen-protobuf-fixtures.sh --check   # the protobuf fixtures are what their sources build
 PROTOC=~/.local/bin/protoc scripts/test-protobuf-fixtures.sh          # that check, on a copy of the working tree
+scripts/build-conformance-runner.sh  # protobuf's conformance runner, from the pinned release, into ~/.local/bin (needs CMake and a C++17 compiler)
+scripts/check-conformance.sh         # protobuf's conformance suite against smock/protobuf, judged by protobuf-conformance/failure_list.txt
 scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, read smock's LLM responses (needs python3 and PyPI)
 scripts/test-helm-chart.sh           # rendering tests of the Helm chart (needs helm, yq and jq)
 scripts/test-helm-chart-on-kind.sh smock:dev   # the chart on a kind cluster (needs kind, kubectl and helm)
@@ -1424,7 +1439,9 @@ CI runs all of these but `moon bench` (`.github/workflows/ci.yml`). The
 tests on wasm-gc, h2spec and the scripts from
 `scripts/check-release-workflow.sh` to `scripts/test-helm-chart.sh` run on
 linux/amd64; the rest run on linux/amd64 and linux/arm64
-(`.github/workflows/build-test.yml`).
+(`.github/workflows/build-test.yml`). CI builds protobuf's conformance
+runner once and caches it
+([protobuf-conformance/README.md](protobuf-conformance/README.md)).
 The SDK job, `scripts/check-llm-sdks.sh`, runs after `build-test.yml`,
 with the release binary built there, and reads smock's
 [LLM responses](docs/definition-files.md#llm-responses) with the

@@ -141,6 +141,76 @@ async test "smock check refuses each field that makes no sense on a gRPC Stub, a
 }
 
 ///|
+async test "llm in a gRPC Stub's response or in an element of its weighted responses is refused at its pointer on a reload, which keeps the set served, for an Ephemeral Stub with 400 invalid_stub, by smock check and at startup" {
+  let llm_stubs =
+    #|stubs:
+    #|  - id: llm
+    #|    mock: greeter
+    #|    request: { path: /helloworld.Greeter/SayHello }
+    #|    response: { llm: { api: openai-chat, text: Hello } }
+    #|  - id: llm-weighted
+    #|    mock: greeter
+    #|    request: { path: /helloworld.Greeter/SayHello }
+    #|    responses:
+    #|      - { json: { message: Hello }, weight: 9 }
+    #|      - { llm: { api: anthropic-messages, text: Hello }, weight: 1 }
+  let ephemeral = [
+    (
+      #|{"request":{"path":"/helloworld.Greeter/SayHello"},"response":{"llm":{"api":"openai-chat","text":"Hello"}}}
+    ),
+    (
+      #|{"request":{"path":"/helloworld.Greeter/SayHello"},"responses":[{"json":{"message":"Hello"}},{"llm":{"api":"openai-responses","text":"Hello"}}]}
+    ),
+  ]
+  with_greeter(greeter_stubs("{ message: Hello }"), dir => {
+    let out = []
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let before = smock.status()
+      write(dir, "llm.yaml", llm_stubs)
+      let failed = smock.reloaded(before)
+      out.push("a reload: \{last_reload(failed)}")
+      out.push("digest kept: \{failed.get("digest") == before.get("digest")}")
+      for stub in ephemeral {
+        let response = smock.admin("POST", "/v1/mocks/greeter/stubs", body=stub)
+        guard response.json() is Object(error) &&
+          error.get("message") is Some(String(message)) else {
+          fail(response.body)
+        }
+        out.push(
+          "an Ephemeral Stub: \{response.status} \{error.get("error").map(e => e.stringify()).unwrap_or("")}\n  \{message}",
+        )
+      }
+    })
+    out.push("smock check: \{check([dir])}")
+    let stopped = run_smock(["serve", "--dir", dir, "--port", "0"])
+    out.push(
+      "smock serve: status \{stopped.status}\n" +
+      log_entries(stopped.logs.filter(line => line.contains("\"error\""))),
+    )
+    inspect(
+      out.join("\n"),
+      content=(
+        #|a reload: "failed"
+        #|  {"file":"llm.yaml","pointer":"/stubs/0/response/llm","message":"makes no sense on a gRPC Stub: an LLM reply is written in an LLM API's HTTP wire form"}
+        #|  {"file":"llm.yaml","pointer":"/stubs/1/responses/1/llm","message":"makes no sense on a gRPC Stub: an LLM reply is written in an LLM API's HTTP wire form"}
+        #|digest kept: true
+        #|an Ephemeral Stub: 400 "invalid_stub"
+        #|  /response/llm: makes no sense on a gRPC Stub: an LLM reply is written in an LLM API's HTTP wire form
+        #|an Ephemeral Stub: 400 "invalid_stub"
+        #|  /responses/1/llm: makes no sense on a gRPC Stub: an LLM reply is written in an LLM API's HTTP wire form
+        #|smock check: status 1
+        #|llm.yaml: /stubs/0/response/llm: makes no sense on a gRPC Stub: an LLM reply is written in an LLM API's HTTP wire form
+        #|llm.yaml: /stubs/1/responses/1/llm: makes no sense on a gRPC Stub: an LLM reply is written in an LLM API's HTTP wire form
+        #|
+        #|smock serve: status 1
+        #|{"level":"error","msg":"invalid definitions","file":"llm.yaml","pointer":"/stubs/0/response/llm","error":"makes no sense on a gRPC Stub: an LLM reply is written in an LLM API's HTTP wire form"}
+        #|{"level":"error","msg":"invalid definitions","file":"llm.yaml","pointer":"/stubs/1/responses/1/llm","error":"makes no sense on a gRPC Stub: an LLM reply is written in an LLM API's HTTP wire form"}
+      ),
+    )
+  })
+}
+
+///|
 async test "smock check warns about an HTTP Stub of a Mock with a set whose path looks like a gRPC method that the set lacks, and still exits 0" {
   let yaml =
     #|mocks:

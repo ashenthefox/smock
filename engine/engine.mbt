@@ -33,6 +33,9 @@ pub struct Engine {
   /// reply's metadata may take: every reload and Ephemeral Stub is read
   /// with it.
   priv header_size_limit : Int32
+  /// `--body-limit`, the most octets the message of a sample request that
+  /// renders a gRPC Stub may take as JSON, as a call's decoded message may.
+  priv body_limit : Int32
 }
 
 ///|
@@ -291,6 +294,10 @@ pub(all) enum Body {
 /// loaded with: by default, 16 KiB. Each block of a static gRPC reply's
 /// metadata of a reload or an Ephemeral Stub may take at most that many
 /// octets.
+///
+/// `body_limit` is `--body-limit`: by default, `default_body_limit`
+/// (10 MiB). A sample request that renders a gRPC Stub may give a message
+/// whose JSON takes at most that many octets once decoded, as a call's may.
 pub fn Engine::Engine(
   snapshot : @definitions.Snapshot,
   match_index~ : Bool = true,
@@ -298,6 +305,7 @@ pub fn Engine::Engine(
   env~ : @template.Env = @template.no_env,
   state_max_bytes~ : Int32 = default_state_max_bytes,
   header_size_limit~ : Int32 = @definitions.default_header_size_limit,
+  body_limit~ : Int32 = default_body_limit,
 ) -> Engine {
   let state = StateBound::new(state_max_bytes)
   {
@@ -312,8 +320,14 @@ pub fn Engine::Engine(
     journal: Journal::new(journal),
     env,
     header_size_limit,
+    body_limit,
   }
 }
+
+///|
+/// The default of `--body-limit`, 10 MiB, which an engine takes as its
+/// `body_limit` unless it is given another.
+pub let default_body_limit : Int32 = 10 * 1024 * 1024
 
 ///|
 /// The engine's side of the Admin API status: what it serves.

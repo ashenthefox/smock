@@ -261,6 +261,7 @@ async fn run(
       env=template_env,
       state_max_bytes~,
       header_size_limit=settings.header_size_limit,
+      body_limit=settings.body_limit,
     )
     lifecycle.started(engine)
     // The Mockoon-equivalent lines exist only in the mockoon log format.

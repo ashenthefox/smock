@@ -205,6 +205,69 @@ fn SampleRequest::to_request(self : SampleRequest) -> Request {
 }
 
 ///|
+/// The call the sample stands for when it renders a gRPC Stub on `rpc`, a
+/// unary method of `set`, `stub` by its ID: the sample's method, path,
+/// query and header fields, each value of binary metadata, whose name ends
+/// with `-bin`, without its padding, as a call's (`@grpc.unpadded_elements`),
+/// and as the body the request message that the sample's body gives as
+/// JSON. The message is checked against the method's input type and
+/// normalised as a gRPC Stub's `json` condition is when the files load
+/// (`@definitions.sample_message`), then encoded and decoded as a call's
+/// message is, so the body is the JSON text that a call carrying it hands
+/// the Stubs: every field without presence that it leaves out is there at
+/// its default. An empty body is the empty message.
+///
+/// Raises `InvalidSampleMessage` when the body is not JSON, is not a
+/// message of the input type, or is one whose JSON passes `body_limit`
+/// octets once decoded, as a call's would be refused.
+fn SampleRequest::call_request(
+  self : SampleRequest,
+  stub : String,
+  set : @protobuf.DescriptorSet,
+  rpc : @protobuf.MethodDescriptor,
+  body_limit : Int32,
+) -> Request raise RenderFailure {
+  let input = set.input_of(rpc)
+  let refused = (pointer : String, message : String) => {
+    InvalidSampleMessage(stub~, input=input.full_name, problems=[
+      { file: "", pointer, message, },
+    ])
+  }
+  let json = if self.body == "" {
+    Json::object(Map([]))
+  } else {
+    @json.parse(self.body) catch {
+      _ => raise refused("", "is not JSON")
+    }
+  }
+  let normalised = match @definitions.sample_message(set, input, json) {
+    Ok(normalised) => normalised
+    Err(problems) =>
+      raise InvalidSampleMessage(stub~, input=input.full_name, problems~)
+  }
+  let encoded = set.encode_json(input, normalised) catch {
+    EncodeError(pointer~, message~) => raise refused(pointer, message)
+  }
+  let body = @protobuf.decode_json(set, input, encoded, limit=body_limit) catch {
+    TooLarge(limit~) =>
+      raise refused(
+        "",
+        "takes more than \{limit} octets as JSON once decoded, the body limit of a call's message (--body-limit)",
+      )
+    DecodeError(message~, ..) => raise refused("", message)
+  }
+  let request = self.to_request()
+  let headers = request.headers
+  for i in 0..<headers.length() {
+    let (name, value) = headers[i]
+    if @grpc.is_binary_name(name.to_lower()) {
+      headers[i] = (name, @grpc.unpadded_elements(value))
+    }
+  }
+  { ..request, headers, body, }
+}
+
+///|
 /// A Stub's response, rendered for a sample request, with the Stub's
 /// conditions that the sample fails. For a CRUD Stub, the answer of the
 /// operation the sample asks of it. Its JSON form is the `Rendering`
@@ -238,12 +301,21 @@ pub(all) struct Rendering {
   data_writes : Array[RenderedWrite]
   status : Int32
   /// The header fields smock sends, in order, without those that depend on
-  /// the connection, such as Content-Length.
+  /// the connection, such as Content-Length. For a gRPC Stub, its initial
+  /// metadata.
   headers : Array[(String, String)]
+  /// The body. For a gRPC Stub, the reply message as JSON, as written or
+  /// rendered, which a call gets encoded with the method's output type.
   body : Body
+  /// For a gRPC Stub, the gRPC part of the reply a call gets: its status,
+  /// its message, its trailing metadata and its error details. `None` for
+  /// an HTTP Stub and a CRUD Stub.
+  grpc : GrpcPart?
   /// Why the Stub's template, or a value or key of its writes, could not be
   /// rendered, when it could not: the response is then the 500 a request
-  /// would get.
+  /// would get, or, for a gRPC Stub, the INTERNAL a call would get. For a
+  /// gRPC Stub, also why its rendered reply, or a rendered detail, is not a
+  /// message of its type, which a call gets INTERNAL for too.
   template_error : TemplateError?
   /// The conditions the sample fails, as in a Near miss, in the order
   /// method, path, query parameters, headers, cookies, body, form fields
@@ -310,6 +382,15 @@ pub suberror RenderFailure {
     meth~ : String,
     path~ : String
   )
+  /// The sample request's body is not a message of `input`, the full name
+  /// of the input type of the method of the gRPC Stub `stub`, as JSON, in
+  /// each of the ways `problems` gives, with JSON Pointers into the
+  /// message. A call cannot carry such a message.
+  InvalidSampleMessage(
+    stub~ : String,
+    input~ : String,
+    problems~ : Array[@definitions.Diagnostic]
+  )
 }
 
 ///|
@@ -343,6 +424,20 @@ pub fn RenderFailure::message(self : RenderFailure) -> String {
       let at_list = spelled_out(@definitions.crud_methods(Some(ListPath)))
       let at_item = spelled_out(@definitions.crud_methods(Some(ItemPath)))
       "the CRUD Stub \{stub.escape()} serves no operation for \{meth.escape()} at \{path.escape()}: it serves \{at_list} at \{crud_path.escape()}, and \{at_item} at \{item.escape()}"
+    }
+    InvalidSampleMessage(stub~, input~, problems~) => {
+      let each = StringBuilder()
+      for i, problem in problems {
+        if i > 0 {
+          each.write_string("; ")
+        }
+        if problem.pointer != "" {
+          each.write_string(problem.pointer)
+          each.write_char(' ')
+        }
+        each.write_string(problem.message)
+      }
+      "the sample request's body must be a \{input} as JSON, the message that the method of the gRPC Stub \{stub.escape()} takes: \{each}"
     }
   }
 }
@@ -404,6 +499,19 @@ fn spelled_out(words : ReadOnlyArray[String]) -> String {
 /// `response_index` raises `UnknownResponse`. A sample whose method and
 /// path fit none of its operations raises `NoOperation`.
 ///
+/// A gRPC Stub renders as a call to its method, whatever the sample's
+/// method and Content-Type, which it checks only as conditions. The
+/// sample's body is the request message as JSON, and its binary metadata
+/// loses its padding (`SampleRequest::call_request`); a body that is not a
+/// message of the method's input type raises `InvalidSampleMessage`. The
+/// rendering shows the answer a call gets (`call_answer`): the reply JSON
+/// as the body, the initial metadata as the headers, and the gRPC part,
+/// with the status, the message, the trailing metadata and the details,
+/// or smock's own INTERNAL, with the template error that says why, when
+/// the Stub cannot serve its content or its rendered reply or details do
+/// not fit their types. An HTTP Stub renders as a request, whatever the
+/// sample's Content-Type.
+///
 /// Rendering decides no Fault, and changes nothing in the engine or in the
 /// sample: no generator advances, and no Variable or copy of a Data bucket
 /// is written or read.
@@ -432,7 +540,18 @@ pub fn Engine::render(
   }
   match stub.serves {
     Ordinary(ordinary) => {
-      let incoming = Incoming::new(sample.to_request())
+      // A gRPC Stub renders as a call, whatever the sample's method and
+      // Content-Type, which are only conditions.
+      let grpc = match (ordinary.grpc_method, mock.descriptor_set) {
+        (Some(rpc), Some(set)) => Some((set, rpc))
+        _ => None
+      }
+      let request = match grpc {
+        Some((set, rpc)) =>
+          sample.call_request(stub.id, set, rpc, self.body_limit)
+        None => sample.to_request()
+      }
+      let incoming = Incoming::new(request)
       // The sample's data stands for the copies of a Session.
       let copies = if sample.data.is_empty() { None } else { Some(sample.data) }
       // The steps of the match decision that build the response, as for a
@@ -465,13 +584,27 @@ pub fn Engine::render(
             sample.data,
           )
         catch {
+          // A gRPC Stub's failures are smock's own answers in gRPC's form,
+          // as a call gets them.
           ValueFailed(error) =>
-            failed = Some((template_failed(stub.id, error), Some(error)))
+            failed = Some(
+              (
+                template_failed(stub.id, error, grpc=grpc is Some(_)),
+                Some(error),
+              ),
+            )
           ApplyFailed(error) =>
-            failed = Some((data_write_failed(stub.id, error), None))
+            failed = Some(
+              (data_write_failed(stub.id, error, grpc=grpc is Some(_)), None),
+            )
           // Never raised: a rendering applies no bound.
           StateLimitReached(message) =>
-            failed = Some((state_limit_reached(stub.id, message), None))
+            failed = Some(
+              (
+                state_limit_reached(stub.id, message, grpc=grpc is Some(_)),
+                None,
+              ),
+            )
         } noraise {
           preview => {
             variables = preview.variables
@@ -502,17 +635,27 @@ pub fn Engine::render(
               vars=Some(sample.vars),
               data=mock.initial_data,
               copies~,
-              grpc=ordinary.grpc_method is Some(_),
+              grpc=grpc is Some(_),
             )
           catch {
             RenderError(at~, message~) => {
               let error = TemplateError::{ at, message, }
-              (response_index, template_failed(stub.id, error), Some(error))
+              (
+                response_index,
+                template_failed(stub.id, error, grpc=grpc is Some(_)),
+                Some(error),
+              )
             }
           } noraise {
             plan => (response_index, plan, None)
           }
         }
+      }
+      // A gRPC Stub shows the answer a call gets from the plan.
+      let (plan, template_error) = match grpc {
+        Some((set, rpc)) =>
+          call_answer(set, rpc, plan, template_error, response_index)
+        None => (plan, template_error)
       }
       {
         stub: stub.id,
@@ -525,6 +668,7 @@ pub fn Engine::render(
         status: plan.status,
         headers: plan.headers,
         body: plan.body,
+        grpc: plan.grpc,
         template_error,
         failed: incoming
         .failed(ordinary.request)
@@ -533,6 +677,86 @@ pub fn Engine::render(
     }
     Crud(crud) => render_crud(stub, mock, crud, sample, now~, seed~)
   }
+}
+
+///|
+/// The answer a call to `rpc`, a unary method of `set`, gets from `plan`,
+/// the plan of a gRPC Stub on it rendered for a sample, as the server makes
+/// it, with the template error that says why it is not the Stub's reply,
+/// if it is not: `error`, the rendering's, or one of its own. `index` is
+/// the index of the response rendered among the Stub's `responses`, or
+/// `None` for its `response`.
+///
+/// - smock's own answer to a Stub that could not serve its content, such as
+///   INTERNAL `template failed`, is shown as it is, with `error`.
+/// - A reply with the status OK whose message was not encoded when the
+///   files loaded, which a templated one never is, is encoded with the
+///   method's output type; one that does not fit gets INTERNAL `template
+///   failed`, with a template error at the JSON Pointer of the value at
+///   fault, in the reply's `json`.
+/// - An error's details are encoded in google.rpc.Status, unless they were
+///   when the files loaded; a detail that does not fit its type gets
+///   INTERNAL `template failed` too, with a template error in the reply's
+///   `grpc/details`.
+///
+/// smock's own answers (`grpc_failure`) carry none of the Stub's metadata,
+/// and no message.
+fn call_answer(
+  set : @protobuf.DescriptorSet,
+  rpc : @protobuf.MethodDescriptor,
+  plan : ResponsePlan,
+  error : TemplateError?,
+  index : Int32?,
+) -> (ResponsePlan, TemplateError?) {
+  let reply = match index {
+    Some(index) => "/responses/\{index}"
+    None => "/response"
+  }
+  guard plan.grpc is Some(part) else {
+    abort("every plan of a gRPC Stub has a gRPC part")
+  }
+  if part.status is Ok {
+    if part.encoded is None {
+      let body = match plan.body {
+        Bytes(json) => json
+        // A gRPC Stub's reply is never a stream of events.
+        Events(_) => b""
+      }
+      // An empty body is an empty message.
+      if body.length() > 0 {
+        let json = @json.parse(@utf8.decode_lossy(body)) catch {
+          _ =>
+            return (
+              grpc_failure(Internal, "template failed"),
+              Some({
+                at: reply + "/json",
+                message: "the rendered reply is not JSON",
+              }),
+            )
+        }
+        let _ : Bytes = set.encode_json(set.output_of(rpc), json) catch {
+          EncodeError(pointer~, message~) =>
+            return (
+              grpc_failure(Internal, "template failed"),
+              Some({ at: reply + "/json" + pointer, message, }),
+            )
+        }
+      }
+    }
+  } else if !part.details.is_empty() && part.encoded_status is None {
+    let _ : Bytes = set.encode_status(
+      part.status.code(),
+      part.message.unwrap_or(""),
+      part.details.exact_view(),
+    ) catch {
+      EncodeError(pointer~, message~) =>
+        return (
+          grpc_failure(Internal, "template failed"),
+          Some({ at: reply + "/grpc/details" + pointer, message, }),
+        )
+    }
+  }
+  (plan, error)
 }
 
 ///|
@@ -640,6 +864,7 @@ fn render_crud(
     status: plan.status,
     headers: plan.headers,
     body: plan.body,
+    grpc: None,
     template_error: None,
     // The sample fits an operation, and a CRUD Stub has no other
     // conditions.
@@ -796,6 +1021,23 @@ pub impl ToJson for Rendering with fn to_json(self) {
     Events(events) =>
       (Json::null(), Json::array(events.iter().map(event_json).collect()))
   }
+  let response : Map[String, Json] = {
+    "status": Json::number(self.status.to_double()),
+    "headers": headers_json(self.headers.iter()),
+    "body": body,
+    "events": events,
+  }
+  // An HTTP Stub's rendering has no gRPC part, not even null.
+  if self.grpc is Some(part) {
+    response["grpc"] = {
+      "status": Json::string(part.status.name()),
+      "message": part.message.map_or(Json::null(), message => {
+        Json::string(message)
+      }),
+      "trailers": headers_json(part.trailers.iter()),
+      "details": Json::array(part.details.iter().to_array()),
+    }
+  }
   {
     "stub": Json::string(self.stub),
     "mock": Json::string(self.mock),
@@ -808,22 +1050,28 @@ pub impl ToJson for Rendering with fn to_json(self) {
     "dataWrites": Json::array(
       self.data_writes.map(write => ToJson::to_json(write)),
     ),
-    "response": {
-      "status": Json::number(self.status.to_double()),
-      "headers": Json::array(
-        self.headers.map(header => {
-          "name": Json::string(header.0),
-          "value": Json::string(header.1),
-        }),
-      ),
-      "body": body,
-      "events": events,
-    },
+    "response": Json::object(response),
     "templateError": self.template_error.map_or(Json::null(), error => {
       ToJson::to_json(error)
     }),
     "failed": Json::array(self.failed.map(failed => ToJson::to_json(failed))),
   }
+}
+
+///|
+/// `fields`, header fields or metadata, as the Admin API document writes
+/// them: an array of objects with `name` and `value`, in order.
+fn headers_json(fields : Iter[(String, String)]) -> Json {
+  Json::array(
+    fields
+    .map(field => {
+      Json::object({
+        "name": Json::string(field.0),
+        "value": Json::string(field.1),
+      })
+    })
+    .to_array(),
+  )
 }
 
 ///|

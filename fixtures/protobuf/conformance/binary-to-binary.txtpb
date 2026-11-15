@@ -1,0 +1,7 @@
+# A TestAllTypesProto3 as protoc would never write it, asked for in the
+# binary encoding: optional_string "smock" before optional_int32 1, then
+# optional_int32 again as 2, and repeated_int32 1, 2 unpacked.
+protobuf_payload: "r\005smock\010\001\010\002\370\001\001\370\001\002"
+requested_output_format: PROTOBUF
+message_type: "protobuf_test_messages.proto3.TestAllTypesProto3"
+test_category: BINARY_TEST

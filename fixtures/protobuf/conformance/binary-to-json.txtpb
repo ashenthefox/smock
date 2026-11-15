@@ -1,0 +1,7 @@
+# A TestAllTypesProto3 in protobuf's binary encoding, which the testee
+# answers in canonical ProtoJSON: optional_int32 1, optional_int64 -5 and
+# optional_string "smock".
+protobuf_payload: "\010\001\020\373\377\377\377\377\377\377\377\377\001r\005smock"
+requested_output_format: JSON
+message_type: "protobuf_test_messages.proto3.TestAllTypesProto3"
+test_category: BINARY_TEST
