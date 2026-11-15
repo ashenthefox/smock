@@ -1,0 +1,8 @@
+valid_host: "reflected.svc"
+original_request {
+  file_containing_symbol: "annotated.Missing"
+}
+error_response {
+  error_code: 5
+  error_message: "symbol not found: annotated.Missing"
+}

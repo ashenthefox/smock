@@ -239,6 +239,40 @@ test "find a method, its input type and a field" {
 }
 ```
 
+## Server reflection
+
+gRPC's server reflection sends a client the files of a set that define
+what it asks for. These walk the set, or its octets, once per request.
+
+- `@protobuf.files_without_source_info(input)`: the files of a
+  FileDescriptorSet, in its order, each as the set encodes it but without
+  its SourceCodeInfo (field 9), as reflection sends files. Every other
+  field is kept byte for byte, custom options and unknown fields
+  included.
+- `set.find_file_containing_symbol(symbol)`: the file that defines a
+  message, field, enum, enum value, service, method or extension, by its
+  full name without a leading dot. An enum value is named in the scope
+  that holds its enum, as protobuf scopes it: `shop.ACTIVE` for a value of
+  `shop.Status`.
+
+```mbt check
+///|
+test "find the file that defines a method, and send it without its source info" {
+  // The set of the lookups' example, its file with source info after its
+  // syntax.
+  let input = b"\x0a\x57\x0a\x0dgreeter.proto\x12\x01g\x22\x16\x0a\x03Req\x12\x0f\x0a\x09user_name\x18\x01\x28\x09\x32\x1f\x0a\x07Greeter\x12\x14\x0a\x02Hi\x12\x06.g.Req\x1a\x06.g.Req\x62\x06proto3\x4a\x02\x0a\x00"
+  let set = @protobuf.read_descriptor_set(input[:])
+  guard set.find_file_containing_symbol("g.Greeter.Hi") is Some(file) else {
+    fail("no file")
+  }
+  inspect(file.name, content="greeter.proto")
+  let files = @protobuf.files_without_source_info(input[:])
+  // The file without its last 4 octets, its source info.
+  inspect(files.length(), content="1")
+  inspect(files[0] == input[2:input.length() - 4].to_owned(), content="true")
+}
+```
+
 ## Messages
 
 `@protobuf.decode_json(set, message, input, limit~)` decodes a message of

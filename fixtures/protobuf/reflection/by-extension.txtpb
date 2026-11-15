@@ -1,0 +1,4 @@
+file_containing_extension {
+  containing_type: "google.protobuf.FieldOptions"
+  extension_number: 50000
+}

@@ -1,0 +1,8 @@
+valid_host: "reflected.svc"
+original_request {
+  all_extension_numbers_of_type: "annotated.Missing"
+}
+error_response {
+  error_code: 5
+  error_message: "type not found: annotated.Missing"
+}

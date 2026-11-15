@@ -38,6 +38,9 @@ priv struct HealthTypes {
   list_request : @protobuf.MessageDescriptor
   /// `HealthListResponse`, the output of `List`.
   list_response : @protobuf.MessageDescriptor
+  /// The files of the descriptor, as the reflection service sends them
+  /// (`@definitions.Mock::reflection`): health.proto alone.
+  files : ReadOnlyArray[Bytes]
 }
 
 ///|
@@ -53,9 +56,13 @@ fn HealthTypes::get() -> HealthTypes {
   if health_types.val is Some(types) {
     return types
   }
-  let set = @protobuf.read_descriptor_set(
-    @hex.decode(health_set.replace_all(old="\n", new="")),
-  ) catch {
+  let (set, files) = try {
+    let bytes = @hex.decode(health_set.replace_all(old="\n", new=""))
+    (
+      @protobuf.read_descriptor_set(bytes),
+      @protobuf.files_without_source_info(bytes),
+    )
+  } catch {
     _ => abort("the embedded descriptor of health.proto decodes")
   }
   guard set.find_message("grpc.health.v1.HealthCheckRequest")
@@ -72,6 +79,7 @@ fn HealthTypes::get() -> HealthTypes {
     check_response,
     list_request,
     list_response,
+    files,
   }
   health_types.val = Some(types)
   types
@@ -296,6 +304,29 @@ fn[S : @io.Writer + ReadOutput] H2Connection::reply_built_in(
   let encoded = set.encode_json(output, reply) catch {
     _ => abort("a reply of a built-in service encodes")
   }
+  self.send_built_in(stream, mock, encoded, smock_mock, date~, out)
+}
+
+///|
+/// Sends on `stream` the reply of a built-in service of `mock`, whose
+/// message is `message`, encoded, as any reply is sent: HEADERS with
+/// `smock-mock` when `smock_mock` gives its value, and `date` with the
+/// value `date`; the framed message in one DATA frame when it fits the
+/// windows, or else in a task of its own, which writes to `out`
+/// (`write_built_in_slowly`); then trailers with `grpc-status: 0`, and,
+/// with `end_early`, RST_STREAM NO_ERROR after them, for a client that
+/// still sends (`end_early`). The answer counts under the Mock with
+/// `stub=""` once it is queued in full.
+fn[S : @io.Writer + ReadOutput] H2Connection::send_built_in(
+  self : H2Connection,
+  stream : Int32,
+  mock : @definitions.Mock,
+  message : Bytes,
+  smock_mock : String?,
+  date~ : String,
+  out : WatchedStream[S],
+  end_early~ : Bool = false,
+) -> Unit {
   let head = reply_head(
     match smock_mock {
       Some(value) => [("Smock-Mock", value)]
@@ -307,13 +338,23 @@ fn[S : @io.Writer + ReadOutput] H2Connection::reply_built_in(
   let rest = self.queue_reply(
     stream,
     head,
-    @grpc.frame(encoded),
+    @grpc.frame(message),
     trailers,
     None,
   )
   if rest.length() > 0 {
-    self.write_built_in_slowly(stream, rest, trailers, mock.name, out)
+    self.write_built_in_slowly(
+      stream,
+      rest,
+      trailers,
+      mock.name,
+      out,
+      end_early~,
+    )
     return
+  }
+  if end_early {
+    self.end_early(stream)
   }
   self.ports.built_in(mock.name, self.last_read)
 }
@@ -363,9 +404,11 @@ fn H2Connection::answer_built_in_status(
 /// Sends `rest`, the part of the framed message of a built-in service's
 /// reply on `stream` that did not fit the windows when it was queued, in a
 /// task of its own, which writes to `out` (`trickle`), then the trailers
-/// `trailers`, which end the stream. The answer counts under the Mock
-/// named `mock`, with `stub=""`, when the task ends. The task ends with its
-/// stream, as a slow write of a Stub's reply does (`write_slowly`).
+/// `trailers`, which end the stream, and, with `end_early`, RST_STREAM
+/// NO_ERROR, for a client that still sends. The answer counts under the
+/// Mock named `mock`, with `stub=""`, when the task ends. The task ends
+/// with its stream, as a slow write of a Stub's reply does
+/// (`write_slowly`).
 fn[S : @io.Writer + ReadOutput] H2Connection::write_built_in_slowly(
   self : H2Connection,
   stream : Int32,
@@ -373,14 +416,19 @@ fn[S : @io.Writer + ReadOutput] H2Connection::write_built_in_slowly(
   trailers : Array[@header.Header],
   mock : String,
   out : WatchedStream[S],
+  end_early~ : Bool = false,
 ) -> Unit {
-  // The read that brought the request in full.
+  // The read that brought the request in full, or its first message.
   let stopwatch = self.last_read
   let task = self.group.spawn(no_wait=true, () => {
     defer self.ports.built_in(mock, stopwatch)
     let finished = self.trickle(stream, rest, None, out, end=false)
     if finished {
       self.end_with_trailers(stream, trailers)
+      if end_early {
+        // From the stream's own task, which then ends.
+        self.reset(stream, @http2.error_no_error, own_task=true)
+      }
     }
     self.end_task(stream, out, finished~)
   })
