@@ -338,7 +338,9 @@ of each GitHub release include its section
     compressed. A request that ends inside a message gets INTERNAL, and
     one with no message or several UNIMPLEMENTED; a message of zero octets
     is one message, and a message that does not parse gets INTERNAL.
-    `te: trailers` is not required. Each refusal has a fixed message, is
+    `te: trailers` is not required. Each refusal has a fixed message, but
+    for two that name what the call sent: the encoding of a compressed
+    message, and the numbers of a message past the values bound. Each is
     followed by RST_STREAM `NO_ERROR` while the client still sends, is not
     journaled, and counts as rejected traffic. See
     [Protocol checks and limits](docs/grpc.md#protocol-checks-and-limits)
