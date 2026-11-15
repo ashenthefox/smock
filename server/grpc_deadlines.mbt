@@ -12,7 +12,9 @@
 // deadline is watched only while a delay runs: once the reply's HEADERS
 // are out, the reply finishes as planned. The stream's task sleeps until
 // the earlier of the delay's end and the deadline, so a deadline adds no
-// task and no timer.
+// task and no timer. Since clients that keep deadlines reset each call that
+// times out, spec E's defences count neither such a reset nor the first
+// reset of a call smock ended at its deadline (http2_defences.mbt).
 
 ///|
 /// The fixed `grpc-message` of the DEADLINE_EXCEEDED that ends a call
@@ -121,6 +123,7 @@ fn[S : @io.Writer + ReadOutput] H2Connection::wait_call(
           deadline_message,
           date~,
         )
+        self.ended_at_deadline(stream)
       } else if outcome.plan.fault is Some(Reset) {
         self.reset_after(stream, outcome.journal)
       } else if outcome.plan.fault is Some(Close) {
@@ -147,23 +150,63 @@ fn[S : @io.Writer + ReadOutput] H2Connection::wait_call(
 }
 
 ///|
-/// The client has reset `stream`, whose response may wait in a task. When
-/// it is a gRPC call whose delay runs past its deadline, and the reset
-/// arrived at or after that deadline less `deadline_tolerance_ms`, the
-/// call's Journal entry records DEADLINE_EXCEEDED, as if smock had ended
-/// the call at its deadline, before the task commits it (`stop_waiting`).
-/// So the entry does not depend on which comes first, the client's reset
-/// or smock's deadline. Any other reset leaves the entry as planned. A
-/// connection without such a call pays one test.
+/// The client has reset `stream`, whose response may wait in a task, and
+/// returns whether the reset ends a gRPC call as DEADLINE_EXCEEDED: a call
+/// whose delay runs past its deadline, reset at or after that deadline
+/// less `deadline_tolerance_ms`. The call's Journal entry then records
+/// DEADLINE_EXCEEDED, as if smock had ended the call at its deadline,
+/// before the task commits it (`stop_waiting`). So the entry does not
+/// depend on which comes first, the client's reset or smock's deadline.
+/// Any other reset leaves the entry as planned. A connection without such
+/// a call pays one test.
 fn H2Connection::reset_near_deadline(
   self : H2Connection,
   stream : Int32,
-) -> Unit {
+) -> Bool {
   if self.past_deadline.is_empty() {
-    return
+    return false
   }
-  if self.past_deadline.get(stream) is Some({ deadline, entry: Some(entry), }) &&
-    self.read_at >= deadline - deadline_tolerance_ms {
+  guard self.past_deadline.get(stream) is Some({ deadline, entry, }) &&
+    self.read_at >= deadline - deadline_tolerance_ms else {
+    return false
+  }
+  if entry is Some(entry) {
     entry.set_grpc_status(DeadlineExceeded)
   }
+  true
+}
+
+///|
+/// smock has ended `stream`, a gRPC call, at its deadline with
+/// DEADLINE_EXCEEDED. Keeps its ID until the client's reset of it arrives
+/// (`deadline_reset`), since a client that keeps deadlines resets the
+/// stream at its own, about when smock's passes. A client that read the
+/// answer first sends none, so at most `--http2-max-concurrent-streams` IDs
+/// are kept, the oldest dropped first.
+fn H2Connection::ended_at_deadline(self : H2Connection, stream : Int32) -> Unit {
+  let ended = self.deadline_ended
+  if ended.length() >= self.max_concurrent_streams {
+    let _ = ended.remove(0)
+  }
+  ended.push(stream)
+}
+
+///|
+/// Whether a client reset of `stream`, a stream already closed, is the
+/// first to land on a gRPC call that smock ended at its deadline with
+/// DEADLINE_EXCEEDED, and so does not count among the frames that do no
+/// work. The stream's ID is then no longer kept, so that a second reset of
+/// it counts. A connection that ended no call at its deadline pays one
+/// test.
+fn H2Connection::deadline_reset(self : H2Connection, stream : Int32) -> Bool {
+  let ended = self.deadline_ended
+  // The newest first: a client resets a call at its deadline, about when
+  // smock ends it.
+  for i = ended.length() - 1; i >= 0; i = i - 1 {
+    if ended[i] == stream {
+      let _ = ended.remove(i)
+      return true
+    }
+  }
+  false
 }

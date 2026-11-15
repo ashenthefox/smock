@@ -1,0 +1,26 @@
+// Written for smock's tests of the decoder's bounds: a type that holds
+// itself in each way a message may hold another, through a message field,
+// a group and the values of a map, so that a client may send it nested as
+// deep as it likes. smock refuses a message nested deeper than 100, each
+// group and map entry counting as a message.
+syntax = "proto2";
+
+package limits;
+
+service Burrows {
+  rpc Dig (Burrow) returns (Dug);
+}
+
+message Burrow {
+  optional string name = 1;
+  // A message field.
+  optional Burrow inner = 2;
+  // A group, which holds a Burrow.
+  optional group Layer = 3 {
+    optional Burrow inner = 1;
+  }
+  // A map whose values are Burrows.
+  map<string, Burrow> rooms = 4;
+}
+
+message Dug {}

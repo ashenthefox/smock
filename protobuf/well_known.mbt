@@ -157,7 +157,7 @@ fn well_known_form(message : MessageDescriptor) -> WellKnown? {
 /// any depth, and an Any that `print_any` cannot print.
 fn DescriptorSet::print_well_known(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   message : MessageDescriptor,
   form : WellKnown,
   records : Array[BytesView],
@@ -225,15 +225,15 @@ fn DescriptorSet::print_well_known(
       out.write_byte(b'"')
     }
     Wrapper(index) => {
-      let values = self.scan(message, records)
+      let values = self.scan(out, message, records)
       self.print_value(out, message.fields[index], values[index], depth)
     }
     Struct(index) | ListValue(index) => {
-      let values = self.scan(message, records)
+      let values = self.scan(out, message, records)
       self.print_repeated(out, message.fields[index], values[index], depth)
     }
     Value => {
-      let values = self.scan(message, records)
+      let values = self.scan(out, message, records)
       // The member of the oneof `kind` that the Value holds: the last one
       // of its fields by number, as the oneof keeps one.
       let mut held = -1
@@ -294,7 +294,7 @@ pub fn type_name_of_url(url : String) -> String? {
 /// set does not define, and one whose message does not decode.
 fn DescriptorSet::print_any(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   records : Array[BytesView],
   depth : Int32,
 ) -> Unit raise DecodeError {
@@ -330,6 +330,9 @@ fn DescriptorSet::print_any(
     out.write_bytes(b"{}")
     return
   }
+  // The type URL is printed in full, so one that cannot fit is too large
+  // before its text is decoded.
+  out.reserve(url.length())
   let text = @utf8.decode_lossy(url)
   guard type_name_of_url(text) is Some(name) else {
     raise DecodeError(
@@ -358,16 +361,10 @@ fn DescriptorSet::print_any(
     return
   }
   // The message's fields follow `@type` in the Any's object: the message
-  // is printed on its own, then its object's members are taken.
-  let fields = @buffer.Buffer(size_hint=2 * value.length() + 16)
-  self.print_message(fields, held, [value], depth + 1)
-  let printed = fields.to_bytes()
-  if printed.length() > 2 {
-    out.write_byte(b',')
-    out.write_bytes(printed[1:])
-  } else {
-    out.write_byte(b'}')
-  }
+  // is printed as an object, which then loses its braces.
+  let at = out.wrapped()
+  self.print_message(out, held, [value], depth + 1)
+  out.unwrap(at)
 }
 
 ///|
@@ -399,10 +396,10 @@ fn is_duration(seconds : Int64, nanos : Int32) -> Bool {
 /// date and time in UTC, with 0, 3, 6 or 9 fractional digits, then `Z`,
 /// such as `"1970-01-01T00:00:01.500Z"`.
 fn write_timestamp(
-  out : @buffer.Buffer,
+  out : Output,
   seconds : Int64,
   nanos : Int32,
-) -> Unit {
+) -> Unit raise DecodeError {
   // The days since 1970-01-01, and the seconds into the day.
   let mut days = seconds / 86400
   let mut time = seconds % 86400
@@ -452,7 +449,11 @@ fn write_timestamp(
 /// accepts, as a JSON string, as ProtoJSON prints it: a `-` when it is
 /// negative, the seconds, 0, 3, 6 or 9 fractional digits, then `s`, such as
 /// `"-1.500s"`.
-fn write_duration(out : @buffer.Buffer, seconds : Int64, nanos : Int32) -> Unit {
+fn write_duration(
+  out : Output,
+  seconds : Int64,
+  nanos : Int32,
+) -> Unit raise DecodeError {
   out.write_byte(b'"')
   if seconds < 0 || nanos < 0 {
     out.write_byte(b'-')
@@ -469,7 +470,7 @@ fn write_duration(out : @buffer.Buffer, seconds : Int64, nanos : Int32) -> Unit 
 /// Writes `nanos`, from 0 to 999,999,999 nanoseconds, as ProtoJSON prints
 /// a fraction of a second: nothing for 0, or else `.` and 3, 6 or 9
 /// digits, the fewest that hold it.
-fn write_fraction(out : @buffer.Buffer, nanos : Int32) -> Unit {
+fn write_fraction(out : Output, nanos : Int32) -> Unit raise DecodeError {
   if nanos == 0 {
     return
   }
@@ -487,7 +488,11 @@ fn write_fraction(out : @buffer.Buffer, nanos : Int32) -> Unit {
 ///|
 /// Writes `value`, 0 or more, in decimal, with zeros before it to make
 /// `width` digits at least.
-fn write_padded(out : @buffer.Buffer, value : Int64, width : Int32) -> Unit {
+fn write_padded(
+  out : Output,
+  value : Int64,
+  width : Int32,
+) -> Unit raise DecodeError {
   let mut unit = 1L
   for _ in 1..<width {
     unit = unit * 10
@@ -508,7 +513,7 @@ fn write_padded(out : @buffer.Buffer, value : Int64, width : Int32) -> Unit {
 /// has no such form that reads back as it: it holds an octet other than a
 /// lower-case letter, a digit, a dot or an underscore, or an underscore
 /// that a lower-case letter does not follow.
-fn write_path(out : @buffer.Buffer, path : BytesView) -> Bool {
+fn write_path(out : Output, path : BytesView) -> Bool raise DecodeError {
   let length = path.length()
   let mut i = 0
   while i < length {

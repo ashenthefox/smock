@@ -572,7 +572,7 @@ fn tree_set() -> @protobuf.DescriptorSet {
 fn tree(input : Bytes) -> String {
   let set = tree_set()
   guard set.find_message("tree.Tree") is Some(message) else { abort("no Tree") }
-  @utf8.decode(@protobuf.decode_json(set, message, input[:])) catch {
+  @utf8.decode(@protobuf.decode_json(set, message, input[:], limit=no_limit)) catch {
     err => "error: \{err}"
   }
 }

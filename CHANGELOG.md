@@ -381,6 +381,19 @@ of each GitHub release include its section
   reads framed messages as they arrive, in pieces split anywhere. See
   [Protocol checks and limits](docs/grpc.md#protocol-checks-and-limits)
   and [Compression](docs/grpc.md#compression).
+- Bounds on decoding a gRPC call's message, so that a small hostile
+  message cannot use up smock's CPU or memory. A message nested deeper
+  than 100, through messages, groups, map entries, Anys, Structs and their
+  Values, gets INTERNAL, and so does one with a length that runs past it.
+  smock counts the decoded JSON as it prints it, and a call gets
+  RESOURCE_EXHAUSTED `the decoded request message is over the body limit`
+  as soon as it passes `--body-limit`: an empty element of a list of
+  messages, 2 octets, prints every field of its type, so a 10 MiB message
+  could otherwise print gigabytes. What smock holds to print a message,
+  such as its map entries, is bounded by `--body-limit` too. The refusal
+  is not journaled, and counts as rejected traffic.
+  `smock/protobuf`'s `decode_json` takes the limit. See
+  [The decoder's limits](docs/grpc.md#the-decoders-limits).
 - Delays and deadlines on gRPC calls. A gRPC Stub's `fault.delay` waits
   before the reply's HEADERS, on the call's stream alone, as on HTTP/2. A
   call's deadline comes from its `grpc-timeout`, counted from its HEADERS.
@@ -389,10 +402,13 @@ of each GitHub release include its section
   HTTP status 200 and the `grpcStatus` `DEADLINE_EXCEEDED`. A client reset
   that arrives while such a delay runs, at most 100 ms before the
   deadline, is journaled the same way, as clients reset the stream at
-  their own deadline. A call cancelled earlier keeps the entry its Stub
-  planned. A timeout longer than 2^31-1 ms, such as `99999999H`, gives no
-  deadline, and a timeout of 0 ends a delayed call at once. `smock/grpc`
-  reads a timeout in whole milliseconds. See
+  their own deadline. Such a reset, and the first reset of a call smock
+  ended at its deadline, count neither toward the Rapid Reset bound nor
+  among the frames that do no work, so a client whose calls time out
+  keeps its connection. A call cancelled earlier keeps the entry its Stub
+  planned. A timeout longer than 2^31-1 ms, such as `99999999H`, gives
+  no deadline, and a timeout of 0 ends a delayed call at once.
+  `smock/grpc` reads a timeout in whole milliseconds. See
   [Deadlines](docs/grpc.md#deadlines) and [Faults](docs/grpc.md#faults).
 - Connection Faults on gRPC calls. A gRPC Stub's `fault.connection` takes
   its HTTP/2 form, with no `content-length`: `reset` resets the call's
