@@ -465,3 +465,55 @@ async test "a length that runs past its message, or past the message that holds 
     })
   })
 }
+
+///|
+async test "the JSON's limit is --body-limit, on every path that decodes a message: with --body-limit 64, a message whose JSON passes it gets RESOURCE_EXHAUSTED, an empty one and a health Check included, and a Check whose JSON fits is answered" {
+  let yaml =
+    #|mocks:
+    #|  - name: shelf
+    #|    grpc: { descriptorSet: collections.binpb, health: true }
+    #|stubs:
+    #|  - id: fill
+    #|    mock: shelf
+    #|    request: { path: /collections.Shelf/Fill }
+    #|    response: { json: {} }
+  with_collections_set(yaml, dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0", "--body-limit", "64"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      let fill = "/collections.Shelf/Fill"
+      let check = "/grpc.health.v1.Health/Check"
+      let calls : Array[(String, String, Bytes)] = [
+        // `{"numbers":[],...,"items":[]}` takes 105 octets with every list
+        // empty, so a Fill passes 64 whatever it sends.
+        ("an empty Fill", fill, b""),
+        // `{"service":"..."}`: 40 letters print 54 octets, and 10 control
+        // characters 74, 6 each, from a message of 12.
+        (
+          "a Check whose JSON fits",
+          check,
+          length_delimited(1, copies(b"a", 40)),
+        ),
+        (
+          "a Check whose JSON passes it",
+          check,
+          length_delimited(1, copies(b"\x01", 10)),
+        ),
+      ]
+      let out = []
+      for call in calls {
+        let (what, path, message) = call
+        let reply = client.call(path, body=framed(message))
+        out.push("\{what}: \{limits_reply(reply)}")
+      }
+      inspect(
+        out.join("\n"),
+        content=(
+          #|an empty Fill: :status: 200, grpc-status: 8, grpc-message: the decoded request message is over the body limit, 0 DATA (end)
+          #|a Check whose JSON fits: :status: 200, grpc-status: 5, grpc-message: unknown service, 0 DATA (end)
+          #|a Check whose JSON passes it: :status: 200, grpc-status: 8, grpc-message: the decoded request message is over the body limit, 0 DATA (end)
+        ),
+      )
+    })
+  })
+}
