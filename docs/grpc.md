@@ -2905,11 +2905,13 @@ no more than the largest JSON body an HTTP request may send:
   records alternate between two lists gets RESOURCE_EXHAUSTED.
 
 So a call holds its message once as it came, and once as JSON, each
-within `--body-limit`. For example, a message of 10 MiB of empty `Item`s
-in a `repeated Item items`, where an `Item` has a string, a list and a
-map, would print 160 MiB of JSON. smock answers RESOURCE_EXHAUSTED once
-the JSON passes 10 MiB, in well under a second. Such a call, like an
-HTTP request with a body of 10 MiB, holds tens of MiB at once.
+within `--body-limit`. While smock decodes the message, the notes it
+holds to print it may take up to one more `--body-limit`. For example, a
+message of 10 MiB of empty `Item`s in a `repeated Item items`, where an
+`Item` has a string, a list and a map, would print 160 MiB of JSON. smock
+answers RESOURCE_EXHAUSTED once the JSON passes 10 MiB, in well under a
+second. Such a call, like an HTTP request with a body of 10 MiB, holds
+tens of MiB at once.
 
 When a condition, a template or a Near miss reads the message, smock
 parses its JSON, and the parsed values cost more memory than the text.
