@@ -12,10 +12,15 @@
 //   error, sends the HEADERS it would send before its trailers, without
 //   ending the stream, then the reset: neither its status fields nor its
 //   trailing metadata go out. The client sees INTERNAL.
+// - `close`: GOAWAY NO_ERROR, then the connection closes
+//   (`H2Connection::close_by_fault`). Every call in flight on the
+//   connection ends with it, and the client sees UNAVAILABLE.
 //
 // Each runs where the answer would: in place, while the event is handled,
 // when the Stub has no delay, and otherwise in the stream's task, once the
-// delay is over (`wait_call`). The Journal entry of a call that a reset
+// delay is over (`wait_call`). A delay that the call's deadline cuts short
+// never ends, so its Fault never comes: the call gets DEADLINE_EXCEEDED
+// (grpc_deadlines.mbt). The Journal entry of a call that a reset or close
 // Fault ends has no status and no gRPC status; a partial one keeps both.
 
 ///|

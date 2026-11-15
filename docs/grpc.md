@@ -6,8 +6,9 @@ and checks the set when it loads the Definition files. Its gRPC Stubs then
 answer unary calls, on the plain port over h2c and on the TLS port over
 h2. This guide shows a first call, says which requests are gRPC calls, how
 a call reaches a Stub and how smock answers it, how a call's deadline
-meets a Stub's delay, which calls gRPC's rules refuse, how a Mock answers
-gRPC's health service, and how to build a set that smock reads. The
+meets a Stub's delay, which status each Fault gives a client, which calls
+gRPC's rules refuse, how a Mock answers gRPC's health service, and how to
+build a set that smock reads. The
 [Definition-file reference](definition-files.md#grpc) describes the
 Mock's `grpc` field and gRPC Stubs.
 
@@ -55,6 +56,7 @@ Mock's `grpc` field and gRPC Stubs.
   - [The body limit](#the-body-limit)
 - [Compression](#compression)
 - [Faults](#faults)
+  - [HTTP/2's resets and refusals](#http2s-resets-and-refusals)
 - [Calls smock does not serve yet](#calls-smock-does-not-serve-yet)
 - [Building a set](#building-a-set)
   - [Self-contained sets](#self-contained-sets)
@@ -223,10 +225,11 @@ stubs:
   the status, message and trailing metadata the reply ends with
   ([Status and message](#status-and-message)). `template` and weighted
   `responses` work as on HTTP.
-- `priority`, `scenario`, `variables`, `dataWrites`, `fault.delay` and
-  `fault.seed` work as on HTTP. A delay waits before the reply's HEADERS,
-  and the call's deadline can cut it short ([Faults](#faults),
-  [Deadlines](#deadlines)).
+- `priority`, `scenario`, `variables`, `dataWrites` and `fault` work as
+  on HTTP. A delay waits before the reply's HEADERS, and the call's
+  deadline can cut it short ([Deadlines](#deadlines)). A connection Fault
+  resets the call's stream, sends half the reply, or closes the
+  connection ([Faults](#faults)).
 
 Fields that make no sense for gRPC are problems when the files load:
 `query` and `cookies` conditions, a body condition other than `json`, and
@@ -237,8 +240,7 @@ Fields that make no sense for gRPC are problems when the files load:
 greeter.yaml: /stubs/0/request/query: makes no sense on a gRPC Stub: a gRPC call's path has no query
 ```
 
-Connection Faults, which break a call's stream or its connection, are not
-served yet: a Stub that gives one fails to load. The
+The
 [Definition-file reference](definition-files.md#a-grpc-stubs-fields)
 lists every field. A [CRUD Stub](definition-files.md#crud-stubs) is never
 a gRPC Stub, whatever its path: it has no request path, so gRPC calls
@@ -1108,7 +1110,9 @@ the status smock answered with instead, such as `UNIMPLEMENTED` for an
 unmatched call, or `INTERNAL`. Its `status` stays
 the HTTP status, 200 for a reply and for an unmatched call, as gRPC sends
 them: a client learns of an error from `grpc-status`, not from
-`:status`. The entry of an HTTP request has no `grpcStatus`.
+`:status`. The entry of an HTTP request has no `grpcStatus`, nor has the
+entry of a call that a `reset` or `close` Fault ended
+([Faults](#faults)).
 
 Journal queries, verification and the unmatched list take calls as they
 take HTTP requests. A filter gives the Mock, the method `POST`, the path
@@ -1979,21 +1983,93 @@ client's `grpc-accept-encoding` changes nothing.
 
 ## Faults
 
-A gRPC Stub's `fault` may give a delay, drawn as on HTTP, with its
-`probability` ([Delays](definition-files.md#delays)). smock decides it as
-for an HTTP request, with the same draws, so
-[`fault.seed` and `--seed`](definition-files.md#seeds) replay it.
-Connection Faults are not served on gRPC Stubs yet: a Stub that gives one
-fails to load.
+A gRPC Stub's `fault` may give a delay and a
+[connection Fault](definition-files.md#connection-faults), each drawn as
+on HTTP, with its `probability`. smock decides them as for an HTTP
+request, with the same draws, so
+[`fault.seed` and `--seed`](definition-files.md#seeds) replay them. A
+connection Fault takes its [HTTP/2 form](http2.md#faults), and sends no
+`content-length`:
 
 | Fault | On a gRPC call | The client sees |
 |---|---|---|
 | delay | Waits before the reply's HEADERS, on the call's stream alone: the other calls of the connection are answered meanwhile. The call's deadline can cut it short ([Deadlines](#deadlines)). | The reply, later; or DEADLINE_EXCEEDED |
+| `reset` | Once the call has arrived in full, RST_STREAM `INTERNAL_ERROR` on the call's stream alone. The other calls of the connection go on. | INTERNAL |
+| `partial` | The reply's HEADERS and the first half of its framed message, rounded down, then RST_STREAM `INTERNAL_ERROR`. A reply with no message, such as an error, sends the HEADERS it would send before its trailers, without the status fields and without ending the stream, then the reset. | INTERNAL |
+| `close` | GOAWAY `NO_ERROR`, then the connection closes. | UNAVAILABLE, for every call in flight on the connection |
 
-A delay holds back whatever the call gets from its Stub: its reply, its
-error, or smock's own answer when the Stub's reply cannot be sent, such as
-INTERNAL `template failed`. A call that no Stub matched gets UNIMPLEMENTED
-at once.
+A Stub that resets the calls of one tenant leaves the other calls of the
+channel be:
+
+```yaml
+stubs:
+  - id: broken
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello
+      headers: { x-tenant: broken }
+    response:
+      json: { message: never sent }
+    fault: { connection: { kind: reset } }
+```
+
+A call with `x-tenant: broken` fails with INTERNAL. grpc-go, and so
+grpcurl, reports it with the message `stream terminated by RST_STREAM
+with error code: INTERNAL_ERROR`, and a call that `partial` ends the same
+way. The next call on the same channel, to another Stub, gets its reply.
+
+`close` ends every call on the connection, not just the Stub's. A gRPC
+client sends its calls to one server over one connection, many at once,
+so each call in flight then fails with UNAVAILABLE, and the client opens
+a new connection for the next. Use `reset` to fail one call alone.
+grpcurl prints a call that `close` ended as:
+
+```text
+ERROR:
+  Code: Unavailable
+  Message: closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR
+```
+
+- **Probabilistic errors.** For a call that fails with a gRPC status
+  some of the time, such as UNAVAILABLE one call in ten, give the Stub
+  weighted `responses`, one of them with a `grpc` status
+  ([Status and message](#status-and-message)). That is no connection
+  Fault: the call gets the status itself, with its message.
+- **A delay first.** A Fault with a delay comes once the delay is over,
+  as on HTTP/2. A delay holds back whatever the call gets from its Stub:
+  its reply, its error, its Fault, or smock's own answer when the Stub's
+  reply cannot be sent, such as INTERNAL `template failed`. A call that
+  no Stub matched gets UNIMPLEMENTED at once.
+- **The deadline first.** A delay that the call's deadline cuts short
+  never ends, so its connection Fault never comes: the call gets
+  DEADLINE_EXCEEDED, and the connection stays open.
+- **What `partial` sends.** The HEADERS of the answer the call would get:
+  its initial metadata, and `smock-mock` when the Default Mock answered.
+  Its status, its message, its details and its trailing metadata never go
+  out. A reply that smock cannot send, such as one whose rendered message
+  does not fit the output type, sends smock's own HEADERS, with none of
+  the Stub's metadata, and so does a reply whose HEADERS are too large to
+  send ([Metadata size](#metadata-size)).
+- **The Journal.** The entry of a call that `reset` or `close` ended has
+  no `status` and no `grpcStatus`, since no status went out. A `partial`
+  one keeps both, as planned, or INTERNAL when smock sent its own HEADERS.
+  An entry has the Fault in `fault`; a call whose deadline came first has
+  none.
+
+### HTTP/2's resets and refusals
+
+smock's [HTTP/2 limits and defences](http2.md#limits-and-timeouts) reset
+or refuse a stream, or end a connection, whatever the request. A gRPC
+client derives a status from each, as gRPC's HTTP/2 protocol says:
+
+| What smock does | The client sees |
+|---|---|
+| RST_STREAM `REFUSED_STREAM`, for a stream past `--http2-max-concurrent-streams` | UNAVAILABLE. smock never began the call, so gRPC retries it on its own, without a retry policy. |
+| RST_STREAM `CANCEL`, for a call whose request is late past the read timeout, or a stream whose window stays at zero past the write timeout | CANCELLED |
+| RST_STREAM `ENHANCE_YOUR_CALM`, for a header list over twice `--header-size-limit` as received | RESOURCE_EXHAUSTED |
+| `:status` 431, for a header list over `--header-size-limit` or with more fields than `--header-count-limit` | UNKNOWN |
+| `:status` 400, for a request HTTP/1.1's rules refuse | INTERNAL |
+| GOAWAY, after one of the [defences](http2.md#defences) | The calls in flight on the connection end, and later calls get UNAVAILABLE. |
 
 ## Calls smock does not serve yet
 

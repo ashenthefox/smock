@@ -46,7 +46,9 @@
 // client advertised, gets Trailers-Only INTERNAL `reply metadata too large`
 // instead (`answer_too_large`). A Stub's delay holds its answer back, in
 // the stream's task, unless the call's deadline cuts it short with
-// DEADLINE_EXCEEDED (grpc_deadlines.mbt). An answer sent before the client
+// DEADLINE_EXCEEDED (grpc_deadlines.mbt). A Stub's connection Fault resets
+// the call's stream or closes its connection in place of its answer, or
+// sends half of it (grpc_faults.mbt). An answer sent before the client
 // has ended its request is followed by RST_STREAM NO_ERROR (`end_early`).
 // What gRPC's rules refuse in a call, checked as soon as it arrives, and
 // what the layer cannot serve yet, get Trailers-Only too, with their
@@ -169,9 +171,10 @@ fn H2Connection::end_early(self : H2Connection, stream : Int32) -> Unit {
 /// now is answered as from its HEADERS (`answer_unserved`). The engine's
 /// plan becomes the call's answer (`call_answer`), which is sent at once
 /// (`send_answer`), or once the plan's delay is over, in a task of its own
-/// (`wait_call`), which writes to `out`. The rest of a reply too large for
-/// the windows is sent in a task of its own too (`write_slowly`), with the
-/// trailers after it.
+/// (`wait_call`), which writes to `out`. A reset or close Fault ends the
+/// call in place of the answer (grpc_faults.mbt). The rest of a reply too
+/// large for the windows is sent in a task of its own too
+/// (`write_slowly`), with the trailers after it.
 fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
   self : H2Connection,
   stream : Int32,

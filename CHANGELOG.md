@@ -394,6 +394,17 @@ of each GitHub release include its section
   deadline, and a timeout of 0 ends a delayed call at once. `smock/grpc`
   reads a timeout in whole milliseconds. See
   [Deadlines](docs/grpc.md#deadlines) and [Faults](docs/grpc.md#faults).
+- Connection Faults on gRPC calls. A gRPC Stub's `fault.connection` takes
+  its HTTP/2 form, with no `content-length`: `reset` resets the call's
+  stream alone, `partial` sends the reply's HEADERS and the first half of
+  its framed message, then resets the stream, and `close` sends GOAWAY
+  and closes the connection, which ends every call on it. A gRPC client
+  sees INTERNAL for `reset` and `partial`, and UNAVAILABLE for `close`.
+  The entry of a call that `reset` or `close` ended has no `status` and
+  no `grpcStatus`. A deadline that cuts a Stub's delay short comes before
+  its Fault, which never comes. The guide gives the status a client
+  derives from each of HTTP/2's resets and refusals too. See
+  [Faults](docs/grpc.md#faults).
 - A Mock's built-in health service. With `grpc: { health: true }`, a Mock
   answers gRPC's `grpc.health.v1.Health` as gRPC's health servers do:
   `Check` says SERVING for `""` and for each service of the Mock's set,
@@ -483,8 +494,9 @@ of each GitHub release include its section
   without `status`. The format version stays 1. See
   [gRPC Stubs](docs/definition-files.md#grpc-stubs).
 - The Admin API document's `JournalEntry` gains `grpcStatus`, one of
-  gRPC's seventeen status names, which a gRPC call's entry has and an HTTP
-  request's does not. Its `Body` says what a gRPC call's recorded request
+  gRPC's seventeen status names, which a gRPC call's entry has, unless a
+  `reset` or `close` Fault ended the call, and an HTTP request's does
+  not. Its `Body` says what a gRPC call's recorded request
   holds: in `data` the decoded JSON, in `size` the octets of the DATA
   frames received, and in `truncated` whether the JSON was cut at
   `--journal-body-limit`.
