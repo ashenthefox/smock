@@ -256,3 +256,128 @@ async test "health: Watch, which streams, gets UNIMPLEMENTED from its HEADERS, f
     })
   })
 }
+
+///|
+/// The Mock of the ticket's example, with the gRPC Stub `hello` on
+/// `SayHello`.
+let health_example_with_hello : String = health_example +
+  (
+    #|
+    #|stubs:
+    #|  - id: hello
+    #|    mock: greeter
+    #|    request: { path: /helloworld.Greeter/SayHello }
+    #|    response: { json: { message: Hello Tom } }
+  )
+
+///|
+async test "health: once SIGTERM starts the drain, every Check and List says NOT_SERVING, an unknown name's included, while a call already in flight finishes" {
+  with_greeter_set([("greeter.yaml", health_example_with_hello)], dir => {
+    let _ = with_smock(
+      ["--dir", dir, "--port", "0", "--drain-timeout-ms", "10000"],
+      smock => {
+        let raw = smock.raw_h2()
+        defer raw.close()
+        let start = @async.now()
+        let hello_path = "/helloworld.Greeter/SayHello"
+        // A call in flight: its HEADERS have arrived, and its message has
+        // not.
+        raw.send([
+          headers_frame(
+            1,
+            raw.block(call_fields(hello_path, "localhost")),
+            end_stream=false,
+          ),
+          Ping(payload=b"\x00\x00\x00\x00\x00\x00\x00\x01", ack=false),
+        ])
+        let out = [raw.frames_until_ping_ack()]
+        smock.terminate()
+        // The client does not acknowledge the drain's PING yet, so smock
+        // still takes new streams.
+        let warned = raw.frames_until(start, frame => {
+          frame is Ping(ack=false, ..)
+        })
+        out.append(warned.shown)
+        let calls = [
+          (3, check_path, b""),
+          (5, check_path, health_fixture("check-nope")),
+          (7, list_path, b""),
+        ]
+        for call in calls {
+          let (stream, path, message) = call
+          raw.send([
+            headers_frame(
+              stream,
+              raw.block(call_fields(path, "localhost")),
+              end_stream=false,
+            ),
+            Data(
+              stream_id=stream,
+              data=framed(message),
+              end_stream=true,
+              padding=0,
+            ),
+          ])
+        }
+        let data : Map[Int32, Bytes] = {}
+        let answered = raw.frames_until(start, frame => {
+          match frame {
+            Data(stream_id~, data=octets, ..) => data[stream_id] = octets
+            _ => ()
+          }
+          frame is Headers(stream_id=7, end_stream=true, ..)
+        })
+        // smock sends the final GOAWAY a second after its PING, which
+        // could come in any of these reads on a slow machine.
+        out.append(answered.shown.filter(line => !line.has_prefix("GOAWAY")))
+        let not_serving = framed(health_fixture("not-serving"))
+        out.push(
+          "Check \"\" and Check nope.Svc say NOT_SERVING: \{data.get(3) == Some(not_serving) && data.get(5) == Some(not_serving)}",
+        )
+        out.push(
+          "List says NOT_SERVING for each: \{data.get(7) == Some(framed(health_fixture("list-greeter-not-serving")))}",
+        )
+        out.push(calls_journaled(smock))
+        out.push(smock.metric("smock_requests_total"))
+        // The call in flight sends its message, and finishes.
+        raw.send([
+          Data(
+            stream_id=1,
+            data=framed(@fs.read_file(hello_request_path).binary()),
+            end_stream=true,
+            padding=0,
+          ),
+        ])
+        let finished = raw.frames_until(start, frame => {
+          frame is Headers(stream_id=1, end_stream=true, ..)
+        })
+        out.append(finished.shown.filter(line => !line.has_prefix("GOAWAY")))
+        inspect(
+          out.join("\n"),
+          content=(
+            #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
+            #|SETTINGS ACK
+            #|GOAWAY last=2147483647 NO_ERROR
+            #|PING
+            #|HEADERS 3 END_HEADERS [:status: 200, content-type: application/grpc, smock-mock: greeter; via=default, date: <now>]
+            #|DATA 3 7 octets
+            #|HEADERS 3 END_STREAM END_HEADERS [grpc-status: 0]
+            #|HEADERS 5 END_HEADERS [:status: 200, content-type: application/grpc, smock-mock: greeter; via=default, date: <now>]
+            #|DATA 5 7 octets
+            #|HEADERS 5 END_STREAM END_HEADERS [grpc-status: 0]
+            #|HEADERS 7 END_HEADERS [:status: 200, content-type: application/grpc, smock-mock: greeter; via=default, date: <now>]
+            #|DATA 7 39 octets
+            #|HEADERS 7 END_STREAM END_HEADERS [grpc-status: 0]
+            #|Check "" and Check nope.Svc say NOT_SERVING: true
+            #|List says NOT_SERVING for each: true
+            #|
+            #|smock_requests_total{mock="greeter",stub=""} 3
+            #|HEADERS 1 END_HEADERS [:status: 200, content-type: application/grpc, smock-mock: greeter; via=default, date: <now>]
+            #|DATA 1 16 octets
+            #|HEADERS 1 END_STREAM END_HEADERS [grpc-status: 0]
+          ),
+        )
+      },
+    )
+  })
+}
