@@ -966,25 +966,10 @@ pub fn Engine::handle(
               }
             }
           }
-          let ephemeral = match ephemeral {
-            Some(list) =>
-              list
-              .iter()
-              .filter(e => e.answers == answers)
-              .map(e => (e.stub, StubSource::Ephemeral))
-            None => Iter::empty()
-          }
           // A gRPC call's Near miss is chosen among every gRPC Stub of its
           // Mock, as an HTTP request's is among every HTTP Stub, so a call
           // to a method that no Stub is on has one too.
-          let stubs = match grpc {
-            Some(_) => mock.stubs.iter().filter(stub => stub.is_grpc())
-            None => mock.http_stubs.iter()
-          }
-          near_miss = incoming.near_miss(
-            ephemeral.concat(stubs.map(stub => (stub, StubSource::File))),
-            states,
-          )
+          near_miss = incoming.near_miss(ephemeral, mock, answers, states)
           if grpc is Some(call) {
             grpc_unimplemented(unmatched_call(mock, call.path), near_miss)
           } else {

@@ -277,8 +277,14 @@ fn plan_response(
       ReadOnlyArray::from_array(trailers)
     }
   }
-  let (details, encoded_status) = match reply.details {
-    Written(details, encoded_status) => (details, encoded_status)
+  // Details as written come with google.rpc.Status encoded at load;
+  // rendered ones have none, and the server encodes them.
+  let mut encoded_status : @definitions.EncodedStatus? = None
+  let details = match reply.details {
+    Written(details, encoded) => {
+      encoded_status = encoded
+      details
+    }
     Templated(templates) => {
       let rendering = rendering_for(
         incoming,
@@ -293,7 +299,7 @@ fn plan_response(
       for i in 0..<templates.length() {
         details.push(templates[i].render_value(rendering))
       }
-      (ReadOnlyArray::from_array(details), None)
+      ReadOnlyArray::from_array(details)
     }
   }
   {

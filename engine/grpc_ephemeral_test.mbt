@@ -205,6 +205,69 @@ test "an HTTP request never tries an Ephemeral gRPC Stub, nor counts it for its 
 }
 
 ///|
+test "a Near miss is chosen only among the Ephemeral Stubs that answer the request: a gRPC call's never names an Ephemeral HTTP Stub, and neither a call's nor an HTTP request's names an Ephemeral gRPC Stub whose method a reload took away" {
+  let h = harness(
+    greeter_with_set("greeter.binpb"),
+    body_files=ephemeral_body_files(),
+  )
+  // An Ephemeral HTTP Stub that fails one condition of each request
+  // below, then an Ephemeral gRPC Stub for Ann.
+  let http_stub = h.add(
+    "greeter",
+    None,
+    (
+      #|{ "request": { "method": "POST", "headers": { "x-route": "http" } },
+      #|  "response": { "status": 200 } }
+    ),
+  )
+  let grpc_stub = h.add(
+    "greeter",
+    None,
+    (
+      #|{ "request": { "path": "/helloworld.Greeter/SayHello", "body": { "json": { "name": "Ann" } } },
+      #|  "response": { "json": { "message": "Hello Ann" } } }
+    ),
+  )
+  let near = (outcome : @engine.Outcome) => {
+    match outcome.near_miss {
+      Some(near_miss) =>
+        "\{near_miss.stub}, \{near_miss.failed.length()} failed"
+      None => "none"
+    }
+  }
+  // The request that the gRPC Stub's conditions all meet, as an HTTP
+  // request.
+  let post = () => {
+    h.send("POST", "/helloworld.Greeter/SayHello", body="{\"name\":\"Ann\"}")
+  }
+  let lines = [
+    "added \{http_stub} and \{grpc_stub}",
+    // Each Ephemeral Stub fails one condition of a call for Bob, and the
+    // HTTP Stub comes first.
+    "a call for Bob: \{near(h.say_hello("Bob"))}",
+    "an HTTP request: \{near(post())}",
+  ]
+  // The Mock's set becomes catalog.proto, which has no SayHello, so the
+  // Ephemeral gRPC Stub answers nothing.
+  let _ = h.reload(
+    greeter_with_set("catalog.binpb"),
+    body_files=ephemeral_body_files(),
+  )
+  lines.push("a call for Ann, after the reload: \{near(h.say_hello("Ann"))}")
+  lines.push("an HTTP request, after the reload: \{near(post())}")
+  inspect(
+    lines.join("\n"),
+    content=(
+      #|added eph-1 and eph-2
+      #|a call for Bob: eph-2, 1 failed
+      #|an HTTP request: eph-1, 1 failed
+      #|a call for Ann, after the reload: none
+      #|an HTTP request, after the reload: eph-1, 1 failed
+    ),
+  )
+}
+
+///|
 test "an Ephemeral gRPC Stub is checked against its Mock's set as a file Stub is: refused with every problem at its pointer, or its condition normalised" {
   let h = harness(
     greeter_with_set("greeter.binpb"),
