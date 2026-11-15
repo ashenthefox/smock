@@ -1275,6 +1275,10 @@ HTTP/2 conformance tool, and the lists of h2spec's cases that do not pass on
 the plain port and on the TLS port, each with its reason (see
 [Build and test](#build-and-test)).
 
+`scripts/grpcurl/` holds the definition set that CI serves to grpcurl, a
+real gRPC client, and the calls grpcurl makes, each with what it prints
+(see [Build and test](#build-and-test)).
+
 ## Toolchain
 
 The MoonBit toolchain version is pinned in `.moonbit-version`, and CI installs
@@ -1304,6 +1308,9 @@ scripts/check-schema.sh dist/smock   # the JSON Schema and smock agree
 scripts/check-openapi.sh       # the Admin API document is valid OpenAPI 3.1
 scripts/install-h2spec.sh      # the pinned h2spec, into ~/.local/bin
 scripts/check-h2spec.sh dist/smock   # h2spec's conformance cases against the plain and TLS ports (needs h2spec, python3 and jq)
+scripts/install-grpcurl.sh     # the pinned grpcurl, into ~/.local/bin
+scripts/check-grpcurl.sh dist/smock  # grpcurl calls smock on the plain and TLS ports, and the gRPC guide shows those calls (needs grpcurl, curl and jq)
+scripts/test-check-grpcurl.sh dist/smock   # that check fails on each difference
 docker build --tag smock:dev .
 scripts/smoke-test-image.sh smock:dev 0.0.0-dev <commit> "moonc <version>"   # the container image
 scripts/check-release-workflow.sh    # the release workflow publishes only for tags (needs yq and jq)
@@ -1389,6 +1396,35 @@ runs the h2spec it finds on `PATH`. On either architecture, then:
 scripts/install-h2spec.sh
 scripts/build-release.sh
 scripts/check-h2spec.sh dist/smock
+```
+
+`scripts/check-grpcurl.sh` calls a smock binary with grpcurl 1.9.4, a
+real gRPC client. smock serves `scripts/grpcurl/definitions`: the Mock of
+the [gRPC guide's quick start](docs/grpc.md#quick-start), with reflection
+and health on, and a second Mock, so that only grpcurl's `-authority`
+reaches the first. Each file of `scripts/grpcurl/calls` is one call: its
+grpcurl command, as the guide writes it for the plain port, then what
+grpcurl prints, and its exit status when it is not 0. Each call runs on
+the plain port over h2c, and on the TLS port over h2 with the self-signed
+certificate, which grpcurl's `-insecure` does not verify. They list and
+describe the services through reflection, call with JSON and metadata,
+make the same calls with `-protoset` and no reflection, print an error's
+details with `-format-error`, check health through reflection, call
+another Host, and call in a Session whose Ephemeral Stub the script adds
+first. Any difference fails the run, which shows it and what grpcurl
+printed. The script also checks the guide: each grpcurl command the guide
+shows must be one of these calls, the output it shows after one must be
+what grpcurl prints, and it must show the set's Definition file.
+`scripts/test-check-grpcurl.sh` checks that each kind of difference fails
+the check. To add a call, add its file, run the script, and compare what
+it prints with what the file says. `scripts/install-grpcurl.sh` installs
+grpcurl 1.9.4, checked against its SHA-256, into a directory,
+`~/.local/bin` unless one is given, on linux/amd64 and linux/arm64:
+
+```sh
+scripts/install-grpcurl.sh
+scripts/build-release.sh
+scripts/check-grpcurl.sh dist/smock
 ```
 
 CI runs all of these but `moon bench` (`.github/workflows/ci.yml`). The

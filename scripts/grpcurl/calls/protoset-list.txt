@@ -1,0 +1,2 @@
+$ grpcurl -plaintext -authority greeter.svc -protoset defs/files/greeter.binpb localhost:8080 list
+helloworld.Greeter

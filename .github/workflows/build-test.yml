@@ -112,6 +112,23 @@ jobs:
         if: matrix.arch == 'amd64'
         run: scripts/check-h2spec.sh dist/smock plain tls
 
+      # grpcurl, a real gRPC client, pinned by version and SHA-256, calls
+      # the release binary on the plain port (h2c) and on the TLS port (h2):
+      # list and describe through reflection, calls with JSON and metadata,
+      # the same calls with -protoset and no reflection, an error with
+      # details through -format-error, and health checks. Each call's
+      # expected output is in scripts/grpcurl/calls, and the gRPC guide
+      # shows only those calls. Any difference fails the step and shows
+      # what grpcurl printed.
+      - name: Install grpcurl
+        run: scripts/install-grpcurl.sh "$RUNNER_TEMP/bin"
+
+      - name: Call smock with grpcurl on the plain port (h2c) and the TLS port (h2)
+        run: scripts/check-grpcurl.sh dist/smock
+
+      - name: Test that the grpcurl check fails on each difference
+        run: scripts/test-check-grpcurl.sh dist/smock
+
       # The release workflow builds and smoke-tests the image the same way.
       - name: Build the container image
         run: docker build --provenance=false --tag smock:ci .

@@ -1,0 +1,3 @@
+$ grpcurl -plaintext localhost:8080 list
+Failed to list services: server does not support the reflection API
+exit status 1

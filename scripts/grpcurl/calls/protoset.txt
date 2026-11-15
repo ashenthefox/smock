@@ -1,0 +1,4 @@
+$ grpcurl -plaintext -authority greeter.svc -protoset defs/files/greeter.binpb -H 'x-tenant: acme' -d '{"name":"Tom"}' localhost:8080 helloworld.Greeter/SayHello
+{
+  "message": "Hello Tom"
+}
