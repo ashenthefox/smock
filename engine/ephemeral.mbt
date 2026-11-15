@@ -212,14 +212,7 @@ fn Engine::recheck_ephemeral(
     guard mocks.get(mock) is Some(declared) else { continue }
     for _, list in by_session {
       for e in list {
-        if e.stub.serves
-          is Ordinary(
-            {
-              grpc_method: Some(_),
-              request: { path: Some(Has(Exact(path))), .. },
-              ..
-            }
-          ) {
+        if e.stub.grpc_path() is Some(path) {
           e.answers = if declared.descriptor_set is Some(set) &&
             set.unary_method(path) is Some(_) {
             GrpcCalls

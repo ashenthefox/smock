@@ -565,14 +565,7 @@ fn grpc_stubs_by_path(
 ) -> Map[String, ReadOnlyArray[Stub]] {
   let by_path : Map[String, Array[Stub]] = Map([])
   for stub in stubs {
-    if stub.serves
-      is Ordinary(
-        {
-          grpc_method: Some(_),
-          request: { path: Some(Has(Exact(path))), .. },
-          ..
-        }
-      ) {
+    if stub.grpc_path() is Some(path) {
       match by_path.get(path) {
         Some(list) => list.push(stub)
         None => by_path[path] = [stub]

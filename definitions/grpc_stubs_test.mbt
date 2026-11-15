@@ -587,6 +587,64 @@ test "a CRUD Stub stays an HTTP Stub even when its path names a method of its Mo
 }
 
 ///|
+test "a gRPC Stub gives the path of its method, and an HTTP Stub none, whatever its path" {
+  let yaml =
+    #|mocks:
+    #|  - { name: greeter, grpc: { descriptorSet: greeter.binpb } }
+    #|  - { name: plain }
+    #|stubs:
+    #|  - id: hello
+    #|    mock: greeter
+    #|    request: { path: /helloworld.Greeter/SayHello }
+    #|    response: {}
+    #|  - id: other-path
+    #|    mock: greeter
+    #|    request: { path: /hello }
+    #|    response: { status: 200 }
+    #|  - id: pattern
+    #|    mock: greeter
+    #|    request: { path: { pattern: "/helloworld.Greeter/.*" } }
+    #|    response: { status: 200 }
+    #|  - id: no-set
+    #|    mock: plain
+    #|    request: { path: /helloworld.Greeter/SayHello }
+    #|    response: { status: 200 }
+    #|  - id: hello-crud
+    #|    mock: greeter
+    #|    crud: { bucket: greetings, path: /helloworld.Greeter/SayHello }
+    #|data:
+    #|  - { mock: greeter, name: greetings, key: id, json: [] }
+    #|
+  guard @definitions.load({
+      files: [("a.yaml", @utf8.encode(yaml))],
+      body_files: [("greeter.binpb", set_bytes(greeter_set))],
+    })
+    is Ok(snapshot) else {
+    fail("the files load")
+  }
+  let lines = []
+  for mock in snapshot.mocks {
+    for stub in mock.stubs {
+      let path = match stub.grpc_path() {
+        Some(path) => path
+        None => "-"
+      }
+      lines.push("\{stub.id}: \{path}")
+    }
+  }
+  inspect(
+    lines.join("\n"),
+    content=(
+      #|hello: /helloworld.Greeter/SayHello
+      #|other-path: -
+      #|pattern: -
+      #|hello-crud: -
+      #|no-set: -
+    ),
+  )
+}
+
+///|
 test "an HTTP Stub of a Mock with a set whose exact path has the form /package.Service/Method, but names no method of the set, gets a warning at its path" {
   inspect(
     check_stubs(
