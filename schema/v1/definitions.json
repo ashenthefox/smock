@@ -515,7 +515,7 @@
         },
         "llm": { "$ref": "#/$defs/llm" },
         "grpc": {
-          "description": "How a gRPC Stub's reply ends: its gRPC status, its status message and its trailing metadata. Only a gRPC Stub's response gives it; an HTTP Stub that gives it is refused. Without it, the reply ends with OK, no message and no trailing metadata. An error, a status other than OK, gives no json: a gRPC call gets a reply message or an error, never both.",
+          "description": "How a gRPC Stub's reply ends: its gRPC status, its status message, its trailing metadata and its error details. Only a gRPC Stub's response gives it; an HTTP Stub that gives it is refused. Without it, the reply ends with OK, no message and no trailing metadata. An error, a status other than OK, gives no json: a gRPC call gets a reply message or an error, never both. Only an error gives details.",
           "type": "object",
           "properties": {
             "status": {
@@ -532,9 +532,30 @@
               "type": "object",
               "propertyNames": { "$ref": "#/$defs/metadataName" },
               "additionalProperties": { "$ref": "#/$defs/headerValues" }
+            },
+            "details": {
+              "description": "The error details, in the order given, such as google.rpc.ErrorInfo, RetryInfo or BadRequest: each an Any in ProtoJSON, @type, a type URL whose last segment names a type of the Mock's Descriptor set, beside the fields of its message. smock builds google.rpc.Status from the status, the message and the details, each packed in an Any, and sends it in grpc-status-details-bin, in base64 without padding, so the set need not hold google/rpc/status.proto. A detail type the set lacks, or a detail that does not fit its type, is a load error. Only an error gives details; an empty array sends none. With template true, each detail is a structured template, rendered then encoded, and one that fails to render or does not fit its type gets INTERNAL template failed.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "@type": {
+                    "description": "The type URL of the detail's message, such as type.googleapis.com/google.rpc.ErrorInfo.",
+                    "type": "string"
+                  }
+                },
+                "required": ["@type"]
+              }
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "if": {
+            "description": "OK: the status left out, or given as OK.",
+            "properties": { "status": { "const": "OK" } }
+          },
+          "then": {
+            "properties": { "details": { "description": "Only an error gives details.", "maxItems": 0 } }
+          }
         }
       },
       "dependentSchemas": {

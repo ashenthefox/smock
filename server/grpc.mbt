@@ -28,8 +28,12 @@
 // unmatched. A plan whose gRPC status is not OK, such as a gRPC Stub's
 // error or that UNIMPLEMENTED, is sent as Trailers-Only, one HEADERS block
 // that ends the stream, with `:status` 200, its `grpc-status`, its
-// `grpc-message` and its trailers, such as the Near miss, unless the reply
-// has initial metadata: it then gets HEADERS with it, then the trailers.
+// `grpc-message`, its error details in google.rpc.Status, as
+// `grpc-status-details-bin`, and its trailers, such as the Near miss,
+// unless the reply has initial metadata: it then gets HEADERS with it, then
+// the trailers. Details as written were encoded when the files were
+// loaded; rendered ones are encoded here, and a detail that is not an Any
+// of a type of the set gets INTERNAL `template failed`.
 // Metadata goes out as spec E sends header fields: names in lower case,
 // values trimmed, and the fields HTTP/2 forbids left out. A `grpc-message`
 // is the status message percent-encoded, so any Unicode text fits in the
@@ -211,9 +215,31 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
     return
   }
   // Any status but OK, such as the UNIMPLEMENTED of a call that no Stub
-  // matched, ends the call without a message.
+  // matched, ends the call without a message, and with its details, if
+  // it has any.
   guard part.status is Ok else {
-    self.answer_status(stream, request, outcome, part, date~)
+    let details = status_details(set, part) catch {
+      EncodeError(pointer~, message~) => {
+        let template_error = match outcome.journal {
+          Some(entry) =>
+            Some(@engine.TemplateError::{
+              at: reply_at(entry.response_index) + "/grpc/details" + pointer,
+              message,
+            })
+          None => None
+        }
+        self.answer_internal(
+          stream,
+          request,
+          outcome,
+          "template failed",
+          date~,
+          template_error?,
+        )
+        return
+      }
+    }
+    self.answer_status(stream, request, outcome, part, date~, details?)
     return
   }
   // A static reply was encoded when the files were loaded, with the output
@@ -279,9 +305,10 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
 /// than smock's own, gets HEADERS with them, as a reply that succeeded
 /// does, then trailers with the part's status, message and trailing
 /// metadata. One without gets Trailers-Only, one HEADERS block that
-/// carries all of these. A Stub's reply too large to send gets INTERNAL
-/// instead (`answer_too_large`). `date` is the value of the answer's `date`
-/// field.
+/// carries all of these, and `grpc-status-details-bin` with `details`, the
+/// reply's google.rpc.Status, when given. A Stub's reply too large to send
+/// gets INTERNAL instead (`answer_too_large`). `date` is the value of the
+/// answer's `date` field.
 fn H2Connection::answer_status(
   self : H2Connection,
   stream : Int32,
@@ -289,11 +316,17 @@ fn H2Connection::answer_status(
   outcome : @engine.Outcome,
   part : @engine.GrpcPart,
   date~ : String,
+  details? : Bytes,
 ) -> Unit {
   let headers = outcome.plan.headers
   if has_initial_metadata(headers) {
     let head = reply_head(headers, date~)
-    let trailers = status_trailers(part.status, part.message, part.trailers)
+    let trailers = status_trailers(
+      part.status,
+      part.message,
+      part.trailers,
+      details?,
+    )
     if self.answer_too_large(
         stream,
         request,
@@ -312,6 +345,7 @@ fn H2Connection::answer_status(
       smock_mock_of(headers),
       date~,
       trailers=part.trailers,
+      details?,
     )
     if self.answer_too_large(stream, request, outcome, None, fields, date~) {
       return
@@ -495,6 +529,34 @@ fn encode_reply(
 }
 
 ///|
+/// The value of `grpc-status-details-bin` of `part`, the gRPC part of an
+/// error's reply to a call of a method of `set`: google.rpc.Status, with the
+/// reply's status, its message and its details, in base64 without padding,
+/// as the octets of its ASCII. `None` without details. Details as written
+/// were encoded when the files were loaded, with the set served then, which
+/// is this one unless the Stub outlived a reload; rendered ones, and those
+/// of such a Stub, are encoded here. Raises `EncodeError`, at the JSON
+/// Pointer of the value at fault from the details, when a detail is not an
+/// Any of a type of the set.
+fn status_details(
+  set : @protobuf.DescriptorSet,
+  part : @engine.GrpcPart,
+) -> Bytes? raise @protobuf.EncodeError {
+  if part.details.is_empty() {
+    return None
+  }
+  if part.encoded_status is Some(encoded) && physical_equal(encoded.set, set) {
+    return Some(encoded.value)
+  }
+  let status = set.encode_status(
+    part.status.code(),
+    part.message.unwrap_or(""),
+    part.details.exact_view(),
+  )
+  Some(@utf8.encode(@base64.encode(status, padding=false)))
+}
+
+///|
 /// The JSON Pointer, within its Stub, of the `json` of the reply that the
 /// Stub's pick chose (`reply_at`).
 fn reply_pointer(index : Int32?) -> String {
@@ -639,20 +701,25 @@ fn reply_head(
 ///|
 /// The trailers of a reply that sent HEADERS: `grpc-status` with the code
 /// of `status`, `grpc-message` with `message`, percent-encoded, when the
-/// reply gives one, then each of `trailers`, the trailing metadata, as
-/// `push_metadata` sends it.
+/// reply gives one, `grpc-status-details-bin` with `details`, when given,
+/// then each of `trailers`, the trailing metadata, as `push_metadata` sends
+/// it.
 fn status_trailers(
   status : @grpc.Status,
   message : String?,
   trailers : ReadOnlyArray[(String, String)],
+  details? : Bytes,
 ) -> Array[@header.Header] {
-  let fields = Array(capacity=trailers.length() + 2)
+  let fields = Array(capacity=trailers.length() + 3)
   fields.push(@header.Header::{
     name: b"grpc-status",
     value: decimal(status.code()),
   })
   if message is Some(text) {
     fields.push({ name: b"grpc-message", value: @grpc.percent_encode(text), })
+  }
+  if details is Some(value) {
+    fields.push({ name: b"grpc-status-details-bin", value, })
   }
   let _ = push_metadata(fields, trailers)
   fields
@@ -688,7 +755,8 @@ fn push_metadata(
 /// stream: `:status` `http_status`, by default 200, `content-type:
 /// application/grpc`, `grpc-status`
 /// with the code of `status`, `grpc-message` when `message` gives its text,
-/// percent-encoded, then `smock-mock` when `mock` gives its value, each of
+/// percent-encoded, `grpc-status-details-bin` when `details` gives its
+/// value, then `smock-mock` when `mock` gives its value, each of
 /// `trailers`, the trailing metadata or smock's own fields such as
 /// `smock-near-miss`, as `push_metadata` sends it, and `date` with the
 /// value `date`, unless `trailers` give one.
@@ -699,13 +767,17 @@ fn trailers_only(
   date~ : String,
   trailers~ : ReadOnlyArray[(String, String)] = [],
   http_status~ : Bytes = b"200",
+  details? : Bytes,
 ) -> Array[@header.Header] {
-  let fields = Array(capacity=trailers.length() + 6)
+  let fields = Array(capacity=trailers.length() + 7)
   fields.push(@header.Header::{ name: b":status", value: http_status, })
   fields.push({ name: b"content-type", value: grpc_content_type, })
   fields.push({ name: b"grpc-status", value: decimal(status.code()), })
   if message is Some(text) {
     fields.push({ name: b"grpc-message", value: @grpc.percent_encode(text), })
+  }
+  if details is Some(value) {
+    fields.push({ name: b"grpc-status-details-bin", value, })
   }
   if mock is Some(value) {
     fields.push({ name: b"smock-mock", value: @http1.field_octets(value), })

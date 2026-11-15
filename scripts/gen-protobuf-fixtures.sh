@@ -351,6 +351,7 @@ descriptor_set details details.binpb helloworld.proto google/rpc/error_details.p
 for name in error-info retry-info bad-request several templated; do
   message details google/rpc/status.proto google.rpc.Status "$name" google/rpc/error_details.proto helloworld.proto
 done
+message details helloworld.proto helloworld.HelloRequest hello-ann
 for package in protobuf definitions engine; do
   hex_test details/details.binpb details_set "The Descriptor set of gRPC's helloworld.proto and googleapis' google/rpc/error_details.proto, fixtures/protobuf/details/details.binpb, in hex." "$package" "$details_licence"
 done

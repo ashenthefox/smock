@@ -1,0 +1,15 @@
+mocks:
+  - name: greeter
+    grpc:
+      descriptorSet: greeter.binpb
+stubs:
+  - id: hello
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello
+    response:
+      json: { message: Hello }
+      grpc:
+        details:
+          - "@type": type.googleapis.com/helloworld.HelloReply
+            message: fine
