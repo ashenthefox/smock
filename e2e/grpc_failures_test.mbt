@@ -298,3 +298,59 @@ async test "smock's own failure is sent as it is, never replaced by INTERNAL rep
     })
   })
 }
+
+///|
+/// The Mock `greeter`, the Default Mock, with the set, and the gRPC Stub
+/// `variables` on SayHello, whose `variables` value fails to render and
+/// which has a partial Fault.
+let partial_failure : String =
+  #|mocks:
+  #|  - name: greeter
+  #|    default: true
+  #|    grpc: { descriptorSet: greeter.binpb }
+  #|stubs:
+  #|  - id: variables
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello }
+  #|    variables: { who: "${body.missing.name}" }
+  #|    response: { json: { message: Hello } }
+  #|    fault: { connection: { kind: partial } }
+
+///|
+async test "smock's own failure under a partial Fault sends the HEADERS it would send before its trailers, with none of the Stub's metadata, then the reset, and its entry keeps the failure's reason, even for a client whose SETTINGS_MAX_HEADER_LIST_SIZE those HEADERS pass" {
+  with_greeter_set([("greeter.yaml", partial_failure)], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      let reply = client.call("/helloworld.Greeter/SayHello")
+      inspect(
+        reply.render(),
+        content=(
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  smock-mock: greeter; via=default
+          #|  date: <now>
+          #|(reset INTERNAL_ERROR)
+        ),
+      )
+      // Fewer octets than those HEADERS: smock does not check the size of
+      // its own answers, so the entry keeps the failure's reason.
+      let small = smock.h2c(
+        settings=@http2.Settings::new(max_header_list_size=Some(100)),
+      )
+      defer small.close()
+      (small.call("/helloworld.Greeter/SayHello") |> ignore) catch {
+        _ => ()
+      }
+      let (_, journal) = smock.journal()
+      inspect(
+        own_answers(journal),
+        content=(
+          #|"variables" 200 "INTERNAL" templateError={"at":"/variables/who","message":"body.missing.name is missing"}
+          #|"variables" 200 "INTERNAL" templateError={"at":"/variables/who","message":"body.missing.name is missing"}
+        ),
+      )
+    })
+  })
+}

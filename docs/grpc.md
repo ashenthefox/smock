@@ -1813,6 +1813,8 @@ past the state bound write nothing, Variables included, and no response
 is picked. A reply that fails once picked keeps the writes made before
 it. The Scenario move stands. The Stub's delay holds the answer back, and
 the call's deadline can cut it short ([Deadlines](#deadlines)). The
+Stub's connection Fault ends the call as it would end the Stub's reply,
+and a `partial` one sends smock's own HEADERS ([Faults](#faults)). The
 request metrics count the call under its Mock and Stub. The `mockoon` log
 format writes its error line, and its `Transaction recorded` line gives
 `responseStatus` 200.
@@ -2322,12 +2324,14 @@ ERROR:
   out. A reply that smock cannot send, such as one whose rendered message
   does not fit the output type, sends smock's own HEADERS, with none of
   the Stub's metadata, and so does a reply whose HEADERS are too large to
-  send ([Metadata size](#metadata-size)).
+  send ([Metadata size](#metadata-size)) and
+  [smock's own failure](#smocks-own-failures) when the Stub cannot serve
+  its content.
 - **The Journal.** The entry of a call that `reset` or `close` ended has
   no `status` and no `grpcStatus`, since no status went out. A `partial`
-  one keeps both, as planned, or INTERNAL when smock sent its own HEADERS.
-  An entry has the Fault in `fault`; a call whose deadline came first has
-  none.
+  one keeps both, as planned, or INTERNAL when smock sent its own HEADERS
+  in place of the Stub's reply. An entry has the Fault in `fault`; a call
+  whose deadline came first has none.
 
 ### HTTP/2's resets and refusals
 

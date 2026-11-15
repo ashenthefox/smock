@@ -37,7 +37,9 @@
 /// cannot send, sends HEADERS with none of the Stub's metadata, and the
 /// entry records it, as `answer_own` records it. So do a Stub's HEADERS
 /// that are too large to send, as `answer_too_large` counts them, with the
-/// reason in the entry's `templateError`.
+/// reason in the entry's `templateError`. smock's own answers, such as its
+/// failures, carry nothing the Stub wrote, and their HEADERS go out as
+/// they are.
 ///
 /// A half that does not fit the windows gets as much as fits, or with
 /// `bounded`, from the stream's task, as the output bound leaves for one
@@ -69,7 +71,7 @@ fn H2Connection::send_partial(
     Status(_) => reply_head(headers, date~)
   }
   if !(answer is Internal(..)) &&
-    outcome.matched is Some(_) &&
+    outcome.plan.grpc is Some({ own: false, .. }) &&
     self.too_large("header block", head) is Some(why) {
     if entry is Some(entry) {
       entry.set_grpc_status(Internal, template_error={
