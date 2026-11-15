@@ -381,3 +381,115 @@ async test "health: once SIGTERM starts the drain, every Check and List says NOT
     )
   })
 }
+
+///|
+/// Runs `f` with a definitions directory holding `files`, the set of gRPC's
+/// helloworld.proto at `files/greeter.binpb`, and the set of gRPC's
+/// health.proto, the one smock embeds, at `files/health.binpb`.
+async fn with_health_set(
+  files : Array[(String, String)],
+  f : async (String) -> Unit,
+) -> Unit {
+  with_greeter_set(files, dir => {
+    write_bytes(
+      dir,
+      "files/health.binpb",
+      @fs.read_file("fixtures/protobuf/health/health.binpb").binary(),
+    )
+    f(dir)
+  })
+}
+
+///|
+async test "health: a gRPC Stub on a health method answers in the service's place, so a Scenario can make Check say NOT_SERVING, and so does an Ephemeral one for its Session; such calls are journaled, while List, which no Stub is on, is still the service's" {
+  let yaml =
+    #|mocks:
+    #|  - name: probed
+    #|    hosts: [probed.svc]
+    #|    grpc: { descriptorSet: health.binpb, health: true }
+    #|  - name: other
+    #|    hosts: [other.svc]
+    #|    grpc: { descriptorSet: health.binpb, health: true }
+    #|stubs:
+    #|  - id: down
+    #|    mock: probed
+    #|    scenario: { name: health, requires: down }
+    #|    request: { path: /grpc.health.v1.Health/Check }
+    #|    response: { json: { status: NOT_SERVING } }
+    #|  - id: up
+    #|    mock: probed
+    #|    request: { path: /grpc.health.v1.Health/Check }
+    #|    response: { json: { status: SERVING } }
+  with_health_set([("mocks.yaml", yaml)], dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      let serving = framed(health_fixture("serving"))
+      let not_serving = framed(health_fixture("not-serving"))
+      let shown = (reply : GrpcReply) => {
+        if reply.data == [serving] {
+          "SERVING"
+        } else if reply.data == [not_serving] {
+          "NOT_SERVING"
+        } else {
+          reply.render()
+        }
+      }
+      let check = (authority : String, headers : Array[(String, String)]) => {
+        shown(client.call(check_path, authority~, headers~, body=framed(b"")))
+      }
+      let out = []
+      out.push("probed, Started: \{check("probed.svc", [])}")
+      out.push(
+        "Scenario set to down: \{smock.call("PUT", "/v1/mocks/probed/scenarios/health", body="{\"state\":\"down\"}")}",
+      )
+      out.push("probed, down: \{check("probed.svc", [])}")
+      let list = client.call(
+        list_path,
+        authority="probed.svc",
+        body=framed(b""),
+      )
+      out.push("probed, List: \{hex(list.data[0])}")
+      let added = smock.call(
+        "POST",
+        "/v1/mocks/other/stubs",
+        session="test-a",
+        body=(
+          #|{"request":{"path":"/grpc.health.v1.Health/Check"},"response":{"json":{"status":"NOT_SERVING"}}}
+        ),
+      )
+      out.push("added for test-a: \{added.split(" ").next().unwrap_or("")}")
+      out.push("other, test-a: \{check("other.svc", [baggage("test-a")])}")
+      out.push("other, no Session: \{check("other.svc", [])}")
+      out.push("Journal, no Session:")
+      out.push(smock.calls_of())
+      out.push("Journal, test-a:")
+      out.push(smock.calls_of(session="test-a"))
+      out.push(smock.metric("smock_requests_total"))
+      out.push(smock.metric("smock_unmatched_requests_total"))
+      inspect(
+        out.join("\n"),
+        content=(
+          #|probed, Started: SERVING
+          #|Scenario set to down: 200 {"scenario":{"name":"health","state":"down","states":["Started","down"]},"warnings":[]}
+          #|probed, down: NOT_SERVING
+          #|probed, List: 00000000250a060a00120208010a1b0a15677270632e6865616c74682e76312e4865616c746812020801
+          #|added for test-a: 201
+          #|other, test-a: NOT_SERVING
+          #|other, no Session: SERVING
+          #|Journal, no Session:
+          #|"up" 200 "OK"
+          #|"down" 200 "OK"
+          #|Journal, test-a:
+          #|"eph-1" 200 "OK"
+          #|smock_requests_total{mock="probed",stub="up"} 1
+          #|smock_requests_total{mock="probed",stub="down"} 1
+          #|smock_requests_total{mock="probed",stub=""} 1
+          #|smock_requests_total{mock="other",stub="ephemeral"} 1
+          #|smock_requests_total{mock="other",stub=""} 1
+          #|
+        ),
+      )
+    })
+  })
+}
