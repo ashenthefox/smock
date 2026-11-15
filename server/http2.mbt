@@ -162,6 +162,7 @@ async fn[S : @io.Reader + @io.Writer + ReadOutput] MockPorts::serve_http2(
       continuing: 0,
       connect: 0,
       call_begun: 0,
+      first_message: 0,
       waiting: Map([]),
       past_deadline: Map([]),
       blocked: Map([]),
@@ -278,6 +279,12 @@ priv struct H2Connection {
   /// (`answer_from_headers`). When the frame also ends the stream, its `End`
   /// answers the call, and when it resets the stream, the call is dropped.
   mut call_begun : Int32
+  /// The stream whose call to a built-in reflection service, its first
+  /// message made whole by the frame being handled, is answered once that
+  /// frame's events are all taken, or 0: then the client still sends
+  /// (`answer_first_message`). When the frame also ends the stream, its
+  /// `End` answers the call instead, with no RST_STREAM after it.
+  mut first_message : Int32
   /// The tasks of the streams whose response waits, by stream: from the end
   /// of the request until the response is queued in full, its body or its
   /// last event included, or the stream is reset. A task then lives on only
@@ -523,6 +530,17 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
             }
           }
         }
+        // A reflection call whose first message this frame made whole, on
+        // a stream it did not end.
+        if self.first_message != 0 {
+          let stream = self.first_message
+          self.first_message = 0
+          if self.requests.get(stream) is Some(request) &&
+            self.answer_first_message(stream, request, out) &&
+            self.continuing == stream {
+            self.continuing = 0
+          }
+        }
         if self.continuing != 0 {
           let stream = self.continuing
           self.continuing = 0
@@ -627,10 +645,21 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
             } else {
               self.will_refuse(stream, 413)
             }
-          } else if request.deframer is Some(deframer) &&
-            self.check_messages(request, deframer, data) is Some(refusal) {
-            self.requests.remove(stream)
-            self.will_refuse_call(stream, refusal)
+          } else if request.deframer is Some(deframer) {
+            match self.check_messages(request, deframer, data) {
+              Some(refusal) => {
+                self.requests.remove(stream)
+                self.will_refuse_call(stream, refusal)
+              }
+              None => {
+                request.receive(data)
+                // A reflection call is answered once its first message is
+                // whole, once the frame's events are all taken.
+                if request.reflection && deframer.whole_messages() > 0 {
+                  self.first_message = stream
+                }
+              }
+            }
           } else {
             request.receive(data)
           }
@@ -645,6 +674,10 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
         self.streams.ended_by_client(stream)
         if stream == self.continuing {
           self.continuing = 0
+        }
+        // Its `End` answers it, as the end of any call does.
+        if stream == self.first_message {
+          self.first_message = 0
         }
         if stream == self.refused {
           self.refused = 0

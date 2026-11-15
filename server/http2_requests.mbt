@@ -53,6 +53,11 @@ priv struct H2Request {
   /// its HEADERS (`check_head`). `forever` for a call without one, or
   /// whose timeout no delay can outlast, and for an HTTP request.
   mut call_deadline : Int64
+  /// Whether it is a call to the built-in reflection service of its Mock,
+  /// as found when its HEADERS arrived (`answer_from_headers`): it is
+  /// answered as soon as its first message is whole, even while the
+  /// client still sends.
+  mut reflection : Bool
 }
 
 ///|
@@ -221,6 +226,7 @@ fn H2Request::new(
       None
     },
     call_deadline: forever,
+    reflection: false,
   }
 }
 

@@ -80,6 +80,7 @@ in a definitions directory, such as `defs/`, that `smock serve --dir` and
 - [gRPC](#grpc)
   - [Descriptor sets](#descriptor-sets)
   - [The health service](#the-health-service)
+  - [Reflection](#reflection)
   - [gRPC Stubs](#grpc-stubs)
   - [The status of a gRPC reply](#the-status-of-a-grpc-reply)
   - [gRPC reply metadata](#grpc-reply-metadata)
@@ -5750,7 +5751,8 @@ Descriptor set, the compiled form of its `.proto` files, with `grpc`.
 smock reads and checks the set with the Definition files, and its
 [gRPC Stubs](#grpc-stubs) answer unary calls, on the plain port over h2c
 and on the TLS port over h2. `grpc` can also turn on gRPC's
-[health service](#the-health-service). The [gRPC guide](grpc.md) shows a
+[health service](#the-health-service) and its server
+[reflection](#reflection). The [gRPC guide](grpc.md) shows a
 first call, says which requests are gRPC calls and how smock serves a
 call, and how to build a set, what smock checks in it and what it keeps.
 
@@ -5775,8 +5777,9 @@ mocks:
       descriptorSet: greeter.binpb
 ```
 
-- `grpc` is an object with two fields, `descriptorSet` and `health`
-  ([The health service](#the-health-service)). Either may be left out.
+- `grpc` is an object with three fields, `descriptorSet`, `health`
+  ([The health service](#the-health-service)) and `reflection`
+  ([Reflection](#reflection)). Each may be left out.
 - `descriptorSet` is a path relative to the body-file subdirectory, with
   the rules of `bodyFile`: it stays inside the subdirectory, symlinks
   included, and none of its names starts with `.`.
@@ -5844,6 +5847,43 @@ mocks:
 
 The gRPC guide's [Health](grpc.md#health) has the details, a Scenario
 that makes the service NOT_SERVING, and grpcurl's commands.
+
+### Reflection
+
+`grpc.reflection`, a boolean, `false` by default, turns on the Mock's
+built-in server reflection, gRPC's `grpc.reflection.v1` and its older
+name `grpc.reflection.v1alpha`. Tools such as grpcurl and Postman then
+list and describe the Mock's services without a local copy of its set:
+
+```yaml
+mocks:
+  - name: greeter
+    hosts: [greeter.svc]
+    grpc:
+      descriptorSet: greeter.binpb
+      reflection: true
+      health: true
+```
+
+- It answers from the Mock's set: the set's services, and each file with
+  the files it imports, as the set holds them, custom options included,
+  without source info. A name the set lacks gets reflection's error
+  NOT_FOUND.
+- With `health` on, it lists `grpc.health.v1.Health` too, and describes
+  it from the descriptor smock embeds, unless the set defines the package
+  `grpc.health.v1` itself.
+- It answers one request per call, and a client opens a new call for its
+  next request, as grpcurl does.
+- Reflection answers are not recorded in the Journal. They count in the
+  request metrics under their Mock with `stub=""`.
+- With reflection on, the Mock keeps each file of its set as encoded,
+  without source info, beside the set's model. A Mock without it keeps
+  nothing more ([Memory](grpc.md#memory)).
+- A Mock that does not turn reflection on has no reflection service: a
+  call to it is a call to a method the set lacks.
+
+The gRPC guide's [Reflection](grpc.md#reflection) has the details and
+grpcurl's commands.
 
 ### gRPC Stubs
 

@@ -22,8 +22,11 @@
 // between them, so a reload never splits them, and a call that the reload
 // leaves without a gRPC Stub to reach gets the answer it would have got
 // from its HEADERS. At both lookups, a call to a method of the Mock's
-// built-in health service that no Stub is on goes to the service, before
-// the set's method is looked up (grpc_health.mbt).
+// built-in health or reflection service that no Stub is on goes to the
+// service, before the set's method is looked up (grpc_health.mbt,
+// grpc_reflection.mbt). A call to reflection, which streams, is answered
+// as soon as its first message is whole, even while the client still
+// sends.
 //
 // A call that cannot reach a gRPC Stub still goes to the engine, with an
 // empty body, which plans its UNIMPLEMENTED answer and journals it as
@@ -91,7 +94,11 @@ fn unary_method(
 /// call is then no longer among the requests: its answer is sent at once,
 /// without waiting for its message (`answer_unserved`), and RST_STREAM
 /// NO_ERROR follows it. A call that can reach a gRPC Stub waits for the end
-/// of its request, which looks it up again.
+/// of its request, which looks it up again, and so does a call to a
+/// built-in service of the Mock, but `Watch`, answered at once: a call to
+/// reflection is marked as one, so that it is answered as soon as its first
+/// message is whole (`answer_first_message`). It also serves a call to
+/// reflection that a reload has sent elsewhere.
 fn H2Connection::answer_from_headers(
   self : H2Connection,
   stream : Int32,
@@ -110,6 +117,12 @@ fn H2Connection::answer_from_headers(
     self.answer_watch(stream, request, found, ended=false)
     self.end_stream()
     return true
+  }
+  // The Mock's built-in reflection service, unless a Stub is on its path:
+  // its call is answered once its first message is whole.
+  if mock is Some(found) && self.reflection_call(found, request) is Some(_) {
+    request.reflection = true
+    return false
   }
   if mock is Some({ descriptor_set: Some(set), .. }) &&
     unary_method(set, request.target) is Some(_) {
@@ -186,6 +199,10 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_call(
   let mock = ports.engine.mock_for_call(incoming, authority?=request.authority)
   if mock is Some(found) && self.health_call(found, request) is Some(called) {
     self.answer_health(stream, request, found, called, out, ended=true)
+    return
+  }
+  if mock is Some(found) && self.reflection_call(found, request) is Some(files) {
+    self.answer_reflection(stream, request, found, files, out, ended=true)
     return
   }
   guard mock is Some({ descriptor_set: Some(set), .. }) &&
