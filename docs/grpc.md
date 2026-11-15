@@ -290,9 +290,9 @@ request metrics count it as a rejected request, with `mock=""` and
 Every other request is an HTTP request. The Mock's HTTP Stubs answer it,
 or its `noMatch` answer when none matches, as before:
 
-- an HTTP/2 request with another content type, gRPC-Web's
-  `application/grpc-web` included, or with none;
-- every HTTP/1.1 request, one with `content-type: application/grpc`
+- An HTTP/2 request with another content type, gRPC-Web's
+  `application/grpc-web` included, or with none, is an HTTP request.
+- So is every HTTP/1.1 request, one with `content-type: application/grpc`
   included. gRPC needs HTTP/2's trailers, so smock serves no gRPC over
   HTTP/1.1.
 
@@ -618,14 +618,14 @@ A call that cannot reach a gRPC Stub, since there is no such Mock, set or
 unary method, is answered at once, without waiting for its message
 ([Calls answered from their HEADERS](#calls-answered-from-their-headers)).
 
-When the call's request has ended, smock:
+When the call's request has ended, smock serves it in five steps:
 
-1. finds the call's Mock and its method again, from the Definition files
-   it serves then;
-2. takes the call's one message from its body, which must hold one;
-3. decodes the message into JSON with the method's input type;
-4. matches the call against the Mock's gRPC Stubs on that method;
-5. encodes the reply with the method's output type, and sends it.
+1. It finds the call's Mock and its method again, from the Definition
+   files it serves then.
+2. It takes the call's one message from its body, which must hold one.
+3. It decodes the message into JSON with the method's input type.
+4. It matches the call against the Mock's gRPC Stubs on that method.
+5. It encodes the reply with the method's output type, and sends it.
 
 ### Reloads
 
@@ -2092,12 +2092,13 @@ format writes its error line, and its `Transaction recorded` line gives
 `smock render` and the Admin render operation
 ([Rendering a template](definition-files.md#rendering-a-template)) show
 what a Stub answers, without a client. A gRPC Stub renders as a call to
-its method. A rendering encodes and decodes the sample's message, and
-encodes the reply, as smock does for a call, so it shows what a call
-would get. The Stub decides this, not the sample: the sample's `method`
+its method. The Stub decides this, not the sample: the sample's `method`
 and its `Content-Type` are checked only as conditions, as a call's are,
-and the rendering lists them among the conditions the sample fails. An
-HTTP Stub renders as a request, whatever the sample's `Content-Type`.
+and the rendering lists them among the conditions the sample fails. The
+rendering of a gRPC Stub encodes and decodes the sample's message, and
+encodes the reply, as smock does for a call, so it shows what a call
+would get. An HTTP Stub renders as a request, whatever the sample's
+`Content-Type`.
 
 For the `hello-unknown` Stub of [Error details](#error-details), with
 `sample.json` holding
@@ -2414,8 +2415,8 @@ brought, as received, and `truncated` says whether the JSON was cut at
 
 The entry's `grpcStatus` is the name of the gRPC status the call got.
 That is the status of the Stub's reply, `OK` unless its `grpc` names
-another, or the status smock answered with instead. Such a status is
-`UNIMPLEMENTED` for an unmatched call, or `INTERNAL` or
+another, or the status smock answered with instead. For example, it is
+`UNIMPLEMENTED` for an unmatched call, and `INTERNAL` or
 `RESOURCE_EXHAUSTED` for [smock's own failures](#smocks-own-failures).
 Its `status` stays the HTTP status, 200 for every answer smock sends a
 call, as gRPC sends them: a client learns of an error from `grpc-status`,
@@ -2829,17 +2830,17 @@ call without it is served.
 ### The order of the checks
 
 A call that breaks several rules gets the answer of the first check it
-fails. On its HEADERS, smock checks, in this order:
+fails. On its HEADERS, smock makes six checks, in this order:
 
-1. smock's checks of every HTTP/2 request: a header list over
+1. It makes its checks of every HTTP/2 request. A header list over
    `--header-size-limit` or with more fields than `--header-count-limit`
    gets 431, and a request that HTTP/1.1's rules refuse gets 400, with no
-   gRPC status ([Ports and detection](#ports-and-detection));
-2. the method, which must be `POST`;
-3. the subtype;
-4. each `grpc-timeout`;
-5. the body limit, by `content-length`;
-6. the call's Mock, its set and its method
+   gRPC status ([Ports and detection](#ports-and-detection)).
+2. It checks the method, which must be `POST`.
+3. It checks the subtype.
+4. It checks each `grpc-timeout`.
+5. It checks the body limit, by `content-length`.
+6. It looks up the call's Mock, its set and its method
    ([Calls answered from their HEADERS](#calls-answered-from-their-headers)).
 
 So a `PUT` with `content-type: application/grpc+json` gets 405, and a
