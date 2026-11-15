@@ -22,11 +22,12 @@
 // - the response encoding (`response_fields`, http2_responses.mbt);
 // - the writing of what the `Conn` queues, through the connection's one
 //   writer (`H2Writer`, http2_output.mbt);
-// - the tasks of the streams whose responses wait (`H2Connection::wait`),
-//   the slow writes of bodies larger than the client's windows, which
-//   resume as the client widens them (`H2Connection::write_slowly`,
-//   http2_windows.mbt), and the streams of Server-Sent Events
-//   (`H2Connection::start_events`, http2_events.mbt);
+// - the tasks of the streams whose responses wait (`H2Connection::wait`,
+//   and `wait_call` for a gRPC call, which its deadline can end,
+//   grpc_deadlines.mbt), the slow writes of bodies larger than the client's
+//   windows, which resume as the client widens them
+//   (`H2Connection::write_slowly`, http2_windows.mbt), and the streams of
+//   Server-Sent Events (`H2Connection::start_events`, http2_events.mbt);
 // - the HTTP/2 forms of the connection Faults (http2_faults.mbt): RST_STREAM
 //   for `reset`, half the response then RST_STREAM for `partial`, and
 //   GOAWAY for `close`;

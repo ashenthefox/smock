@@ -37,15 +37,18 @@
 // before either is sent, and a reply with a block over
 // `--header-size-limit`, or over the SETTINGS_MAX_HEADER_LIST_SIZE the
 // client advertised, gets Trailers-Only INTERNAL `reply metadata too large`
-// instead (`answer_too_large`). An answer sent before the client has
-// ended its request is followed by RST_STREAM NO_ERROR (`end_early`). What
-// gRPC's rules refuse in a call, checked as soon as it arrives, and what the
-// layer cannot serve yet, get Trailers-Only too, with their `grpc-status`
-// and a fixed `grpc-message`, and `:status` 200 but for a method other than
-// POST and a malformed `grpc-timeout` (grpc_checks.mbt). A call that does
-// not reach the engine is counted as rejected traffic and is not
-// journaled; one that does is journaled as the engine planned it, with the
-// gRPC status INTERNAL, which the entry records before it is committed.
+// instead (`answer_too_large`). A Stub's delay holds its answer back, in
+// the stream's task, unless the call's deadline cuts it short with
+// DEADLINE_EXCEEDED (grpc_deadlines.mbt). An answer sent before the client
+// has ended its request is followed by RST_STREAM NO_ERROR (`end_early`).
+// What gRPC's rules refuse in a call, checked as soon as it arrives, and
+// what the layer cannot serve yet, get Trailers-Only too, with their
+// `grpc-status` and a fixed `grpc-message`, and `:status` 200 but for a
+// method other than POST and a malformed `grpc-timeout`
+// (grpc_checks.mbt). A call that does not reach the engine is counted as
+// rejected traffic and is not journaled; one that does is journaled as the
+// engine planned it, or with smock's own gRPC status, such as INTERNAL or
+// DEADLINE_EXCEEDED, which the entry records before it is committed.
 
 ///|
 /// The content type of gRPC calls, as the octets of a field value.
