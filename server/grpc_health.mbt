@@ -172,7 +172,12 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answer_health(
     types.list_request
   }
   let message = incoming.body[@grpc.prefix_length:]
-  let json = @protobuf.decode_json(types.set, input, message) catch {
+  let json = @protobuf.decode_json(
+    types.set,
+    input,
+    message,
+    limit=self.body_limit,
+  ) catch {
     _ => {
       self.refuse_call(stream, Undecodable, ended=true)
       return

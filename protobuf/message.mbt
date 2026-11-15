@@ -107,6 +107,11 @@ let no_runs : Array[BytesView] = []
 /// that the URL names, or its form as `value` when it is a well-known type
 /// that has one, an Empty's object of no fields included.
 ///
+/// The JSON is bounded by `limit`: it is counted as it is printed, and
+/// printing stops as soon as it passes `limit` octets, so a small message
+/// whose JSON would be far larger, such as a list of empty messages each
+/// printed with every field at its default, costs no more than `limit`.
+///
 /// Raises `DecodeError` when the input is not protobuf, when a proto3
 /// string is not UTF-8, when a message lacks a proto2 required field, as
 /// protobuf's parsers refuse it, when messages nest deeper than 100, a map
@@ -114,14 +119,22 @@ let no_runs : Array[BytesView] = []
 /// ProtoJSON cannot print, such as a Timestamp out of range, a Value that
 /// holds nothing or NaN, or an Any whose type the set lacks, when a message
 /// it prints is a type of an editions file or a MessageSet, and when a
-/// message it prints is or has a field that it does not decode yet: a
-/// group.
+/// message it prints is or has a field that it does not decode yet: one
+/// declared in an editions file. Raises `TooLarge` when the JSON passes
+/// `limit`.
 pub fn decode_json(
   set : DescriptorSet,
   message : MessageDescriptor,
   input : BytesView,
+  limit~ : Int32,
 ) -> Bytes raise DecodeError {
-  let out = @buffer.Buffer(size_hint=2 * input.length() + 16)
+  // Twice the input, as a guess, but never more than the limit.
+  let guess = if input.length() > (limit - 16) / 2 {
+    limit
+  } else {
+    2 * input.length() + 16
+  }
+  let out = Output::new(size_hint=guess, limit~)
   set.print_message(out, message, [input], 0)
   out.to_bytes()
 }
@@ -295,7 +308,7 @@ fn DescriptorSet::scan(
 /// `decode_json` decodes, as `decode_json` prints it.
 fn DescriptorSet::print_message(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   message : MessageDescriptor,
   records : Array[BytesView],
   depth : Int32,
@@ -388,7 +401,7 @@ fn DescriptorSet::print_message(
 /// array.
 fn DescriptorSet::print_repeated(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   field : FieldDescriptor,
   value : Value?,
   depth : Int32,
@@ -409,7 +422,7 @@ fn DescriptorSet::print_repeated(
 /// message `depth` messages deep, or its default when it is `None`.
 fn DescriptorSet::print_value(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   field : FieldDescriptor,
   value : Value?,
   depth : Int32,
@@ -452,7 +465,7 @@ fn DescriptorSet::print_value(
 /// as an array.
 fn DescriptorSet::print_list(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   field : FieldDescriptor,
   runs : Array[BytesView],
   depth : Int32,
@@ -573,7 +586,7 @@ fn is_map_entry(entry : MessageDescriptor) -> Bool {
 /// define is skipped, as protobuf's parsers keep it as an unknown field.
 fn DescriptorSet::print_map(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   entry : MessageDescriptor,
   runs : Array[BytesView],
   depth : Int32,
@@ -842,10 +855,10 @@ fn sorted_entries(
 /// 32-bit or 64-bit value.
 fn DescriptorSet::print_number(
   self : DescriptorSet,
-  out : @buffer.Buffer,
+  out : Output,
   field : FieldDescriptor,
   bits : UInt64,
-) -> Unit {
+) -> Unit raise DecodeError {
   match field.type_ {
     Bool => out.write_bytes(if bits != 0 { b"true" } else { b"false" })
     Int64 | SFixed64 => write_signed(out, bits.reinterpret_as_int64())
@@ -869,7 +882,7 @@ fn DescriptorSet::print_number(
       if value.is_nan() || value.is_inf() {
         write_double(out, value.to_double())
       } else {
-        out.write_string_utf8(value.to_string())
+        out.write_ascii(value.to_string())
       }
     }
     Enum => {
@@ -961,7 +974,7 @@ pub fn is_well_known(full_name : String) -> Bool {
 ///|
 /// Writes `value` as a JSON number, or as the string `"NaN"`, `"Infinity"`
 /// or `"-Infinity"`, which JSON has no number for.
-fn write_double(out : @buffer.Buffer, value : Double) -> Unit {
+fn write_double(out : Output, value : Double) -> Unit raise DecodeError {
   if value.is_nan() {
     out.write_bytes(b"\"NaN\"")
   } else if value.is_pos_inf() {
@@ -969,13 +982,13 @@ fn write_double(out : @buffer.Buffer, value : Double) -> Unit {
   } else if value.is_neg_inf() {
     out.write_bytes(b"\"-Infinity\"")
   } else {
-    out.write_string_utf8(value.to_string())
+    out.write_ascii(value.to_string())
   }
 }
 
 ///|
 /// Writes `value` in decimal, with a `-` when it is negative.
-fn write_signed(out : @buffer.Buffer, value : Int64) -> Unit {
+fn write_signed(out : Output, value : Int64) -> Unit raise DecodeError {
   if value < 0 {
     out.write_byte(b'-')
     // In two's complement, so that the smallest Int64 has its magnitude.
@@ -987,7 +1000,7 @@ fn write_signed(out : @buffer.Buffer, value : Int64) -> Unit {
 
 ///|
 /// Writes `value` in decimal.
-fn write_unsigned(out : @buffer.Buffer, value : UInt64) -> Unit {
+fn write_unsigned(out : Output, value : UInt64) -> Unit raise DecodeError {
   // The power of ten of the first digit. It never passes `value`, so it
   // never overflows.
   let mut unit = 1UL
@@ -1006,7 +1019,7 @@ let base64_digits : Bytes = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 
 ///|
 /// Writes `octets` as a JSON string of standard base64, with padding.
-fn write_base64(out : @buffer.Buffer, octets : BytesView) -> Unit {
+fn write_base64(out : Output, octets : BytesView) -> Unit raise DecodeError {
   out.write_byte(b'"')
   let length = octets.length()
   let mut i = 0
@@ -1040,7 +1053,7 @@ fn write_base64(out : @buffer.Buffer, octets : BytesView) -> Unit {
 /// string. Such a name is ASCII without quotes or controls, unless a
 /// `json_name` makes it otherwise, so it is written one code unit at a time
 /// until a code unit needs more.
-fn write_json_name(out : @buffer.Buffer, name : String) -> Unit {
+fn write_json_name(out : Output, name : String) -> Unit raise DecodeError {
   for i in 0..<name.length() {
     let unit = name[i]
     if unit < 0x20 || unit >= 0x7F || unit == '"' || unit == '\\' {
@@ -1059,7 +1072,10 @@ fn write_json_name(out : @buffer.Buffer, name : String) -> Unit {
 /// Writes the key of an extension whose full name is `full_name`, as
 /// ProtoJSON writes it: the full name in brackets, as a JSON string, such
 /// as `"[shop.priority]"`.
-fn write_extension_name(out : @buffer.Buffer, full_name : String) -> Unit {
+fn write_extension_name(
+  out : Output,
+  full_name : String,
+) -> Unit raise DecodeError {
   // A full name is ASCII without quotes or controls, as protoc writes it,
   // but a set may hold any, so it is written as `write_json_name` writes a
   // name.
@@ -1094,7 +1110,10 @@ fn is_utf8(octets : BytesView) -> Bool {
 ///|
 /// Writes `octets`, UTF-8 text, as a JSON string: in quotes, with `"`, `\`
 /// and the control characters escaped as `@json` escapes them.
-fn write_json_string(out : @buffer.Buffer, octets : BytesView) -> Unit {
+fn write_json_string(
+  out : Output,
+  octets : BytesView,
+) -> Unit raise DecodeError {
   out.write_byte(b'"')
   for octet in octets {
     match octet {
