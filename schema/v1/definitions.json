@@ -551,7 +551,7 @@
           "additionalProperties": false,
           "if": {
             "description": "OK: the status left out, or given as OK.",
-            "properties": { "status": { "const": "OK" } }
+            "properties": { "status": { "description": "OK.", "const": "OK" } }
           },
           "then": {
             "properties": { "details": { "description": "Only an error gives details.", "maxItems": 0 } }
