@@ -121,6 +121,19 @@ pub fn Deframer::take(self : Deframer, data : BytesView) -> Taken {
 }
 
 ///|
+/// How many messages of the body have arrived whole so far: each counts
+/// once its last octet is taken, and a message of zero octets once its
+/// prefix is. A message is whole before the body ends, so a reader can take
+/// the first message of a stream that the client keeps open.
+pub fn Deframer::whole_messages(self : Deframer) -> Int32 {
+  if self.left > 0L {
+    self.messages - 1
+  } else {
+    self.messages
+  }
+}
+
+///|
 /// How a body ends, were it to end after the octets taken so far.
 #derive(Eq, Debug)
 pub(all) enum Ending {

@@ -103,6 +103,14 @@ pub struct Mock {
   /// answers the gRPC calls to it that no Stub is on: the Mock's
   /// `grpc.health`, false by default.
   health : Bool
+  /// When the Mock's `grpc.reflection` turns its built-in reflection
+  /// service on, `grpc.reflection.v1` and `v1alpha`, the files of its
+  /// Descriptor set that the service answers with: each file, in the order
+  /// of the set's `files`, as the set encodes it but without its
+  /// SourceCodeInfo, none for a Mock without a set. `None` when reflection
+  /// is off, as by default: such a Mock keeps nothing more than its set's
+  /// model.
+  reflection : ReadOnlyArray[Bytes]?
   /// The Stubs of this Mock, in the order they are tried: by priority,
   /// lower numbers first and Stubs without a priority last; Stubs of equal
   /// priority in declaration order, that is file-name order, then position
@@ -1382,6 +1390,7 @@ pub fn ValidSet::snapshot(self : ValidSet, digest~ : String) -> Snapshot {
           journal: true,
           descriptor_set: None,
           health: false,
+          reflection: None,
           stubs: ReadOnlyArray::from_array([]),
           http_stubs: ReadOnlyArray::from_array([]),
           index: MatchIndex::new(ReadOnlyArray::from_array([])),
@@ -1426,6 +1435,7 @@ pub fn ValidSet::snapshot(self : ValidSet, digest~ : String) -> Snapshot {
       journal: mock.journal,
       descriptor_set: mock.descriptor_set,
       health: mock.health,
+      reflection: mock.reflection,
       stubs,
       http_stubs,
       index: MatchIndex::new(http_stubs),

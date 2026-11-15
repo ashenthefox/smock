@@ -51,6 +51,7 @@ Mock's `grpc` field and gRPC Stubs.
   - [Resets and the connection's defences](#resets-and-the-connections-defences)
 - [Built-in services](#built-in-services)
   - [Health](#health)
+  - [Reflection](#reflection)
 - [Protocol checks and limits](#protocol-checks-and-limits)
   - [The order of the checks](#the-order-of-the-checks)
   - [Timeouts](#timeouts)
@@ -111,6 +112,9 @@ grpcurl -plaintext -protoset defs/files/greeter.binpb \
   "message": "Hello Tom"
 }
 ```
+
+With [reflection](#reflection) on, grpcurl finds the types through it
+instead, and needs no `-protoset`.
 
 The same call goes to the TLS port over h2. Leave out `-plaintext`, and
 add `-insecure` while smock serves its self-signed certificate:
@@ -1712,8 +1716,8 @@ deadline, and a reset that arrives more than 100 ms before the deadline.
 
 ## Built-in services
 
-A Mock can answer gRPC's standard health service itself, with no Stub.
-It is off unless the Mock turns it on.
+A Mock can answer gRPC's standard health service and server reflection
+itself, with no Stub. Each is off unless the Mock turns it on.
 
 ### Health
 
@@ -1809,14 +1813,21 @@ A test sets the Scenario `health` to `down` through the Admin API, and
 
 #### With grpcurl
 
-grpcurl needs the service's schema. Give it `health.proto`:
+grpcurl needs the service's schema. Turn [reflection](#reflection) on
+as well, and grpcurl finds it there, from the descriptor smock embeds:
+
+```yaml
+mocks:
+  - name: greeter
+    hosts: [greeter.svc]
+    grpc:
+      descriptorSet: greeter.binpb
+      health: true
+      reflection: true
+```
 
 ```sh
-mkdir -p grpc/health/v1
-curl -fsSL -o grpc/health/v1/health.proto \
-  https://raw.githubusercontent.com/grpc/grpc-proto/master/grpc/health/v1/health.proto
-grpcurl -plaintext -authority greeter.svc -proto grpc/health/v1/health.proto \
-  localhost:8080 grpc.health.v1.Health/Check
+grpcurl -plaintext -authority greeter.svc localhost:8080 grpc.health.v1.Health/Check
 ```
 
 ```json
@@ -1828,8 +1839,8 @@ grpcurl -plaintext -authority greeter.svc -proto grpc/health/v1/health.proto \
 A name that is not a service of the set:
 
 ```sh
-grpcurl -plaintext -authority greeter.svc -proto grpc/health/v1/health.proto \
-  -d '{"service": "nope.Svc"}' localhost:8080 grpc.health.v1.Health/Check
+grpcurl -plaintext -authority greeter.svc -d '{"service": "nope.Svc"}' \
+  localhost:8080 grpc.health.v1.Health/Check
 ```
 
 ```text
@@ -1838,8 +1849,18 @@ ERROR:
   Message: unknown service
 ```
 
-`grpc.health.v1.Health/List` with the same flags prints the status of
-`""` and of `helloworld.Greeter`.
+`grpc.health.v1.Health/List` prints the status of `""` and of
+`helloworld.Greeter`.
+
+Without reflection, give grpcurl `health.proto` instead:
+
+```sh
+mkdir -p grpc/health/v1
+curl -fsSL -o grpc/health/v1/health.proto \
+  https://raw.githubusercontent.com/grpc/grpc-proto/master/grpc/health/v1/health.proto
+grpcurl -plaintext -authority greeter.svc -proto grpc/health/v1/health.proto \
+  localhost:8080 grpc.health.v1.Health/Check
+```
 
 #### In the Journal and the metrics
 
@@ -1847,6 +1868,119 @@ Health answers are not recorded in the Journal: probes every few seconds
 would otherwise evict the calls that tests verify. The request metrics
 count each under its Mock with `stub=""`, and not as an unmatched
 request. In the `mockoon` log format, they get no line.
+
+### Reflection
+
+Tools such as grpcurl and Postman find a server's services and their
+types through gRPC's
+[server reflection](https://github.com/grpc/grpc/blob/master/doc/server-reflection.md).
+Turn it on with the Mock's `grpc.reflection`, and they need no local copy
+of the Mock's set:
+
+```yaml
+mocks:
+  - name: greeter
+    hosts: [greeter.svc]
+    grpc:
+      descriptorSet: greeter.binpb
+      reflection: true
+      health: true
+```
+
+```sh
+grpcurl -plaintext -authority greeter.svc localhost:8080 list
+```
+
+```text
+grpc.health.v1.Health
+helloworld.Greeter
+```
+
+```sh
+grpcurl -plaintext -authority greeter.svc localhost:8080 describe helloworld.Greeter.SayHello
+```
+
+```text
+helloworld.Greeter.SayHello is a method:
+rpc SayHello ( .helloworld.HelloRequest ) returns ( .helloworld.HelloReply );
+```
+
+A call then needs no `-protoset`:
+
+```sh
+grpcurl -plaintext -authority greeter.svc -d '{"name": "Tom"}' \
+  localhost:8080 helloworld.Greeter/SayHello
+```
+
+smock serves both versions of the service, `grpc.reflection.v1` and its
+older name `grpc.reflection.v1alpha`, so older and newer tools work. It
+answers from the Mock's set:
+
+| Request | Answer |
+|---|---|
+| `list_services` | The services of every file of the set, in the order of the set, then `grpc.health.v1.Health` when health is on and the set does not define it. |
+| `file_by_filename` | The file of that name, then each file it imports, at any depth, once each. |
+| `file_containing_symbol` | The file that defines the symbol, with its imports. A symbol is any named element, by its full name: a message, a nested type, a field, an enum, an enum value, a service, a method or an extension. |
+| `file_containing_extension` | The file that defines the extension of the type with the number, with its imports. |
+| `all_extension_numbers_of_type` | The numbers of the extensions of the type in the set. |
+
+- Files are sent as the set holds them, custom options included, without
+  their source info, the comments and positions. So `describe` prints no
+  comments.
+- A name the set lacks gets reflection's `error_response` with
+  NOT_FOUND (5), such as `symbol not found: helloworld.Missing`. A request
+  that asks for nothing gets INVALID_ARGUMENT (3).
+- Each response echoes the request in `original_request`, and gives the
+  call's Host, its `:authority`, in `valid_host`.
+- With `health` on, the health service is listed, and described from the
+  descriptor of `health.proto` that smock embeds. When the Mock's set
+  defines the package `grpc.health.v1` itself, it answers from the set
+  instead, and the embedded descriptor is not used.
+- The reflection services themselves are not listed: smock does not
+  embed `reflection.proto`.
+- `descriptorSet` may be left out. A Mock with `grpc: { reflection: true,
+  health: true }` alone lists the health service only.
+- A Mock that does not turn reflection on has no reflection service. A
+  call to it is a call to a method the set lacks, which gets UNIMPLEMENTED
+  `unknown method` from its HEADERS, and grpcurl says `server does not
+  support the reflection API`.
+
+#### One request per call
+
+Reflection's method, `ServerReflectionInfo`, is bidirectional streaming,
+and smock serves no streaming method yet. So smock answers one request
+per call: it reads the first request message as soon as it has arrived
+whole, sends one response message and the OK trailers, then RST_STREAM
+`NO_ERROR` if the client is still sending. Messages after the first are
+not read. Clients open a new call for their next request, as grpcurl,
+grpc-go and grpc-python do, so every command works.
+
+The [protocol checks](#protocol-checks-and-limits) come first, as for any
+call, and a first message that does not decode as a reflection request
+gets INTERNAL `the request message cannot be decoded`.
+
+#### A Stub wins
+
+As for health, a call goes to the Stubs, not to the service, when the
+Mock has a gRPC Stub on its path. Reflection's method streams, and a gRPC
+Stub on a streaming method is a problem, so no Stub can be on it today.
+
+#### In the Journal and the metrics
+
+Reflection answers are not recorded in the Journal: each grpcurl command
+makes one or more reflection calls, which would otherwise evict the calls
+that tests verify. The request metrics count each under its Mock with
+`stub=""`, and not as an unmatched request. In the `mockoon` log format,
+they get no line.
+
+#### Memory
+
+With reflection on, the Mock keeps each file of its set as the set
+encodes it, without its source info, beside the set's decoded model, so
+that answers carry every field and option as the set holds them. This
+costs about as much memory as the set built without source info, in
+every replica ([Memory](#memory)). A Mock without reflection keeps
+nothing more.
 
 ## Protocol checks and limits
 
@@ -2262,7 +2396,10 @@ It drops the rest, so it costs nothing:
   that a Buf image adds to each file.
 
 So a set built with `buf build -o` and its defaults, which is a Buf image
-with source info, loads as it is. Files written in proto2, in proto3 or in
+with source info, loads as it is. A Mock with [reflection](#reflection)
+on also keeps each file as the set encodes it, without its source info,
+so that reflection sends custom options and every other field as the set
+holds them. Files written in proto2, in proto3 or in
 an edition all load. gRPC Stubs serve the types of proto3 and proto2
 files; a Stub whose method reaches a type of an editions file, or a
 MessageSet, is a problem ([proto2 types](#proto2-types)).
@@ -2294,6 +2431,11 @@ A large set costs memory in each one. For example, a set of 4.8 MB, with
 5,000 messages and 100,000 fields, takes about 40 MiB once loaded, and
 about 0.15 s to load. Source info costs nothing once loaded, since smock
 drops it.
+
+A Mock with [reflection](#reflection) on also keeps each file of its set
+as encoded, without source info, about as many octets as the set built
+without source info: for the set of 4.8 MB above, built without source
+info, about 4.8 MB more in each replica.
 
 To keep a set small, build it from the files of the services your Mocks
 stand in for, not from every file of a large repository: give protoc

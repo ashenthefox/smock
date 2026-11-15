@@ -181,3 +181,25 @@ test "framing a message gives flag 0, its length and its octets, which read back
     ),
   )
 }
+
+///|
+test "the messages that have arrived whole are counted as each one's last octet arrives, a message of zero octets as soon as its prefix does" {
+  let deframer = @grpc.Deframer()
+  let counts = []
+  // HelloRequest { name: "Tom" }, an empty message, then a message cut
+  // short, one octet at a time.
+  let body = b"\x00\x00\x00\x00\x05\x0a\x03Tom\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02a"
+  counts.push(deframer.whole_messages())
+  for i in 0..<body.length() {
+    let mut rest = body[i:i + 1]
+    while deframer.take(rest) is Prefix(rest=after, ..) {
+      rest = after
+    }
+    counts.push(deframer.whole_messages())
+  }
+  inspect(
+    counts.map(count => count.to_string()).join(""),
+    content="0000000000111112222222",
+  )
+  debug_inspect(deframer.ending(), content="InMessage(length=2)")
+}

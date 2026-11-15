@@ -1,0 +1,6 @@
+valid_host: "reflected.svc"
+original_request {
+  file_containing_symbol: "annotated.Accounts.Get"
+}
+# The files, which the tests add.
+file_descriptor_response {}

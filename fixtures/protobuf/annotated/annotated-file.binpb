@@ -1,0 +1,10 @@
+
+⁄
+annotated.proto	annotated google/protobuf/descriptor.proto"[
+Account
+id (	BÇµprimary keyRid)
+owner (	BÇµa user's nameRowner:àµ2C
+Accounts2
+Get.annotated.Account.annotated.Account"êà:3
+note.google.protobuf.FieldOptions–Ü (	Rnote:;
+audited.google.protobuf.MessageOptions—Ü (Rauditedbproto3
