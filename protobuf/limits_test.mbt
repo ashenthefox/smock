@@ -72,12 +72,7 @@ test "what the decoder holds to print a message counts with its JSON: the record
   }
   // A Node's child sent 100 times, merged into one.
   let children = (count : Int32, limit : Int32) => {
-    bounded(
-      scalars_set,
-      "scalars.Node",
-      repeated(b"\x12\x00", count),
-      limit~,
-    )
+    bounded(scalars_set, "scalars.Node", repeated(b"\x12\x00", count), limit~)
   }
   // A map of 100 entries, from 0 to 99, each with the value 1.
   let entries = @buffer.Buffer()
@@ -254,7 +249,10 @@ test "messages nest 100 deep and no deeper through an Any, a Struct and its Valu
       dynamic_depth("google.protobuf.Struct", structs(34, number_value(1.0))),
       // A Value and its ListValue are two levels: the last Value at depth
       // 100, then its ListValue at 101.
-      dynamic_depth("google.protobuf.Value", listed_values(50, number_value(1.0))),
+      dynamic_depth(
+        "google.protobuf.Value",
+        listed_values(50, number_value(1.0)),
+      ),
       dynamic_depth("google.protobuf.Value", listed_values(50, empty_list)),
     ].join("\n"),
     content=(
@@ -273,4 +271,53 @@ test "messages nest 100 deep and no deeper through an Any, a Struct and its Valu
 /// as `depth_outcome` says.
 fn dynamic_depth(name : String, input : Bytes) -> String {
   depth_outcome(dynamic_set, name, input)
+}
+
+///|
+/// Octets that are UTF-8 or not, at the start, the middle and the end of a
+/// string: each kind of bad sequence, a sequence cut short, and good ones
+/// of every length, a byte order mark included.
+let utf8_cases : Array[Bytes] = [
+  b"plain", b"\xef\xbb\xbfbom", b"\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x88", b"\x80",
+  b"a\xbfb", b"\xc0\x80", b"\xc1\xbf", b"\xe0\x80\x80", b"\xe0\x9f\xbf", b"\xed\xa0\x80",
+  b"\xed\xbf\xbf", b"\xf0\x80\x80\x80", b"\xf0\x8f\xbf\xbf", b"\xf4\x90\x80\x80",
+  b"\xf5\x80\x80\x80", b"\xff", b"\xfe\xfe", b"\xc3", b"\xe2\x82", b"\xf0\x9f\x98",
+  b"x\xe2\x82", b"\xe2\x82x", b"\xf0\x9f\x98x", b"\xc3\xc3\xa9", b"\xe2\x28\xa1",
+]
+
+///|
+test "a proto2 string that is not UTF-8 prints as UTF-8 decoders repair it, U+FFFD for each maximal subpart, and a proto3 one is refused, whatever its bad sequence" {
+  for octets in utf8_cases {
+    // A proto2 Burrow's name, printed with no copy of the repaired text.
+    let printed = bounded(
+      limits_set,
+      "limits.Burrow",
+      nested(w => {
+        w.tag(1, Len)
+        w.length_delimited(octets)
+      }),
+      limit=no_limit,
+    )
+    let lossy = @utf8.decode_lossy(octets)
+    assert_eq(printed, "{\"name\":\"\{lossy}\",\"rooms\":{}}")
+    // A proto3 Every's string.
+    let strict = bounded(
+      scalars_set,
+      "scalars.Every",
+      nested(w => {
+        w.tag(9, Len)
+        w.length_delimited(octets)
+      }),
+      limit=no_limit,
+    )
+    let good = try @utf8.decode(octets, ignore_bom=false) catch {
+      _ => false
+    } noraise {
+      _ => true
+    }
+    assert_eq(
+      strict.has_prefix("error: ") && strict.contains("not UTF-8"),
+      !good,
+    )
+  }
 }

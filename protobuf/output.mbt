@@ -51,7 +51,7 @@ fn Output::new(size_hint~ : Int32, limit~ : Int32) -> Output {
   } else {
     size_hint
   }
-  { data: FixedArray::make(capacity, b'\x00'), length: 0, limit, held: 0 }
+  { data: FixedArray::make(capacity, b'\x00'), length: 0, limit, held: 0, }
 }
 
 ///|
@@ -88,8 +88,7 @@ fn Output::reserve(self : Output, count : Int32) -> Unit raise DecodeError {
 ///|
 /// Writes `value`.
 fn Output::write_byte(self : Output, value : Byte) -> Unit raise DecodeError {
-  if self.length >= self.data.length() ||
-    self.length + self.held >= self.limit {
+  if self.length >= self.data.length() || self.length + self.held >= self.limit {
     self.reserve(1)
   }
   self.data[self.length] = value

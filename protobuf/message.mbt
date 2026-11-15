@@ -266,16 +266,14 @@ fn DescriptorSet::scan(
         (String, Len) => {
           let at = reader.pos
           let value = reader.length_delimited()
-          if is_utf8(value) {
-            values[index] = Some(Octets(value))
-          } else if checked {
+          // One of a proto2 file is repaired as it is printed.
+          if checked && !is_utf8(value) {
             raise reader.error(
               at,
               "the field \{field.name} holds octets that are not UTF-8",
             )
-          } else {
-            values[index] = Some(Octets(repaired(value)))
           }
+          values[index] = Some(Octets(value))
         }
         (Bytes, Len) => values[index] = Some(Octets(reader.length_delimited()))
         (Message, Len) | (Group, StartGroup) => {
@@ -456,7 +454,9 @@ fn DescriptorSet::print_value(
       if field.type_ is Bytes {
         write_base64(out, octets)
       } else {
-        write_json_string(out, octets)
+        // A string of a proto2 file need not be UTF-8: those of a proto3
+        // file were checked when the message was scanned.
+        write_json_string(out, octets, repair=field.syntax is Proto2)
       }
     Some(Number(bits)) => self.print_number(out, field, bits)
     None | Some(Elements(_)) =>
@@ -515,9 +515,7 @@ fn DescriptorSet::print_list(
               self.print_message(out, type_, [element], depth + 1)
             }
             None if field.type_ is Bytes => write_base64(out, element)
-            None if !checked && !is_utf8(element) =>
-              write_json_string(out, repaired(element))
-            None => write_json_string(out, element)
+            None => write_json_string(out, element, repair=!checked)
           }
         }
         // A packed record of values.
@@ -671,7 +669,9 @@ fn DescriptorSet::print_map(
               "the field \{key_field.name} holds octets that are not UTF-8",
             )
           } else {
-            // Keys that print alike are one key.
+            // Keys that print alike are one key. The key repaired is held
+            // until the map is printed.
+            out.hold(repaired_length(text))
             repaired(text)
           }
         }
@@ -732,7 +732,7 @@ fn DescriptorSet::print_map(
     let before = out.held
     let values = self.scan(out, entry, [entries[i]])
     match values[key_index] {
-      Some(Octets(text)) => write_json_string(out, text)
+      Some(Octets(text)) => write_json_string(out, text, repair=!checked)
       Some(Number(bits)) => {
         out.write_byte(b'"')
         self.print_number(out, key_field, bits)
@@ -1118,29 +1118,138 @@ fn write_extension_name(
 }
 
 ///|
-/// `octets`, which are not UTF-8, as UTF-8, with U+FFFD for each bad
-/// sequence, as smock reads header values.
-fn repaired(octets : BytesView) -> BytesView {
-  @utf8.encode(@utf8.decode_lossy(octets))
+/// The length of the UTF-8 sequence that starts at `at` in `octets`, from
+/// 1 to 4, when it is well formed, or else minus the length of its maximal
+/// subpart: the longest start of a well-formed sequence there, or its first
+/// octet, which a decoder replaces with one U+FFFD (Unicode, section 3.9),
+/// as `@utf8.decode_lossy` does. It reads no octet past the sequence.
+fn utf8_sequence(octets : BytesView, at : Int32) -> Int32 {
+  let first = octets[at].to_int()
+  if first < 0x80 {
+    return 1
+  }
+  // The sequence's length, and the range of its second octet: the others
+  // are from 0x80 to 0xBF.
+  let mut length = 0
+  let mut low = 0x80
+  let mut high = 0xBF
+  if first >= 0xC2 && first <= 0xDF {
+    length = 2
+  } else if first == 0xE0 {
+    length = 3
+    low = 0xA0
+  } else if first == 0xED {
+    length = 3
+    high = 0x9F
+  } else if first >= 0xE1 && first <= 0xEF {
+    length = 3
+  } else if first == 0xF0 {
+    length = 4
+    low = 0x90
+  } else if first == 0xF4 {
+    length = 4
+    high = 0x8F
+  } else if first >= 0xF1 && first <= 0xF3 {
+    length = 4
+  } else {
+    return -1
+  }
+  for k in 1..<length {
+    if at + k >= octets.length() {
+      return -k
+    }
+    let octet = octets[at + k].to_int()
+    if octet < low || octet > high {
+      return -k
+    }
+    low = 0x80
+    high = 0xBF
+  }
+  length
 }
 
 ///|
-/// Whether `octets` are UTF-8.
+/// The length of `octets` repaired: each maximal subpart that is not UTF-8
+/// replaced with U+FFFD, 3 octets, as `repaired` repairs it.
+fn repaired_length(octets : BytesView) -> Int32 {
+  let mut length = 0
+  let mut i = 0
+  while i < octets.length() {
+    let sequence = utf8_sequence(octets, i)
+    if sequence > 0 {
+      length += sequence
+      i += sequence
+    } else {
+      length += 3
+      i -= sequence
+    }
+  }
+  length
+}
+
+///|
+/// `octets`, which are not UTF-8, as UTF-8, with U+FFFD for each maximal
+/// subpart that is not, as smock reads header values.
+fn repaired(octets : BytesView) -> BytesView {
+  let out = @buffer.Buffer(size_hint=repaired_length(octets))
+  let mut i = 0
+  while i < octets.length() {
+    let sequence = utf8_sequence(octets, i)
+    if sequence > 0 {
+      out.write_bytes(octets[i:i + sequence])
+      i += sequence
+    } else {
+      out.write_bytes(b"\xef\xbf\xbd")
+      i -= sequence
+    }
+  }
+  out.to_bytes()
+}
+
+///|
+/// Whether `octets` are UTF-8. It allocates nothing.
 fn is_utf8(octets : BytesView) -> Bool {
-  let _ = @utf8.decode(octets, ignore_bom=false) catch { _ => return false }
+  let mut i = 0
+  while i < octets.length() {
+    if octets[i] < b'\x80' {
+      i += 1
+      continue
+    }
+    let sequence = utf8_sequence(octets, i)
+    if sequence < 0 {
+      return false
+    }
+    i += sequence
+  }
   true
 }
 
 ///|
 /// Writes `octets`, UTF-8 text, as a JSON string: in quotes, with `"`, `\`
-/// and the control characters escaped as `@json` escapes them.
+/// and the control characters escaped as `@json` escapes them. With
+/// `repair`, `octets` need not be UTF-8: each maximal subpart that is not
+/// is written as U+FFFD, as `repaired` repairs it, with no copy made.
 fn write_json_string(
   out : Output,
   octets : BytesView,
+  repair~ : Bool = false,
 ) -> Unit raise DecodeError {
   out.write_byte(b'"')
-  for octet in octets {
+  let mut i = 0
+  while i < octets.length() {
+    let octet = octets[i]
+    i += 1
     match octet {
+      _ if octet >= b'\x80' && repair => {
+        let sequence = utf8_sequence(octets, i - 1)
+        if sequence > 0 {
+          out.write_bytes(octets[i - 1:i - 1 + sequence])
+          i = i - 1 + sequence
+        } else {
+          out.write_bytes(b"\xef\xbf\xbd")
+          i = i - 1 - sequence
+        }
+      }
       b'"' => out.write_bytes(b"\\\"")
       b'\\' => out.write_bytes(b"\\\\")
       b'\n' => out.write_bytes(b"\\n")

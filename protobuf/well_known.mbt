@@ -330,6 +330,9 @@ fn DescriptorSet::print_any(
     out.write_bytes(b"{}")
     return
   }
+  // The type URL is printed in full, so one that cannot fit is too large
+  // before its text is decoded.
+  out.reserve(url.length())
   let text = @utf8.decode_lossy(url)
   guard type_name_of_url(text) is Some(name) else {
     raise DecodeError(

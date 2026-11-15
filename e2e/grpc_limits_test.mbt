@@ -55,7 +55,8 @@ async fn journaled_targets(smock : Smock) -> String {
   }
   let targets = []
   for entry in entries {
-    guard entry is Object({ "request": Object({ "target": String(target), .. }), .. }) else {
+    guard entry
+      is Object({ "request": Object({ "target": String(target), .. }), .. }) else {
       fail("no target: \{entry.stringify()}")
     }
     targets.push(target)
@@ -68,11 +69,13 @@ async fn journaled_targets(smock : Smock) -> String {
 }
 
 ///|
-/// The Mock `shelf`, with collections.proto's set, a gRPC Stub on Fill
-/// that answers any message, and an HTTP Stub that takes uploads.
+/// The Mock `shelf`, the Default Mock, with collections.proto's set, a
+/// gRPC Stub on Fill that answers any message, and an HTTP Stub that takes
+/// uploads.
 let limits_shelf : String =
   #|mocks:
   #|  - name: shelf
+  #|    default: true
   #|    grpc: { descriptorSet: collections.binpb }
   #|stubs:
   #|  - id: fill
@@ -131,6 +134,119 @@ async test "the ticket's example: a message of 10 MiB of empty Items, whose JSON
           #|journaled: /upload
           #|smock_requests_total{mock="shelf",stub="upload"} 1
           #|smock_requests_total{mock="",stub=""} 1
+        ),
+      )
+    })
+  })
+}
+
+///|
+/// The directory of the limits fixtures.
+let limits_dir : String = "fixtures/protobuf/limits"
+
+///|
+/// Runs `f` with a definitions directory holding `limits.yaml`: the Mock
+/// `burrows`, with limits.proto's set, a gRPC Stub on Dig that answers any
+/// message, and the Mock `shelf` of `limits_shelf`, with
+/// collections.proto's set.
+async fn with_burrows(f : async (String) -> Unit) -> Unit {
+  let yaml =
+    #|mocks:
+    #|  - name: burrows
+    #|    hosts: [burrows.svc]
+    #|    grpc: { descriptorSet: limits.binpb }
+    #|stubs:
+    #|  - id: dig
+    #|    mock: burrows
+    #|    request: { path: /limits.Burrows/Dig }
+    #|    response: { json: {} }
+  with_collections_set(limits_shelf, dir => {
+    write_bytes(dir, "limits.yaml", @utf8.encode(yaml))
+    write_bytes(
+      dir,
+      "files/limits.binpb",
+      @fs.read_file("\{limits_dir}/limits.binpb").binary(),
+    )
+    f(dir)
+  })
+}
+
+///|
+/// A length-delimited record of field `field` that holds `value`: its tag,
+/// then its length as a varint.
+fn length_delimited(field : Int32, value : Bytes) -> Bytes {
+  let out = @buffer.Buffer(size_hint=value.length() + 10)
+  out.write_byte(((field << 3) | 2).to_byte())
+  let mut length = value.length()
+  while length >= 0x80 {
+    out.write_byte(((length & 0x7F) | 0x80).to_byte())
+    length = length >> 7
+  }
+  out.write_byte(length.to_byte())
+  out.write_bytes(value)
+  out.to_bytes()
+}
+
+///|
+async test "strings whose JSON passes --body-limit get RESOURCE_EXHAUSTED and cost smock no more than an HTTP/2 upload of 10 MiB and its JSON: a proto2 string and a proto2 map key that are not UTF-8, which print U+FFFD, 3 octets, for each bad octet, and a proto3 string of control characters, which print 6 each" {
+  with_burrows(dir => {
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let client = smock.h2c()
+      defer client.close()
+      let upload = client.send(
+        "POST",
+        "/upload",
+        authority="localhost",
+        headers=[],
+        body=copies(b"a", default_body_limit),
+      )
+      guard client.response(upload).status == 200 else {
+        fail("the upload failed")
+      }
+      let uploaded = peak_resident_set(smock.pid)
+      // Octets that fit in --body-limit with the prefix and a record's
+      // tags and lengths.
+      let octets = default_body_limit - 64
+      let bad = copies(b"\xff", octets)
+      let calls = [
+        (
+          "a proto2 string",
+          "burrows.svc",
+          "/limits.Burrows/Dig",
+          length_delimited(1, bad),
+        ),
+        (
+          "a proto2 map key",
+          "burrows.svc",
+          "/limits.Burrows/Dig",
+          length_delimited(4, length_delimited(1, bad)),
+        ),
+        (
+          "a proto3 string",
+          "localhost",
+          "/collections.Shelf/Fill",
+          length_delimited(8, copies(b"\x01", octets)),
+        ),
+      ]
+      let out = []
+      for call in calls {
+        let (what, authority, path, message) = call
+        let reply = client.call(path, authority~, body=framed(message))
+        out.push("\{what}: \{limits_reply(reply)}")
+      }
+      let called = peak_resident_set(smock.pid)
+      out.push(
+        "peak RSS within the upload's, plus --body-limit for the JSON: \{called <= uploaded + default_body_limit.to_double()}",
+      )
+      out.push("journaled: \{journaled_targets(smock)}")
+      inspect(
+        out.join("\n"),
+        content=(
+          #|a proto2 string: :status: 200, grpc-status: 8, grpc-message: the decoded request message is over the body limit, 0 DATA (end)
+          #|a proto2 map key: :status: 200, grpc-status: 8, grpc-message: the decoded request message is over the body limit, 0 DATA (end)
+          #|a proto3 string: :status: 200, grpc-status: 8, grpc-message: the decoded request message is over the body limit, 0 DATA (end)
+          #|peak RSS within the upload's, plus --body-limit for the JSON: true
+          #|journaled: /upload
         ),
       )
     })
