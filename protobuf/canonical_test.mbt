@@ -271,3 +271,45 @@ test "Struct, Value, ListValue, NullValue and Any in their ProtoJSON forms" {
     ),
   )
 }
+
+///|
+test "proto2: fields with presence printed whenever set, extensions under their full names in brackets, and groups as messages" {
+  inspect(
+    canonical(extensions_set, "shop.Order", fixture(order_full)),
+    content=(
+      #|{"id":"8","note":"gift","[shop.priority]":-2,"[shop.codes]":["a",""],"[shop.label]":{"text":"fragile"},"[shop.Gift.gift]":{"wrap":"red"},"urgent":true}
+    ),
+  )
+  inspect(
+    canonical(extensions_set, "shop.Itinerary", fixture(itinerary)),
+    content=(
+      #|{"name":"tour","stop":[{"city":"Paris","window":{"opens":9,"closes":17}},{"city":"Lyon"}],"note":{"text":"by train"}}
+    ),
+  )
+  // Fields set at their defaults, and a closed enum's unknown numbers
+  // left out.
+  inspect(
+    canonical(shipping_set, "shipping.Parcel", fixture(shipping_parcel)),
+    content=(
+      #|{"state":"SHIPPED","history":["NEW","DELIVERED"],"weights":[1,300],"sizes":[3,4],"order":{"id":"7"},"orders":[{"id":"8","note":""},{"id":"-1"}],"states":{"a":"NEW","b":"DELIVERED"},"label":"","tags":["x",""],"notes":{"k":"v"},"fragile":false,"count":0,"carrierName":"post","byId":{"2":{"id":"2"}}}
+    ),
+  )
+  inspect(
+    canonical(shipping_set, "shipping.Parcel", fixture(shipping_unknown)),
+    content=(
+      #|{"state":"SHIPPED","history":["NEW","DELIVERED"],"states":{"a":"SHIPPED"},"carrierName":"post"}
+    ),
+  )
+  // A proto2 string that is not UTF-8 prints with U+FFFD, as in the
+  // decoded form, and a message without its required field does not
+  // decode.
+  inspect(
+    canonical(shipping_set, "shipping.Parcel", fixture(shipping_not_utf8)),
+    content=(
+      #|{"label":"a�(b","tags":["��","ok"],"notes":{"�":"�"}}
+    ),
+  )
+  inspect(canonical(shipping_set, "shipping.Order", b"\x12\x00"), content=(
+    #|error: octet 0: the message shipping.Order lacks its required field id
+  ))
+}
