@@ -225,17 +225,27 @@ pub(all) struct GrpcPart {
   /// without templates; `None` for one that the server encodes from the
   /// plan's body, once rendered, and for an answer without a message.
   encoded : @definitions.EncodedMessage?
+  /// The error details of an error's reply, each an Any in ProtoJSON, as
+  /// written or rendered, which the server sends in google.rpc.Status, in
+  /// `grpc-status-details-bin`. Empty without details.
+  details : ReadOnlyArray[Json]
+  /// google.rpc.Status of details as written, encoded when the files were
+  /// loaded; `None` for rendered ones, which the server encodes, and
+  /// without details.
+  encoded_status : @definitions.EncodedStatus?
 }
 
 ///|
 /// The gRPC part that a gRPC Stub's reply starts from: the status `OK`,
-/// with no message, no trailing metadata and no encoded message. Each reply
-/// gets its own status, message and encoded message (`plan_response`).
+/// with no message, no trailing metadata, no encoded message and no
+/// details. Each reply gets its own (`plan_response`).
 let grpc_ok : GrpcPart = {
   status: Ok,
   message: None,
   trailers: [],
   encoded: None,
+  details: [],
+  encoded_status: None,
 }
 
 ///|
@@ -1135,6 +1145,8 @@ fn grpc_unimplemented(message : String, near_miss : NearMiss?) -> ResponsePlan {
         None => []
       },
       encoded: None,
+      details: [],
+      encoded_status: None,
     }),
   }
 }

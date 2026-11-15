@@ -1,0 +1,22 @@
+# NOT_FOUND, as a templated reply renders it for a call for Ann: an
+# ErrorInfo whose metadata holds the name, and a BadRequest.
+code: 5
+message: "no user called Ann"
+details {
+  [type.googleapis.com/google.rpc.ErrorInfo] {
+    reason: "USER_UNKNOWN"
+    domain: "greeter.svc"
+    metadata {
+      key: "name"
+      value: "Ann"
+    }
+  }
+}
+details {
+  [type.googleapis.com/google.rpc.BadRequest] {
+    field_violations {
+      field: "name"
+      description: "no user called Ann"
+    }
+  }
+}

@@ -71,21 +71,24 @@ priv struct ToolCallDecl {
 
 ///|
 /// A gRPC Stub's `grpc` as written: its status, its message with its JSON
-/// Pointer, which is parsed as a template with `template` on, and its
+/// Pointer, which is parsed as a template with `template` on, its
 /// trailing metadata as (name, value, JSON Pointer of the value), as
 /// `File::read_headers` reads metadata, whose values are parsed as
-/// templates with `template` on.
+/// templates with `template` on, and its error details with the JSON
+/// Pointer of `details`.
 priv struct GrpcDecl {
   status : @grpc.Status
   message : (String, String)?
   trailers : Array[(String, String, String)]
+  details : (Array[Json], String)?
 }
 
 ///|
 /// Reads the `responses` of the Stub at `stub_pointer`: the value `json` at
 /// `pointer`, 1 to `max_responses` responses, each the shape of `response`
 /// plus `weight`, an integer from 1 to `max_weight`, by default 1. Their
-/// templates may read the Data buckets `buckets`. Returns them in the order
+/// templates may read the Data buckets `buckets`. A gRPC Stub's are read
+/// with its Mock's set, `descriptor_set`. Returns them in the order
 /// written, with the sum of their weights.
 fn File::read_responses(
   self : File,
@@ -93,7 +96,7 @@ fn File::read_responses(
   pointer : String,
   json : Json,
   buckets~ : @template.Buckets,
-  grpc~ : Bool,
+  descriptor_set~ : @protobuf.DescriptorSet?,
 ) -> (Array[WeightedResponse], Int32) {
   let items = self.array(pointer, json)
   if json is Array(_) && (items.length() < 1 || items.length() > max_responses) {
@@ -121,7 +124,13 @@ fn File::read_responses(
     }
     responses.push({
       weight,
-      response: self.read_response(stub_pointer, at, item, buckets~, grpc~),
+      response: self.read_response(
+        stub_pointer,
+        at,
+        item,
+        buckets~,
+        descriptor_set~,
+      ),
     })
     total += weight
   }
@@ -131,18 +140,21 @@ fn File::read_responses(
 ///|
 /// Reads the response of the Stub at `stub_pointer`: the value `json` at
 /// `pointer`. Its templates may read the Data buckets `buckets`. A gRPC
-/// Stub's response, when `grpc` is true, needs no status, its `json` gets
-/// no Content-Type, and it may give `grpc`, the status and message its
-/// reply ends with; an error gives no `json`. An HTTP Stub's response
-/// cannot give `grpc`.
+/// Stub's response, read with its Mock's set, `descriptor_set`, needs no
+/// status, its `json` gets no Content-Type, and it may give `grpc`, the
+/// status, message, trailing metadata and error details its reply ends
+/// with; an error gives no `json`, and only an error gives details. An
+/// HTTP Stub's response, when `descriptor_set` is `None`, cannot give
+/// `grpc`.
 fn File::read_response(
   self : File,
   stub_pointer : String,
   pointer : String,
   json : Json,
   buckets~ : @template.Buckets,
-  grpc~ : Bool,
+  descriptor_set~ : @protobuf.DescriptorSet?,
 ) -> Response {
+  let grpc = descriptor_set is Some(_)
   let mut status = 0
   let headers : Array[(String, String, String)] = []
   let mut body : BodyField = NoBody
@@ -205,6 +217,13 @@ fn File::read_response(
     self.error(
       child_pointer(pointer, "json"),
       "is not allowed with the gRPC status \{status}: a gRPC call gets a reply message or an error, never both",
+    )
+  }
+  // gRPC sends error details only with an error.
+  if grpc_reply is Some({ status: Ok, details: Some((details, field)), .. }) &&
+    details.length() > 0 {
+    self.error(
+      field, "is not allowed with the gRPC status OK: gRPC sends error details only with an error",
     )
   }
   if grpc {
@@ -287,8 +306,8 @@ fn File::read_response(
   }
   let grpc_reply : GrpcReply? = match grpc_reply {
     None => None
-    Some({ status, message, trailers, }) => {
-      let message : GrpcMessage? = match message {
+    Some({ status, message: message_decl, trailers, details, }) => {
+      let message : GrpcMessage? = match message_decl {
         None => None
         Some((text, field)) =>
           if template {
@@ -321,20 +340,45 @@ fn File::read_response(
           ),
         )
       }
-      Some({ status, message, trailers, })
+      let details = match (details, descriptor_set) {
+        // Details with OK are a problem, reported above, and no details
+        // send no status.
+        (Some((details, field)), Some(set)) if !(status is Ok) &&
+          details.length() > 0 =>
+          self.read_details(
+            stub_pointer,
+            field,
+            details,
+            set,
+            status,
+            message_decl.map_or("", written => written.0),
+            template~,
+            buckets~,
+          )
+        _ => no_grpc_details
+      }
+      Some({ status, message, trailers, details, })
     }
   }
-  // Whether the templated message or trailers read Variables, and Data
-  // buckets.
+  // Whether the templated message, trailers or details read Variables,
+  // and Data buckets.
   let (message_vars, message_data) = match grpc_reply {
-    Some({ message, trailers, .. }) => {
+    Some({ message, trailers, details, .. }) => {
       let (vars, data) = match message {
         Some(Templated(text)) => (text.reads_vars(), text.reads_data())
         _ => (false, false)
       }
+      let (details_vars, details_data) = match details {
+        Templated(templates) =>
+          (
+            templates.any(@template.Structured::reads_vars),
+            templates.any(@template.Structured::reads_data),
+          )
+        Written(_, _) => (false, false)
+      }
       (
-        vars || trailers.reads(@template.Text::reads_vars),
-        data || trailers.reads(@template.Text::reads_data),
+        vars || details_vars || trailers.reads(@template.Text::reads_vars),
+        data || details_data || trailers.reads(@template.Text::reads_data),
       )
     }
     None => (false, false)
@@ -363,10 +407,12 @@ fn File::read_response(
 ///|
 /// Reads a gRPC Stub's `grpc`, a closed object, the value `json` at
 /// `pointer`: `status`, a name from `OK` to `UNAUTHENTICATED`, by default
-/// `OK`, `message`, any string, and `trailers`, the trailing metadata, in
-/// the shape of `headers` and under gRPC's rules, as `File::read_headers`
-/// reads metadata, whose values are templates when `templated`. Returns
-/// `None` when it is not an object.
+/// `OK`, `message`, any string, `trailers`, the trailing metadata, in the
+/// shape of `headers` and under gRPC's rules, as `File::read_headers`
+/// reads metadata, whose values are templates when `templated`, and
+/// `details`, an array of error details, which `File::read_details` reads
+/// once the reply's status and message are known. Returns `None` when it
+/// is not an object.
 fn File::read_reply_grpc(
   self : File,
   pointer : String,
@@ -380,6 +426,7 @@ fn File::read_reply_grpc(
   let mut status : @grpc.Status = Ok
   let mut message = None
   let trailers = []
+  let mut details = None
   for key, value in grpc {
     let field = child_pointer(pointer, key)
     match key {
@@ -397,10 +444,16 @@ fn File::read_reply_grpc(
         trailers.append(
           self.read_headers(field, value, metadata=true, templated~),
         )
+      "details" =>
+        if value is Array(items) {
+          details = Some((items, field))
+        } else {
+          self.error(field, "must be an array")
+        }
       _ => self.unknown_field(field)
     }
   }
-  Some({ status, message, trailers, })
+  Some({ status, message, trailers, details, })
 }
 
 ///|

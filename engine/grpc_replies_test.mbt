@@ -40,6 +40,8 @@ test "a static reply's plan carries the message encoded when the files were load
       #|        message=<Bytes: [0x0a, 0x02, 0x48, 0x69]>,
       #|      ),
       #|    ),
+      #|    details: <ReadOnlyArray: []>,
+      #|    encoded_status: None,
       #|  },
       #|)
     ),
@@ -59,6 +61,8 @@ test "a static reply's plan carries the message encoded when the files were load
       #|    message: None,
       #|    trailers: <ReadOnlyArray: []>,
       #|    encoded: None,
+      #|    details: <ReadOnlyArray: []>,
+      #|    encoded_status: None,
       #|  },
       #|)
     ),

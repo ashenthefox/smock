@@ -1,0 +1,29 @@
+mocks:
+  - name: greeter
+    grpc:
+      descriptorSet: greeter.binpb
+stubs:
+  - id: hello-later
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello
+      body: { json: { name: Tom } }
+    response:
+      grpc:
+        status: UNAVAILABLE
+        message: try again
+        details:
+          - "@type": type.googleapis.com/helloworld.HelloReply
+            message: later
+  - id: hello-unknown
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello
+    response:
+      template: true
+      grpc:
+        status: NOT_FOUND
+        message: "no user called ${body.name}"
+        details:
+          - "@type": type.googleapis.com/helloworld.HelloRequest
+            name: "${body.name}"
