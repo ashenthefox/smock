@@ -254,12 +254,23 @@ whatever the new version needs in smock. Before that branch merges into
     TLS;
   - the JVM, with OkHttp's h2c by prior knowledge, and Java's built-in
     client over TLS and on the plain port, where it gets HTTP/1.1;
-  - a browser over TLS, with a certificate it trusts.
+  - a browser over TLS, with a certificate it trusts;
+  - gRPC unary calls from grpc-java, on Netty, and from grpc-python, on
+    gRPC's C core, each over h2c on the plain port and over TLS on the
+    TLS port with smock's certificate: a call that gets an OK reply, one
+    that gets an error with details and trailing metadata, and one whose
+    deadline a Stub's delay outlasts.
 
-  Each gets the Stub's response, over the protocol that the HTTP/2
-  guide's [Clients](http2.md#clients) table gives, and each Journal
-  entry's `version` says the same. The results, with each client's
-  version, go in the merge record.
+  Each HTTP client gets the Stub's response, over the protocol that the
+  HTTP/2 guide's [Clients](http2.md#clients) table gives, and each Journal
+  entry's `version` says the same. Each gRPC client gets the reply and its
+  metadata, the error's status, message, trailer and details, and
+  DEADLINE_EXCEEDED at its deadline, before the delay ends
+  ([Deadlines](grpc.md#deadlines)). Each Journal entry's `grpcStatus` says
+  the same. These calls check smock's trailers, its
+  [Trailers-Only](grpc.md#trailers-only) answers and its deadlines with
+  two gRPC stacks that share no code with moonhttp or grpcurl. The
+  results, with each client's version, go in the merge record.
 - **The pre-merge local and GKE benchmark runs**, compared with the
   previous runs, as [Before merging into main](merging-into-main.md) says
   for every integration branch.
