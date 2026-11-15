@@ -319,7 +319,7 @@ async test "health: once SIGTERM starts the drain, every Check and List says NOT
             ),
           ])
         }
-        let data : Map[Int32, Bytes] = {}
+        let data : Map[Int32, Bytes] = Map([])
         let answered = raw.frames_until(start, frame => {
           match frame {
             Data(stream_id~, data=octets, ..) => data[stream_id] = octets
@@ -512,13 +512,13 @@ async test "health: a reply larger than the stream's window is sent as the clien
         [
           "DATA frames: \{list.data.length()}, each of 8 octets at most: \{list.data.iter().all(octets => octets.length() <= 8)}",
           "the framed List reply: \{whole.to_bytes() == framed(health_fixture("list-greeter"))}",
-          "trailers: \{list.trailers}, \{list.ended}",
+          "the reply: \{list.outline()}",
           smock.metric("smock_requests_total"),
         ].join("\n"),
         content=(
           #|DATA frames: 5, each of 8 octets at most: true
           #|the framed List reply: true
-          #|trailers: Some([(grpc-status, 0)]), end
+          #|the reply: :status: 200, grpc-status: 0, 5 DATA (end)
           #|smock_requests_total{mock="greeter",stub=""} 1
         ),
       )
@@ -542,17 +542,15 @@ async test "health: gRPC's protocol checks come first, so a health call with no 
         ] {
         let (what, body) = call
         let reply = client.call(check_path, body~)
-        out.push(
-          "\{what}: \{reply.trailers}, \{reply.head.filter(field => field.0.has_prefix("grpc-"))}",
-        )
+        out.push("\{what}: \{reply.outline()}")
       }
       out.push(smock.metric("smock_requests_total"))
       inspect(
         out.join("\n"),
         content=(
-          #|no message: None, [(grpc-status, 12), (grpc-message, the request has no message)]
-          #|two messages: None, [(grpc-status, 12), (grpc-message, the request has more than one message)]
-          #|a string that is not UTF-8: None, [(grpc-status, 13), (grpc-message, the request message cannot be decoded)]
+          #|no message: :status: 200, grpc-status: 12, grpc-message: the request has no message, 0 DATA (end)
+          #|two messages: :status: 200, grpc-status: 12, grpc-message: the request has more than one message, 0 DATA (end)
+          #|a string that is not UTF-8: :status: 200, grpc-status: 13, grpc-message: the request message cannot be decoded, 0 DATA (end)
           #|smock_requests_total{mock="",stub=""} 3
         ),
       )
@@ -575,15 +573,15 @@ async test "health: the service answers over h2 on the TLS port as over h2c on t
           )
           let list = client.call(list_path, body=framed(b""))
           out.push(
-            "\{port}: Check \{check.data == [framed(health_fixture("serving"))]}, List \{list.data == [framed(health_fixture("list-greeter"))]}, \{list.trailers}",
+            "\{port}: Check \{check.data == [framed(health_fixture("serving"))]}, List \{list.data == [framed(health_fixture("list-greeter"))]}, \{list.outline()}",
           )
         }
         out.push(smock.metric("smock_requests_total"))
         inspect(
           out.join("\n"),
           content=(
-            #|h2c: Check true, List true, Some([(grpc-status, 0)])
-            #|h2: Check true, List true, Some([(grpc-status, 0)])
+            #|h2c: Check true, List true, :status: 200, grpc-status: 0, 1 DATA (end)
+            #|h2: Check true, List true, :status: 200, grpc-status: 0, 1 DATA (end)
             #|smock_requests_total{mock="greeter",stub=""} 4
           ),
         )
