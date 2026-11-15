@@ -238,9 +238,16 @@ pub(all) struct Rendering {
   data_writes : Array[RenderedWrite]
   status : Int32
   /// The header fields smock sends, in order, without those that depend on
-  /// the connection, such as Content-Length.
+  /// the connection, such as Content-Length. For a gRPC Stub, its initial
+  /// metadata.
   headers : Array[(String, String)]
+  /// The body. For a gRPC Stub, the reply message as JSON, as written or
+  /// rendered, which a call gets encoded with the method's output type.
   body : Body
+  /// For a gRPC Stub, the gRPC part of the reply a call gets: its status,
+  /// its message, its trailing metadata and its error details. `None` for
+  /// an HTTP Stub and a CRUD Stub.
+  grpc : GrpcPart?
   /// Why the Stub's template, or a value or key of its writes, could not be
   /// rendered, when it could not: the response is then the 500 a request
   /// would get.
@@ -525,6 +532,7 @@ pub fn Engine::render(
         status: plan.status,
         headers: plan.headers,
         body: plan.body,
+        grpc: plan.grpc,
         template_error,
         failed: incoming
         .failed(ordinary.request)
@@ -640,6 +648,7 @@ fn render_crud(
     status: plan.status,
     headers: plan.headers,
     body: plan.body,
+    grpc: None,
     template_error: None,
     // The sample fits an operation, and a CRUD Stub has no other
     // conditions.
@@ -796,6 +805,23 @@ pub impl ToJson for Rendering with fn to_json(self) {
     Events(events) =>
       (Json::null(), Json::array(events.iter().map(event_json).collect()))
   }
+  let response : Map[String, Json] = {
+    "status": Json::number(self.status.to_double()),
+    "headers": headers_json(self.headers.iter()),
+    "body": body,
+    "events": events,
+  }
+  // An HTTP Stub's rendering has no gRPC part, not even null.
+  if self.grpc is Some(part) {
+    response["grpc"] = {
+      "status": Json::string(part.status.name()),
+      "message": part.message.map_or(Json::null(), message => {
+        Json::string(message)
+      }),
+      "trailers": headers_json(part.trailers.iter()),
+      "details": Json::array(part.details.iter().to_array()),
+    }
+  }
   {
     "stub": Json::string(self.stub),
     "mock": Json::string(self.mock),
@@ -808,22 +834,28 @@ pub impl ToJson for Rendering with fn to_json(self) {
     "dataWrites": Json::array(
       self.data_writes.map(write => ToJson::to_json(write)),
     ),
-    "response": {
-      "status": Json::number(self.status.to_double()),
-      "headers": Json::array(
-        self.headers.map(header => {
-          "name": Json::string(header.0),
-          "value": Json::string(header.1),
-        }),
-      ),
-      "body": body,
-      "events": events,
-    },
+    "response": Json::object(response),
     "templateError": self.template_error.map_or(Json::null(), error => {
       ToJson::to_json(error)
     }),
     "failed": Json::array(self.failed.map(failed => ToJson::to_json(failed))),
   }
+}
+
+///|
+/// `fields`, header fields or metadata, as the Admin API document writes
+/// them: an array of objects with `name` and `value`, in order.
+fn headers_json(fields : Iter[(String, String)]) -> Json {
+  Json::array(
+    fields
+    .map(field => {
+      Json::object({
+        "name": Json::string(field.0),
+        "value": Json::string(field.1),
+      })
+    })
+    .to_array(),
+  )
 }
 
 ///|
