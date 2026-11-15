@@ -361,9 +361,9 @@ of each GitHub release include its section
     fields, which would print 579,503 values. A list passes at any length
     when an element of n octets prints at most 4 × n − 1 fields: 7 for a
     default-constructed element, 15 for one with a small field set.
-    Wider default-constructed elements pass up to about 32,766 / (f − 7)
-    of them, such as 618 of 60 fields. `smock render` and the Admin
-    render operation refuse a sample past the bound too. What smock holds
+    Wider default-constructed elements pass in smaller numbers, such as
+    618 elements of 60 fields. `smock render` and the Admin render
+    operation refuse a sample past the bound too. What smock holds
     to print a message, such as its map entries, is bounded by
     `--body-limit` too. See
     [The decoder's limits](docs/grpc.md#the-decoders-limits).

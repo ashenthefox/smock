@@ -2961,15 +2961,17 @@ smock bounds the values by the size of the message:
   for a message of 19000 octets`.
 - The bound applies whatever the Mock's Stubs read. A Mock whose Stubs
   read only the metadata refuses the same messages.
-- Whichever bound the JSON passes first answers. A message near
-  `--body-limit` gets `the decoded request message is over the body
-  limit`.
+- Whichever bound the JSON passes first, as smock prints it, answers.
+  For a small message that is the values. For a message of a few hundred
+  KB or more it is `--body-limit`, with `the decoded request message is
+  over the body limit`.
 
 A value that a message sends takes an octet or more, so the values a
 message sends never number more than its octets. Only fields printed at
 their default can take a message past the bound. Those are the fields
-without presence: a message field, a member of a oneof and a proto3
-`optional` field print only when the message holds them
+without presence, an empty list or map among them. A message field, a
+member of a oneof and a proto3 `optional` field have presence, and print
+only when the message holds them
 ([The request message as JSON](#the-request-message-as-json)). In
 practice the bound refuses long lists of wide, almost empty messages.
 
@@ -2981,9 +2983,12 @@ elements:
 
 | The elements | Octets each | Pass at any length | Wider elements |
 |---|---|---|---|
-| default-constructed, with no field set | 2, or 3 under a field number of 16 or more | up to 7 printed fields | up to about 32,766 / (f − 7) of them: 10,922 of 10 fields, 2,520 of 20, 618 of 60 |
+| default-constructed, with no field set | 2 | up to 7 printed fields | up to about 32,766 / (f − 7) of them: 10,922 of 10 fields, 2,520 of 20, 618 of 60 |
 | with one small field set, such as a bool or a small number | 4 | up to 15 printed fields | |
 | with a name of 8 characters | 12 | up to 47 printed fields | |
+
+A list whose field number is 16 or more has a tag of 2 octets, so each
+of its elements takes one octet more, and allows 4 more values.
 
 So a list of thousands of default-constructed or almost empty wide
 messages is refused, and so is a large sparse grid of wide cells. To send
