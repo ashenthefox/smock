@@ -22,11 +22,12 @@ usage:
 A run measures one smock, or compares 2 to 4 variants of it, each in a Pod
 of its own on one node, which one load generator measures in turn, round
 after round: manifests then takes
---variant LABEL=IMAGE[,no-init][,no-first-second][,scenarios][,crud] for
-each, the first the baseline, and --rounds N; plan and estimate take
---variants N and --rounds N. Its results split into samples, one
-variant's pass over the steps in one round each, which summarize
-summarizes as runs of smock alone, and same-node compares them.
+--variant LABEL=IMAGE[,no-init][,no-first-second][,scenarios][,crud][,grpc]
+for each, the first the baseline, and --rounds N; plan and estimate take
+--variants N and --rounds N, and, for grpc variants, --definitions
+bench/definitions-grpc, as samples and summarize do. Its results split
+into samples, one variant's pass over the steps in one round each, which
+summarize summarizes as runs of smock alone, and same-node compares them.
 """
 
 import argparse
@@ -87,19 +88,32 @@ DEFAULT_ROUNDS = 4
 # container that prints its node's CPU, without the load generator's
 # scrape of its /metrics a second into each step, and serve the Scenario
 # variant of the benchmark's definitions (bench/definitions-scenarios/),
-# or their CRUD variant (bench/definitions-crud/), which the load
-# generator sends its own request mix (bench/requests-crud.json).
-VARIANT_OPTIONS = ("no-init", "no-first-second", "scenarios", "crud")
+# their CRUD variant (bench/definitions-crud/), which the load generator
+# sends its own request mix (bench/requests-crud.json), or their gRPC
+# variant (bench/definitions-grpc/), which the load generator sends its own
+# mix of gRPC calls (bench/requests-grpc.json) in its own case,
+# grpc-keep-alive, alone. A run of one smock serves the benchmark's
+# definitions: only grpc variants serve the gRPC variant.
+VARIANT_OPTIONS = ("no-init", "no-first-second", "scenarios", "crud", "grpc")
 
 # Where smock's image holds the benchmark's definitions
-# (bench/gke/smock-definitions.dockerfile), their Scenario variant and
-# their CRUD variant; and the variants as the repository names them, which
-# summarize records.
+# (bench/gke/smock-definitions.dockerfile), their Scenario variant, their
+# CRUD variant and their gRPC variant; and the definitions as the
+# repository names them, which summarize records.
 DEFINITIONS_DIR = "/definitions"
+DEFINITIONS = "bench/definitions"
 SCENARIO_DEFINITIONS_DIR = "/definitions-scenarios"
 SCENARIO_DEFINITIONS = "bench/definitions-scenarios"
 CRUD_DEFINITIONS_DIR = "/definitions-crud"
 CRUD_DEFINITIONS = "bench/definitions-crud"
+GRPC_DEFINITIONS_DIR = "/definitions-grpc"
+GRPC_DEFINITIONS = "bench/definitions-grpc"
+
+# The options that serve other definitions than the benchmark's, with the
+# directory each serves, as the repository names it, and in smock's image.
+DEFINITIONS_OPTIONS = {"scenarios": (SCENARIO_DEFINITIONS, SCENARIO_DEFINITIONS_DIR),
+                       "crud": (CRUD_DEFINITIONS, CRUD_DEFINITIONS_DIR),
+                       "grpc": (GRPC_DEFINITIONS, GRPC_DEFINITIONS_DIR)}
 
 # How many variants a run can compare on one node: the namespace's quota
 # and the load generator's time grow with each.
@@ -108,12 +122,13 @@ MIN_VARIANTS, MAX_VARIANTS = 2, 4
 
 def parse_variant(text):
     """A variant as --variant gives it,
-    LABEL=IMAGE[,no-init][,no-first-second][,scenarios][,crud]: {label,
-    image, init, first_second, scenarios, crud}."""
+    LABEL=IMAGE[,no-init][,no-first-second][,scenarios][,crud][,grpc]:
+    {label, image, init, first_second, scenarios, crud, grpc}."""
     label, equals, rest = text.partition("=")
     image, *options = rest.split(",")
     if not equals or not image:
-        raise GkeError(f"--variant {text}: give it as LABEL=IMAGE[,no-init][,no-first-second][,scenarios][,crud]")
+        raise GkeError(f"--variant {text}: give it as "
+                       "LABEL=IMAGE[,no-init][,no-first-second][,scenarios][,crud][,grpc]")
     if not VARIANT_LABEL.fullmatch(label):
         raise GkeError(f"variant label {label}: use 1 to 16 lowercase letters, digits and hyphens, starting with a "
                        "letter and ending with a letter or digit")
@@ -121,31 +136,32 @@ def parse_variant(text):
         if option not in VARIANT_OPTIONS:
             raise GkeError(f"variant {label}: no option {option}; there are {', '.join(VARIANT_OPTIONS[:-1])} "
                            f"and {VARIANT_OPTIONS[-1]}")
-    if "scenarios" in options and "crud" in options:
-        raise GkeError(f"variant {label}: scenarios and crud serve other definitions: give one of them")
+    serving = list(dict.fromkeys(option for option in options if option in DEFINITIONS_OPTIONS))
+    if len(serving) > 1:
+        raise GkeError(f"variant {label}: {and_list(serving)} serve other definitions: give one of them")
     return {"label": label, "image": image, "init": "no-init" not in options,
             "first_second": "no-first-second" not in options, "scenarios": "scenarios" in options,
-            "crud": "crud" in options}
+            "crud": "crud" in options, "grpc": "grpc" in options}
+
+
+def definitions_option(variant):
+    """The option of `variant` (None for a run of one smock) that serves
+    other definitions than the benchmark's, or None."""
+    return next((option for option in DEFINITIONS_OPTIONS if variant and variant.get(option)), None)
 
 
 def served_definitions(variant):
     """Where smock's image holds the definitions that `variant` (None for a
     run of one smock) serves."""
-    if variant and variant["scenarios"]:
-        return SCENARIO_DEFINITIONS_DIR
-    if variant and variant["crud"]:
-        return CRUD_DEFINITIONS_DIR
-    return DEFINITIONS_DIR
+    option = definitions_option(variant)
+    return DEFINITIONS_OPTIONS[option][1] if option else DEFINITIONS_DIR
 
 
 def repository_definitions(variant):
-    """The definitions that `variant` serves, as the repository names
-    them."""
-    if variant["scenarios"]:
-        return SCENARIO_DEFINITIONS
-    if variant["crud"]:
-        return CRUD_DEFINITIONS
-    return "bench/definitions"
+    """The definitions that `variant` (None for a run of one smock) serves,
+    as the repository names them."""
+    option = definitions_option(variant)
+    return DEFINITIONS_OPTIONS[option][0] if option else DEFINITIONS
 
 
 def variant_mix(variant):
@@ -159,7 +175,9 @@ def variant_mix(variant):
 
 def parse_variants(texts):
     """The variants --variant gives, in its order, the first the baseline:
-    parse_variant's, each with its own label; [] without any."""
+    parse_variant's, each with its own label; [] without any. Every one
+    serves the gRPC variant of the definitions, or none does: its case runs
+    against it alone, and each step runs every variant."""
     variants = [parse_variant(text) for text in texts or []]
     if variants and not MIN_VARIANTS <= len(variants) <= MAX_VARIANTS:
         raise GkeError(f"a run compares {MIN_VARIANTS} to {MAX_VARIANTS} variants, not {len(variants)}")
@@ -167,7 +185,20 @@ def parse_variants(texts):
     for label in dict.fromkeys(labels):
         if labels.count(label) > 1:
             raise GkeError(f"variant {label} is given twice: give each its own label")
+    grpc = [variant["label"] for variant in variants if variant["grpc"]]
+    others = [variant["label"] for variant in variants if not variant["grpc"]]
+    if grpc and others:
+        raise GkeError(f"variant {grpc[0]} serves {GRPC_DEFINITIONS}, which only its own case runs against, and "
+                       f"variant {others[0]} does not: give every variant the grpc option, or none")
     return variants
+
+
+def variants_definitions(variants):
+    """The definitions that decide which cases of the plan a run of
+    `variants` runs (plan_cases), as the repository names them: the gRPC
+    variant's, when they serve it, which they all do then; else the
+    benchmark's, whose cases a scenarios or a crud variant runs too."""
+    return GRPC_DEFINITIONS if variants and variants[0]["grpc"] else DEFINITIONS
 
 
 # The load generator's Pod, by the nodes' architecture: oha used at most
@@ -284,11 +315,14 @@ def plan_profiles(plan, names=None):
     return profiles
 
 
-def plan_cases(plan, names=None):
-    """The cases of the plan to run: by default all of them but those that
-    run only on one machine (local_only), such as h2c-multiplexed. The
-    plan's cases must be ones the harness can run, and only the harness on
-    one machine can hold idle connections."""
+def plan_cases(plan, names=None, definitions=DEFINITIONS):
+    """The cases of the plan to run when smock serves `definitions`, as the
+    repository names them: by default all of those that run against them
+    (bench.py's cases_for: grpc-keep-alive against the gRPC variant alone,
+    which only grpc variants serve, and every other case against any other
+    definitions) but those that run only on one machine (local_only), such
+    as h2c-multiplexed. The plan's cases must be ones the harness can run,
+    and only the harness on one machine can hold idle connections."""
     for name in names or []:
         if name not in [case["name"] for case in plan["cases"]]:
             raise GkeError(f"the plan has no case {name}")
@@ -296,11 +330,25 @@ def plan_cases(plan, names=None):
         problem = harness.case_problem(case)
         if problem:
             raise GkeError(problem)
+    fitting = [case["name"] for case in harness.cases_for(plan["cases"], harness.ROOT / definitions)]
+    if not fitting:
+        raise GkeError(f"the plan has no case that runs when smock serves {definitions}: run a plan that has one, "
+                       "such as bench/plan-autopilot.json")
     if names is None:
-        cases = [case for case in plan["cases"] if not case.get("local_only")]
+        cases = [case for case in plan["cases"] if case["name"] in fitting and not case.get("local_only")]
     else:
         cases = [case for case in plan["cases"] if case["name"] in names]
     for case in cases:
+        if case["name"] not in fitting:
+            own = harness.case_definitions(case)
+            if own is not None:
+                shown = harness.shown_path(own)
+                option = next((option for option, (directory, _) in DEFINITIONS_OPTIONS.items() if directory == shown),
+                              None)
+                raise GkeError(f"case {case['name']} runs only when smock serves {shown}, which a GKE run serves "
+                               f"only to variants with the {option} option")
+            raise GkeError(f"a run that serves {definitions} runs {', '.join(fitting)} alone: leave {case['name']} "
+                           "out of --cases")
         if case.get("local_only"):
             raise GkeError(f"case {case['name']} runs only on one machine (local_only), which keeps the GKE run's "
                            "time down: leave it out of --cases")
@@ -418,9 +466,10 @@ SMOCK_SECURITY = {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": T
 
 def smock_objects(profile, arch, zone, generator_image, smock_deadline_s, image, variant=None):
     """smock's Service and Pod under `profile`, from `image`; a variant's,
-    {label, init, scenarios, crud, ...}, when it is given: a scenarios
-    variant serves the Scenario variant of the definitions, and a crud
-    variant their CRUD variant."""
+    {label, init, scenarios, crud, grpc, ...}, when it is given: a
+    scenarios variant serves the Scenario variant of the definitions, a
+    crud variant their CRUD variant, and a grpc variant their gRPC
+    variant."""
     name = smock_name(profile["name"], variant and variant["label"])
     labels = {"app": SMOCK}
     pod_labels = {**labels, "profile": profile["name"], **({"variant": variant["label"]} if variant else {})}
@@ -491,10 +540,13 @@ def generator_env(profile, cases, variants, rounds):
     """The load generator's environment (generator.py's): smock's Service
     as TARGET; or, with `variants`, VARIANTS, each one's label, Service,
     whether to scrape smock a second into each step, and the mix of a
-    variant whose definitions have their own (variant_mix), in order, and
-    the number of ROUNDS."""
+    variant whose definitions have their own (variant_mix), in order, the
+    number of ROUNDS, and, when they serve the gRPC variant, its
+    DEFINITIONS, whose cases they run."""
     common = [{"name": "PROFILE", "value": profile["name"]},
               {"name": "CASES", "value": ",".join(case["name"] for case in cases)}]
+    if variants_definitions(variants) != DEFINITIONS:
+        common.append({"name": "DEFINITIONS", "value": variants_definitions(variants)})
     if not variants:
         return [{"name": "TARGET", "value": service_host(profile)}, *common]
     described = []
@@ -532,7 +584,8 @@ def manifests(plan, profile, cases, arch, zone, smock_image, generator_image, sm
     from its image, on the node of the profile's other variants (a no-init
     variant without the init container, a scenarios variant serving the
     Scenario variant of the definitions, a crud variant their CRUD
-    variant); the quota counts each one's Pod,
+    variant, a grpc variant their gRPC variant); the quota counts each
+    one's Pod,
     and the load generator measures each in turn over `rounds` rounds (its
     VARIANTS and ROUNDS), with time for them all. `smock_image` is not used
     then."""
@@ -1325,7 +1378,7 @@ def command_summarize(args):
     plan_path, targets_path = Path(args.plan), Path(args.targets)
     plan = read_json(plan_path)
     profiles = plan_profiles(plan, comma_list(args.profiles))
-    cases = plan_cases(plan, comma_list(args.cases))
+    cases = plan_cases(plan, comma_list(args.cases), args.definitions)
     out = Path(args.out)
     results = {profile["name"]: profile_results(out, plan, profile, cases, args.arch) for profile in profiles}
     stopped = stopped_record(results, args.stopped, args.stopped_under)
@@ -1341,7 +1394,8 @@ def command_summarize(args):
     status = start.get("status") or {}
     smock_nodes, generator_nodes = nodes_of(results, "smock"), nodes_of(results, "generator")
     node = smock_nodes[0] if smock_nodes else None
-    # The mix the load generator sent: the CRUD variant's own to it.
+    # The mix the load generator sent: the CRUD or the gRPC variant's own
+    # to it.
     mix = harness.mix_path(harness.ROOT / args.definitions)
     compute_class = COMPUTE_CLASSES[args.arch]
     # Where the Pods ran, as their nodes say; the zone the run pinned them
@@ -1514,7 +1568,7 @@ def write_samples(out, profiles, rounds=1):
 def command_samples(args):
     plan = read_json(args.plan)
     profiles = plan_profiles(plan, comma_list(args.profiles))
-    plan_cases(plan, comma_list(args.cases))
+    plan_cases(plan, comma_list(args.cases), args.definitions)
     if args.rounds is not None and args.rounds < 1:
         raise GkeError(f"a run of variants has at least 1 round, not {args.rounds}")
     for round_, label, directory in write_samples(args.out, profiles, args.rounds or 1):
@@ -2134,7 +2188,8 @@ def conditions_record(samples, labels):
     differ and how. A sample of a variant that served other definitions
     than the first (a scenarios or a crud variant's) has another definition
     set, as its option says, and a crud variant's was sent the CRUD
-    variant's own mix: that is no condition besides smock."""
+    variant's own mix: that is no condition besides smock. (grpc variants
+    are all grpc or none.)"""
     compare = compare_module()
     named = summarized(samples, labels)
     (reference, first), differences = named[0], {}
@@ -2197,7 +2252,8 @@ def variant_records(labels, baseline, samples, raws, sha256, no_init):
                         "options": [*(["no-init"] if label in no_init else []),
                                     *(["no-first-second"] if skipped else []),
                                     *(["scenarios"] if SCENARIO_DEFINITIONS in served else []),
-                                    *(["crud"] if CRUD_DEFINITIONS in served else [])]})
+                                    *(["crud"] if CRUD_DEFINITIONS in served else []),
+                                    *(["grpc"] if GRPC_DEFINITIONS in served else [])]})
     return records, problems
 
 
@@ -2334,7 +2390,7 @@ def command_job_failure(args):
 def command_plan(args):
     plan = read_json(args.plan)
     profiles = plan_profiles(plan, comma_list(args.profiles))
-    cases = plan_cases(plan, comma_list(args.cases))
+    cases = plan_cases(plan, comma_list(args.cases), args.definitions)
     variants, rounds = counts(args)
     for profile in profiles:
         check_variant_names(profile, comma_list(args.labels) or [])
@@ -2348,7 +2404,7 @@ def command_plan(args):
 def command_estimate(args):
     plan = read_json(args.plan)
     profiles = plan_profiles(plan, comma_list(args.profiles))
-    cases = plan_cases(plan, comma_list(args.cases))
+    cases = plan_cases(plan, comma_list(args.cases), args.definitions)
     variants, rounds = counts(args)
     text, problem = estimate(plan, profiles, cases, args.region, args.arch, args.time_limit_s, variants, rounds)
     print(text)
@@ -2360,8 +2416,8 @@ def command_estimate(args):
 def command_manifests(args):
     plan = read_json(args.plan)
     [profile] = plan_profiles(plan, [args.profile])
-    cases = plan_cases(plan, comma_list(args.cases))
     variants = parse_variants(args.variant)
+    cases = plan_cases(plan, comma_list(args.cases), variants_definitions(variants))
     if variants and args.smock_image:
         raise GkeError("give smock's image with --smock-image or --variant, not both")
     if not variants and not args.smock_image:
@@ -2432,6 +2488,14 @@ def counts(args):
     return args.variants, rounds
 
 
+def add_definitions(parser):
+    """The option of the definitions smock serves, which decide the cases
+    a run runs (plan_cases)."""
+    parser.add_argument("--definitions", default=DEFINITIONS,
+                        help=f"the definitions smock serves, as the repository names them (default: {DEFINITIONS}; "
+                             f"{GRPC_DEFINITIONS} for grpc variants, which run grpc-keep-alive alone)")
+
+
 def add_counts(parser):
     """The options of how many variants a run measures, and in how many
     rounds."""
@@ -2451,6 +2515,7 @@ def main(argv):
     planning.add_argument("--profiles", help="only these profiles, comma-separated (default: every profile)")
     planning.add_argument("--cases", help="only these cases, comma-separated (default: every case but local_only ones)")
     add_counts(planning)
+    add_definitions(planning)
     planning.add_argument("--labels", help="the variants' labels, comma-separated, whose Pods and Services each "
                                            "profile must be able to name")
     planning.set_defaults(handler=command_plan)
@@ -2464,6 +2529,7 @@ def main(argv):
     estimating.add_argument("--time-limit-s", type=int, required=True,
                             help="seconds after which the watchdog deletes the cluster")
     add_counts(estimating)
+    add_definitions(estimating)
     estimating.set_defaults(handler=command_estimate)
     rendering = commands.add_parser("manifests", help="write the Kubernetes objects of one profile")
     rendering.add_argument("--plan", required=True, help="the plan, such as bench/plan-autopilot.json")
@@ -2475,8 +2541,8 @@ def main(argv):
                                           "chooses smock's, and the load generator follows it)")
     rendering.add_argument("--smock-image", help="smock's image, by digest")
     rendering.add_argument("--variant", action="append",
-                           help="LABEL=IMAGE[,no-init][,no-first-second][,scenarios][,crud]: a variant of smock to "
-                                "measure on the node "
+                           help="LABEL=IMAGE[,no-init][,no-first-second][,scenarios][,crud][,grpc]: a variant of "
+                                "smock to measure on the node "
                                 f"of the others, from its image, by digest; {MIN_VARIANTS} to {MAX_VARIANTS} of them, "
                                 "in place of --smock-image, the first the baseline")
     rendering.add_argument("--generator-image", required=True, help="the load generator's image, by digest")
@@ -2527,7 +2593,8 @@ def main(argv):
                              help="the definitions smock served, as the repository names them (default: "
                                   "bench/definitions; bench/definitions-scenarios for a scenarios variant, "
                                   "bench/definitions-crud for a crud variant, which was sent its own mix, "
-                                  "bench/requests-crud.json)")
+                                  "bench/requests-crud.json, and bench/definitions-grpc for a grpc variant, which was "
+                                  "sent its own, bench/requests-grpc.json, in grpc-keep-alive alone)")
     summarizing.add_argument("--generator-image", help="the load generator's image digest")
     summarizing.add_argument("--stopped", help="why the run stopped before its end, when it did")
     summarizing.add_argument("--stopped-under", help="the profile the run was running when it stopped")
@@ -2540,6 +2607,7 @@ def main(argv):
     splitting.add_argument("--profiles", help="the profiles the run ran, comma-separated (default: every profile)")
     splitting.add_argument("--cases",
                            help="the cases the run ran, comma-separated (default: every case but local_only ones)")
+    add_definitions(splitting)
     splitting.add_argument("--rounds", type=int,
                            help="the rounds the run planned, when the load generator may not have said so "
                                 "(default: as many as it says)")

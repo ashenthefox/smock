@@ -373,6 +373,44 @@ class Variants(Helper):
             ["catalog-item", "catalog-list", "user-profile", "user-preferences", "create-order", "get-order",
              "update-order", "create-payment", "legacy-payment"]])
 
+    def test_grpc_variants_serve_the_grpc_variant_and_the_load_generator_sends_them_its_mix_in_its_own_case(self):
+        # Their images hold every set; the load generator runs
+        # grpc-keep-alive alone, the one case that runs against the gRPC
+        # variant, and sends each variant its mix of gRPC calls.
+        generator = load_generator_module()
+        gke = generator.gke
+        rendered = self.manifests(profile="autopilot-min", variants=(f"r2={OTHER_IMAGE},grpc",
+                                                                     f"r2b={OTHER_IMAGE},grpc"))
+        served = {}
+        for label in ("r2", "r2b"):
+            [_, pod] = rendered[f"smock-{label}.json"]
+            [container] = pod_spec(pod)["containers"]
+            served[label] = {variable["name"]: variable["value"] for variable in container["env"]}["SMOCK_DIR"]
+        self.assertEqual(served, {"r2": "/definitions-grpc", "r2b": "/definitions-grpc"})
+        [job] = objects(rendered, "Job")
+        [container] = pod_spec(job)["containers"]
+        env = {variable["name"]: variable["value"] for variable in container["env"]}
+        self.assertEqual((env["CASES"], env["DEFINITIONS"]), ("grpc-keep-alive", "bench/definitions-grpc"))
+        self.assertEqual(json.loads(env["VARIANTS"]), [
+            {"label": "r2", "target": "smock-autopilot-min-r2.smock-bench.svc.cluster.local", "first_second": True,
+             "mix": "requests-grpc.json"},
+            {"label": "r2b", "target": "smock-autopilot-min-r2b.smock-bench.svc.cluster.local", "first_second": True,
+             "mix": "requests-grpc.json"}])
+        variants = generator.read_variants(env)
+        self.assertEqual([[request["name"] for request in variant.mix] for variant in variants],
+                         [["get-order", "quote-order", "track-order"]] * 2)
+        # The Job has the time of grpc-keep-alive's 8 steps, which the load
+        # generator plans as gke.py did.
+        plan = gke.read_json(BENCH / "plan-autopilot.json")
+        [profile] = gke.plan_profiles(plan, [env["PROFILE"]])
+        specs = gke.steps(plan, profile, gke.plan_cases(plan, gke.comma_list(env["CASES"]), env["DEFINITIONS"]))
+        self.assertEqual({spec["case"] for spec in specs}, {"grpc-keep-alive"})
+        self.assertEqual(len(specs), 8)
+        self.assertEqual(job["spec"]["activeDeadlineSeconds"], gke.job_deadline_s(plan, profile, specs, 2, 4))
+        # Variants of the other definitions tell it nothing of them.
+        [job] = objects(self.manifests(variants=(TWO_VARIANTS[0], f"r2={OTHER_IMAGE},crud")), "Job")
+        self.assertNotIn("DEFINITIONS", {variable["name"] for variable in pod_spec(job)["containers"][0]["env"]})
+
     def test_the_namespace_holds_each_variants_pod_the_load_generators_and_no_more(self):
         # Each smock Pod and the load generator's, with two to spare, as
         # without variants, whose one smock Pod gives 4.
@@ -458,6 +496,11 @@ class Variants(Helper):
                 (variants(TWO_VARIANTS[0], f"r2={OTHER_IMAGE},no-sleep"), "variant r2: no option no-sleep"),
                 (variants(TWO_VARIANTS[0], f"r2={OTHER_IMAGE},scenarios,crud"),
                  "variant r2: scenarios and crud serve other definitions: give one of them"),
+                (variants(TWO_VARIANTS[0], f"r2={OTHER_IMAGE},grpc,crud"),
+                 "variant r2: grpc and crud serve other definitions: give one of them"),
+                (variants(f"r1={SMOCK_IMAGE},grpc", f"r2={OTHER_IMAGE}"),
+                 "variant r1 serves bench/definitions-grpc, which only its own case runs against, and variant r2 "
+                 "does not: give every variant the grpc option, or none"),
                 ([*variants(*TWO_VARIANTS), "--rounds", 0], "at least 1 round, not 0"),
                 (["--smock-image", SMOCK_IMAGE, "--rounds", 4], "--rounds needs --variant"),
                 (["--smock-image", SMOCK_IMAGE, *variants(*TWO_VARIANTS)], "--smock-image or --variant, not both"),
@@ -631,6 +674,47 @@ class Plan(Helper):
             self.assertEqual(status, 1)
             self.assertIn(expected, stderr)
 
+    def test_the_grpc_case_runs_only_against_the_grpc_variant_which_only_grpc_variants_serve(self):
+        # A run of one smock serves bench/definitions, so it leaves
+        # grpc-keep-alive out, as the plan before it did; grpc variants
+        # serve bench/definitions-grpc, and run it alone: 8 steps a profile.
+        status, stdout, stderr = self.plan("--definitions", "bench/definitions-grpc", "--variants", 2)
+        self.assertEqual(status, 0, stderr)
+        self.assertEqual([line.split()[:2] for line in stdout.splitlines()],
+                         [["autopilot-burst-min", "8"], ["autopilot-min", "8"], ["chart-default", "8"]])
+        plan = json.loads((BENCH / "plan-autopilot.json").read_text())
+        path = self.directory() / "plan.json"
+        path.write_text(json.dumps({**plan, "cases": [case for case in plan["cases"]
+                                                      if case["name"] != "grpc-keep-alive"]}))
+        for args in ((), ("--definitions", "bench/definitions-crud"), ("--variants", 2)):
+            self.assertEqual(self.plan(*args), self.plan(*args, plan=path), args)
+        for args, expected in ((["--cases", "grpc-keep-alive"],
+                                "case grpc-keep-alive runs only when smock serves bench/definitions-grpc, which a GKE "
+                                "run serves only to variants with the grpc option"),
+                               (["--definitions", "bench/definitions-grpc", "--cases", "grpc-keep-alive,h2c-keep-alive"],
+                                "a run that serves bench/definitions-grpc runs grpc-keep-alive alone: leave "
+                                "h2c-keep-alive out of --cases")):
+            status, _, stderr = self.plan(*args)
+            self.assertEqual(status, 1, args)
+            self.assertIn(expected, stderr)
+        # A plan without the case has nothing to run against the variant.
+        status, _, stderr = self.plan("--definitions", "bench/definitions-grpc", plan=path)
+        self.assertEqual(status, 1)
+        self.assertIn("the plan has no case that runs when smock serves bench/definitions-grpc", stderr)
+        # The estimate counts the case's steps alone, as for a plan of that
+        # case alone.
+        alone = self.directory() / "plan.json"
+        [grpc] = [case for case in plan["cases"] if case["name"] == "grpc-keep-alive"]
+        alone.write_text(json.dumps({**plan, "cases": [{key: value for key, value in grpc.items()
+                                                        if key != "definitions"}]}))
+        estimates = []
+        for path, args in ((BENCH / "plan-autopilot.json", ["--definitions", "bench/definitions-grpc"]), (alone, [])):
+            status, stdout, stderr = helper("estimate", "--plan", path, *args, "--variants", 2, "--region",
+                                            "us-central1", "--arch", "amd64", "--time-limit-s", 14400)
+            self.assertEqual(status, 0, stderr)
+            estimates.append(stdout)
+        self.assertEqual(estimates[0], estimates[1])
+
     def test_a_plan_a_pod_cannot_run_is_refused_with_what_to_change(self):
         # bench/plan.json's profiles have no memory limit, which Autopilot
         # needs, and one case holds idle connections from the harness.
@@ -669,7 +753,14 @@ class SameNodePlan(Helper):
     def test_it_measures_http_keep_alive_at_and_below_the_lowest_steps_of_the_autopilot_plans_ladders(self):
         plan = json.loads((BENCH / "plan-same-node.json").read_text())
         autopilot = json.loads((BENCH / "plan-autopilot.json").read_text())
-        [case] = plan["cases"]
+        [case, grpc] = plan["cases"]
+        self.assertEqual((case["name"], grpc["name"]), ("http-keep-alive", "grpc-keep-alive"))
+        # Variants with the grpc option run grpc-keep-alive alone, at the
+        # same rates, as the autopilot plan's differs from http-keep-alive.
+        autopilot_grpc = next(case for case in autopilot["cases"] if case["name"] == "grpc-keep-alive")
+        self.assertEqual({key: value for key, value in grpc.items() if key != "rates"},
+                         {key: value for key, value in autopilot_grpc.items() if key != "rates"})
+        self.assertEqual(grpc["rates"], case["rates"])
         # Under 50m and 250m, 52ee405's binary saturated from the second step of
         # the autopilot plan's ladder (0.94 to 0.97 of its limit at 250
         # requests/s under 50m in the runs of 2026-10-16, 0.80 to 0.85 at
@@ -695,6 +786,12 @@ class SameNodePlan(Helper):
         # Job's deadline under autopilot-burst-min and autopilot-min.
         status, stdout, stderr = helper("plan", "--plan", BENCH / "plan-same-node.json", "--profiles",
                                         "autopilot-burst-min,autopilot-min", "--variants", 4, "--rounds", 4)
+        self.assertEqual(status, 0, stderr)
+        self.assertEqual(stdout, "autopilot-burst-min 3 2907\nautopilot-min 3 2907\n")
+        # So do four grpc variants, with grpc-keep-alive in its place.
+        status, stdout, stderr = helper("plan", "--plan", BENCH / "plan-same-node.json", "--profiles",
+                                        "autopilot-burst-min,autopilot-min", "--variants", 4, "--rounds", 4,
+                                        "--definitions", "bench/definitions-grpc")
         self.assertEqual(status, 0, stderr)
         self.assertEqual(stdout, "autopilot-burst-min 3 2907\nautopilot-min 3 2907\n")
 
@@ -946,6 +1043,36 @@ class Summary(Helper):
         out = self.results(lines, pods())
         self.assertEqual(json.loads((out / "conditions.json").read_text())["request_mix"]["file"],
                          "bench/requests.json")
+
+    def test_the_conditions_of_the_grpc_variant_name_the_mix_it_was_sent_and_its_steps_are_its_case(self):
+        plan = json.loads(small_plan(self.directory()).read_text())
+        plan["cases"].append({**plan["cases"][0], "name": "grpc-keep-alive", "protocol": "h2c",
+                              "definitions": "definitions-grpc"})
+        path = self.directory() / "plan.json"
+        path.write_text(json.dumps(plan))
+
+        def grpc_step(rate):
+            line = generator_step(rate)
+            return {**line, "result": {**line["result"], "id": f"grpc-keep-alive@small@{rate}",
+                                       "case": "grpc-keep-alive", "protocol": "h2c",
+                                       "raw": f"raw/small/grpc-keep-alive@{rate}"}}
+
+        lines = [START, grpc_step(500), grpc_step(1000), {"kind": "done"}]
+        out = self.results(lines, pods(), plan=path, stopped=("--definitions", "bench/definitions-grpc"))
+        summary = json.loads((out / "summary.json").read_text())
+        self.assertTrue(summary["complete"])
+        self.assertEqual([case["id"] for case in summary["cases"]],
+                         ["grpc-keep-alive@small@500", "grpc-keep-alive@small@1000"])
+        conditions = json.loads((out / "conditions.json").read_text())
+        self.assertEqual(conditions["definitions"]["directory"], "bench/definitions-grpc")
+        self.assertEqual([case["id"] for case in conditions["cases"]],
+                         ["grpc-keep-alive@small@500", "grpc-keep-alive@small@1000"])
+        mix = conditions["request_mix"]
+        self.assertEqual(mix["file"], "bench/requests-grpc.json")
+        self.assertEqual(mix["sha256"], hashlib.sha256((BENCH / "requests-grpc.json").read_bytes()).hexdigest())
+        self.assertEqual(mix["weights"], {"get-order": 60, "quote-order": 25, "track-order": 15})
+        self.assertIn("definition set 48f7ce9715f0 (bench/definitions-grpc, request mix bench/requests-grpc.json), on ",
+                      (out / "summary.md").read_text())
 
     def test_the_note_says_how_smock_was_measured(self):
         out = self.results([START, generator_step(500), generator_step(1000), {"kind": "done"}], pods())
@@ -1994,21 +2121,25 @@ class Generator(Helper):
 STEP_IDS = ["http-keep-alive@small", "https-keep-alive@small"]
 
 
-def generate_variants(plan_path, variants, rounds, mixes=None):
+def generate_variants(plan_path, variants, rounds, mixes=None, cases="http-keep-alive,https-keep-alive",
+                      definitions=None):
     """Runs the load generator for profile small against several smocks on
     this machine as variants, `variants` [(label, smock, first_second,
     ports instead of smock's own)], for `rounds` rounds, each sent the mix
     `mixes` names for it ({label: file name under bench/}), else the
-    benchmark's; returns its exit status, its JSON lines and its output."""
+    benchmark's, with `cases`, which run against `definitions` when given,
+    as gke.py tells it for grpc variants; returns its exit status, its
+    JSON lines and its output."""
     entries = [{"label": label, "target": "localhost", "first_second": first_second,
                 "plain_port": int(ports.get("plain", smock.ports["plain"])),
                 "tls_port": int(ports.get("tls", smock.ports["tls"])), "admin_port": int(smock.ports["admin"]),
                 **({"mix": mixes[label]} if label in (mixes or {}) else {})}
                for label, smock, first_second, ports in variants]
-    environment = {**{name: value for name, value in os.environ.items() if name != "TARGET"},
+    environment = {**{name: value for name, value in os.environ.items() if name not in ("TARGET", "DEFINITIONS")},
                    "VARIANTS": json.dumps(entries), "ROUNDS": str(rounds), "PROFILE": "small",
-                   "CASES": "http-keep-alive,https-keep-alive", "PLAN": str(plan_path),
-                   "OHA": shutil.which(OHA) or OHA, "TRAFFIC_CHECK_S": "2"}
+                   "CASES": cases, "PLAN": str(plan_path),
+                   "OHA": shutil.which(OHA) or OHA, "TRAFFIC_CHECK_S": "2",
+                   **({"DEFINITIONS": definitions} if definitions else {})}
     generator = subprocess.run([sys.executable, str(BENCH / "gke" / "generator.py")], env=environment,
                                capture_output=True, text=True, timeout=240)
     lines = [json.loads(line) for line in generator.stdout.splitlines()]
@@ -2185,6 +2316,44 @@ class GeneratorWithCrudVariant(Helper):
             self.assertEqual((step["errors"], step["smock_ready"]), (0, True))
         self.assertEqual(sent, {"a": ["bench-catalog-search", "bench-update-order-status"],
                                 "c": ["bench-catalog-list", "bench-update-order"]})
+
+
+class GeneratorWithGrpcVariants(Helper):
+    """grpc variants are sent the gRPC variant's mix in its own case,
+    grpc-keep-alive: each call with its framed body from its file, over
+    h2c, as gke.py tells the load generator with DEFINITIONS. It runs here
+    against two smocks on this machine serving the gRPC variant, for one
+    round."""
+
+    SESSIONS = ("bench-grpc-get-order", "bench-grpc-quote-order", "bench-grpc-track-order")
+
+    def test_each_variant_is_sent_every_grpc_call_of_its_mix_and_every_call_gets_200(self):
+        plan = json.loads(Generator.generator_plan(self).read_text())
+        plan["cases"].append({**plan["cases"][0], "name": "grpc-keep-alive", "protocol": "h2c",
+                              "definitions": "definitions-grpc"})
+        plan_path = self.directory() / "plan-grpc.json"
+        plan_path.write_text(json.dumps(plan))
+        with LocalSmock(BENCH / "definitions-grpc") as a, LocalSmock(BENCH / "definitions-grpc") as b:
+            status, lines, output = generate_variants(plan_path, [("a", a, True, {}), ("b", b, True, {})], 1,
+                                                      mixes={"a": "requests-grpc.json", "b": "requests-grpc.json"},
+                                                      cases="grpc-keep-alive", definitions="bench/definitions-grpc")
+            sent = {label: [session for session in self.SESSIONS if journal_entries(smock, session)]
+                    for label, smock in (("a", a), ("b", b))}
+        self.assertEqual(status, 0, output)
+        steps = [line for line in lines if line["kind"] == "step"]
+        self.assertEqual(sorted((line["variant"], line["result"]["id"]) for line in steps),
+                         [("a", "grpc-keep-alive@small"), ("b", "grpc-keep-alive@small")])
+        for step in (line["result"] for line in steps):
+            self.assertEqual((step["errors"], step["smock_ready"]), (0, True))
+            self.assertEqual(step["requests"]["ok"], step["requests"]["scheduled"])
+        # Each traffic port answered the first call of the mix, with its
+        # body: over HTTP/1.1, which no gRPC Stub answers, and over h2c,
+        # which grpc-keep-alive sends.
+        for check in (line for line in lines if line["kind"] == "traffic-check"):
+            self.assertTrue(check["ok"], check)
+            self.assertEqual(sorted(check["http2"]), ["plain"])
+            self.assertEqual(check["http2"]["plain"]["status"], 200)
+        self.assertEqual(sent, {"a": list(self.SESSIONS), "b": list(self.SESSIONS)})
 
 
 class VariantsStopTogether(Helper):
