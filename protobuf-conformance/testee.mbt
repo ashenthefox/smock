@@ -15,8 +15,9 @@ const JSON_LIMIT : Int32 = 67108864
 priv enum Payload {
   /// No message: a request without its payload.
   Missing
-  /// protobuf's binary encoding, `protobuf_payload`.
-  Binary(BytesView)
+  /// protobuf's binary encoding, `protobuf_payload`: its own octets, not a
+  /// view of the request's, so that an error's octet counts from its start.
+  Binary(Bytes)
   /// JSON text, `json_payload`.
   Json(BytesView)
   /// A form smock does not have, by its name: JSPB or protobuf's text
@@ -76,7 +77,7 @@ fn read_request(input : BytesView) -> Request raise @protobuf.DecodeError {
     match reader.tag() {
       1 => {
         reader.expect(Len)
-        request.payload = Binary(reader.length_delimited())
+        request.payload = Binary(reader.length_delimited().to_owned())
       }
       2 => {
         reader.expect(Len)
@@ -108,39 +109,88 @@ fn read_request(input : BytesView) -> Request raise @protobuf.DecodeError {
 
 ///|
 /// The response to `request`.
+///
+/// A request that gives or asks for a form smock does not have, JSPB or
+/// protobuf's text format, is skipped, and so is a message of a type of an
+/// editions file, which smock/protobuf does not decode or encode yet.
+/// Otherwise the message is decoded and encoded with smock/protobuf:
+///
+/// - Binary to JSON: `decode_canonical_json`. Its error is a parse error,
+///   since smock/protobuf raises one error for bytes that are not the
+///   message and for a value that ProtoJSON cannot print.
+/// - JSON to binary: `@json.parse`, as smock reads a gRPC reply's JSON, then
+///   `encode_json`. Their errors are parse errors.
+/// - Binary to binary: binary to JSON, then JSON to binary, whose error is a
+///   serialize error.
+/// - JSON to JSON: JSON to binary, then binary to JSON, whose error is a
+///   serialize error.
 fn respond(set : @protobuf.DescriptorSet, request : Request) -> Response {
+  if request.payload is Unsupported(form) {
+    return Skipped("smock does not read \{form}")
+  }
+  let binary_output = match request.output {
+    1 => true
+    2 => false
+    3 => return Skipped("smock does not write JSPB")
+    4 => return Skipped("smock does not write protobuf's text format")
+    format => return RuntimeError("no output format of number \{format}")
+  }
   guard set.find_message(request.message_type) is Some(message) else {
     return RuntimeError(
       "the Descriptor set has no message type \{request.message_type}",
     )
   }
+  if message.syntax is Editions {
+    return Skipped(
+      "smock/protobuf does not decode or encode \{message.full_name} yet: it is a type of an editions file",
+    )
+  }
   match request.payload {
-    Binary(input) =>
-      match request.output {
-        2 =>
-          Json(
-            @protobuf.decode_canonical_json(
-              set,
-              message,
-              input,
-              limit=JSON_LIMIT,
-            ),
-          ) catch {
-            error => ParseError(error.to_string())
-          }
-        _ => RuntimeError("not yet")
+    Binary(input) => {
+      let json = @protobuf.decode_canonical_json(
+        set,
+        message,
+        input[:],
+        limit=JSON_LIMIT,
+      ) catch {
+        error => return ParseError(error.to_string())
       }
+      if !binary_output {
+        return Json(json)
+      }
+      let json = @json.parse(@utf8.decode(json)) catch {
+        error =>
+          return RuntimeError(
+            "smock/protobuf printed JSON that does not parse: \{error}",
+          )
+      }
+      Binary(set.encode_json(message, json)) catch {
+        error => SerializeError(error.to_string())
+      }
+    }
     Json(text) => {
-      // Read as smock reads the JSON of a gRPC reply.
       let json = @json.parse(@utf8.decode(text)) catch {
         error => return ParseError(error.to_string())
       }
       let binary = set.encode_json(message, json) catch {
         error => return ParseError(error.to_string())
       }
-      Binary(binary)
+      if binary_output {
+        return Binary(binary)
+      }
+      Json(
+        @protobuf.decode_canonical_json(
+          set,
+          message,
+          binary[:],
+          limit=JSON_LIMIT,
+        ),
+      ) catch {
+        error => SerializeError(error.to_string())
+      }
     }
-    _ => RuntimeError("not yet")
+    // An unsupported form is skipped above.
+    Missing | Unsupported(_) => RuntimeError("the request holds no message")
   }
 }
 

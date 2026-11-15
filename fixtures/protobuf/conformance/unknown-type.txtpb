@@ -1,0 +1,5 @@
+# A message of a type that the Descriptor set does not define.
+protobuf_payload: ""
+requested_output_format: JSON
+message_type: "conformance.Nope"
+test_category: BINARY_TEST

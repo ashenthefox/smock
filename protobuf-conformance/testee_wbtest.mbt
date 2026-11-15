@@ -29,3 +29,34 @@ async test "a binary message asked for as JSON is answered in canonical ProtoJSO
 async test "a JSON message asked for in the binary encoding is encoded as protoc encodes it" {
   check("json-to-binary")
 }
+
+///|
+async test "a JSON message asked for as JSON is answered in canonical ProtoJSON" {
+  check("json-to-json")
+}
+
+///|
+async test "a binary message asked for in the binary encoding is encoded again as protoc encodes it" {
+  check("binary-to-binary")
+}
+
+///|
+async test "a message in protobuf's text format is skipped, and so is one asked for in it" {
+  check("text-format")
+  check("text-format-output")
+}
+
+///|
+async test "a message of a type of an editions file is skipped" {
+  check("editions")
+}
+
+///|
+async test "bytes that are not protobuf give smock/protobuf's error as a parse error" {
+  check("not-protobuf")
+}
+
+///|
+async test "a type that the Descriptor set lacks gives a runtime error" {
+  check("unknown-type")
+}

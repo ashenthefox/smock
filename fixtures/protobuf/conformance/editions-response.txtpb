@@ -1,0 +1,2 @@
+# The answer to editions.txtpb.
+skipped: "smock/protobuf does not decode or encode protobuf_test_messages.editions.proto3.TestAllTypesProto3 yet: it is a type of an editions file"

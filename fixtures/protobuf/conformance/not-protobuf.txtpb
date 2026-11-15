@@ -1,0 +1,5 @@
+# Bytes that end inside a varint, asked for as JSON.
+protobuf_payload: "\010"
+requested_output_format: JSON
+message_type: "protobuf_test_messages.proto3.TestAllTypesProto3"
+test_category: BINARY_TEST
