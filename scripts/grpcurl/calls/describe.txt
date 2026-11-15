@@ -1,0 +1,3 @@
+$ grpcurl -plaintext -authority greeter.svc localhost:8080 describe helloworld.Greeter.SayHello
+helloworld.Greeter.SayHello is a method:
+rpc SayHello ( .helloworld.HelloRequest ) returns ( .helloworld.HelloReply );
