@@ -1233,6 +1233,11 @@ Packages of `smock/smock`:
   times it writes, which the Admin API and the CLI also read.
 - `buildinfo`: the version, commit and toolchain the binary was built with.
 - `e2e`: tests that run the `smock` binary as a black box (native).
+- `protobuf-conformance`: the testee of protobuf's conformance suite, a
+  program built on `smock/protobuf`, with the list of the suite's cases
+  that the module fails (native). smock's image does not hold it.
+  `scripts/check-conformance.sh` runs the suite on it
+  ([protobuf-conformance/README.md](protobuf-conformance/README.md)).
 - `schema`: a test over every Definition-file fixture in
   `schema/v1/fixtures/` that needs no `smock` binary: each, written as YAML
   by `smock/yaml`, reads back as the same tree (native).
@@ -1310,6 +1315,8 @@ scripts/check-ci-artifacts.sh        # CI keeps the release binary of each archi
 scripts/install-protoc.sh            # the pinned protoc, into ~/.local/bin, with its well-known types
 PROTOC=~/.local/bin/protoc scripts/gen-protobuf-fixtures.sh --check   # the protobuf fixtures are what their sources build
 PROTOC=~/.local/bin/protoc scripts/test-protobuf-fixtures.sh          # that check, on a copy of the working tree
+scripts/build-conformance-runner.sh  # protobuf's conformance runner, from the pinned release, into ~/.local/bin (needs CMake and a C++17 compiler)
+scripts/check-conformance.sh         # protobuf's conformance suite against smock/protobuf, judged by protobuf-conformance/failure_list.txt
 scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, read smock's LLM responses (needs python3 and PyPI)
 scripts/test-helm-chart.sh           # rendering tests of the Helm chart (needs helm, yq and jq)
 scripts/test-helm-chart-on-kind.sh smock:dev   # the chart on a kind cluster (needs kind, kubectl and helm)
@@ -1388,7 +1395,9 @@ CI runs all of these but `moon bench` (`.github/workflows/ci.yml`). The
 tests on wasm-gc, h2spec and the scripts from
 `scripts/check-release-workflow.sh` to `scripts/test-helm-chart.sh` run on
 linux/amd64; the rest run on linux/amd64 and linux/arm64
-(`.github/workflows/build-test.yml`).
+(`.github/workflows/build-test.yml`). CI builds protobuf's conformance
+runner once and caches it
+([protobuf-conformance/README.md](protobuf-conformance/README.md)).
 The SDK job, `scripts/check-llm-sdks.sh`, runs after `build-test.yml`,
 with the release binary built there, and reads smock's
 [LLM responses](docs/definition-files.md#llm-responses) with the
