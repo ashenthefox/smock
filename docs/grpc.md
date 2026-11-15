@@ -1533,9 +1533,8 @@ the Stubs see ([The call the Stubs see](#the-call-the-stubs-see)), so
 A Mock has one state for its HTTP requests and its gRPC calls. A call
 reads what a request of the same Session wrote, and a request reads what
 a call wrote. A call's Session comes from its `baggage` metadata, as a
-request's comes from its `baggage` header
-([Sessions](../README.md#sessions-and-ephemeral-stubs)). Another Session,
-or a call without one, has its own state.
+request's comes from its `baggage` header ([Sessions](#sessions)).
+Another Session, or a call without one, has its own state.
 
 ### Scenarios
 
