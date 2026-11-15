@@ -162,6 +162,7 @@ async fn[S : @io.Reader + @io.Writer + ReadOutput] MockPorts::serve_http2(
       connect: 0,
       call_begun: 0,
       waiting: Map([]),
+      past_deadline: Map([]),
       blocked: Map([]),
       claimed: 0,
       window_deadline: forever,
@@ -283,6 +284,11 @@ priv struct H2Connection {
   /// and the streams waiting are never more than the concurrent streams the
   /// connection allows.
   waiting : Map[Int32, @async.Task[Unit]]
+  /// The gRPC calls among them whose delay runs past their deadline, by
+  /// stream, until their tasks end: a client reset of one that arrives in
+  /// the last `deadline_tolerance_ms` before its deadline ends it as
+  /// DEADLINE_EXCEEDED (`reset_near_deadline`).
+  past_deadline : Map[Int32, PastDeadline]
   /// The slow writes waiting for the client to widen a window, by stream,
   /// in the order they began to wait, which a `Map` keeps.
   blocked : Map[Int32, WindowWait]
@@ -579,7 +585,8 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
         if request.grpc {
           // gRPC's own checks of a call, after spec E's: a body over the
           // limit by its `content-length` comes last among them.
-          if check_head(request, self.body_limit) is Some(refusal) {
+          if check_head(request, self.body_limit, arrived=self.header_at)
+            is Some(refusal) {
             self.will_refuse_call(stream, refusal)
             continue
           }
@@ -677,6 +684,11 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
           self.requests.remove(stream)
           self.end_stream()
         } else {
+          // A gRPC call's entry records DEADLINE_EXCEEDED for a client
+          // reset near its deadline before its task commits it.
+          if remote {
+            self.reset_near_deadline(stream)
+          }
           self.stop_waiting(stream)
         }
         if early && self.reset_early(octets) {

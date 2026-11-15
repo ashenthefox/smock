@@ -48,6 +48,11 @@ priv struct H2Request {
   /// For a gRPC call, how far the framing of its messages is read, as its
   /// body arrives; `None` for an HTTP request.
   deframer : @grpc.Deframer?
+  /// For a gRPC call with a `grpc-timeout`, when its deadline passes, in
+  /// `@async.now()` milliseconds: the timeout after the read that brought
+  /// its HEADERS (`check_head`). `forever` for a call without one, or
+  /// whose timeout no delay can outlast, and for an HTTP request.
+  mut call_deadline : Int64
 }
 
 ///|
@@ -215,6 +220,7 @@ fn H2Request::new(
     } else {
       None
     },
+    call_deadline: forever,
   }
 }
 
