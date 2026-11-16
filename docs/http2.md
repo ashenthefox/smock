@@ -7,7 +7,7 @@ It then says how smock bounds what one HTTP/2 connection can cost: its
 limits, timeouts and defences. gRPC calls are HTTP/2 requests too, which
 a Mock's gRPC Stubs answer; the [gRPC guide](grpc.md) describes them, and
 how these limits meet gRPC's channels
-([Connections](grpc.md#connections)).
+([Connections](grpc/services-and-connections.md#connections)).
 
 ## Contents
 
@@ -328,9 +328,9 @@ helm install smock oci://ghcr.io/hirunefu/charts/smock --version <version> \
   --set service.appProtocol.plain=kubernetes.io/h2c
 ```
 
-For the TLS port, use the value your gateway documents. See
-[Ports, Services and probes](../charts/smock/README.md#ports-services-and-probes)
-in the chart's README.
+For the TLS port, use the value your gateway documents. See [Ports, Services
+and probes](../charts/smock/README.md#ports-services-and-probes) in the
+chart's README.
 
 The admin port stays HTTP/1.1 only, so the probes, `/metrics` and the
 Admin API work as before.
@@ -338,9 +338,10 @@ Admin API work as before.
 ## What a Stub sees
 
 Each HTTP/2 stream carries one request, which reaches the Mocks once the
-client has sent all of it, except a CONNECT ([below](#connect)) and a
-gRPC call that can reach no gRPC Stub, which is answered from its HEADERS
-([Calls answered from their HEADERS](grpc.md#calls-answered-from-their-headers)):
+client has sent all of it, except a CONNECT ([below](#connect)) and a gRPC
+call that can reach no gRPC Stub, which is answered from its HEADERS ([Calls
+answered from their
+HEADERS](grpc/unmatched-and-refused-calls.md#calls-answered-from-their-headers)):
 
 - `:method` is the method, and `:path` is the target, as sent. The path
   and the query come from it as from an HTTP/1.1 request target, and `*`
@@ -470,10 +471,10 @@ smock never pushes: it sends no PUSH_PROMISE.
 
 ## Streams that wait
 
-A Stub's [delay](definition-files.md#delays) delays only its own stream.
-The other streams of the connection are answered meanwhile, so a slow call
-does not hold up the fast ones a client sends beside it on the same
-connection, as with a real server.
+A Stub's [delay](definition-files/faults.md#delays) delays only its own
+stream. The other streams of the connection are answered meanwhile, so a
+slow call does not hold up the fast ones a client sends beside it on the
+same connection, as with a real server.
 
 A response body larger than the client's flow-control windows waits in
 its own stream too. smock sends what the windows allow, in DATA frames no
@@ -500,10 +501,10 @@ is in the Journal, as a request whose client goes away is.
 
 ## Server-Sent Events
 
-An [events Stub](definition-files.md#server-sent-events) streams one event
-stream per HTTP/2 stream. So one connection can carry several event
-streams at once, as a browser with several EventSources on one connection
-opens them, and its other HTTP/2 streams are answered meanwhile.
+An [events Stub](definition-files/responses.md#server-sent-events) streams
+one event stream per HTTP/2 stream. So one connection can carry several
+event streams at once, as a browser with several EventSources on one
+connection opens them, and its other HTTP/2 streams are answered meanwhile.
 
 - The HEADERS go out at once, or after the Stub's delay, with the Stub's
   status and headers. They carry `content-type: text/event-stream` and no
@@ -530,11 +531,11 @@ opens them, and its other HTTP/2 streams are answered meanwhile.
 
 ## Faults
 
-A Stub's [connection Fault](definition-files.md#connection-faults) takes
-its nearest HTTP/2 form: it fails the request on its own stream, or, for
-`close`, the connection. smock decides Faults as over HTTP/1.1, with the
+A Stub's [connection Fault](definition-files/faults.md#connection-faults)
+takes its nearest HTTP/2 form: it fails the request on its own stream, or,
+for `close`, the connection. smock decides Faults as over HTTP/1.1, with the
 same draws, so a probability and [`fault.seed` or
-`--seed`](definition-files.md#seeds) give the same Faults over both.
+`--seed`](definition-files/faults.md#seeds) give the same Faults over both.
 
 | Fault | What the client receives | Journal entry |
 |---|---|---|
@@ -561,7 +562,7 @@ same draws, so a probability and [`fault.seed` or
   ends closes with a FIN.
 - A gRPC call takes these forms too, with no `content-length`. Its
   client sees INTERNAL for `reset` and `partial`, and UNAVAILABLE for
-  `close` ([gRPC Faults](grpc.md#faults)).
+  `close` ([gRPC Faults](grpc/state-and-faults.md#faults)).
 
 ## The Journal
 
@@ -673,7 +674,8 @@ and then reads again gets every response.
 
 `--body-limit` applies to each stream alone, as it applies to each request
 over HTTP/1.1. A gRPC call over it gets RESOURCE_EXHAUSTED, the way gRPC
-says so, instead of 413 ([The body limit](grpc.md#the-body-limit)).
+says so, instead of 413 ([The body
+limit](grpc/unmatched-and-refused-calls.md#the-body-limit)).
 
 - A `content-length` over the limit gets `413 Content Too Large` at once,
   before any of the body is read.
@@ -818,7 +820,7 @@ connection.
 
 | Pattern | Bound | Past it |
 |---|---|---|
-| Rapid Reset (CVE-2023-44487) and MadeYouReset (CVE-2025-8671): streams opened, then reset before smock has finished their responses | More than 100 such streams, which are also more than half of all the streams the client opened. A stream counts when the client resets it, or when moonhttp resets it for a stream error the client's frames caused, whatever the code: a WINDOW_UPDATE of 0 or one that overflows the window, DATA or HEADERS after the end of the request, or a PRIORITY frame that makes the stream depend on itself. A stream refused at open counts too, but `REFUSED_STREAM` past the concurrent-streams limit only once the client has acknowledged smock's SETTINGS, since it may not know the limit before. smock's own resets never count: Faults, timeouts, a stream window held at zero, and the resets after 400, 413 and 431. Nor do the streams ignored after the final GOAWAY of [the drain](#the-drain). A stream that smock answered at once has ended before the client's reset arrives, so that reset is a frame that does no work instead ([Frames that do no work](#frames-that-do-no-work)). A gRPC call that times out is the exception: a client reset that arrives in the last 100 ms before its deadline, while its Stub's delay runs past it, does not count, nor does the first reset of a call that smock ended at its deadline with DEADLINE_EXCEEDED. Clients that keep deadlines reset each call at their own, so they keep their connections ([Resets and the connection's defences](grpc.md#resets-and-the-connections-defences)). A reset stream stops at once ([Streams that wait](#streams-that-wait)). | GOAWAY `ENHANCE_YOUR_CALM`, and the connection closes. |
+| Rapid Reset (CVE-2023-44487) and MadeYouReset (CVE-2025-8671): streams opened, then reset before smock has finished their responses | More than 100 such streams, which are also more than half of all the streams the client opened. A stream counts when the client resets it, or when moonhttp resets it for a stream error the client's frames caused, whatever the code: a WINDOW_UPDATE of 0 or one that overflows the window, DATA or HEADERS after the end of the request, or a PRIORITY frame that makes the stream depend on itself. A stream refused at open counts too, but `REFUSED_STREAM` past the concurrent-streams limit only once the client has acknowledged smock's SETTINGS, since it may not know the limit before. smock's own resets never count: Faults, timeouts, a stream window held at zero, and the resets after 400, 413 and 431. Nor do the streams ignored after the final GOAWAY of [the drain](#the-drain). A stream that smock answered at once has ended before the client's reset arrives, so that reset is a frame that does no work instead ([Frames that do no work](#frames-that-do-no-work)). A gRPC call that times out is the exception: a client reset that arrives in the last 100 ms before its deadline, while its Stub's delay runs past it, does not count, nor does the first reset of a call that smock ended at its deadline with DEADLINE_EXCEEDED. Clients that keep deadlines reset each call at their own, so they keep their connections ([Resets and the connection's defences](grpc/state-and-faults.md#resets-and-the-connections-defences)). A reset stream stops at once ([Streams that wait](#streams-that-wait)). | GOAWAY `ENHANCE_YOUR_CALM`, and the connection closes. |
 | Too many streams at once | `--http2-max-concurrent-streams` | RST_STREAM `REFUSED_STREAM` on the new stream. |
 | CONTINUATION flood (2024): a header block that never ends, as CONTINUATION frames keep coming | A header block, its HEADERS and CONTINUATION frames together, holds at most twice `--header-size-limit` octets as received, the bound moonhttp keeps ([Header lists](#header-lists)), and ends within `--read-timeout-ms` ([Timeouts](#timeouts)). An empty CONTINUATION frame that does not end its block is a frame that does no work ([Frames that do no work](#frames-that-do-no-work)). | GOAWAY `ENHANCE_YOUR_CALM`, and the connection closes, for a block over the bound. A block still open at the read timeout is a timeout instead: GOAWAY `NO_ERROR`, and the connection closes, with no log line. |
 | HPACK bomb: a small header block that decodes to a large list, such as one that names a large table entry over and over | moonhttp keeps no more of a decoded list than twice `--header-size-limit`, counted as RFC 7541 counts it. smock then holds the list to `--header-size-limit` and `--header-count-limit` ([Header lists](#header-lists)). The table smock decodes header blocks with is 4,096 octets. So is the one it encodes responses with, however large a table the client allows: smock lowers a larger SETTINGS_HEADER_TABLE_SIZE to 4,096 before moonhttp sees it, since an encoder may use any table up to the size the client allows (RFC 7541, section 4.2). | 431 for a list over `--header-size-limit` or with too many fields. RST_STREAM `ENHANCE_YOUR_CALM`, with no status, for a list over twice it. A block that does not decode is a connection error, not a defence: GOAWAY `COMPRESSION_ERROR`, with no log line ([Connection errors](#connection-errors)). |
@@ -876,13 +878,13 @@ These frames count:
 - CONTINUATION frames with no octets that do not end their header block
   (`empty CONTINUATION`).
 - DATA, WINDOW_UPDATE and RST_STREAM frames on a stream that has closed
-  (`DATA on a closed stream`, and so on), and HEADERS on a stream that
-  smock reset, which are ignored (`HEADERS on a stream smock reset`).
-  HEADERS on another stream that has closed end the connection at once
-  ([Connection errors](#connection-errors)). The first RST_STREAM on a
-  gRPC call that smock ended at its deadline with DEADLINE_EXCEEDED does
-  not count: the client resets the call at its own deadline
-  ([Resets and the connection's defences](grpc.md#resets-and-the-connections-defences)).
+  (`DATA on a closed stream`, and so on), and HEADERS on a stream that smock
+  reset, which are ignored (`HEADERS on a stream smock reset`). HEADERS on
+  another stream that has closed end the connection at once ([Connection
+  errors](#connection-errors)). The first RST_STREAM on a gRPC call that
+  smock ended at its deadline with DEADLINE_EXCEEDED does not count: the
+  client resets the call at its own deadline ([Resets and the connection's
+  defences](grpc/state-and-faults.md#resets-and-the-connections-defences)).
   A second one counts.
 - Frames of a type that HTTP/2 does not define (`unknown type`).
 
@@ -919,7 +921,7 @@ counted in `connectionsCut`, as over HTTP/1.1. See
 [The drain](running.md#the-drain).
 gRPC calls drain the same way, and the gRPC health service of a Mock
 that turns it on says NOT_SERVING from the moment SIGTERM arrives
-([The drain](grpc.md#the-drain)).
+([The drain](grpc/services-and-connections.md#the-drain)).
 
 ## Connection errors
 

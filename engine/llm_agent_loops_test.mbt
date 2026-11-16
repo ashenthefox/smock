@@ -1,9 +1,10 @@
-// Seam 1 tests of the agent loops in docs/definition-files.md: for each
-// API, a first Stub that calls a tool and a second that answers once the
-// last message is the tool's result, told apart with `$last` and quoting
-// the result with `last()`; Responses follow-ups by `previous_response_id`;
-// and a conversation of several turns, followed by a Scenario and counted
-// by a Variable. Each Mock is the docs' Definition file as written.
+// Seam 1 tests of the agent loops in docs/definition-files/llm-tool-calls.md:
+// for each API, a first Stub that calls a tool and a second that answers
+// once the last message is the tool's result, told apart with `$last` and
+// quoting the result with `last()`; Responses follow-ups by
+// `previous_response_id`; and a conversation of several turns, followed by
+// a Scenario and counted by a Variable. Each Mock is the docs' Definition
+// file as written.
 
 ///|
 /// The Chat Completions loop of the docs: `ask-weather` calls

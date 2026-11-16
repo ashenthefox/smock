@@ -219,18 +219,17 @@ requests at once (`"streams_per_connection": 4`, oha's `-p 4`). So about
 `--definitions` serves another definitions directory than
 `bench/definitions/`. `bench/definitions-scenarios/` is its Scenario
 variant: the same Mocks and Stubs, but each Stub that a request of the mix
-names has a [Scenario](../docs/definition-files.md#scenarios) clause, which
-requires `Started` and moves to `Seen`, and right after it a twin,
-`<id>-seen`, with the same request and response, which requires `Seen` and
-moves back to `Started`. Each request carries its own Session, so its
-Scenario is its own, and the two Stubs take turns. So in every Mock,
-every request of the mix matches a Scenario Stub and moves its Scenario:
-smock looks up the Session's states, checks the state the Stub requires,
-moves it, and records the move in the Journal. Every other request also
-tries the Stub whose state does not hold before the twin that answers,
-as the Stubs of a Scenario with the same request do. The plain set has no
-Scenario Stub, so each of its requests pays only the test of whether its
-Mock has one.
+names has a [Scenario](../docs/definition-files/scenarios.md#scenarios)
+clause, which requires `Started` and moves to `Seen`, and right after it a
+twin, `<id>-seen`, with the same request and response, which requires `Seen`
+and moves back to `Started`. Each request carries its own Session, so its
+Scenario is its own, and the two Stubs take turns. So in every Mock, every
+request of the mix matches a Scenario Stub and moves its Scenario: smock
+looks up the Session's states, checks the state the Stub requires, moves it,
+and records the move in the Journal. Every other request also tries the Stub
+whose state does not hold before the twin that answers, as the Stubs of a
+Scenario with the same request do. The plain set has no Scenario Stub, so
+each of its requests pays only the test of whether its Mock has one.
 
 To see what Scenarios cost, run each set on the same machine with the same
 plan and compare the runs with `bench/compare.py`, which names the
@@ -240,11 +239,11 @@ On GKE, a variant with the `scenarios` option serves it
 
 ## CRUD Stubs in the benchmark
 
-`bench/definitions-crud/` is the CRUD variant of the definitions: the
-same Mocks and Stubs, but two resources are
-[Data buckets](../docs/definition-files.md#data-buckets), each served by
-a [CRUD Stub](../docs/definition-files.md#crud-stubs) in place of the
-Stubs that answered its items one by one:
+`bench/definitions-crud/` is the CRUD variant of the definitions: the same
+Mocks and Stubs, but two resources are [Data
+buckets](../docs/definition-files/data-buckets.md#data-buckets), each served
+by a [CRUD Stub](../docs/definition-files/crud-stubs.md#crud-stubs) in place
+of the Stubs that answered its items one by one:
 
 - `items`, keyed by `sku`, holds the catalog's 600 items, which the 600
   item Stubs answered, in their order. The CRUD Stub `catalog-items`
@@ -261,7 +260,7 @@ Stub, so a run that serves this variant sends it a mix of its own,
 `bench/requests-crud.json`. `bench/gen_definitions.py` writes it from
 `bench/requests.json`: the same requests, with the same weights, but two.
 `catalog-search` becomes `catalog-list`, a
-[list query](../docs/definition-files.md#list-queries),
+[list query](../docs/definition-files/crud-stubs.md#list-queries),
 `GET /catalog/items?category=lighting&$sort=-stock&$limit=10`, which
 filters the 600 items to 100, sorts them and keeps 10. `update-order-status`
 becomes `update-order`, a `PATCH` of the order with the same body. Each of

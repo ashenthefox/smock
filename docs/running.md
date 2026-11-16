@@ -80,21 +80,21 @@ reported and the current one keeps serving
 | `--session-member` | `SMOCK_SESSION_MEMBER` | `smock-session`: the member of that header whose value is the Session key |
 | `--log-format` | `SMOCK_LOG_FORMAT` | `json` by default (stderr, smock's own shape), or `mockoon` (stdout, the Mockoon CLI's shape, [for Mockoon users](migrating-from-mockoon.md#logs)) |
 | `--body-file-dir` | `SMOCK_BODY_FILE_DIR` | `files` |
-| `--template-env` | `SMOCK_TEMPLATE_ENV` | none: templates read no environment variable; a comma-separated list of names lets them read those as `env.NAME`, with values read once at startup ([Environment variables](definition-files.md#environment-variables)) |
-| `--header-size-limit` | `SMOCK_HEADER_SIZE_LIMIT` | 16384 bytes (16 KiB): larger request heads get 431; over HTTP/2, a larger header list, counted as RFC 7541 counts it, gets 431 on its stream, and a header block over twice the limit closes the connection ([Header lists](http2.md#header-lists)); it also bounds each block of a gRPC reply's metadata, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL ([Metadata size](grpc.md#metadata-size)) |
+| `--template-env` | `SMOCK_TEMPLATE_ENV` | none: templates read no environment variable; a comma-separated list of names lets them read those as `env.NAME`, with values read once at startup ([Environment variables](definition-files/templates.md#environment-variables)) |
+| `--header-size-limit` | `SMOCK_HEADER_SIZE_LIMIT` | 16384 bytes (16 KiB): larger request heads get 431; over HTTP/2, a larger header list, counted as RFC 7541 counts it, gets 431 on its stream, and a header block over twice the limit closes the connection ([Header lists](http2.md#header-lists)); it also bounds each block of a gRPC reply's metadata, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL ([Metadata size](grpc/metadata-and-status.md#metadata-size)) |
 | `--header-count-limit` | `SMOCK_HEADER_COUNT_LIMIT` | 100 header fields: more get 431 |
-| `--body-limit` | `SMOCK_BODY_LIMIT` | 10485760 bytes (10 MiB): longer bodies get 413; over HTTP/2, per stream, on that stream alone ([Request bodies](http2.md#request-bodies)); a gRPC call gets RESOURCE_EXHAUSTED instead, and its message's decoded JSON is held to the limit too ([The body limit](grpc.md#the-body-limit)), and to 32,768 values and 4 more for each octet of the message ([The values a message may print](grpc.md#the-values-a-message-may-print)) |
+| `--body-limit` | `SMOCK_BODY_LIMIT` | 10485760 bytes (10 MiB): longer bodies get 413; over HTTP/2, per stream, on that stream alone ([Request bodies](http2.md#request-bodies)); a gRPC call gets RESOURCE_EXHAUSTED instead, and its message's decoded JSON is held to the limit too ([The body limit](grpc/unmatched-and-refused-calls.md#the-body-limit)), and to 32,768 values and 4 more for each octet of the message ([The values a message may print](grpc/unmatched-and-refused-calls.md#the-values-a-message-may-print)) |
 | `--http2-max-concurrent-streams` | `SMOCK_HTTP2_MAX_CONCURRENT_STREAMS` | 100, from 1 to 1000: the most streams an HTTP/2 connection may have in progress at once; a stream past it gets RST_STREAM `REFUSED_STREAM` ([Limits and timeouts](http2.md#limits-and-timeouts)) |
 | `--read-timeout-ms` | `SMOCK_READ_TIMEOUT_MS` | 30000: a request must arrive whole within 30 s of its first byte, or, when it was pipelined behind a response, of that response; over HTTP/2, a stream whose request is late gets RST_STREAM `CANCEL` alone ([Limits and timeouts](http2.md#limits-and-timeouts)) |
 | `--idle-timeout-ms` | `SMOCK_IDLE_TIMEOUT_MS` | 60000: a connection that waits 60 s for a request closes |
 | `--write-timeout-ms` | `SMOCK_WRITE_TIMEOUT_MS` | 30000: a connection closes when a write to it makes no progress for 30 s, as when the client stops reading; over HTTP/2, also when a response waits that long for the client to widen the connection window, and a stream whose own window stays at zero that long gets RST_STREAM `CANCEL` alone ([Timeouts](http2.md#timeouts)) |
 | `--drain-timeout-ms` | `SMOCK_DRAIN_TIMEOUT_MS` | 20000: how long smock drains after SIGTERM before it cuts what is still running |
-| `--seed` | `SMOCK_SEED` | none: smock picks the seed of its random generator, from 0 to 9007199254740991, and logs it ([Faults](definition-files.md#seeds)) |
+| `--seed` | `SMOCK_SEED` | none: smock picks the seed of its random generator, from 0 to 9007199254740991, and logs it ([Faults](definition-files/faults.md#seeds)) |
 | `--journal` | `SMOCK_JOURNAL` | `on`: requests are recorded in the [Journal](admin-api.md#the-journal); `off` records none |
 | `--journal-max-entries` | `SMOCK_JOURNAL_MAX_ENTRIES` | 10000: beyond it, the oldest entries are evicted |
 | `--journal-max-bytes` | `SMOCK_JOURNAL_MAX_BYTES` | a quarter of smock's memory limit (cgroup v2 `memory.max`), at least 1048576 bytes (1 MiB) and at most 67108864 (64 MiB); 64 MiB without a limit ([The Journal](admin-api.md#the-journal)): beyond it, the oldest entries are evicted |
 | `--journal-body-limit` | `SMOCK_JOURNAL_BODY_LIMIT` | 4096 bytes (4 KiB): the most of a request body an entry keeps, and of the form and XML values its Near miss keeps, in total |
-| `--state-max-bytes` | `SMOCK_STATE_MAX_BYTES` | an eighth of smock's memory limit (cgroup v2 `memory.max`), at least 1048576 bytes (1 MiB) and at most 67108864 (64 MiB); 64 MiB without a limit ([The state bound](definition-files.md#the-state-bound)): the most bytes the per-Session state of the whole process takes; a request or an Admin API set whose writes would pass it gets 507, and a gRPC call RESOURCE_EXHAUSTED ([smock's own failures](grpc.md#smocks-own-failures)) |
+| `--state-max-bytes` | `SMOCK_STATE_MAX_BYTES` | an eighth of smock's memory limit (cgroup v2 `memory.max`), at least 1048576 bytes (1 MiB) and at most 67108864 (64 MiB); 64 MiB without a limit ([The state bound](definition-files/variables.md#the-state-bound)): the most bytes the per-Session state of the whole process takes; a request or an Admin API set whose writes would pass it gets 507, and a gRPC call RESOURCE_EXHAUSTED ([smock's own failures](grpc/unmatched-and-refused-calls.md#smocks-own-failures)) |
 
 ## Logs
 
@@ -176,28 +176,29 @@ ends only its stream, so the connection stays open and the client gets it.
 
 Over HTTP/2, smock also bounds what a client can make one connection cost,
 such as a flood of PING, SETTINGS or CONTINUATION frames, or of streams
-reset as soon as they open (Rapid Reset). A connection that
-passes such a bound gets GOAWAY `ENHANCE_YOUR_CALM` and closes, and smock
-logs one line for it, at level `warn`, that names the pattern, such as
-`{"level":"warn","msg":"HTTP/2 connection closed by a defence","pattern":"frames that do no work","frame":"PING"}`.
-No metric counts it. See [Defences](http2.md#defences).
+reset as soon as they open (Rapid Reset). A connection that passes such a
+bound gets GOAWAY `ENHANCE_YOUR_CALM` and closes, and smock logs one line
+for it, at level `warn`, that names the pattern, such as
+`{"level":"warn","msg":"HTTP/2 connection closed by a
+defence","pattern":"frames that do no work","frame":"PING"}`. No metric
+counts it. See [Defences](http2.md#defences).
 
 Over HTTP/2, a body over `--body-limit` gets 413 on its stream alone, and
 the connection's other streams go on. When the client is still sending the
 body, RST_STREAM `NO_ERROR` follows the 413, to stop the upload. See
-[Request bodies](http2.md#request-bodies). Since the limit applies to
-each stream, one HTTP/2 connection can hold request bodies of up to
-`--http2-max-concurrent-streams` × `--body-limit` in memory at once: about
-1 GiB with the defaults (100 × 10 MiB). For a small Pod, lower either flag
-([Limits and timeouts](http2.md#limits-and-timeouts)). A gRPC call
-over the limit gets RESOURCE_EXHAUSTED with `:status` 200 instead of 413,
-as gRPC servers answer it, and the JSON that smock decodes its message
-into is held to the limit as well
-([The body limit](grpc.md#the-body-limit)). That JSON may also hold
-at most 32,768 values, and 4 more for each octet of the message, which
-bounds the memory that a small message costs once its JSON is parsed. No
-flag changes that bound
-([The values a message may print](grpc.md#the-values-a-message-may-print)).
+[Request bodies](http2.md#request-bodies). Since the limit applies to each
+stream, one HTTP/2 connection can hold request bodies of up to
+`--http2-max-concurrent-streams` × `--body-limit` in memory at once: about 1
+GiB with the defaults (100 × 10 MiB). For a small Pod, lower either flag
+([Limits and timeouts](http2.md#limits-and-timeouts)). A gRPC call over the
+limit gets RESOURCE_EXHAUSTED with `:status` 200 instead of 413, as gRPC
+servers answer it, and the JSON that smock decodes its message into is held
+to the limit as well ([The body
+limit](grpc/unmatched-and-refused-calls.md#the-body-limit)). That JSON may
+also hold at most 32,768 values, and 4 more for each octet of the message,
+which bounds the memory that a small message costs once its JSON is parsed.
+No flag changes that bound ([The values a message may
+print](grpc/unmatched-and-refused-calls.md#the-values-a-message-may-print)).
 
 Over HTTP/2, a request over a header limit gets 431 on its stream alone,
 and the connection stays open. The read timeout applies to each stream
@@ -246,10 +247,10 @@ update does not fail the tests running against the old Pod. SIGINT and
 SIGHUP do not drain: they end smock at once, cutting whatever is in
 flight, so that Ctrl-C stops a local smock promptly.
 
-- [`/readyz`](admin-api.md#probes) fails from the moment the signal
-  arrives, and the gRPC health service of each Mock that turns it on
-  says NOT_SERVING ([The drain](grpc.md#the-drain)). The plain and TLS
-  listeners close, so new connections are refused, and idle HTTP/1.1
+- [`/readyz`](admin-api.md#probes) fails from the moment the signal arrives,
+  and the gRPC health service of each Mock that turns it on says NOT_SERVING
+  ([The drain](grpc/services-and-connections.md#the-drain)). The plain and
+  TLS listeners close, so new connections are refused, and idle HTTP/1.1
   keep-alive connections close at once.
 - Responses in progress finish with `Connection: close`, and their
   connections close after them. Server-Sent Event streams and pending

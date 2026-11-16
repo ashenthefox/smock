@@ -265,11 +265,11 @@ whatever the new version needs in smock. Before that branch merges into
   entry's `version` says the same. Each gRPC client gets the reply and its
   metadata, the error's status, message, trailer and details, and
   DEADLINE_EXCEEDED at its deadline, before the delay ends
-  ([Deadlines](grpc.md#deadlines)). Each Journal entry's `grpcStatus` says
-  the same. These calls check smock's trailers, its
-  [Trailers-Only](grpc.md#trailers-only) answers and its deadlines with
-  two gRPC stacks that share no code with moonhttp or grpcurl. The
-  results, with each client's version, go in the merge record.
+  ([Deadlines](grpc/state-and-faults.md#deadlines)). Each Journal entry's
+  `grpcStatus` says the same. These calls check smock's trailers, its
+  [Trailers-Only](grpc/metadata-and-status.md#trailers-only) answers and its
+  deadlines with two gRPC stacks that share no code with moonhttp or
+  grpcurl. The results, with each client's version, go in the merge record.
 - **The pre-merge local and GKE benchmark runs**, compared with the
   previous runs, as [Before merging into main](merging-into-main.md) says
   for every integration branch.

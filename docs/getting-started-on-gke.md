@@ -77,7 +77,7 @@ A Definition file declares *Mocks* and *Stubs*:
   plus the response to send. smock tries a Mock's Stubs in the order
   they are declared, unless a `priority` says otherwise, and the first
   whose conditions all hold answers
-  ([Which Stub answers](definition-files.md#which-stub-answers)).
+  ([Which Stub answers](definition-files/matching.md#which-stub-answers)).
 
 smock listens on three ports, and the Helm chart puts two Services in
 front of them:
@@ -146,7 +146,8 @@ stubs:
 It declares one Mock, `users`, and one Stub, `get-user`, which answers
 `GET /users/1` with status 200 and a JSON body; `json` sends the value
 as compact JSON with `Content-Type: application/json`.
-[definition-files.md](definition-files.md) describes every field.
+[definition-files.md](definition-files.md) and the documents it lists
+describe every field.
 
 smock does not start with Definition files that are not valid, so check
 them before installing. `smock check` reads a definitions directory as
@@ -384,9 +385,9 @@ definition set. A Pod that starts while the ConfigMap holds the invalid
 files, such as after `kubectl rollout restart` or when GKE moves the Pod
 to another node, crash-loops with `invalid definitions`, so fix the
 file and upgrade again.
-[definition-files.md](definition-files.md#templates) describes
-templates, and the rest of that file describes conditions, responses
-and Faults.
+[Templates](definition-files/templates.md) describes templates, and the
+other documents of the [Definition-file reference](definition-files.md)
+describe conditions, responses and Faults.
 
 ### Call it from other Pods
 
@@ -726,8 +727,8 @@ gh run download "$run" -R hirunefu/smock -n smock-linux-amd64 --dir "$dir"   # w
 file "$dir/smock"                 # ELF 64-bit LSB pie executable, x86-64, ...
 ```
 
-If `gh run download` finds no artifact, see
-[Troubleshooting an unreleased commit](#troubleshooting-an-unreleased-commit).
+If `gh run download` finds no artifact, see [Troubleshooting an unreleased
+commit](#troubleshooting-an-unreleased-commit).
 
 On a Linux x86_64 machine, the binary can also be built from source. It
 needs OpenSSL 3 (`libssl-dev`), python3, git and a C compiler, and

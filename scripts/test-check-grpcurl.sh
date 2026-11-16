@@ -43,7 +43,7 @@ fail() {
 fresh() {
   rm -rf "$copy"
   for path in scripts/check-grpcurl.sh scripts/install-grpcurl.sh scripts/grpcurl docs/grpc.md \
-    fixtures/protobuf/health/grpc; do
+    docs/grpc fixtures/protobuf/health/grpc; do
     mkdir -p "$copy/$(dirname "$path")"
     cp -R "$path" "$copy/$path"
   done
@@ -126,13 +126,15 @@ expect definitions 1 \
   'the Host "greeter.svc" is already claimed by the Mock "greeter"' \
   "check-grpcurl: smock check found problems or warnings in scripts/grpcurl/definitions"
 
-# A grpcurl command in the guide that no transcript has.
+# A grpcurl command in the guide that no transcript has, in one of the
+# documents in docs/grpc/, which names the document and the command's line.
 fresh
-sed -i 's|^  localhost:8080 grpc.health.v1.Health/Check$|  localhost:8080 grpc.health.v1.Health/Watch|' "$copy/docs/grpc.md"
+health=docs/grpc/services-and-connections.md
+sed -i 's|^  localhost:8080 grpc.health.v1.Health/Check$|  localhost:8080 grpc.health.v1.Health/Watch|' "$copy/$health"
 check guide-command
-line=$(grep -n 'grpc.health.v1.Health/Watch$' "$copy/docs/grpc.md" | head -n 1 | cut -d: -f1)
+line=$(grep -n 'grpc.health.v1.Health/Watch$' "$copy/$health" | head -n 1 | cut -d: -f1)
 expect guide-command 1 \
-  "check-grpcurl: docs/grpc.md:$((line - 1)): the guide shows a grpcurl command that no transcript in scripts/grpcurl/calls has:" \
+  "check-grpcurl: $health:$((line - 1)): the guide shows a grpcurl command that no transcript in scripts/grpcurl/calls has:" \
   "grpcurl -plaintext -authority greeter.svc -d '{\"service\": \"nope.Svc\"}' localhost:8080 grpc.health.v1.Health/Watch"
 
 # Output in the guide that grpcurl does not print, after a command that
@@ -158,7 +160,7 @@ fresh
 sed -i '0,/^      headers: { x-tenant: acme }  /s//      headers: { x-tenant: other }  /' "$copy/docs/grpc.md"
 check guide-definitions
 expect guide-definitions 1 \
-  "check-grpcurl: docs/grpc.md does not show scripts/grpcurl/definitions/greeter.yaml, without its first comment lines, as a yaml block"
+  "check-grpcurl: the gRPC guide, docs/grpc.md and docs/grpc/*.md, does not show scripts/grpcurl/definitions/greeter.yaml, without its first comment lines, as a yaml block"
 
 echo "test-check-grpcurl: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

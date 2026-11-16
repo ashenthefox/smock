@@ -384,10 +384,10 @@ tests on wasm-gc, h2spec and the scripts from
 linux/amd64; the rest run on linux/amd64 and linux/arm64
 (`.github/workflows/build-test.yml`). CI builds protobuf's conformance
 runner once and caches it
-([protobuf-conformance/README.md](protobuf-conformance/README.md)).
-The SDK job, `scripts/check-llm-sdks.sh`, runs after `build-test.yml`,
-with the release binary built there, and reads smock's
-[LLM responses](docs/definition-files.md#llm-responses) with the
+([protobuf-conformance/README.md](protobuf-conformance/README.md)). The SDK
+job, `scripts/check-llm-sdks.sh`, runs after `build-test.yml`, with the
+release binary built there, and reads smock's [LLM
+responses](docs/definition-files/llm-responses.md#llm-responses) with the
 vendors' official SDKs, as applications call them
 ([llm-sdks/README.md](llm-sdks/README.md)).
 

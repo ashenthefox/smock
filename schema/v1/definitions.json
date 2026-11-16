@@ -462,7 +462,7 @@
       "additionalProperties": false
     },
     "response": {
-      "description": "The response to return when the Stub matches. Its body is given inline (body), read from a body file (bodyFile), given as JSON (json), streamed as Server-Sent Events (events), or declared as an LLM reply (llm). Give at most one of them; without any, the body is empty. With template true, the header values, the body and the events are templates, parsed when the definitions are loaded and rendered for each request: see docs/definition-files.md, Templates.",
+      "description": "The response to return when the Stub matches. Its body is given inline (body), read from a body file (bodyFile), given as JSON (json), streamed as Server-Sent Events (events), or declared as an LLM reply (llm). Give at most one of them; without any, the body is empty. With template true, the header values, the body and the events are templates, parsed when the definitions are loaded and rendered for each request: see docs/definition-files/templates.md.",
       "$ref": "#/$defs/responseFields",
       "unevaluatedProperties": false
     },
@@ -600,7 +600,7 @@
       }
     },
     "llm": {
-      "description": "An LLM reply, declared by its content instead of a body: smock writes it in the wire form of the API that api names, as a stream of Server-Sent Events with Content-Type: text/event-stream when the request's JSON body has stream: true, and otherwise as one JSON body with Content-Type: application/json (a Content-Type in headers is replaced). smock adds an x-request-id header, or request-id for anthropic-messages, unless headers give one of that name in any case; other headers are sent as written. The reply's id and the request id are generated from the Stub's random source, so fault.seed and --seed repeat them; the reply's model is model, or else the request's model when that is a string; its time is when smock received the request. It is for HTTP Stubs: smock refuses it on a gRPC Stub, whose exact request path names a unary method of its Mock's Descriptor set. See docs/definition-files.md, LLM responses.",
+      "description": "An LLM reply, declared by its content instead of a body: smock writes it in the wire form of the API that api names, as a stream of Server-Sent Events with Content-Type: text/event-stream when the request's JSON body has stream: true, and otherwise as one JSON body with Content-Type: application/json (a Content-Type in headers is replaced). smock adds an x-request-id header, or request-id for anthropic-messages, unless headers give one of that name in any case; other headers are sent as written. The reply's id and the request id are generated from the Stub's random source, so fault.seed and --seed repeat them; the reply's model is model, or else the request's model when that is a string; its time is when smock received the request. It is for HTTP Stubs: smock refuses it on a gRPC Stub, whose exact request path names a unary method of its Mock's Descriptor set. See docs/definition-files/llm-responses.md.",
       "type": "object",
       "properties": {
         "api": {

@@ -10,11 +10,11 @@ describes the three that read or write Definition files without serving:
 The examples use the `defs` directory and the `get-user` Stub of the
 README's quick start ([Run](../README.md#run)), and a `sample.json` that
 holds `{"path": "/users/1"}`. The Definition-file reference has longer
-accounts of the first two commands:
-[Checking a definitions directory](definition-files.md#checking-a-definitions-directory)
-says what `smock check` checks and warns about, and
-[Rendering a template](definition-files.md#rendering-a-template) says
-what a rendering shows.
+accounts of the first two commands: [Checking a definitions
+directory](definition-files.md#checking-a-definitions-directory) says what
+`smock check` checks and warns about, and [Rendering a
+template](definition-files/templates.md#rendering-a-template) says what a
+rendering shows.
 
 ## `smock check`
 
@@ -26,7 +26,7 @@ about a [state that a Stub requires but no Stub moves its Scenario
 to](definition-files.md#a-state-that-no-stub-moves-to); warnings do
 not change the exit status. It reads the Descriptor set that each Mock
 names, and checks every gRPC Stub against its method's types
-([gRPC Stubs](definition-files.md#grpc-stubs)). It takes
+([gRPC Stubs](definition-files/grpc.md#grpc-stubs)). It takes
 `--body-file-dir`, `--template-env` and `--header-size-limit` as
 `smock serve` does ([Settings](running.md#settings)), and reads the
 listed environment variables from its own environment.
@@ -43,9 +43,9 @@ of values. Cookies come
 from `headers.Cookie`, as a request's come from its `Cookie` fields, and
 form fields from the body, read as a form when `headers.Content-Type` says
 it is one. `vars` maps the name of each
-[Variable](definition-files.md#variables) templates read to its value;
+[Variable](definition-files/variables.md#variables) templates read to its value;
 a rendering never reads the live Variables. `data` maps the name of each
-[Data bucket](definition-files.md#data-buckets) of the Stub's Mock
+[Data bucket](definition-files/data-buckets.md#data-buckets) of the Stub's Mock
 to the value templates read in place of its initial value; a rendering
 never reads a Session's copy. smock reads the directory as
 `smock serve` does, body files included. It takes `--body-file-dir`,
@@ -58,10 +58,10 @@ result without its `warnings`: the Stub's status, headers and body
 the sample fails, with expected and actual values as in a Near miss (empty
 when it meets them all). The Stub is
 rendered even when the sample fails them, and a
-[templated](definition-files.md#templates) response is rendered for the
-sample. An [LLM response](definition-files.md#llm-responses) shows the
+[templated](definition-files/templates.md#templates) response is rendered for the
+sample. An [LLM response](definition-files/llm-responses.md#llm-responses) shows the
 reply the sample's body asks for: the JSON body, or a stream's events,
-each with its wait. A [gRPC Stub](grpc.md#rendering-a-grpc-stub)
+each with its wait. A [gRPC Stub](grpc/rendering-and-journal.md#rendering-a-grpc-stub)
 renders as a call to its method, whatever the sample's method and
 Content-Type, which are only conditions: the sample's body is the request
 message as JSON, checked against the method's input type, and the
@@ -70,7 +70,7 @@ gRPC status, message, trailing metadata and error details as
 `response.grpc`, never protobuf bytes. `--time` (RFC 3339) and `--seed` fix the clock and the
 random source of the rendering; without a seed, it uses the Stub's
 `fault.seed`, or a fresh one. A Stub with
-[`responses`](definition-files.md#several-responses) renders the one
+[`responses`](definition-files/responses.md#several-responses) renders the one
 the seed picks, and `--response <i>` renders the one at index `i`, from 0.
 The rendering shows the `time`, the `seed` and the `responseIndex` it used,
 so it can be repeated exactly, and a template that fails for the sample
@@ -79,7 +79,7 @@ shows the 500 a request would get and its `templateError`. It also shows, as
 the sample's `vars`, and the response reads them written over the sample's
 `vars`. It shows, as `dataWrites`, the writes the Stub's `dataWrites` would
 make on the sample's data, and the response reads the data after them. A
-[CRUD Stub](definition-files.md#crud-stubs) renders the answer its
+[CRUD Stub](definition-files/crud-stubs.md#crud-stubs) renders the answer its
 operation would give from the sample's data, and shows its write, if it
 makes one, in `dataWrites`. It writes nothing. It exits with status 1,
 with the problem on stderr, for:
@@ -129,6 +129,6 @@ It writes the file to a temporary file whose name starts with `.`, then
 renames it, so a smock that watches the directory never loads half a file.
 Run `smock check` on the directory afterwards: the command does not read
 the other files there.
-[docs/importing-openapi.md](importing-openapi.md) describes what is
-generated, selecting responses, regenerating and the limits, with notes
-for Mockoon and Prism users.
+[docs/importing-openapi.md](importing-openapi.md) and its documents
+describe what is generated, selecting responses, regenerating and the
+limits, with notes for Mockoon and Prism users.

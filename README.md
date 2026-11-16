@@ -8,15 +8,15 @@ terms are defined in [GLOSSARY.md](GLOSSARY.md).
 
 Definition files declare smock's Mocks and their Stubs, and smock reloads
 them when they change. A Stub matches requests by method, path, query
-parameters, headers, cookies and body, and its response can use
-templates, Variables, Data buckets and Faults. CRUD Stubs serve a Data
-bucket as a REST resource,
-[LLM responses](docs/definition-files.md#llm-responses) stand in for the
-OpenAI Chat Completions, OpenAI Responses and Anthropic Messages APIs, and
-[gRPC Stubs](docs/grpc.md) answer unary calls, on the same ports as HTTP,
-with replies written as JSON. Tests work in Sessions: through the Admin
-API, a test adds Ephemeral Stubs for its Session only, and checks in the
-Journal what its system sent. smock comes as a container image, a Helm
+parameters, headers, cookies and body, and its response can use templates,
+Variables, Data buckets and Faults. CRUD Stubs serve a Data bucket as a REST
+resource, [LLM
+responses](docs/definition-files/llm-responses.md#llm-responses) stand in
+for the OpenAI Chat Completions, OpenAI Responses and Anthropic Messages
+APIs, and [gRPC Stubs](docs/grpc.md) answer unary calls, on the same ports
+as HTTP, with replies written as JSON. Tests work in Sessions: through the
+Admin API, a test adds Ephemeral Stubs for its Session only, and checks in
+the Journal what its system sent. smock comes as a container image, a Helm
 chart and Linux binaries.
 
 ## Run
@@ -43,10 +43,10 @@ Save this Definition file as `defs/users.json`. It declares one Mock,
 ```
 
 Each release publishes the container image, the Helm chart and Linux
-binaries ([docs/installing.md](docs/installing.md)).
-To run the binary, download the one for your machine (`amd64` or `arm64`)
-from the [latest release](https://github.com/hirunefu/smock/releases/latest),
-with `<version>` its version without the `v`:
+binaries ([docs/installing.md](docs/installing.md)). To run the binary,
+download the one for your machine (`amd64` or `arm64`) from the [latest
+release](https://github.com/hirunefu/smock/releases/latest), with
+`<version>` its version without the `v`:
 
 ```sh
 curl -fLo smock https://github.com/hirunefu/smock/releases/download/v<version>/smock-<version>-linux-amd64
@@ -78,11 +78,12 @@ describes Hosts and the Default Mock.
 
 A request that no Stub matches gets the Mock's no-match response, with a
 `Smock-Near-Miss` header naming the closest Stub and the conditions it
-failed, such as `Smock-Near-Miss: get-user; failed=method`.
-[When no Stub matches](docs/definition-files.md#when-no-stub-matches)
-describes the no-match response and the Near miss.
+failed, such as `Smock-Near-Miss: get-user; failed=method`. [When no Stub
+matches](docs/definition-files/matching.md#when-no-stub-matches) describes
+the no-match response and the Near miss.
 
-[docs/definition-files.md](docs/definition-files.md) describes the format,
+[docs/definition-files.md](docs/definition-files.md) and the documents it
+lists describe the format,
 [docs/running.md](docs/running.md) the settings, the logs and HTTPS, and
 [docs/admin-api.md](docs/admin-api.md) how tests add Stubs and check calls.
 
@@ -93,10 +94,10 @@ reads it.
 
 ### Using smock
 
-- [docs/definition-files.md](docs/definition-files.md) describes the
-  format of Definition files: how Stubs match requests, what they
-  answer, templates, Variables, Data buckets, CRUD Stubs and Faults, and
-  how to write them in YAML.
+- [docs/definition-files.md](docs/definition-files.md) and the documents
+  it lists describe the format of Definition files: how Stubs match
+  requests, what they answer, templates, Variables, Data buckets, CRUD
+  Stubs and Faults, and how to write them in YAML.
 - [docs/running.md](docs/running.md) describes `smock serve`: its ports
   and protocols, settings, logs, limits and timeouts, the drain and HTTPS.
 - [docs/admin-api.md](docs/admin-api.md) describes the Admin API: the

@@ -95,19 +95,19 @@ when they fail:
 
 `GET /metrics` serves the Prometheus metrics, without a token, also when
 authentication is on. `smock_build_info` carries the version, commit and
-toolchain as labels; `smock_definition_reloads_total` counts reloads of
-the Definition files by result; with HTTPS,
-`smock_tls_certificate_expiry_timestamp_seconds` gives when each
-certificate expires; `smock_journal_entries`, `smock_journal_bytes` and
-`smock_journal_evictions_total` show the [Journal](#the-journal)'s size
-and evictions, without labels; `smock_state_bytes` and
-`smock_state_writes_refused_total` show the bytes of per-Session state
-that [the state bound](definition-files.md#the-state-bound) counts,
+toolchain as labels; `smock_definition_reloads_total` counts reloads of the
+Definition files by result; with HTTPS,
+`smock_tls_certificate_expiry_timestamp_seconds` gives when each certificate
+expires; `smock_journal_entries`, `smock_journal_bytes` and
+`smock_journal_evictions_total` show the [Journal](#the-journal)'s size and
+evictions, without labels; `smock_state_bytes` and
+`smock_state_writes_refused_total` show the bytes of per-Session state that
+[the state bound](definition-files/variables.md#the-state-bound) counts,
 Variables and copies of Data buckets, and the writes it refused, from
 requests, CRUD Stubs and Admin API sets, without labels;
 `smock_log_lines_dropped_total` counts smock's own log lines that the
-`mockoon` log format dropped because 1,024 of them were waiting for
-stdout ([Logs](running.md#logs)), and stays 0 in the `json` format.
+`mockoon` log format dropped because 1,024 of them were waiting for stdout
+([Logs](running.md#logs)), and stays 0 in the `json` format.
 
 ### Process and cgroup metrics
 
@@ -149,34 +149,34 @@ answers all the same.
 
 ### Request metrics
 
-The request traffic on the plain and TLS ports is in
-`smock_requests_total` and the latency histogram
-`smock_request_duration_seconds` (from the request being read in full to
-the last byte of its response, so injected delays and Server-Sent Event
-streams count; buckets from 100 µs to 5 minutes), labelled only by `mock`
-and `stub`, and in `smock_unmatched_requests_total`, labelled only by
-`mock`. A Stub from a Definition file is labelled by its ID, every
-Ephemeral Stub by `stub="ephemeral"`, and a request that matched no Stub
-by `stub=""`. A request is labelled with the Mock that answered it, the
-Default Mock included, or `mock=""` when no Mock did. gRPC calls count as
-requests, with the same labels. A gRPC call that a Mock's built-in health
-or reflection service answered counts under its Mock with `stub=""` too,
-but it is not an unmatched request, and the Journal does not record it
-([The Journal and the metrics](grpc.md#the-journal-and-the-metrics)).
-A request the protocol layer rejects (HTTP/1.1: 400, 413, 431, 501 or
-505, such as a malformed head or a body over `--body-limit`; HTTP/2: 400,
-413 or 431 on its stream; a gRPC call: 405, 400, or 200 with the gRPC
-status UNIMPLEMENTED, INTERNAL or RESOURCE_EXHAUSTED, as
-[Protocol checks and limits](grpc.md#protocol-checks-and-limits)
+The request traffic on the plain and TLS ports is in `smock_requests_total`
+and the latency histogram `smock_request_duration_seconds` (from the request
+being read in full to the last byte of its response, so injected delays and
+Server-Sent Event streams count; buckets from 100 µs to 5 minutes), labelled
+only by `mock` and `stub`, and in `smock_unmatched_requests_total`, labelled
+only by `mock`. A Stub from a Definition file is labelled by its ID, every
+Ephemeral Stub by `stub="ephemeral"`, and a request that matched no Stub by
+`stub=""`. A request is labelled with the Mock that answered it, the Default
+Mock included, or `mock=""` when no Mock did. gRPC calls count as requests,
+with the same labels. A gRPC call that a Mock's built-in health or
+reflection service answered counts under its Mock with `stub=""` too, but it
+is not an unmatched request, and the Journal does not record it ([The
+Journal and the
+metrics](grpc/rendering-and-journal.md#the-journal-and-the-metrics)). A
+request the protocol layer rejects (HTTP/1.1: 400, 413, 431, 501 or 505,
+such as a malformed head or a body over `--body-limit`; HTTP/2: 400, 413 or
+431 on its stream; a gRPC call: 405, 400, or 200 with the gRPC status
+UNIMPLEMENTED, INTERNAL or RESOURCE_EXHAUSTED, as [Protocol checks and
+limits](grpc/unmatched-and-refused-calls.md#protocol-checks-and-limits)
 lists them) counts with `mock=""` and `stub=""`, timed from the read that
-brought it; it is not an unmatched request, and the Journal does not
-record it. Labels never carry a path, Host, method, status, gRPC status
-or Session, so the number of series stays bounded by the Definition
-files. A request is counted once its response is written; the Admin API,
-probes and `/metrics` are not counted. Only the `mockoon` log format logs
-requests: a `Transaction recorded` line for each request counted here,
-except those the protocol layer rejects and the answers of gRPC's
-built-in services. The `json` format logs none.
+brought it; it is not an unmatched request, and the Journal does not record
+it. Labels never carry a path, Host, method, status, gRPC status or Session,
+so the number of series stays bounded by the Definition files. A request is
+counted once its response is written; the Admin API, probes and `/metrics`
+are not counted. Only the `mockoon` log format logs requests: a `Transaction
+recorded` line for each request counted here, except those the protocol
+layer rejects and the answers of gRPC's built-in services. The `json` format
+logs none.
 
 ## Rendering a Stub
 
@@ -213,7 +213,7 @@ write, and the writes its `dataWrites` would make. It writes nothing.
 A test names its *Session* in the W3C `baggage` header of its requests, in
 the `smock-session` member, and Admin API calls name theirs the same way,
 as do gRPC calls, in their `baggage` metadata
-([Sessions](grpc.md#sessions)).
+([Sessions](grpc/metadata-and-status.md#sessions)).
 Through the Admin API, a test adds *Ephemeral Stubs* to a Mock from the
 Definition files, for its Session only:
 
@@ -246,7 +246,7 @@ curl localhost:8080/users/1                                           # 200, fro
   apply only to them. An Ephemeral Stub can be the Near miss, named by its
   ID in `Smock-Near-Miss`.
 - The Session also keeps its own state of each
-  [Scenario](definition-files.md#scenarios). An Ephemeral Stub may
+  [Scenario](definition-files/scenarios.md#scenarios). An Ephemeral Stub may
   carry a `scenario` clause, as a Stub in a Definition file does, even on a
   Scenario that no file names, and shares the Session's state with the
   file Stubs that name the same Scenario. Deleting the Ephemeral Stub
@@ -264,36 +264,37 @@ curl localhost:8080/users/1                                           # 200, fro
   list does not show gets 404 `unknown_scenario`, and a state outside the
   known states 400 `unknown_state`, so a typo cannot leave a Scenario in a
   state that nothing matches.
-- The Session keeps its own [Variables](definition-files.md#variables)
-  of each Mock too, which a Stub's `variables` write and templates read as
-  `vars.NAME`. `GET /v1/mocks/{mock}/variables` lists the calling Session's
-  Variables of the Mock, by name, with their values.
-  `PUT /v1/mocks/{mock}/variables/{name}` with a JSON value as the body,
-  such as `"ann"`, sets one, so that a test can arrange the state its
-  requests read, and `DELETE` deletes one. A name that is not 1 to 128
-  ASCII letters, digits, `_` and `-` gets 400 `invalid_request`, and so
-  does a value above 1 MiB of compact JSON; a Variable the Session has not
-  set gets 404 `unknown_variable`, and a set that would pass
-  [the state bound](definition-files.md#the-state-bound) 507
+- The Session keeps its own
+  [Variables](definition-files/variables.md#variables) of each Mock too,
+  which a Stub's `variables` write and templates read as `vars.NAME`. `GET
+  /v1/mocks/{mock}/variables` lists the calling Session's Variables of the
+  Mock, by name, with their values. `PUT /v1/mocks/{mock}/variables/{name}`
+  with a JSON value as the body, such as `"ann"`, sets one, so that a test
+  can arrange the state its requests read, and `DELETE` deletes one. A name
+  that is not 1 to 128 ASCII letters, digits, `_` and `-` gets 400
+  `invalid_request`, and so does a value above 1 MiB of compact JSON; a
+  Variable the Session has not set gets 404 `unknown_variable`, and a set
+  that would pass [the state
+  bound](definition-files/variables.md#the-state-bound) 507
   `state_limit_reached`.
-- The Session keeps its own copy of each
-  [Data bucket](definition-files.md#data-buckets) it writes to, and
-  reads the bucket's initial value until then. The copy lives until a
-  reset, a reload that drops it, a `DELETE` or a restart.
-  `GET /v1/mocks/{mock}/data` lists the Mock's buckets, with whether the
-  Session holds a copy of each; `GET /v1/mocks/{mock}/data/{bucket}` reads
-  one with the value the Session reads; `PUT` with a JSON value as the body
-  sets the Session's copy, so that a test can arrange its data; and
-  `DELETE` drops the copy, so the bucket reads its initial value again. A
-  bucket the Mock does not declare gets 404 `unknown_bucket`, a value that
-  breaks a keyed bucket's rules 400 `invalid_data`, and a set that would
-  pass the state bound 507 `state_limit_reached`
-  ([Session copies](definition-files.md#session-copies)).
+- The Session keeps its own copy of each [Data
+  bucket](definition-files/data-buckets.md#data-buckets) it writes to, and
+  reads the bucket's initial value until then. The copy lives until a reset,
+  a reload that drops it, a `DELETE` or a restart. `GET
+  /v1/mocks/{mock}/data` lists the Mock's buckets, with whether the Session
+  holds a copy of each; `GET /v1/mocks/{mock}/data/{bucket}` reads one with
+  the value the Session reads; `PUT` with a JSON value as the body sets the
+  Session's copy, so that a test can arrange its data; and `DELETE` drops
+  the copy, so the bucket reads its initial value again. A bucket the Mock
+  does not declare gets 404 `unknown_bucket`, a value that breaks a keyed
+  bucket's rules 400 `invalid_data`, and a set that would pass the state
+  bound 507 `state_limit_reached` ([Session
+  copies](definition-files/data-buckets.md#session-copies)).
 - `GET` lists and `DELETE /v1/mocks/{mock}/stubs/{id}` deletes the calling
   Session's Ephemeral Stubs of the Mock. `POST /v1/reset` with
   `{"scope":"session"}` clears the calling Session's Ephemeral Stubs,
   [Journal](#the-journal) entries, Scenario state,
-  [Variables](definition-files.md#variables) and copies of Data
+  [Variables](definition-files/variables.md#variables) and copies of Data
   buckets of every Mock, and its eviction count;
   `{"scope":"mock","mock":"users"}` every Session's of one Mock, even one
   that a reload removed while the Journal holds its entries; and
@@ -325,40 +326,40 @@ curl -H "Authorization: Bearer change-me" -H "baggage: smock-session=checkout-42
   localhost:9090/v1/journal/query
 ```
 
-- Each entry records the Session, the Host, the Mock and whether the
-  Default Mock answered; the method, target, HTTP version, header fields
-  and body; the Stub that answered, or the Near miss with what each failed
-  condition expects and what the request sent, each with `stubSource`:
-  `file` for a Stub from a Definition file, `ephemeral` for an Ephemeral
-  Stub, so that equal IDs cannot be confused; the
-  [Scenario](definition-files.md#seeing-what-moved) move the Stub
+- Each entry records the Session, the Host, the Mock and whether the Default
+  Mock answered; the method, target, HTTP version, header fields and body;
+  the Stub that answered, or the Near miss with what each failed condition
+  expects and what the request sent, each with `stubSource`: `file` for a
+  Stub from a Definition file, `ephemeral` for an Ephemeral Stub, so that
+  equal IDs cannot be confused; the
+  [Scenario](definition-files/scenarios.md#seeing-what-moved) move the Stub
   made, as `scenario`, with its name and the states it moved from and to;
   the index of the response the Stub gave among its
-  [`responses`](definition-files.md#several-responses), as
+  [`responses`](definition-files/responses.md#several-responses), as
   `responseIndex`; the names of the
-  [Variables](definition-files.md#variables) the request wrote, as
+  [Variables](definition-files/variables.md#variables) the request wrote, as
   `variablesWritten`; the names of the [Data
-  buckets](definition-files.md#writing-buckets-datawrites) it wrote,
-  as `dataWritten`, and why a data write failed, as `dataError`; the
-  operation a [CRUD Stub](definition-files.md#crud-stubs) served and
-  its key, as `crud`; the status, or the connection Fault; when the
-  request was received and how long the response took; and the digest of
-  the definition set that answered. A request for a Host that no Mock
-  answers is recorded too, with no Mock; one the protocol layer rejects
-  (HTTP/1.1: 400, 413, 431, 501 or 505; HTTP/2: 400, 413 or 431 on its
-  stream; gRPC: 405, 400, or 200 with the gRPC status UNIMPLEMENTED,
-  INTERNAL or RESOURCE_EXHAUSTED) is not.
+  buckets](definition-files/data-buckets.md#writing-buckets-datawrites) it
+  wrote, as `dataWritten`, and why a data write failed, as `dataError`; the
+  operation a [CRUD Stub](definition-files/crud-stubs.md#crud-stubs) served
+  and its key, as `crud`; the status, or the connection Fault; when the
+  request was received and how long the response took; and the digest of the
+  definition set that answered. A request for a Host that no Mock answers is
+  recorded too, with no Mock; one the protocol layer rejects (HTTP/1.1: 400,
+  413, 431, 501 or 505; HTTP/2: 400, 413 or 431 on its stream; gRPC: 405,
+  400, or 200 with the gRPC status UNIMPLEMENTED, INTERNAL or
+  RESOURCE_EXHAUSTED) is not.
 - A gRPC call is recorded as a `POST` to its method's path, such as
-  `/helloworld.Greeter/SayHello`, with its metadata as header fields and
-  its message, decoded into JSON, as the body, whose `size` counts the
-  octets received. Its entry adds `grpcStatus`, the name of the gRPC
-  status the call got, such as `OK`, `NOT_FOUND` or `UNIMPLEMENTED`, while
-  its `status` is 200, the HTTP status that gRPC sends with every gRPC
-  status. An HTTP request's entry has no `grpcStatus`. A filter finds calls as it finds
-  requests, by `POST`, the method's path and the metadata as headers,
-  `-bin` values without their base64 padding. The answers of a Mock's
-  built-in health and reflection services are not recorded
-  ([The Journal and the metrics](grpc.md#the-journal-and-the-metrics)).
+  `/helloworld.Greeter/SayHello`, with its metadata as header fields and its
+  message, decoded into JSON, as the body, whose `size` counts the octets
+  received. Its entry adds `grpcStatus`, the name of the gRPC status the
+  call got, such as `OK`, `NOT_FOUND` or `UNIMPLEMENTED`, while its `status`
+  is 200, the HTTP status that gRPC sends with every gRPC status. An HTTP
+  request's entry has no `grpcStatus`. A filter finds calls as it finds
+  requests, by `POST`, the method's path and the metadata as headers, `-bin`
+  values without their base64 padding. The answers of a Mock's built-in
+  health and reflection services are not recorded ([The Journal and the
+  metrics](grpc/rendering-and-journal.md#the-journal-and-the-metrics)).
 - A request is in the Journal as soon as its client has the whole
   response: smock records it just before it writes the response's last
   bytes, so a query made right after a call always finds it. A stream of
@@ -389,30 +390,32 @@ curl -H "Authorization: Bearer change-me" -H "baggage: smock-session=checkout-42
   that Session, or everything, is reset (a reset of one Mock keeps it), so
   the counts grow with the number of Sessions whose entries were evicted.
 - `--journal off` records nothing, and a Mock with `"journal": false`
-  ([docs/definition-files.md](definition-files.md#turning-the-journal-off-for-a-mock))
+  ([Turning the Journal off for a
+  Mock](definition-files/matching.md#turning-the-journal-off-for-a-mock))
   records none of its requests, so that a high-rate load test pays nothing
   for recording. A query while the Journal is off, or whose filter names
   such a Mock, gets 409 `journal_off` rather than entries that cannot be
   trusted. Only those are refused: a filter that names no Mock is answered
-  from the requests that were recorded, which leave out those of Mocks
-  whose Journal is off.
+  from the requests that were recorded, which leave out those of Mocks whose
+  Journal is off.
 - The Journal survives a [reload](definition-files.md#reloading) of
   the Definition files; each entry keeps the digest of the set that
   answered it. It lives in the process that received the requests, until a
   reset or a restart.
 - The byte bound follows smock's memory limit, so that the Journal fits a
-  small Pod ([ADR 0004](adr/0004-journal-byte-bound-follows-the-memory-limit.md)).
+  small Pod ([ADR
+  0004](adr/0004-journal-byte-bound-follows-the-memory-limit.md)).
   `--journal-max-bytes` or `SMOCK_JOURNAL_MAX_BYTES` always wins. Without
   either, smock reads the memory limit of its own cgroup at startup:
   `memory.max` of the cgroup v2 that `/proc/self/cgroup` names, under
-  `/sys/fs/cgroup`, which in a container on a Kubernetes node with cgroup
-  v2 is the container's memory limit. The bound is a quarter of that
-  limit, rounded down, at least 1 MiB, so that a tiny limit still records
-  something, and at most 64 MiB. Without a limit (`max`), or when it
-  cannot be read, as on a cgroup v1 host, the bound is 64 MiB. Under a
-  52Mi limit it is 13 MiB, which holds about 8,400 entries of the
-  [benchmark](../bench/README.md)'s request mix (each counts about 1.6
-  KB); from a 256Mi limit up, it is 64 MiB.
+  `/sys/fs/cgroup`, which in a container on a Kubernetes node with cgroup v2
+  is the container's memory limit. The bound is a quarter of that limit,
+  rounded down, at least 1 MiB, so that a tiny limit still records
+  something, and at most 64 MiB. Without a limit (`max`), or when it cannot
+  be read, as on a cgroup v1 host, the bound is 64 MiB. Under a 52Mi limit
+  it is 13 MiB, which holds about 8,400 entries of the
+  [benchmark](../bench/README.md)'s request mix (each counts about 1.6 KB);
+  from a 256Mi limit up, it is 64 MiB.
 - smock logs the bound it uses at startup, with its `source`: `flag`,
   `variable`, `memoryLimit` (a quarter of the limit), `minimum` (1 MiB) or
   `default` (64 MiB), and the `memoryLimit` it read, in bytes or `max`, or

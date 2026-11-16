@@ -92,9 +92,9 @@ MESSAGES_BROKEN_TEXT = "Let me check."
 MESSAGES_BROKEN_CALL = ("toolu_sdk_broken", "get_weather", "not JSON")
 
 # The mid-stream errors: each API's error Stub is the docs' cut-short Stub
-# (docs/definition-files.md#mid-stream-errors), which cuts the stream after
-# ERROR_AFTER code points of its text. A request that does not stream gets
-# the whole text.
+# (docs/definition-files/llm-errors.md#mid-stream-errors), which cuts the
+# stream after ERROR_AFTER code points of its text. A request that does not
+# stream gets the whole text.
 ERROR_TEXT = "Hello! How can I assist you today?"
 ERROR_AFTER = 5
 ERROR_MESSAGE = "The server had an error while processing your request. Sorry about that!"
@@ -102,8 +102,9 @@ CHAT_ERROR = {"message": ERROR_MESSAGE, "type": "server_error", "param": None, "
 RESPONSES_ERROR = {"type": "error", "code": "server_error", "message": ERROR_MESSAGE, "param": None}
 MESSAGES_ERROR = {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
 
-# The docs' 429 and 529 replies (docs/definition-files.md#a-429-with-retry-after
-# and #a-529-when-overloaded), OpenAI's and Anthropic's: their bodies, and the
+# The docs' 429 and 529 replies
+# (docs/definition-files/llm-errors.md#a-429-with-retry-after and
+# #a-529-when-overloaded), OpenAI's and Anthropic's: their bodies, and the
 # request id each one's header carries.
 RATE_LIMITED_BODY = {
     "error": {

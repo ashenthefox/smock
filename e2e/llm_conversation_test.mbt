@@ -50,8 +50,9 @@ let weather_conversation : String =
 ///|
 /// The waits, in milliseconds, of the first request `ask-weather` matches:
 /// `first` before its first piece, then `interval` before each later one.
-/// They are the waits docs/definition-files.md shows under Timing for the
-/// same `timing` with `smock render --seed 7`, since the Stub's seed is 7.
+/// They are the waits docs/definition-files/llm-responses.md shows under
+/// Timing for the same `timing` with `smock render --seed 7`, since the
+/// Stub's seed is 7.
 let first_match_waits : Array[Int32] = [824, 27, 20, 38, 19, 40, 38, 26]
 
 ///|
