@@ -42,11 +42,15 @@ for file in $(git ls-files --cached --others --exclude-standard \
   fi
 done
 
-for file in $(git ls-files --cached --others --exclude-standard '*.mbt'); do
-  count=$(grep -ci 'extern "c"' "$file" || true)
-  if [ "$count" -eq 0 ]; then
-    continue
-  fi
+# Each MoonBit file with a line that holds extern "C", as <file>:<count of
+# such lines>, from one grep over all the files. /dev/null makes grep name
+# the file even when xargs gives it only one.
+counts=$(git ls-files -z --cached --others --exclude-standard '*.mbt' |
+  xargs -0 -r grep -ci 'extern "c"' /dev/null | grep -v ':0$' || true)
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  file=${line%:*}
+  count=${line##*:}
   limit=$(printf '%s\n' "$bindings" | awk -v file="$file" '$1 == file { print $2 }')
   if [ -z "$limit" ]; then
     echo "check-no-c: $file binds C functions (extern \"C\"), which ADR 0001 does not allow" >&2
@@ -55,7 +59,9 @@ for file in $(git ls-files --cached --others --exclude-standard '*.mbt'); do
     echo "check-no-c: $file has $count C bindings; $limit allowed" >&2
     failed=1
   fi
-done
+done <<EOF
+$counts
+EOF
 
 if [ -e "$reset" ]; then
   functions=$(grep -c 'MOONBIT_FFI_EXPORT' "$reset" || true)
@@ -103,23 +109,37 @@ dependency() {
 
 # matching <regex> <name pattern>...: prints each file under the current
 # directory whose name matches one of the patterns and whose text, without
-# // comments, matches the extended regular expression, in any case.
+# // comments, matches the extended regular expression, in any case. One
+# awk program reads all those files, in sorted order: it drops each line's
+# // comment, compares the rest with the regex, both in lower case, and
+# prints a file's name at its first match. The regex reaches awk through
+# the environment, which leaves its backslashes as they are, and every path
+# starts with ./, so awk takes none for a variable assignment. awk runs in
+# the C locale, so that it reads each file as bytes: the regexes are ASCII,
+# mawk and gawk then find the same matches, and gawk prints no warning for
+# bytes that are not valid UTF-8.
 matching() {
   regex=$1
   shift
-  find . -type f | sort | while IFS= read -r file; do
-    for pattern in "$@"; do
-      # shellcheck disable=SC2254 # the pattern is a glob on purpose
-      case ${file##*/} in
-      $pattern)
-        if sed 's|//.*||' "$file" | grep -qiE "$regex"; then
-          echo "$file"
-        fi
-        break
-        ;;
-      esac
-    done
+  # From here on, "$@" holds find's tests: -name <pattern> -o -name ...
+  patterns=$#
+  for pattern; do
+    set -- "$@" -o -name "$pattern"
   done
+  shift "$((patterns + 1))"
+  # shellcheck disable=SC2016 # the awk program is in single quotes on purpose
+  find . -type f \( "$@" \) -print0 | sort -z |
+    re=$regex LC_ALL=C xargs -0 -r awk '
+      BEGIN { re = tolower(ENVIRON["re"]) }
+      FNR == 1 { found = 0 }
+      !found {
+        line = $0
+        sub(/\/\/.*/, "", line)
+        if (tolower(line) ~ re) {
+          print FILENAME
+          found = 1
+        }
+      }'
 }
 
 # The keys of the module and package files that give a C compiler, or its
