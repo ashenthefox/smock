@@ -741,7 +741,7 @@ test "the JSON is held to every limit wherever an Any is printed: last, first an
 }
 
 ///|
-test "Anys three deep, each in the message of the one before, are printed with the widest limit and held to every other: the text may pass its limit by one octet, not by one for each Any around it, which would pass the largest Int32" {
+test "Anys three deep, each in the message of the one before, are printed with the widest limit, and held to every limit from 0 to past their JSON's size: the text may pass its limit by one octet, not by one for each Any around it, which would pass the largest Int32" {
   let set = any_holders()
   let only = (any : Bytes) => nested(w => message_field(w, 1, any))
   let holding = (inner : Bytes) => {
@@ -752,7 +752,8 @@ test "Anys three deep, each in the message of the one before, are printed with t
   let deep = holding(holding(only(any_of("type.googleapis.com/e.E", b""))))
   inspect(
     [
-      // The largest Int32, which is `no_limit`, then every other limit.
+      // The largest Int32, which is `no_limit`, then each limit from 0 to
+      // the JSON's size and two more.
       bounded_in(set, "e.Only", deep, limit=0x7FFF_FFFF),
       swept(set, "e.Only", deep),
     ].join("\n"),

@@ -70,7 +70,8 @@ test "the text's buffers double from the room it starts with, and the one that w
       // Nearly three times the limit: the largest buffer under the limit
       // is two octets short of it.
       buffers_shown(1026, 1),
-      // No text may be printed, and the one octet is made.
+      // No text may be printed, and the one octet is made: the one limit
+      // whose buffers are not under three times it.
       buffers_shown(0, 0),
     ].join("\n"),
     content=(
