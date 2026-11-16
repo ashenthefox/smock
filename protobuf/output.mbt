@@ -76,9 +76,9 @@ priv struct Output {
   mut length : Int32
   /// The most octets the text may take, and what is held.
   limit : Int32
-  /// The most octets the text may take for now: `limit`, and one more
-  /// while an object whose braces are to come off may still be empty
-  /// (`Output::wrapped`).
+  /// The most octets the text may take for now: `limit`, and one more from
+  /// `Output::wrapped` until an object's braces next come off
+  /// (`Output::unwrap`).
   mut most : Int32
   /// Where the room that the text has now ends: at the end of `data`, or
   /// at `most` when that comes first. `Output::reserve` makes more.
