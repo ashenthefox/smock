@@ -264,6 +264,8 @@ docker build --tag smock:dev .
 scripts/smoke-test-image.sh smock:dev 0.0.0-dev <commit> "moonc <version>"   # the container image
 scripts/check-release-workflow.sh    # the release workflow publishes only for tags (needs yq and jq)
 scripts/test-release-notes.sh        # the release notes, with CHANGELOG.md's links at the release's tag
+python3 scripts/check-doc-links.py   # the documents' links into the repository lead to a file, and to a heading when they name one (needs git)
+scripts/test-check-doc-links.sh      # that check, on small trees (needs python3 and git)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
 scripts/check-benchmark-workflow.sh  # the benchmark workflow runs only by hand (needs yq and jq)
