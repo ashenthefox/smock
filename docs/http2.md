@@ -179,7 +179,8 @@ curl --cacert smock.pem https://localhost:8443/users/1       # h2, by ALPN
   built with HTTP/2 support, as `--http2` asks it to. `--http1.1` offers
   `http/1.1` alone, and gets HTTP/1.1.
 - `smock.pem` is smock's self-signed certificate, read from the handshake
-  as [Run](../README.md#run) shows. `--insecure` skips the check instead.
+  as [The self-signed certificate](running.md#the-self-signed-certificate)
+  shows. `--insecure` skips the check instead.
   With a certificate that curl trusts, leave both out.
 - `-w '%{http_version}\n'` prints `2` for a response over HTTP/2, and `-v`
   shows what ALPN chose, such as `ALPN: server accepted h2`.
@@ -282,7 +283,7 @@ and `http/1.1`, and get HTTP/2, with a certificate they trust:
   each time smock starts. Give smock certificate files from a certificate
   authority that the browser trusts, with a name for each Host the page
   calls (`--tls-cert-file` and `--tls-key-file`, or a Mock's own with
-  `--tls-mock-certs`; see [Run](../README.md#run)). For local use, a
+  `--tls-mock-certs`; see [HTTPS](running.md#https)). For local use, a
   certificate authority of your own, added to the trust store of the
   system or of the browser, will do.
 - The developer tools' network panel shows each request's protocol: `h2`
@@ -365,7 +366,7 @@ gRPC call that can reach no gRPC Stub, which is answered from its HEADERS
 
 Each stream of a connection is a request of its own. It goes to the Mock
 its own `:authority` names, and its
-[Session](../README.md#sessions-and-ephemeral-stubs) comes from its own
+[Session](admin-api.md#sessions-and-ephemeral-stubs) comes from its own
 `baggage` field. So a browser that sends requests for several Hosts over one
 connection reaches each Host's Mock, and tests that share a pooled
 connection stay apart. Ephemeral Stubs, Scenarios, Variables, Data buckets
@@ -575,7 +576,7 @@ labels as HTTP/1.1 ones.
 
 ## Logs
 
-In the `mockoon` log format ([Run](../README.md#run)), each HTTP/2 request
+In the `mockoon` log format ([Logs](running.md#logs)), each HTTP/2 request
 a Mock handles gets a `Transaction recorded` line, as an HTTP/1.1 request
 does. Its `requestMethod` is `:method`, and its `requestPath` is `:path`
 up to the `?`, or `:authority` for a CONNECT. The line comes once the
@@ -619,7 +620,7 @@ TLS at 30,000 requests/s then used 88% of the CPU rather than 64%, and in
 one of two runs its p99 rose to 14 ms and its p99.9 to 25 ms, past the
 performance targets; at 20,000 it kept the latency of `json`. So smock
 serving HTTP/2 close to its CPU limit in `json` needs a higher limit in
-`mockoon` ([Run](../README.md#run)).
+`mockoon` ([Logs](running.md#logs)).
 
 ## Limits and timeouts
 
@@ -914,7 +915,8 @@ suggests (section 6.8), so that no request the client has sent is lost.
    and sooner when its client answers the PING or closes the connection.
 
 At the drain timeout (`--drain-timeout-ms`), what is still open is cut and
-counted in `connectionsCut`, as over HTTP/1.1. See [Run](../README.md#run).
+counted in `connectionsCut`, as over HTTP/1.1. See
+[The drain](running.md#the-drain).
 gRPC calls drain the same way, and the gRPC health service of a Mock
 that turns it on says NOT_SERVING from the moment SIGTERM arrives
 ([The drain](grpc.md#the-drain)).
@@ -965,4 +967,4 @@ against the plain port and the TLS port on every push.
 [`scripts/h2spec/plain.txt`](../scripts/h2spec/plain.txt) and
 [`scripts/h2spec/tls.txt`](../scripts/h2spec/tls.txt) list the cases that
 do not pass yet on each port, with their reasons
-([Build and test](../README.md#build-and-test)).
+([Build and test](../CONTRIBUTING.md#build-and-test)).

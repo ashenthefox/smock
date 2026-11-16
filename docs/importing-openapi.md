@@ -1259,7 +1259,7 @@ method, path and `response`, without the two headers. The Session's
 requests then get that
 response, and other Sessions still get the main one. The system under
 test must pass the Session on, in the `baggage` header of its calls
-([Sessions and Ephemeral Stubs](../README.md#sessions-and-ephemeral-stubs)).
+([Sessions and Ephemeral Stubs](admin-api.md#sessions-and-ephemeral-stubs)).
 Below, the second `curl` stands for such a call:
 
 ```sh
@@ -1531,8 +1531,9 @@ A bundler fetches what the URLs name. smock never does.
 A document whose name ends in `.yaml` or `.yml` is read as YAML 1.2, the
 YAML version OpenAPI recommends. One whose name ends in `.json` is read as
 JSON. Definition files are not read this way: they keep the safe subset
-of YAML that the [README](../README.md) describes, and the command writes
-its YAML output in that subset.
+of YAML that the
+[Definition-file reference](definition-files.md#writing-definition-files-in-yaml)
+describes, and the command writes its YAML output in that subset.
 
 Values without quotes are typed by the YAML 1.2 core schema:
 

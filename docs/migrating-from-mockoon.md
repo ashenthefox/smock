@@ -916,7 +916,7 @@ A state differs from Mockoon's count in three ways:
 - **It is kept per Session and per replica.** Mockoon keeps one count
   for each route of the environment, and every client moves it. smock
   keeps a Scenario's state per
-  [Session](../README.md#sessions-and-ephemeral-stubs), so concurrent
+  [Session](admin-api.md#sessions-and-ephemeral-stubs), so concurrent
   tests each walk their own flow, and requests without a Session share
   a state of their own. Each replica keeps its own state, so tests that
   rely on Scenarios need one replica, or session affinity. Started side
@@ -1002,12 +1002,12 @@ and a 503 with `Retry-After: 5` once. It becomes:
 - Each response keeps its own status, headers, body and `template`. The
   conditions, the `fault` and the `scenario` clause stay one per Stub, so
   responses with latencies of their own share one delay.
-- The [Journal](../README.md#the-journal) records which response each
+- The [Journal](admin-api.md#the-journal) records which response each
   request got, as `responseIndex`, and `smock render` with `--response 1`
   renders the 503 ([Checking the migration](#checking-the-migration)).
   A test that needs the 503 on a given call, rather than by chance, adds
   an Ephemeral Stub that gives it for its Session
-  ([Sessions and Ephemeral Stubs](../README.md#sessions-and-ephemeral-stubs)).
+  ([Sessions and Ephemeral Stubs](admin-api.md#sessions-and-ephemeral-stubs)).
 
 #### Global variables
 
@@ -1716,7 +1716,7 @@ curl -s -H "Authorization: Bearer change-me" localhost:9090/v1/journal/unmatched
 
 Without a `baggage` header, it lists the requests that named no Session;
 a test that names its Session sees its own
-([Verifying calls and unmatched requests](../README.md#verifying-calls-and-unmatched-requests)).
+([Verifying calls and unmatched requests](admin-api.md#verifying-calls-and-unmatched-requests)).
 
 ## Running it where Mockoon ran
 
@@ -1870,7 +1870,7 @@ SMOCK_ADMIN_TOKEN=change-me bin/smock serve --dir defs --log-format mockoon |
 The four Mockoon lines and the envelope of every line are a stable
 contract: smock changes them only in a breaking change, which the
 CHANGELOG lists under Changed and the release notes call out
-([Run](../README.md#run)).
+([Logs](running.md#logs)).
 
 ### Mockoon's lines in smock
 
@@ -1893,7 +1893,7 @@ CHANGELOG lists under Changed and the release notes call out
 keeps each request whole, with the Stub that answered and its status:
 query it with `POST /v1/journal/query`, and list the requests no Stub
 answered with `GET /v1/journal/unmatched`
-([The Journal](../README.md#the-journal)).
+([The Journal](admin-api.md#the-journal)).
 
 ### How the lines differ
 

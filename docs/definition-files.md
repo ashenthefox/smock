@@ -7,7 +7,8 @@ in a definitions directory, such as `defs/`, that `smock serve --dir` and
 - The Definition files are the regular files at the top level whose names
   end in `.json`, `.yaml` or `.yml`. Symlinks are followed. A YAML file
   means exactly what the equivalent JSON file means; smock accepts only the
-  safe subset of YAML that the [README](../README.md) describes.
+  safe subset of YAML that [Writing Definition files in
+  YAML](#writing-definition-files-in-yaml) describes.
 - Names that start with `.` are skipped, which covers the `..data` entries
   of Kubernetes ConfigMap volumes.
 - smock reads the files in byte-wise order of their names, and reads them
@@ -19,6 +20,25 @@ in a definitions directory, such as `defs/`, that `smock serve --dir` and
   Definition files, and serves them from memory. Symlinks inside
   it are followed while they stay inside it; one that leads a file or a
   directory outside it is a problem, so that nothing outside is served.
+
+This document describes the format:
+how Stubs match requests (method, path, query parameters, headers, cookies
+and body, exactly, by RE2 pattern, as JSON, by form field or by paths into
+XML, negated or by presence with `$not` and `$exists`, and by array element
+with `$includes` and `$last`), the order they are tried in (priority, then file-name
+order), what a Mock answers when nothing matches, responses with inline
+bodies, body files that serve byte ranges, JSON or Server-Sent Events,
+LLM responses in an LLM API's wire form,
+several responses picked at random by weight (`responses`), response
+templates and their helpers (fake data, time and dates, conversions,
+strings, encodings, JWTs and arithmetic), Variables that keep a value from
+one request for the next, Data buckets that a Mock declares with their
+initial values and that each Session reads and writes in a copy of its
+own, CRUD Stubs that serve a bucket as a REST resource with filters,
+sorting and paging, Faults, the JSON Schema, editor support and writing
+Definition files in another configuration language.
+[migrating-from-mockoon.md](migrating-from-mockoon.md) turns a Mockoon
+environment into Definition files.
 
 ## Contents
 
@@ -94,6 +114,7 @@ in a definitions directory, such as `defs/`, that `smock serve --dir` and
 - [Reloading](#reloading)
 - [Checking a definitions directory](#checking-a-definitions-directory)
   - [Warnings](#warnings)
+- [Writing Definition files in YAML](#writing-definition-files-in-yaml)
 - [Editor support](#editor-support)
 - [Writing Definition files in another configuration language](#writing-definition-files-in-another-configuration-language)
 
@@ -815,7 +836,8 @@ a client that disconnects, or a Journal that is off. So:
 
 #### Sessions and Ephemeral Stubs
 
-State is kept per Mock, per [Session](../README.md#sessions-and-ephemeral-stubs)
+State is kept per Mock, per
+[Session](admin-api.md#sessions-and-ephemeral-stubs)
 and per Scenario. Concurrent tests that share a Mock each walk their own
 flow, as long as each sends its own Session. Requests without a Session
 share one state of their own, which is the simplest for a developer
@@ -834,14 +856,14 @@ state belongs to the Session that added it: other Sessions never see it.
 Deleting an Ephemeral Stub leaves the state as it is. A state that no Stub
 names any more matches no `requires`, and the next reload that swaps in
 new files sends it back to `Started` ([Reloading](#reloading)). A
-[reset](../README.md#sessions-and-ephemeral-stubs) of the Session, of the
+[reset](admin-api.md#sessions-and-ephemeral-stubs) of the Session, of the
 Mock or of everything clears the states in its scope, and sends their
 Scenarios back to `Started`.
 
 Through the Admin API, a test lists its Session's Scenarios of a Mock,
 with the state each one is in, and sets the state of one, so that it can
 start in the middle of a flow, or reset one Scenario by setting `Started`
-([Sessions and Ephemeral Stubs](../README.md#sessions-and-ephemeral-stubs)).
+([Sessions and Ephemeral Stubs](admin-api.md#sessions-and-ephemeral-stubs)).
 It can set only a state that the files or its own Ephemeral Stubs name.
 
 #### How state grows
@@ -858,7 +880,7 @@ its whole run instead.
 
 #### Seeing what moved
 
-Each [Journal](../README.md#the-journal) entry records the move its Stub
+Each [Journal](admin-api.md#the-journal) entry records the move its Stub
 made, as `scenario`:
 
 ```json
@@ -951,11 +973,11 @@ that no Mock answers, get no `Smock-Near-Miss` header.
 A request that matches pays nothing for this: smock counts failed
 conditions only once every Stub has failed to match.
 
-The [Journal](../README.md#the-journal) records the full Near miss of each
+The [Journal](admin-api.md#the-journal) records the full Near miss of each
 unmatched request: every condition it failed, with what the Stub expects
 and what the request sent. A test lists its Session's unmatched requests
 with `GET /v1/journal/unmatched`
-([README](../README.md#verifying-calls-and-unmatched-requests)).
+([Admin API](admin-api.md#verifying-calls-and-unmatched-requests)).
 
 What the Stub expects is the condition as the Stub writes it, operators
 included. What the request sent is every value of the parameter, header,
@@ -1178,13 +1200,13 @@ working:
   It serves no ranges, and keeps its own value.
 
 With [`responses`](#several-responses), the response picked decides.
-[Ephemeral Stubs](../README.md#sessions-and-ephemeral-stubs) have no body
+[Ephemeral Stubs](admin-api.md#sessions-and-ephemeral-stubs) have no body
 files, so they never serve ranges.
 
 A [delay](#delays) applies to a 206 or a 416 as to any response. A
 `partial` [connection Fault](#connection-faults) sends the head of the
 206, with its `Content-Length`, and the first half of the range. The
-[Journal](../README.md#the-journal) records the status sent: 206 or 416.
+[Journal](admin-api.md#the-journal) records the status sent: 206 or 416.
 `smock render` and the Admin render operation apply the same rule to the
 sample's `Range` header ([Rendering a template](#rendering-a-template)).
 
@@ -1232,13 +1254,13 @@ data: line 2
 - While a stream waits, smock serves every other connection. A client that
   closes the connection mid-stream ends that stream: smock notices when it
   next writes an event. Until then, which an event's long delay can put
-  off, the stream keeps its connection, and a [drain](../README.md#run) on
-  SIGTERM waits for it as for any stream in progress. smock does not watch
-  the connection meanwhile, since a client may close its sending side once
-  its request is sent and still read the stream. A client that keeps the
-  connection open but stops reading is cut by the
-  [write timeout](../README.md#run): when the write of an event makes no
-  progress for `--write-timeout-ms`, smock closes the connection.
+  off, the stream keeps its connection, and a [drain](running.md#the-drain)
+  on SIGTERM waits for it as for any stream in progress. smock does not
+  watch the connection meanwhile, since a client may close its sending
+  side once its request is sent and still read the stream. A client that
+  keeps the connection open but stops reading is cut by the
+  [write timeout](running.md#the-write-timeout): when the write of an event
+  makes no progress for `--write-timeout-ms`, smock closes the connection.
 - Over HTTP/2, each event stream is an HTTP/2 stream of its own, so one
   connection can carry several at once, and its other HTTP/2 streams are
   answered meanwhile. The HEADERS carry `content-type: text/event-stream`
@@ -1300,7 +1322,7 @@ Stub answers about one request in ten with a 503:
   response's index counted from 0, such as `/stubs/0/responses/1/json`. A
   template that fails for a request points at the field within the Stub
   the same way, such as `"at":"/responses/1/json/id"`.
-- An [Ephemeral Stub](../README.md#sessions-and-ephemeral-stubs) can give
+- An [Ephemeral Stub](admin-api.md#sessions-and-ephemeral-stubs) can give
   `responses` too, with inline bodies only: `bodyFile` is refused in any
   of them.
 - The shadow warning, the Near miss and the traffic metrics look at the
@@ -1316,7 +1338,7 @@ So the Fault decisions and the helper output for a seed are the same with
 replay the picks as they replay the Faults. A Stub with `response` takes no
 pick.
 
-The [Journal](../README.md#the-journal) records which response each
+The [Journal](admin-api.md#the-journal) records which response each
 request got, as `responseIndex`, its index from 0. It is null for a Stub
 with `response` or `crud`, for a request that no Stub matched, and when no
 response was picked because a value of the Stub's [`variables`](#variables)
@@ -1526,11 +1548,11 @@ A stream travels as the events of an `events` response do:
   `partial` Fault sends the first half of the events, rounded down, and
   does not end the stream; for the JSON reply, it sends half the body.
   `reset` and `close` are unchanged.
-- The stream's [Journal](../README.md#the-journal) entry is committed
+- The stream's [Journal](admin-api.md#the-journal) entry is committed
   before its last event, as for `events`.
 - A client that closes the connection mid-stream ends the stream: smock
   notices when it next writes an event, and the Journal keeps the
-  request's entry. A [drain](../README.md#run) on SIGTERM waits for a
+  request's entry. A [drain](running.md#the-drain) on SIGTERM waits for a
   stream in progress, its waits included.
 
 ### Chunks
@@ -2089,7 +2111,7 @@ The fields of `error`:
   an error in place of the whole reply is an ordinary response
   ([Errors before the reply](#errors-before-the-reply)).
 - **Status and Journal.** The status is the Stub's, 200 here, sent before
-  the stream starts. The [Journal](../README.md#the-journal) entry has
+  the stream starts. The [Journal](admin-api.md#the-journal) entry has
   that status, and is committed before the last event, the error, as for
   `events`.
 - **What openai-python does.** It raises `APIError` on Chat's error frame,
@@ -3229,7 +3251,7 @@ answer and the user's next question, the third request gets
   also read the count through the
   [Admin API](#through-the-admin-api), or count the Journal's entries.
 - The state and the count belong to the
-  [Session](../README.md#sessions-and-ephemeral-stubs). Give each test
+  [Session](admin-api.md#sessions-and-ephemeral-stubs). Give each test
   its own Session, or reset it, so that each conversation starts in
   `Started` with no count. Requests without a Session share one state
   and one count.
@@ -3576,7 +3598,7 @@ Stub's id.
 
 An LLM request carries the whole conversation, and often the tools'
 schemas, so its body often passes 4 KiB. The
-[Journal](../README.md#the-journal) keeps the first 4 KiB of each body by
+[Journal](admin-api.md#the-journal) keeps the first 4 KiB of each body by
 default, and the entry's body then says `truncated: true`. A test that
 reads prompts from the Journal raises `--journal-body-limit`
 (`SMOCK_JOURNAL_BODY_LIMIT`), such as `--journal-body-limit 1048576`. Each
@@ -4267,7 +4289,7 @@ A delay Fault still applies first, and a connection Fault still replaces
 the response. A stream is rendered whole before its head is sent, so a
 failed event also gives this 500 and no stream. The Journal entry records
 the 500 and `templateError`. The default `json`
-[log format](../README.md#run) writes no line for it. The `mockoon` format
+[log format](running.md#logs) writes no line for it. The `mockoon` format
 writes an error line to stdout, after the response's last byte and just
 before the request's `Transaction recorded` line, also with the Journal
 off. It has the message, the Stub's path as written (`routePath`, left out
@@ -4378,7 +4400,7 @@ In one Session, `POST /login` with `{"user":"ann"}` gets
   its own, and they are lost on restart. A reset clears them, and a reload
   keeps them ([Resets and reloads](#resets-and-reloads)). One byte bound
   holds all of them ([The state bound](#the-state-bound)).
-- An [Ephemeral Stub](../README.md#sessions-and-ephemeral-stubs) takes
+- An [Ephemeral Stub](admin-api.md#sessions-and-ephemeral-stubs) takes
   `variables` too, and writes the Variables of its Session.
 - Through the Admin API, a test lists, sets and deletes the Variables of
   its own Session ([Through the Admin API](#through-the-admin-api)).
@@ -4441,7 +4463,7 @@ them take.
   write without writing them (see [Rendering a
   template](#rendering-a-template)).
 
-Each [Journal](../README.md#the-journal) entry records the names of the
+Each [Journal](admin-api.md#the-journal) entry records the names of the
 Variables the request wrote, in the order written, as `variablesWritten`.
 It is empty for a Stub without `variables`, for a request that no Stub
 matched, when a value failed to render or a data write failed, and when
@@ -4495,7 +4517,7 @@ check what its requests wrote.
 
 #### Resets and reloads
 
-A [reset](../README.md#sessions-and-ephemeral-stubs) clears the Variables
+A [reset](admin-api.md#sessions-and-ephemeral-stubs) clears the Variables
 in its scope, so that a test starts clean:
 
 - `{"scope":"session"}` clears the calling Session's Variables in every
@@ -4924,7 +4946,7 @@ of a Stub of the bucket's Mock, the values of `variables` included.
   reads the Default Mock's buckets.
 - A template reads the copy of the request's Session when it holds one,
   and else the initial value ([Session copies](#session-copies)).
-- An [Ephemeral Stub](../README.md#sessions-and-ephemeral-stubs) reads the
+- An [Ephemeral Stub](admin-api.md#sessions-and-ephemeral-stubs) reads the
   buckets of its Mock, and the copies of its Session. After a reload
   removes a bucket, its reads of that bucket are missing, so `??` gives a
   fallback.
@@ -4940,7 +4962,7 @@ through the Admin API](#data-buckets-through-the-admin-api)).
 
 - Reads never copy, so a Session that only reads costs no memory.
 - Copies are kept per Mock, per
-  [Session](../README.md#sessions-and-ephemeral-stubs) and per bucket, in
+  [Session](admin-api.md#sessions-and-ephemeral-stubs) and per bucket, in
   the process. Requests without a Session share one copy of each bucket,
   as they share Scenario state.
 - Each replica keeps its own copies, and they are lost on restart.
@@ -5000,7 +5022,7 @@ Three calls in one Session answer `{"visits":1}`, `{"visits":2}` and
 - A counter is a `set` with a helper, as above. `merge` and `append` keep
   the rest of the bucket: `{ op: append, bucket: cart, value: "${body}" }`
   adds the request's body to a cart.
-- An [Ephemeral Stub](../README.md#sessions-and-ephemeral-stubs) takes
+- An [Ephemeral Stub](admin-api.md#sessions-and-ephemeral-stubs) takes
   `dataWrites` too, over the buckets of its Mock, and writes the copies of
   its Session.
 
@@ -5146,7 +5168,7 @@ entry, and RESOURCE_EXHAUSTED `state limit reached`
 ([smock's own failures](grpc.md#smocks-own-failures)).
 
 A write that cannot be applied writes no log line in the default `json`
-[log format](../README.md#run). The `mockoon` format writes the error line
+[log format](running.md#logs). The `mockoon` format writes the error line
 of a [template failure](#missing-values-and-render-errors), with the
 message of the 500's body, just before the request's
 `Transaction recorded` line, also with the Journal off:
@@ -5195,7 +5217,7 @@ for an Ephemeral Stub:
 
 #### Writes in the Journal
 
-Each [Journal](../README.md#the-journal) entry names the buckets its
+Each [Journal](admin-api.md#the-journal) entry names the buckets its
 request wrote, in the order first written, each once, as `dataWritten`.
 `dataError` is the `at` and the `message` of a write that failed to
 apply, as the 500 gives them, or null. Both are always present, and count
@@ -5605,7 +5627,7 @@ the write. A connection Fault replaces the answer, but not the write, and
 
 #### CRUD Stubs in the Journal
 
-Each [Journal](../README.md#the-journal) entry has `crud`: null, or the
+Each [Journal](admin-api.md#the-journal) entry has `crud`: null, or the
 operation and its key. A list records `{"op":"list","key":null}`,
 whatever its query. A read, a replace, an update and a delete record
 `read`, `replace`, `update` and `delete` with the item path's key text,
@@ -5620,7 +5642,7 @@ its own answers.
 
 #### Ephemeral CRUD Stubs
 
-An [Ephemeral Stub](../README.md#sessions-and-ephemeral-stubs) can be a
+An [Ephemeral Stub](admin-api.md#sessions-and-ephemeral-stubs) can be a
 CRUD Stub, with no `id` or `mock`, as any Ephemeral Stub. It serves the
 requests of its Session, and reads and writes its Session's copy of the
 bucket.
@@ -5711,7 +5733,7 @@ brings them back for `checkout-42`.
 
 ### Copies in resets and reloads
 
-A [reset](../README.md#sessions-and-ephemeral-stubs) drops the copies in
+A [reset](admin-api.md#sessions-and-ephemeral-stubs) drops the copies in
 its scope, so that their buckets read their initial values again:
 
 - `{"scope":"session"}` drops the calling Session's copies in every Mock,
@@ -6073,7 +6095,7 @@ oneofs, and every well-known type, in its ProtoJSON form
 
 #### Ephemeral gRPC Stubs
 
-An [Ephemeral Stub](../README.md#sessions-and-ephemeral-stubs) is a gRPC
+An [Ephemeral Stub](admin-api.md#sessions-and-ephemeral-stubs) is a gRPC
 Stub when its exact `path` names a method of its Mock's set, as a Stub in a
 Definition file is. smock checks it against the set and normalises its
 `json` condition, as it does when the files load, or refuses it with 400
@@ -6847,6 +6869,47 @@ greeter.yaml: /stubs/0/response: warning: the reply's Trailers-Only block would 
 
 A templated reply gets no warning, since its size is known only once
 rendered.
+
+## Writing Definition files in YAML
+
+Definition files can be YAML (`.yaml` or `.yml`), mixed with JSON files
+in one directory. A YAML file means exactly what the equivalent JSON file
+means. `defs/users.yaml` is the same as the `defs/users.json` of the
+[README's quick start](../README.md#run):
+
+```yaml
+mocks:
+  - name: users
+stubs:
+  - id: get-user
+    mock: users
+    request: { method: GET, path: /users/1 }
+    response:
+      status: 200
+      headers:
+        Content-Type: application/json
+      body: '{"id":1,"name":"Alice"}'
+```
+
+To keep that meaning the same in every YAML version and tool, smock accepts
+only a safe subset of YAML (`yaml/`):
+
+- Block and flow collections, plain and quoted scalars, `|` and `>` block
+  scalars with their chomping indicators, comments, and one document.
+- Plain `true`, `false`, `null` and JSON-syntax numbers are typed; quoted
+  scalars are always strings. Any other plain scalar that YAML 1.1 or 1.2
+  would type, such as `yes`, `on`, `~`, `True`, `0x1F`, `007`, `1_000`,
+  `.inf` or `2001-12-14`, is rejected with "quote this value". Every other
+  plain scalar is a string.
+- Anchors, aliases, tags, merge keys, duplicate keys and multiple documents
+  are rejected.
+
+A JSON file with a key repeated in one object is rejected too, at the later
+key: JSON parsers disagree on which of the two values counts.
+
+Every problem is reported with the file and the JSON Pointer of the value,
+such as `users.yaml: /stubs/0/request/method: "on" may be read as a boolean;
+quote this value`.
 
 ## Editor support
 

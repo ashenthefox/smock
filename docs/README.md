@@ -1,20 +1,24 @@
 # Documentation
 
 These are smock's documents, grouped by who reads them. The
-[README](../README.md) says what smock is and how to run it, and
+[README](../README.md) says what smock is and has the quick start, and
 [GLOSSARY.md](../GLOSSARY.md) defines the terms every document uses,
 such as Mock, Stub and Session.
 
 ## Using smock
 
-- The README's [Run](../README.md#run),
-  [Sessions and Ephemeral Stubs](../README.md#sessions-and-ephemeral-stubs)
-  and [The Journal](../README.md#the-journal) describe `smock serve` and
-  its settings, HTTPS, the Admin API and its metrics, `smock check`,
-  `smock render`, and how tests add Stubs and check what was called.
+- [running.md](running.md) describes `smock serve`: its startup, ports
+  and protocols, its settings, its logs, its limits and timeouts, the
+  drain on SIGTERM, HTTPS and the `Date` header.
+- [admin-api.md](admin-api.md) describes the Admin API: its token, the
+  status, the probes and the metrics, rendering a Stub, and how tests add
+  Ephemeral Stubs in a Session and check in the Journal what was called.
+- [commands.md](commands.md) describes the commands that do not serve:
+  `smock check`, `smock render` and `smock import-openapi`.
 - [definition-files.md](definition-files.md) describes the format of
   Definition files: how Stubs match requests, what they answer,
-  templates, Variables, Data buckets, CRUD Stubs, Faults and reloading.
+  templates, Variables, Data buckets, CRUD Stubs, Faults, reloading and
+  writing Definition files in YAML.
 - [http2.md](http2.md) says how clients reach smock over HTTP/2, h2c on
   the plain port and h2 on the TLS port, from curl, Go, the JVM, browsers
   and behind a load balancer. It says what a Stub and the Journal see of
@@ -52,23 +56,19 @@ such as Mock, Stub and Session.
 - [charts/smock/README.md](../charts/smock/README.md) describes the Helm
   chart: where the Definition files come from, the Admin API token and
   TLS, probes, sizing, and every value with its default.
-- The README's
-  [Container image and release binaries](../README.md#container-image-and-release-binaries)
-  describes what each release publishes, and its
-  [Verify the image](../README.md#verify-the-image) and
-  [Verify the Helm chart](../README.md#verify-the-helm-chart) say how to
-  check their signatures and fetch the image's SBOM.
+- [installing.md](installing.md) describes what each release publishes,
+  the container image, the Helm chart and the Linux binaries, and says
+  how to verify the signatures of the image and the chart and fetch the
+  image's SBOM.
 - [SECURITY.md](../SECURITY.md) says which releases get security fixes,
   and how to report a vulnerability.
 - [CHANGELOG.md](../CHANGELOG.md) records what changed in each release.
 
 ## Contributing to smock
 
-- The README's [Layout](../README.md#layout),
-  [Toolchain](../README.md#toolchain) and
-  [Build and test](../README.md#build-and-test) describe the modules and
-  packages, the pinned MoonBit toolchain, and how to build and test
-  smock.
+- [CONTRIBUTING.md](../CONTRIBUTING.md) has the contribution policy, and
+  describes the modules and packages, the pinned MoonBit toolchain, and
+  how to build and test smock.
 - [bench/README.md](../bench/README.md) describes the release benchmark:
   how to run it on a machine, on GKE Autopilot and in CI, what a run
   writes, and how to compare runs.

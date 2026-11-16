@@ -555,7 +555,7 @@ The warning does not change the exit status
 ### Ephemeral gRPC Stubs
 
 A test can add a gRPC Stub through the Admin API, as any
-[Ephemeral Stub](../README.md#sessions-and-ephemeral-stubs). It is a gRPC
+[Ephemeral Stub](admin-api.md#sessions-and-ephemeral-stubs). It is a gRPC
 Stub when its path names a method of the Mock's set. This one makes the
 calls of the Session `test-a` to the [quick start](#quick-start)'s Mock
 fail with UNAVAILABLE:
@@ -1359,7 +1359,7 @@ HTTP Stub's condition on one, stay as written.
 
 ### Sessions
 
-A call carries its [Session](../README.md#sessions-and-ephemeral-stubs)
+A call carries its [Session](admin-api.md#sessions-and-ephemeral-stubs)
 in its `baggage` metadata, as an HTTP request carries it in its `baggage`
 header: in the `smock-session` member, or wherever `--session-header` and
 `--session-member` say. There is no key of gRPC's own. With grpcurl:
@@ -2443,8 +2443,8 @@ without their padding, as the entries hold them:
 The request metrics, `smock_requests_total`,
 `smock_request_duration_seconds` and `smock_unmatched_requests_total`,
 count calls with the labels they give HTTP requests, `mock` and `stub`
-([the README's metrics](../README.md#run)). No metric and no label gives
-the gRPC status: only the Journal records it. Each call counts and is
+([Request metrics](admin-api.md#request-metrics)). No metric and no label
+gives the gRPC status: only the Journal records it. Each call counts and is
 recorded as follows:
 
 | The call | The request metrics | The Journal |
@@ -3181,7 +3181,7 @@ turns it on says NOT_SERVING ([During the drain](#during-the-drain)), and
 `/readyz` fails. So clients that health-check smock, and Kubernetes,
 send no more calls to it. The connection closes once no call is in
 progress. At `--drain-timeout-ms`, calls still in progress are cut, and
-their clients see UNAVAILABLE ([Run](../README.md#run)).
+their clients see UNAVAILABLE ([The drain](running.md#the-drain)).
 
 ## What smock does not serve
 

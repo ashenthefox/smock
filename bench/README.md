@@ -111,7 +111,8 @@ A CPU limit equal to the request is a CFS quota over a 100 ms period, as
 here: under 50m, smock may run 5 ms in every 100 ms. smock runs with its
 defaults, so if they do not fit a memory limit, the run shows OOM kills
 rather than hiding them; the Journal's byte bound follows the memory limit
-([The Journal](../README.md#the-journal)): 13 MiB under 52Mi, 64 MiB under the others.
+([The Journal](../docs/admin-api.md#the-journal)): 13 MiB under 52Mi, 64 MiB
+under the others.
 Each profile measures idle RSS, then plain HTTP, TLS, and HTTP/2 as h2c
 and over TLS, and h2c with several streams on each connection
 ([HTTP/2 cases](#http2-cases)), all with keep-alive
@@ -380,7 +381,8 @@ gRPC status of its reply and its Journal entry: the Mock, the Stub,
 ## The mockoon log format in the benchmark
 
 `--log-format mockoon` runs smock in the `mockoon` log format
-([Run](../README.md#run)), so that a run measures what the format costs:
+([Logs](../docs/running.md#logs)), so that a run measures what the format
+costs:
 smock writes a `Transaction recorded` line to stdout for each request,
 and waits for each write to finish. `--log-format json`, the default,
 runs smock as runs before the option did: with no `--log-format`, and
@@ -532,7 +534,8 @@ generator that paces requests more finely than 1 ms.
 
 A full run of `bench/plan-autopilot.json` measures every target of its
 architecture; on GKE, idle RSS and peak memory come from smock's own
-[process and cgroup metrics](../README.md#run), so a smock without them leaves
+[process and cgroup metrics](../docs/admin-api.md#process-and-cgroup-metrics),
+so a smock without them leaves
 those two unmeasured. A run of `bench/plan.json`, as in CI, runs none of
 these profiles, and reports each target as not measured.
 
@@ -1094,7 +1097,9 @@ profile runs.
 The summary checks the targets of the run's architecture (`--arch`).
 Nothing outside smock's Pod can read its cgroup on Autopilot, so what
 smock used comes from its own
-`/metrics`, its [process and cgroup metrics](../README.md#run), which the load
+`/metrics`, its
+[process and cgroup metrics](../docs/admin-api.md#process-and-cgroup-metrics),
+which the load
 generator scrapes right before and right after each step, and a second
 into it: its CPU time and throttling during the step and in its first
 second, from its container's cgroup, with the CPU time a request and

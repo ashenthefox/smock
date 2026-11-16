@@ -444,11 +444,11 @@ async test "cgroup metrics: under a CPU quota and a memory limit, smock's cgroup
 ///|
 async test "cgroup metrics: in whatever cgroup smock runs, /metrics has a cgroup metric exactly when the cgroup's file has its count, as the file has it when /metrics is scraped" {
   // smock serves the cgroup metrics whose counts the files have when it
-  // starts (README.md), so the check holds of a smock whose cgroup had the
-  // same counts from before it started until after the scrape. Their
-  // controllers can still change in between, as when a scope with a CPU
-  // quota from outside the tests starts or ends beside the test process:
-  // the check is then made again with a new smock.
+  // starts (docs/admin-api.md), so the check holds of a smock whose cgroup
+  // had the same counts from before it started until after the scrape.
+  // Their controllers can still change in between, as when a scope with a
+  // CPU quota from outside the tests starts or ends beside the test
+  // process: the check is then made again with a new smock.
   cgroup_tests.acquire()
   defer cgroup_tests.release()
   let dir = cgroup_of()

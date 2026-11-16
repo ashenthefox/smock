@@ -672,7 +672,7 @@ of each GitHub release include its section
   cosign, without a key, as the image is: the signature's certificate names
   the release workflow at the release's tag. The release workflow verifies
   the signature before it publishes the release. See
-  [Verify the Helm chart](README.md#verify-the-helm-chart).
+  [Verify the Helm chart](docs/installing.md#verify-the-helm-chart).
 - The image's SBOM lists the MoonBit native runtime, mimalloc and simdutf,
   which come with the MoonBit toolchain and are linked into smock, with the
   licences that NOTICE gives them. The runtime has the toolchain's version,
@@ -684,7 +684,7 @@ of each GitHub release include its section
   kept its connection, and the response smock held for it, open for good.
   A client that reads slowly but steadily still gets the whole response,
   and delays do not count. It is not logged, like the read and idle
-  timeouts. See [Run](README.md#run).
+  timeouts. See [The write timeout](docs/running.md#the-write-timeout).
 - A `json` condition can match the last element of an array with
   `{ "$last": <condition> }`. It holds when the value is an array with at
   least one element, and its last element meets the condition, so a Stub
@@ -839,7 +839,7 @@ of each GitHub release include its section
   startup. [Logs](docs/migrating-from-mockoon.md#logs) in the Mockoon
   migration guide shows the setting for the binary, Docker and the Helm
   chart, and lists every line and how it differs from Mockoon's. See also
-  [Run](README.md#run).
+  [Logs](docs/running.md#logs).
 
 ### Changed
 

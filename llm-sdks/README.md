@@ -90,8 +90,8 @@ retry checks, below, keep the default retries.
   openai-python or `OverloadedError` from anthropic-sdk-python for the
   529.
 - Retries: with clients that keep the default retries, each call in a
-  [Session](../README.md#sessions-and-ephemeral-stubs) of its own, the
-  Journal holds one request of the 429, whose `x-should-retry` is
+  [Session](../docs/admin-api.md#sessions-and-ephemeral-stubs) of its own,
+  the Journal holds one request of the 429, whose `x-should-retry` is
   `"false"`, and three of the 529, which has none, as each SDK retries it
   twice. So the SDKs do retry, and the header is what stops them.
 

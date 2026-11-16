@@ -116,12 +116,11 @@ export VERSION=<version>
 export IMAGE=ghcr.io/hirunefu/smock:$VERSION
 ```
 
-The image and the chart are signed. The README's
-[Verify the image](../README.md#verify-the-image) says how to check the
+The image and the chart are signed. In [installing.md](installing.md),
+[Verify the image](installing.md#verify-the-image) says how to check the
 image's signature and fetch its SBOM, and
-[Verify the Helm chart](../README.md#verify-the-helm-chart) how to check
-the chart's signature. The README's
-[Container image and release binaries](../README.md#container-image-and-release-binaries)
+[Verify the Helm chart](installing.md#verify-the-helm-chart) how to check
+the chart's signature. [installing.md](installing.md)
 and [charts/smock/README.md](../charts/smock/README.md) describe the
 image and the chart.
 
@@ -511,9 +510,9 @@ The second call lists the requests that no Stub answered, such as
 `/users/2`, each with its Near miss in full. Tests keep their requests
 apart with a *Session*, named in the header
 `baggage: smock-session=<key>`, and can add *Ephemeral Stubs* that only
-their Session sees. The README's
-[Sessions and Ephemeral Stubs](../README.md#sessions-and-ephemeral-stubs)
-and [The Journal](../README.md#the-journal) describe both. Each Pod
+their Session sees. In [admin-api.md](admin-api.md),
+[Sessions and Ephemeral Stubs](admin-api.md#sessions-and-ephemeral-stubs)
+and [The Journal](admin-api.md#the-journal) describe both. Each Pod
 keeps its own Ephemeral Stubs, Scenario state, Variables, copies of Data
 buckets and Journal, so tests that use them need one replica.
 

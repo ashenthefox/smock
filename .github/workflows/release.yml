@@ -12,13 +12,13 @@
 #    workflow's GitHub OIDC identity), attests an SPDX SBOM for each
 #    architecture (the base's packages, which syft finds, and smock with
 #    the MoonBit modules that the build of that architecture resolved, which
-#    scripts/add-smock-to-sbom.sh adds), and verifies all of that as the
-#    README does (scripts/verify-image.sh).
+#    scripts/add-smock-to-sbom.sh adds), and verifies all of that as
+#    docs/installing.md does (scripts/verify-image.sh).
 # 3. chart and publish-chart: packages the Helm chart with the version as its
 #    version and app version, so it runs the image published in step 2
 #    (scripts/package-helm-chart.sh), pushes it as an OCI artifact to
 #    oci://ghcr.io/hirunefu/charts/smock, signs it with cosign (keyless, as
-#    the image) and verifies the signature as the README does
+#    the image) and verifies the signature as docs/installing.md does
 #    (scripts/verify-chart.sh).
 # 4. release: creates the GitHub release with the linux/amd64 and
 #    linux/arm64 binaries (the same binaries as in the image), the SBOMs,
@@ -246,7 +246,7 @@ jobs:
             cosign attest --yes --type spdxjson --predicate "$sbom" "$IMAGE@$digest"
           done
 
-      - name: Verify the published image as the README does
+      - name: Verify the published image as docs/installing.md does
         run: scripts/verify-image.sh "$IMAGE:$VERSION"
 
       - uses: actions/upload-artifact@v7
@@ -339,7 +339,7 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: cosign sign --yes "${CHARTS#oci://}/smock@$DIGEST"
 
-      - name: Verify the published chart as the README does
+      - name: Verify the published chart as docs/installing.md does
         run: scripts/verify-chart.sh "${CHARTS#oci://}/smock:$VERSION"
 
       - name: Check the published chart
