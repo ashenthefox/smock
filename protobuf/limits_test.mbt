@@ -411,6 +411,365 @@ test "an Any's message is printed in place, after its @type: one with no field t
 }
 
 ///|
+/// A set written field by field: google.protobuf.Any and Duration, and in
+/// the package `e`, `E`, a message with no field, `F`, with the string
+/// `name`, and messages that hold an Any: `Only` alone, as `a`, `Last`
+/// after the string `pad`, `First` before it, `Middle` between the strings
+/// `before` and `after`, `List` as the repeated `items`, and `Map` as the
+/// values of the map `items`, whose keys are strings.
+fn any_holders() -> @protobuf.DescriptorSet {
+  let any_type = ".google.protobuf.Any"
+  // A repeated field numbered 1, of the message type `type_name`.
+  let listed = (name : String, type_name : String) => {
+    nested(w => {
+      string_field(w, 1, name)
+      varint_field(w, 3, 1)
+      varint_field(w, 4, 3)
+      varint_field(w, 5, 11)
+      string_field(w, 6, type_name)
+    })
+  }
+  let any = file_proto(
+    "google/protobuf/any.proto",
+    package_name="google.protobuf",
+    body=w => {
+      message_field(
+        w,
+        4,
+        message_proto("Any", body=w => {
+          message_field(w, 2, field_proto("type_url", 1, 9))
+          message_field(w, 2, field_proto("value", 2, 12))
+        }),
+      )
+    },
+  )
+  let duration = file_proto(
+    "google/protobuf/duration.proto",
+    package_name="google.protobuf",
+    body=w => {
+      message_field(
+        w,
+        4,
+        message_proto("Duration", body=w => {
+          message_field(w, 2, field_proto("seconds", 1, 3))
+          message_field(w, 2, field_proto("nanos", 2, 5))
+        }),
+      )
+    },
+  )
+  let entry = message_proto("ItemsEntry", body=w => {
+    message_field(w, 2, field_proto("key", 1, 9))
+    message_field(w, 2, field_proto("value", 2, 11, type_name=any_type))
+    // MessageOptions with map_entry true.
+    message_field(w, 7, nested(w => varint_field(w, 7, 1)))
+  })
+  let holders = file_proto(
+    "e.proto",
+    package_name="e",
+    dependencies=["google/protobuf/any.proto"],
+    body=w => {
+      message_field(w, 4, message_proto("E"))
+      message_field(
+        w,
+        4,
+        message_proto("F", body=w => {
+          message_field(w, 2, field_proto("name", 1, 9))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("Only", body=w => {
+          message_field(w, 2, field_proto("a", 1, 11, type_name=any_type))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("Last", body=w => {
+          message_field(w, 2, field_proto("pad", 1, 9))
+          message_field(w, 2, field_proto("a", 2, 11, type_name=any_type))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("First", body=w => {
+          message_field(w, 2, field_proto("a", 1, 11, type_name=any_type))
+          message_field(w, 2, field_proto("pad", 2, 9))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("Middle", body=w => {
+          message_field(w, 2, field_proto("before", 1, 9))
+          message_field(w, 2, field_proto("a", 2, 11, type_name=any_type))
+          message_field(w, 2, field_proto("after", 3, 9))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("List", body=w => {
+          message_field(w, 2, listed("items", any_type))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("Map", body=w => {
+          message_field(w, 2, listed("items", ".e.Map.ItemsEntry"))
+          message_field(w, 3, entry)
+        }),
+      )
+    },
+  )
+  @protobuf.read_descriptor_set(set_of([any, duration, holders])) catch {
+    err => abort("not a set: \{err}")
+  }
+}
+
+///|
+/// `input` decoded as a message of the type whose full name is `name` in
+/// `set`, with its JSON bounded by `limit`, as text, or the error that
+/// stops it.
+fn bounded_in(
+  set : @protobuf.DescriptorSet,
+  name : String,
+  input : Bytes,
+  limit~ : Int32,
+) -> String {
+  guard set.find_message(name) is Some(message) else {
+    abort("no message \{name}")
+  }
+  @utf8.decode(@protobuf.decode_json(set, message, input[:], limit~)) catch {
+    err => "error: \{err}"
+  }
+}
+
+///|
+test "the JSON is held to the limit after an Any's object too: a message that ends one octet past the limit, with the brace after an Any of a message with no field, is refused" {
+  let set = any_holders()
+  // An Only whose Any holds an E.
+  let only = nested(w => {
+    message_field(w, 1, any_of("type.googleapis.com/e.E", b""))
+  })
+  inspect(
+    [
+      bounded_in(set, "e.Only", only, limit=no_limit),
+      bounded_in(set, "e.Only", only, limit=41),
+      bounded_in(set, "e.Only", only, limit=40),
+    ].join("\n"),
+    content=(
+      #|{"a":{"@type":"type.googleapis.com/e.E"}}
+      #|{"a":{"@type":"type.googleapis.com/e.E"}}
+      #|error: the decoded message passes the limit of 40 octets
+    ),
+  )
+}
+
+///|
+/// How `decode_json` holds the JSON of `input`, a message of the type
+/// whose full name is `name` in `set`, to every limit from 0 to the JSON's
+/// size and two more: `held` when it raises `TooLarge` with each limit
+/// under the size, and prints the text that it prints with no limit with
+/// every other. Or else the first limit with which it does not, and what
+/// it does with it.
+fn swept(set : @protobuf.DescriptorSet, name : String, input : Bytes) -> String {
+  guard set.find_message(name) is Some(message) else {
+    abort("no message \{name}")
+  }
+  let whole = @protobuf.decode_json(set, message, input[:], limit=no_limit) catch {
+    err => return "error: \{err}"
+  }
+  for limit in 0..<=(whole.length() + 2) {
+    let outcome = try
+      @protobuf.decode_json(set, message, input[:], limit~)
+    catch {
+      TooLarge(limit=passed) => "refused at \{passed}"
+      err => "error: \{err}"
+    } noraise {
+      text =>
+        if text == whole {
+          "printed"
+        } else {
+          "printed otherwise, as \{text.length()} octets"
+        }
+    }
+    let wanted = if limit < whole.length() {
+      "refused at \{limit}"
+    } else {
+      "printed"
+    }
+    if outcome != wanted {
+      return "with the limit \{limit}, \{outcome}"
+    }
+  }
+  "held"
+}
+
+///|
+test "the JSON is held to every limit wherever an Any is printed: as the whole message, last, first and in the middle of its message, in a list, in a map and in another Any, with a message of no field, one with a field and a well-known type, in the first room made for the text or past it" {
+  let set = any_holders()
+  let url = (name : String) => "type.googleapis.com/\{name}"
+  // An F whose name is `name`.
+  let f = (name : Bytes) => {
+    nested(w => {
+      w.tag(1, Len)
+      w.length_delimited(name)
+    })
+  }
+  let empty = any_of(url("e.E"), b"")
+  let filled = any_of(url("e.F"), f(b"Tom"))
+  // 30 control characters, which the JSON prints with six octets each: a
+  // text that outgrows the room first made for it, twice the message and
+  // 16 octets.
+  let controls = repeated(b"\x01", 30)
+  let long = any_of(url("e.F"), f(controls))
+  let only = (any : Bytes) => nested(w => message_field(w, 1, any))
+  let last = (pad : Bytes, any : Bytes) => {
+    nested(w => {
+      w.tag(1, Len)
+      w.length_delimited(pad)
+      message_field(w, 2, any)
+    })
+  }
+  let first = (any : Bytes) => {
+    nested(w => {
+      message_field(w, 1, any)
+      string_field(w, 2, "p")
+    })
+  }
+  let middle = (any : Bytes) => {
+    nested(w => {
+      string_field(w, 1, "b")
+      message_field(w, 2, any)
+      string_field(w, 3, "a")
+    })
+  }
+  let list = (anys : Array[Bytes]) => {
+    nested(w => {
+      for any in anys {
+        message_field(w, 1, any)
+      }
+    })
+  }
+  let map = (entries : Array[(String, Bytes)]) => {
+    nested(w => {
+      for entry in entries {
+        message_field(
+          w,
+          1,
+          nested(e => {
+            string_field(e, 1, entry.0)
+            message_field(e, 2, entry.1)
+          }),
+        )
+      }
+    })
+  }
+  let cases : Array[(String, Bytes)] = [
+    // The Any as the whole message, holding a message with a field: the
+    // text ends with that message's brace, so nothing is printed after
+    // the Any's object that a limit one octet short could refuse instead.
+    ("google.protobuf.Any", filled),
+    // The Any alone, last, first and in the middle of its message.
+    ("e.Only", only(empty)),
+    ("e.Only", only(filled)),
+    ("e.Last", last(b"p", empty)),
+    ("e.Last", last(b"p", filled)),
+    ("e.First", first(empty)),
+    ("e.First", first(filled)),
+    ("e.Middle", middle(empty)),
+    ("e.Middle", middle(filled)),
+    // In a repeated field, and as a map's values, under keys long enough
+    // for the JSON to take more than what is held to print the map.
+    ("e.List", list([empty, filled, empty])),
+    ("e.Map", map([("k".repeat(80), empty), ("l".repeat(80), filled)])),
+    // An Any in an Any, printed as its `value`, and one in the message
+    // that an Any holds, both with their braces to come off.
+    ("google.protobuf.Any", any_of(url("google.protobuf.Any"), empty)),
+    ("google.protobuf.Any", any_of(url("e.Only"), only(empty))),
+    ("google.protobuf.Any", any_of(url("e.Middle"), middle(filled))),
+    // A well-known type, printed as `value`.
+    (
+      "e.Last",
+      last(
+        b"p",
+        any_of(
+          url("google.protobuf.Duration"),
+          seconds_and_nanos(1, 500_000_000),
+        ),
+      ),
+    ),
+    // Texts that outgrow their first room: before an Any that ends the
+    // message, in an Any, and in an Any that another holds in a list.
+    ("e.Last", last(controls, empty)),
+    ("e.Last", last(b"p", long)),
+    ("e.List", list([any_of(url("e.Only"), only(long)), empty])),
+  ]
+  let out = []
+  for case in cases {
+    let (name, input) = case
+    let text = bounded_in(set, name, input, limit=no_limit)
+    let shown = if text.length() > 100 {
+      "\{name}, \{text.length()} octets"
+    } else {
+      text
+    }
+    out.push("\{swept(set, name, input)}: \{shown}")
+  }
+  inspect(
+    out.join("\n"),
+    content=(
+      #|held: {"@type":"type.googleapis.com/e.F","name":"Tom"}
+      #|held: {"a":{"@type":"type.googleapis.com/e.E"}}
+      #|held: {"a":{"@type":"type.googleapis.com/e.F","name":"Tom"}}
+      #|held: {"pad":"p","a":{"@type":"type.googleapis.com/e.E"}}
+      #|held: {"pad":"p","a":{"@type":"type.googleapis.com/e.F","name":"Tom"}}
+      #|held: {"a":{"@type":"type.googleapis.com/e.E"},"pad":"p"}
+      #|held: {"a":{"@type":"type.googleapis.com/e.F","name":"Tom"},"pad":"p"}
+      #|held: {"before":"b","a":{"@type":"type.googleapis.com/e.E"},"after":"a"}
+      #|held: {"before":"b","a":{"@type":"type.googleapis.com/e.F","name":"Tom"},"after":"a"}
+      #|held: e.List, 132 octets
+      #|held: e.Map, 262 octets
+      #|held: {"@type":"type.googleapis.com/google.protobuf.Any","value":{"@type":"type.googleapis.com/e.E"}}
+      #|held: {"@type":"type.googleapis.com/e.Only","a":{"@type":"type.googleapis.com/e.E"}}
+      #|held: google.protobuf.Any, 118 octets
+      #|held: {"pad":"p","a":{"@type":"type.googleapis.com/google.protobuf.Duration","value":"1.500s"}}
+      #|held: e.Last, 230 octets
+      #|held: e.Last, 241 octets
+      #|held: e.List, 316 octets
+    ),
+  )
+}
+
+///|
+test "Anys three deep, each in the message of the one before, are printed with the widest limit, and held to every limit from 0 to past their JSON's size: the text may pass its limit by one octet, not by one for each Any around it, which would pass the largest Int32" {
+  let set = any_holders()
+  let only = (any : Bytes) => nested(w => message_field(w, 1, any))
+  let holding = (inner : Bytes) => {
+    only(any_of("type.googleapis.com/e.Only", inner))
+  }
+  // An Only whose Any holds an Only, whose Any holds an Only, whose Any
+  // holds an E.
+  let deep = holding(holding(only(any_of("type.googleapis.com/e.E", b""))))
+  inspect(
+    [
+      // The largest Int32, which is `no_limit`, then each limit from 0 to
+      // the JSON's size and two more.
+      bounded_in(set, "e.Only", deep, limit=0x7FFF_FFFF),
+      swept(set, "e.Only", deep),
+    ].join("\n"),
+    content=(
+      #|{"a":{"@type":"type.googleapis.com/e.Only","a":{"@type":"type.googleapis.com/e.Only","a":{"@type":"type.googleapis.com/e.E"}}}}
+      #|held
+    ),
+  )
+}
+
+///|
 test "a length that runs past its message, or past the message that holds it, makes the message not parse, at any level and before anything is allocated for it" {
   let past = [
     // A Burrow's name: 5 octets announced, 1 sent.

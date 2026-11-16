@@ -330,14 +330,17 @@ The JSON is bounded by `limit`, in octets. It is counted as it is
 printed, and `decode_json` raises `TooLarge` as soon as it passes the
 limit. A field without presence prints at its default even in an empty
 message, so a list of empty messages of 2 octets each could otherwise
-print far more than the message it comes from. What the decoder holds
-meanwhile is bounded by `limit` too: a view of the input for each run of
-records of a repeated field that do not come together, each record of a
-message field after its first, and each map entry, until it has printed
-them. Messages as encoders write them need few. The decoder checks every
-length against the octets left before it reads the value, and checks and
-repairs UTF-8 with no copy. smock passes `--body-limit`, so a gRPC call
-costs no more than the largest JSON body an HTTP request may send.
+print far more than the message it comes from. The text that
+`decode_json` returns never takes more than `limit` octets, and the
+buffers that it grows through take under three times `limit`. What the
+decoder holds meanwhile is bounded by `limit` too: a view of the input
+for each run of records of a repeated field that do not come together,
+each record of a message field after its first, and each map entry,
+until it has printed them. Messages as encoders write them need few. The
+decoder checks every length against the octets left before it reads the
+value, and checks and repairs UTF-8 with no copy. smock passes
+`--body-limit`, so the JSON of a gRPC call, once decoded, costs no more
+than the largest JSON body an HTTP request may send.
 
 The JSON values it prints are bounded too, by the size of the input:
 32,768 values, and 4 more for each octet. A value is every JSON value of

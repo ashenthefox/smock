@@ -5,11 +5,11 @@
 // larger, such as a list of empty messages each printed with every field
 // at its default, takes no more than the limit. The buffers that the text
 // grows through take more than the text: each is twice the last, until
-// the next would pass the limit and is the limit instead
-// (`Output::reserve`). Together they take up to four times a text that
-// has outgrown the first, and under three times the limit, or one buffer
-// more when the text passes the limit by the octet that `Output::wrapped`
-// allows it. What the decoder holds meanwhile to print the message, views
+// the next would hold the limit and is the last one instead, of the limit
+// and the octet that the text may pass it by while an Any's object is
+// printed (`Output::reserve`, `Output::wrapped`). Together they take up to
+// four times a text that has outgrown the first, and under three times
+// the limit. What the decoder holds meanwhile to print the message, views
 // of the input beyond one a field, is counted too, against the same limit
 // on its own.
 //
@@ -69,16 +69,20 @@ fn values_bound(octets : Int32) -> Int32 {
 /// at most `most_values` JSON values, while what the decoder holds
 /// meanwhile may take at most `limit` octets too (`Output::hold`).
 priv struct Output {
-  /// The text so far, at the start of `data`, which never grows past the
-  /// most the text may take.
+  /// The text so far, at the start of `data`, which never grows past
+  /// `limit` and one octet, the most the text may ever take.
   mut data : FixedArray[Byte]
   /// The length of the text so far.
   mut length : Int32
   /// The most octets the text may take, and what is held.
   limit : Int32
-  /// The most octets the text may take for now: `limit`, and one more
-  /// while the braces of an object are to come off (`Output::unwrap`).
+  /// The most octets the text may take for now: `limit`, and one more from
+  /// `Output::wrapped` until an object's braces next come off
+  /// (`Output::unwrap`).
   mut most : Int32
+  /// Where the room that the text has now ends: at the end of `data`, or
+  /// at `most` when that comes first. `Output::reserve` makes more.
+  mut room : Int32
   /// What the decoder holds, in octets, as `Output::hold` counts it.
   mut held : Int32
   /// The JSON values printed so far, the message that is printed being
@@ -90,9 +94,10 @@ priv struct Output {
 
 ///|
 /// An output with no text yet, bounded by `limit`, with room for
-/// `size_hint` octets of text, or `limit` when it is smaller. Its text may
-/// hold at most `most_values` JSON values, the value that is printed into
-/// it being the first: any number when none is given.
+/// `size_hint` octets of text, or for all the text may ever take when
+/// `size_hint` is `limit` or more. Its text may hold at most `most_values`
+/// JSON values, the value that is printed into it being the first: any
+/// number when none is given.
 fn Output::new(
   size_hint~ : Int32,
   limit~ : Int32,
@@ -107,8 +112,9 @@ fn Output::new(
   } else {
     limit
   }
-  let capacity = if size_hint < 0 || size_hint > limit {
-    limit
+  // The last buffer from the start, as `Output::reserve` makes it.
+  let capacity = if size_hint < 0 || size_hint >= limit {
+    limit + 1
   } else {
     size_hint
   }
@@ -117,6 +123,11 @@ fn Output::new(
     length: 0,
     limit,
     most: limit,
+    room: if capacity < limit {
+      capacity
+    } else {
+      limit
+    },
     held: 0,
     values: 1,
     most_values,
@@ -143,29 +154,43 @@ fn Output::reserve(self : Output, count : Int32) -> Unit raise DecodeError {
   }
   let needed = self.length + count
   if needed > self.data.length() {
-    // Doubled, but never past the most the text may take.
-    let doubled = if self.data.length() > self.most / 2 {
-      self.most
+    // Twice the last, or what is needed when that is more. A buffer that
+    // would hold the limit is the last: it holds the octet past the limit
+    // too, which the text may take for a while (`Output::wrapped`), so
+    // that no other is made after it.
+    let doubled = if self.data.length() >= self.limit / 2 {
+      self.limit
     } else {
       2 * self.data.length()
     }
+    let size = if doubled > needed { doubled } else { needed }
     let data = FixedArray::make(
-      if doubled > needed {
-        doubled
+      if size >= self.limit {
+        self.limit + 1
       } else {
-        needed
+        size
       },
       b'\x00',
     )
     data.unsafe_blit(0, self.data, 0, self.length)
     self.data = data
+    self.bound(self.most)
   }
 }
 
 ///|
-/// Writes `value`.
+/// Lets the text take at most `most` octets for now, and sets the room it
+/// has by that and by the buffer.
+fn Output::bound(self : Output, most : Int32) -> Unit {
+  self.most = most
+  self.room = if self.data.length() < most { self.data.length() } else { most }
+}
+
+///|
+/// Writes `value`. It tests the room, not the buffer's length: the buffer
+/// may hold an octet more than the text may take for now.
 fn Output::write_byte(self : Output, value : Byte) -> Unit raise DecodeError {
-  if self.length >= self.data.length() {
+  if self.length >= self.room {
     self.reserve(1)
   }
   self.data[self.length] = value
@@ -214,11 +239,11 @@ fn Output::release_to(self : Output, held : Int32) -> Unit {
 
 ///|
 /// Where the object that is printed next starts, an object whose braces
-/// `Output::unwrap` takes off once it is printed: the text may pass the
-/// limit by its `{` meanwhile.
+/// `Output::unwrap` takes off once it is printed. Until an object's braces
+/// next come off, the text may pass the limit by an octet: the `{` of this
+/// object, which leaves the text when the object turns out empty.
 fn Output::wrapped(self : Output) -> Int32 {
-  // The data never grows past the limit but by that octet.
-  self.most += 1
+  self.bound(self.limit + 1)
   self.length
 }
 
@@ -229,14 +254,17 @@ fn Output::wrapped(self : Output) -> Int32 {
 /// empty object leaves only the `}` that ends the object it is printed in.
 /// Raises `TooLarge` when the text then passes the limit.
 fn Output::unwrap(self : Output, at : Int32) -> Unit raise DecodeError {
-  self.most -= 1
   if self.length - at == 2 {
     self.data[at] = b'}'
     self.length = at + 1
   } else {
     self.data[at] = b','
   }
-  if self.length > self.most {
+  // The text keeps every octet it has now. An object printed around this
+  // one, whose braces are still to come off, holds this one's member, so
+  // its `{` becomes a comma.
+  self.bound(self.limit)
+  if self.length > self.limit {
     raise TooLarge(limit=self.limit)
   }
 }

@@ -2896,8 +2896,9 @@ of the message ([The decoder's limits](#the-decoders-limits)).
 ### The decoder's limits
 
 A small message can ask a decoder for far more than its size. smock
-bounds what decoding a call's message may cost, so that a gRPC call costs
-no more than the largest JSON body an HTTP request may send:
+bounds what decoding a call's message may cost, so that its JSON, once
+decoded, costs no more than the largest JSON body an HTTP request may
+send:
 
 - **Nesting.** Messages may nest 100 deep. That is the default of
   protobuf's C++ and Java parsers. Each nested message is a level, and so
@@ -2951,7 +2952,7 @@ and enum names of up to 40, for a call whose JSON smock parses once:
   an empty object or map about 110 more. Each octet of the JSON text
   costs about 5 more.
 - The 32,768 values that a message of any size may print cost 3 to
-  15 MiB. smock decodes and matches one call at a time, so calls at once
+  16 MiB. smock decodes and matches one call at a time, so calls at once
   do not add this up.
 - A message of 64 KiB may print 294,912 values, which cost 34 to
   112 MiB. The most is for empty maps whose JSON just fits
@@ -2968,19 +2969,19 @@ and enum names of up to 40, for a call whose JSON smock parses once:
 - smock never parses the JSON of a refused call. Such a call costs the
   text that smock printed before the bound, and the buffers that the
   text grew through. The buffer starts at twice the message's size and
-  doubles as the text grows, up to `--body-limit`. At its peak, a call
-  may hold every buffer the text grew through. So the text costs up to
-  four times its size, and at most about three times `--body-limit`,
-  30 MiB by default. The message itself, and the notes that smock holds
-  to print it, come on top of that. The example of
+  doubles as the text grows, up to `--body-limit` and one octet. At its
+  peak, a call may hold every buffer the text grew through. So the text
+  costs up to four times its size, and at most about three times
+  `--body-limit`, 30 MiB by default. The message itself, and the notes
+  that smock holds to print it, come on top of that. The example of
   [The values a message may print](#the-values-a-message-may-print),
   9,500 empty elements of 60 `int64` fields, costs 2.4 MiB. For empty
   elements of 120 enum fields, with field names of 29 characters and
-  enum names of 40, a message of up to 2 KB costs up to about 11 MiB,
-  and one of up to 10 KB up to about 20 MiB. The cost steps: where a
+  enum names of 40, a message of up to 2 KB costs up to about 11 MiB.
+  One of up to 10 KB costs up to about 20 MiB. The cost steps: where a
   slightly larger message saves the buffer one doubling, the cost
-  halves. So a message of 1.4 KB costs up to about 11 MiB, and one of
-  2 KB up to about 8 MiB.
+  halves. So a message of 1,382 octets costs up to about 11 MiB, one of
+  1,384 up to about 6 MiB, and one of 2,000 up to about 8 MiB.
 - The text of a served call grows through the same buffers, whatever
   reads the message, and smock then copies the text out of the last
   one. So a served call's text costs up to about five times its size
@@ -3087,11 +3088,14 @@ To count a message's values, count the values of its JSON:
 `jq '[..] | length'` does it for a JSON text. The Journal shows the JSON
 of a served message, cut at `--journal-body-limit`, 4,096 octets by
 default, so raise that limit to count a large message there. Keep
-`--journal-max-bytes` above the JSON's size too: the Journal evicts at
-once an entry that takes more. smock never shows the JSON of a refused
-message, so count such a message with protobuf's own printer, told to
-print the fields without presence. In Python, with protobuf 5.26 or
-later:
+`--journal-max-bytes` well above the JSON's size too. An entry also
+counts its request line and headers, a few hundred octets or more. The
+entry of an unmatched call holds the JSON again when its Near miss shows
+a body condition, and then counts up to three times the JSON's size. The
+Journal evicts at once an entry that takes more than the bound.
+smock never shows the JSON of a refused message, so count such a message
+with protobuf's own printer, told to print the fields without presence.
+In Python, with protobuf 5.26 or later:
 
 ```python
 from google.protobuf import json_format

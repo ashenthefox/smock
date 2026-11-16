@@ -112,9 +112,12 @@ let no_runs : Array[BytesView] = []
 /// printing stops as soon as it passes `limit` octets, so a small message
 /// whose JSON would be far larger, such as a list of empty messages each
 /// printed with every field at its default, prints no more than `limit`
-/// octets. The buffers that the text grows through, each twice the last,
-/// take more until the text is returned: up to four times a text that
-/// has outgrown the first, and at most about three times `limit`. What it
+/// octets. While an Any's object is printed, the text may pass `limit` by
+/// one octet, a brace that an object with no member then loses. The text
+/// that is returned never takes more than `limit` octets. The buffers that
+/// the text grows through, each twice the last, take more until the text
+/// is returned: up to four times a text that has outgrown the first, and
+/// under three times `limit`, since the largest is made once. What it
 /// holds meanwhile to print a message is bounded by `limit` too: views of
 /// the input, beyond one a field, of the records of a repeated field that
 /// do not come together, of a message field sent again, and of the
