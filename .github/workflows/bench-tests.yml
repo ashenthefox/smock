@@ -2,7 +2,7 @@
 # checklist uses (docs/merging-into-main.md), against fake gcloud, kubectl
 # and docker commands (bench/test_gke_script.py). Nothing reaches a cloud.
 #
-# The tests take about five minutes and read only the files listed under
+# The tests take about four minutes and read only the files listed under
 # paths below (the script, the two scripts and the Dockerfile it runs or
 # copies, and bench/), so they run when a push or a pull request changes
 # one of those, and not in ci.yml. For a push to a branch, GitHub compares

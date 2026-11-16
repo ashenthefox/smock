@@ -460,7 +460,7 @@ from `main`'s own commit, and `keep` keeps them once every job has passed.
 Every other run, and a run whose plan fails, runs every job.
 
 `.github/workflows/bench-tests.yml` runs the tests of `scripts/gke-bench.sh`
-(`bench/test_gke_script.py`), which take about five minutes, only on a push
+(`bench/test_gke_script.py`), which take about four minutes, only on a push
 or pull request that changes that script, `scripts/install-oha.sh`,
 `scripts/build-release.sh`, `Dockerfile`, `bench/` or the workflow itself.
 

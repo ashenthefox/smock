@@ -1334,7 +1334,7 @@ branch and each pull request, `.github/workflows/ci.yml` runs
 checklist reads, and checks the definitions against
 `bench/gen_definitions.py`. `.github/workflows/bench-tests.yml` runs
 `bench/test_gke_script.py`, the tests of `scripts/gke-bench.sh` against
-fake gcloud, kubectl and docker commands, which take about five minutes.
+fake gcloud, kubectl and docker commands, which take about four minutes.
 It runs only on a push or pull request that changes the script,
 `scripts/install-oha.sh`, `scripts/build-release.sh`, `Dockerfile`,
 `bench/` or the workflow itself. For a push to a branch, GitHub compares
