@@ -5,8 +5,8 @@
 # upgraded module that needs a later moonhttp would raise it with no change
 # to moon.mod. This check is what makes the pin exact: moonhttp is raised
 # only on purpose, on an integration branch, through the gate that
-# docs/releasing.md describes (Upgrading moonhttp). CI runs it on every
-# push.
+# docs/releasing.md describes (Upgrading moonhttp). CI runs it
+# (build-test.yml, job checks).
 #
 # It needs moon, with the registry index updated (moon update), and jq.
 #

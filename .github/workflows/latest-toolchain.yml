@@ -3,6 +3,13 @@
 # imports with the rest, moonhttp among them (ADR 0005). A failure opens an
 # issue, or comments on the one already open. Run it by hand from the Actions
 # tab to try it.
+#
+# A scheduled run builds nothing when the latest toolchain is the pinned one
+# and CI passed on main's head in the last 7 days: CI then tested the same
+# sources with the same toolchain (scripts/latest-toolchain-plan.sh). It
+# still runs when no push of main's head has passed CI in 7 days, so a
+# change outside the repository, such as a new runner image, waits a week
+# at most to show, and whenever it is started by hand.
 name: Latest MoonBit
 
 on:
@@ -14,17 +21,64 @@ permissions:
   contents: read
 
 jobs:
+  # Decides whether to build and test. Anything but an answer of "false"
+  # runs them: the first step may fail without failing the job, the plan
+  # always answers, and a plan that says nothing skips nothing.
+  resolve:
+    name: Compare the latest MoonBit with the pinned one
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # scripts/latest-toolchain-plan.sh looks up CI's run on this commit
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Each toolchain goes into a directory of its own, and neither onto
+      # the PATH of later steps (the install script adds it to GITHUB_PATH
+      # where that is set).
+      - name: Install both toolchains and write down their versions
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        run: |
+          for channel in pinned latest; do
+            export MOON_HOME="$RUNNER_TEMP/moon-$channel"
+            env -u GITHUB_PATH scripts/install-moonbit.sh "$channel"
+            "$MOON_HOME/bin/moon" version --all | tee "$RUNNER_TEMP/$channel.txt"
+          done
+
+      - id: plan
+        name: Decide whether to build and test
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          scripts/latest-toolchain-plan.sh
+          "$RUNNER_TEMP/pinned.txt" "$RUNNER_TEMP/latest.txt"
+          >>"$GITHUB_OUTPUT"
+
   build-test:
     name: Build and test (latest MoonBit)
+    needs: resolve
+    if: ${{ !cancelled() && needs.resolve.outputs.run != 'false' }}
     uses: ./.github/workflows/build-test.yml
+    # What the called workflow's jobs may ask for at most. Its job plan asks
+    # for actions: read, and does not run here.
+    permissions:
+      contents: read
+      actions: read
     with:
       toolchain: latest
 
+  # A job that runs into its time limit ends as cancelled, not as failed, so
+  # both are reported. A run that somebody cancels is not.
   report-failure:
     name: Report the failure
-    needs: build-test
-    if: failure()
+    needs: [resolve, build-test]
+    if: ${{ !cancelled() && (needs.build-test.result == 'failure' || needs.build-test.result == 'cancelled') }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       issues: write
     env:

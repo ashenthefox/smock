@@ -17,44 +17,208 @@
 #    becomes the digest of the new files, the Stub answers with the new
 #    response, and the Pod is the same one, with a restart count of 0.
 #
-# It deletes the cluster when it ends. It needs docker, kind, kubectl, helm,
-# curl, jq and python3.
+# It deletes the cluster when it ends, also when a HUP, INT or TERM signal
+# ends it. It needs docker, kind, kubectl, helm, curl, jq and python3.
+#
+# Creating the cluster needs no image and takes about half a minute, most of
+# it waiting for the control plane. So CI starts it in an earlier step, before
+# it builds the release binary and the image, and runs the rest once the
+# image is built:
+#
+# - --start creates the state directory if needed, starts creating the
+#   cluster in the background and returns at once. The background process
+#   leads a session of its own (setsid, from util-linux) and holds none of
+#   the caller's file descriptors, so the step that runs --start ends at
+#   once and the process outlives it. It writes into the state directory:
+#   cluster (the cluster's name), kubeconfig (the cluster's credentials),
+#   started (when creation started, in seconds since the epoch), pid (the
+#   background process's pid and its start time, see start_time below; its
+#   process group holds kind and its children), create.log (what kind
+#   printed) and, once creation has ended, status (kind's exit status). It
+#   refuses a state directory that already holds any of these files.
+# - --cluster waits until that creation has ended, for at most 5 minutes
+#   after --start, and prints create.log. It fails when creation failed or
+#   did not end in time. Otherwise it goes on as the first form does, from
+#   loading the image. It deletes the cluster when it ends, and leaves the
+#   state directory to the caller.
 #
 # usage: scripts/test-helm-chart-on-kind.sh <image>
+#        scripts/test-helm-chart-on-kind.sh --start <state directory>
+#        scripts/test-helm-chart-on-kind.sh --cluster <state directory> <image>
 # example: scripts/test-helm-chart-on-kind.sh smock:ci
 set -eu
-cd "$(dirname "$0")/.."
-
-if [ "$#" -ne 1 ]; then
-  echo "usage: $0 <image>" >&2
-  exit 2
-fi
-image=$1
-repository=${image%:*}
-tag=${image##*:}
-
-# The node image kind v0.33.0 was released with, by digest as kind asks.
-node_image=kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
-cluster=smock-chart-$$
-namespace=mocks
-release=smock
-
-tmp=$(mktemp -d)
-# The cluster's credentials stay here, out of the user's kubeconfig.
-export KUBECONFIG="$tmp/kubeconfig"
-pids=
-cleanup() {
-  for pid in $pids; do
-    kill "$pid" 2>/dev/null || true
-  done
-  kind delete cluster --name "$cluster" >/dev/null 2>&1 || true
-  rm -rf "$tmp"
-}
-trap cleanup EXIT
 
 say() {
   echo "test-helm-chart-on-kind: $*"
 }
+# die <message>: fails before there is anything on the cluster to show.
+die() {
+  echo "test-helm-chart-on-kind: $*" >&2
+  exit 1
+}
+usage() {
+  echo "usage: $0 <image>" >&2
+  echo "       $0 --start <state directory>" >&2
+  echo "       $0 --cluster <state directory> <image>" >&2
+  exit 2
+}
+
+# The state directory is resolved before the cd below, since the caller
+# names it relative to its own working directory.
+mode=all
+case ${1-} in
+--start)
+  [ "$#" -eq 2 ] || usage
+  mode=start
+  mkdir -p "$2"
+  state=$(cd "$2" && pwd)
+  ;;
+--create)
+  # What --start runs in the background, with an absolute state directory.
+  [ "$#" -eq 2 ] || usage
+  mode=create
+  state=$2
+  ;;
+--cluster)
+  [ "$#" -eq 3 ] || usage
+  mode=cluster
+  [ -f "$2/cluster" ] || die "$2 holds no cluster that --start started"
+  state=$(cd "$2" && pwd)
+  image=$3
+  ;;
+-*) usage ;;
+*)
+  [ "$#" -eq 1 ] || usage
+  image=$1
+  ;;
+esac
+cd "$(dirname "$0")/.."
+
+# The node image kind v0.33.0 was released with, by digest as kind asks.
+node_image=kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+# How long --cluster lets creation run, counted from --start: the node
+# image's download, the node's start and kind's own wait of up to 120 s for
+# the control plane fit in it.
+create_timeout=300
+namespace=mocks
+release=smock
+
+# create_cluster <name>: creates the cluster, with its credentials in
+# $KUBECONFIG.
+create_cluster() {
+  kind create cluster --name "$1" --image "$node_image" --wait 120s
+}
+
+# start_time <pid>: when the process <pid> started, in clock ticks since
+# boot (field 22 of /proc/<pid>/stat), or nothing when no process has that
+# pid or there is no /proc. A pid and its start time name one process: a
+# process that gets the pid after it is freed has a later start time.
+start_time() {
+  sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | cut -d ' ' -f 20
+}
+
+if [ "$mode" = start ]; then
+  command -v setsid >/dev/null || die "--start needs setsid (util-linux)"
+  # A file of an earlier start would pass for one of this start's.
+  for file in cluster started pid pid.new create.log kubeconfig status status.new; do
+    [ ! -e "$state/$file" ] ||
+      die "$state already holds the state of a cluster ($file); give --start a new directory"
+  done
+  echo "smock-chart-$$" >"$state/cluster"
+  date +%s >"$state/started"
+  setsid sh "$PWD/scripts/${0##*/}" --create "$state" \
+    </dev/null >"$state/create.log" 2>&1 &
+  # The background process writes its pid first; waiting for it shows here
+  # that it started.
+  for _ in $(seq 50); do
+    if [ -s "$state/pid" ]; then
+      say "creating cluster $(cat "$state/cluster") in the background, logging to $state/create.log"
+      exit 0
+    fi
+    sleep 0.1
+  done
+  cat "$state/create.log" >&2
+  die "the background creation of the cluster did not start"
+fi
+
+if [ "$mode" = create ]; then
+  # A new file is renamed into place, so a reader never sees it half written.
+  echo "$$ $(start_time "$$")" >"$state/pid.new"
+  mv "$state/pid.new" "$state/pid"
+  export KUBECONFIG="$state/kubeconfig"
+  status=0
+  create_cluster "$(cat "$state/cluster")" || status=$?
+  say "kind create cluster ended with exit status $status after $(($(date +%s) - $(cat "$state/started"))) s"
+  echo "$status" >"$state/status.new"
+  mv "$state/status.new" "$state/status"
+  exit "$status"
+fi
+
+repository=${image%:*}
+tag=${image##*:}
+
+tmp=$(mktemp -d)
+if [ "$mode" = cluster ]; then
+  cluster=$(cat "$state/cluster")
+  export KUBECONFIG="$state/kubeconfig"
+else
+  cluster=smock-chart-$$
+  # The cluster's credentials stay here, out of the user's kubeconfig.
+  export KUBECONFIG="$tmp/kubeconfig"
+fi
+
+# creating: whether the creation that --start started still runs; it sets
+# leader to the pid of the creation's process. That process leads a process
+# group, which kind and its children share, so the group outlives a
+# background shell that was killed while kind runs on. A process that has
+# the leader's pid but another start time is not the leader: the creation
+# ended without a status and its pid went to an unrelated process, whose
+# group is neither waited for nor signalled. A live group whose leader has
+# gone is still the creation's, since no new process gets the id of a
+# process group that still has members (POSIX).
+creating() {
+  [ ! -e "$state/status" ] && [ -s "$state/pid" ] || return 1
+  read -r leader leader_started <"$state/pid"
+  kill -0 "-$leader" 2>/dev/null || return 1
+  leader_now=$(start_time "$leader")
+  [ -z "$leader_now" ] || [ "$leader_now" = "$leader_started" ]
+}
+# stop_creation: stops a creation that still runs, so that it does not go on
+# making the cluster while cleanup deletes it. It signals the group only
+# while creating says that it is the creation's.
+stop_creation() {
+  creating || return 0
+  kill -TERM "-$leader" 2>/dev/null || true
+  for _ in $(seq 50); do
+    creating || return 0
+    sleep 0.2
+  done
+  kill -KILL "-$leader" 2>/dev/null || true
+}
+
+pids=
+cleanup() {
+  # A second signal, such as the TERM that follows the INT when a CI step is
+  # cancelled, would cut the cleanup short and leave the cluster: the
+  # cleanup ignores HUP, INT and TERM, and so do the commands it runs.
+  trap '' HUP INT TERM
+  for pid in $pids; do
+    kill "$pid" 2>/dev/null || true
+  done
+  if [ "$mode" = cluster ]; then
+    stop_creation
+  fi
+  kind delete cluster --name "$cluster" >/dev/null 2>&1 || true
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
+# dash runs the EXIT trap when the script exits but not when a signal kills
+# it, so these signals end the script through exit, with the status a shell
+# reports for each (128 + the signal's number).
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 fail() {
   echo "test-helm-chart-on-kind: $*" >&2
   echo "test-helm-chart-on-kind: the Pods and their logs:" >&2
@@ -65,7 +229,29 @@ fail() {
   exit 1
 }
 
-kind create cluster --name "$cluster" --image "$node_image" --wait 120s
+if [ "$mode" = cluster ]; then
+  [ -s "$state/pid" ] || die "the creation of cluster $cluster did not start: see what --start printed"
+  started=$(cat "$state/started")
+  waiting=$(date +%s)
+  say "waiting for the creation of cluster $cluster, at most $create_timeout s after it started"
+  while creating && [ "$(($(date +%s) - started))" -lt "$create_timeout" ]; do
+    sleep 0.5
+  done
+  waited=$(($(date +%s) - waiting))
+  echo "test-helm-chart-on-kind: what kind printed while it created cluster $cluster:" >&2
+  cat "$state/create.log" >&2
+  if [ ! -e "$state/status" ]; then
+    if creating; then
+      die "the creation of cluster $cluster did not end within $create_timeout s"
+    fi
+    die "the creation of cluster $cluster stopped without an exit status"
+  fi
+  status=$(cat "$state/status")
+  [ "$status" = 0 ] || die "the creation of cluster $cluster failed with exit status $status"
+  say "created cluster $cluster; waited $waited s for it here"
+else
+  create_cluster "$cluster"
+fi
 kind load docker-image "$image" --name "$cluster"
 
 kubectl create namespace "$namespace"
@@ -106,14 +292,14 @@ fi
 grep -q 'violate PodSecurity "restricted' "$tmp/broken.log" ||
   fail "the dry run refused a Pod for another reason than the Restricted standard: $(cat "$tmp/broken.log")"
 token="--set adminAuth.tokenSecret.name=smock-admin-token"
-for mode in \
+for variant in \
   "configmap|$token" \
   "configmap-env-tls|$token --set adminAuth.tokenAs=env --set tls.secretName=smock-tls --set tls.mockSecrets.users=users-tls" \
   "configmap-auth-off|--set adminAuth.enabled=false" \
   "git-sync|$token --set definitions.source=gitSync --set definitions.gitSync.repo=https://example.com/mocks.git --set tls.secretName=smock-tls" \
   "image|$token --set definitions.source=image --set definitions.image.reference=ghcr.io/hirunefu/mocks:v1 --set tls.secretName=smock-tls"; do
-  name=${mode%%|*}
-  flags=${mode#*|}
+  name=${variant%%|*}
+  flags=${variant#*|}
   # shellcheck disable=SC2086 # $flags is a list of flags
   helm template "$release" charts/smock --namespace "$namespace" $flags >"$tmp/$name.yaml"
   if ! kubectl --namespace "$namespace" apply --dry-run=server --warnings-as-errors \
@@ -141,14 +327,15 @@ kubectl --namespace "$namespace" rollout status deployment/"$release" --timeout 
 say "installed into a namespace that enforces the Restricted standard, and the Pod is ready"
 
 # forward <service> <port>: forwards a free local port to the Service's
-# port, and prints the local port.
+# port, and sets local_port to it. It runs in this shell rather than in a
+# command substitution, which would lose what it adds to pids, so that
+# cleanup stops the port-forward.
 forward() {
   kubectl --namespace "$namespace" port-forward "service/$1" ":$2" >"$tmp/forward-$1" 2>&1 &
   pids="$pids $!"
   for _ in $(seq 50); do
     local_port=$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9]*\) .*/\1/p' "$tmp/forward-$1")
     if [ -n "$local_port" ]; then
-      echo "$local_port"
       return
     fi
     sleep 0.2
@@ -156,8 +343,10 @@ forward() {
   cat "$tmp/forward-$1" >&2
   fail "could not forward a port to service/$1"
 }
-plain_port=$(forward "$release" 80)
-admin_port=$(forward "$release-admin" 9090)
+forward "$release" 80
+plain_port=$local_port
+forward "$release-admin" 9090
+admin_port=$local_port
 
 hello() {
   curl --silent --show-error --fail --max-time 5 "http://127.0.0.1:$plain_port/hello"

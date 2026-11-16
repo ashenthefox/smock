@@ -1,10 +1,10 @@
 # Definition-file fixtures
 
-`scripts/check-schema.sh` checks every file here twice, each alone in a
-definitions directory: with an external JSON Schema validator against
-`../definitions.json`, and with `smock check`. Both verdicts must match the
-directory the file is in, so CI fails as soon as smock and the Schema
-disagree.
+`scripts/check-schema.sh` checks every file here twice: with an external
+JSON Schema validator against `../definitions.json`, which takes all the
+files in one run, and with `smock check`, each file alone in a definitions
+directory. Both verdicts must match the directory the file is in, so CI
+fails as soon as smock and the Schema disagree.
 
 | Directory | The Schema | smock |
 |---|---|---|

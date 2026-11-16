@@ -223,8 +223,13 @@ real gRPC client, and the calls grpcurl makes, each with what it prints
 
 The MoonBit toolchain version is pinned in `.moonbit-version`, and CI installs
 exactly that version, as does the release workflow; the release notes name
-it. A weekly CI job also builds and tests with the latest stable MoonBit,
-the modules smock imports included, and opens an issue when that fails.
+it. A weekly run also builds and tests with the latest stable MoonBit,
+the modules smock imports included, and opens an issue when that fails
+(`.github/workflows/latest-toolchain.yml`). A scheduled run builds nothing
+when the latest toolchain is the pinned one and a CI run on a push of
+`main`'s head, the commit the scheduled run checks out, succeeded and was
+last updated within 7 days, since it would only repeat that run
+(`scripts/latest-toolchain-plan.sh`); a run started by hand always builds.
 moonbitstack/moonhttp is pinned to one exact version, and raised only on
 purpose ([Upgrading moonhttp](docs/releasing.md#upgrading-moonhttp)).
 
@@ -254,7 +259,6 @@ scripts/test-openssl-asan.sh   # the OpenSSL bindings under AddressSanitizer and
 scripts/build-release.sh       # dist/smock
 dist/smock --version
 scripts/check-schema.sh dist/smock   # the JSON Schema and smock agree
-scripts/check-openapi.sh       # the Admin API document is valid OpenAPI 3.1
 scripts/install-h2spec.sh      # the pinned h2spec, into ~/.local/bin
 scripts/check-h2spec.sh dist/smock   # h2spec's conformance cases against the plain and TLS ports (needs h2spec, python3 and jq)
 scripts/install-grpcurl.sh     # the pinned grpcurl, into ~/.local/bin
@@ -262,22 +266,32 @@ scripts/check-grpcurl.sh dist/smock  # grpcurl calls smock on the plain and TLS 
 scripts/test-check-grpcurl.sh dist/smock   # that check fails on each difference
 docker build --tag smock:dev .
 scripts/smoke-test-image.sh smock:dev 0.0.0-dev <commit> "moonc <version>"   # the container image
+scripts/test-helm-chart-on-kind.sh smock:dev   # the chart on a kind cluster (needs kind, kubectl and helm)
 scripts/check-release-workflow.sh    # the release workflow publishes only for tags (needs yq and jq)
 scripts/test-release-notes.sh        # the release notes, with CHANGELOG.md's links at the release's tag
-python3 scripts/check-doc-links.py   # the documents' links into the repository lead to a file, and to a heading when they name one (needs git)
-scripts/test-check-doc-links.sh      # that check, on small trees (needs python3 and git)
+scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit and that the tag names moon.mod's version (needs jq)
+scripts/check-benchmark-workflow.sh  # the benchmark workflow runs only by hand (needs yq and jq)
+scripts/check-ci-artifacts.sh        # when CI's jobs and steps run, and that it keeps the release binaries only from a run whose every job passed (needs yq and jq)
+scripts/test-check-ci-artifacts.sh   # that check, on copies of the workflows changed one thing at a time (needs yq and jq)
+scripts/test-ci-plan.sh              # the plan that skips the tests on main of a tree that already passed (needs git and jq)
+scripts/test-latest-toolchain-plan.sh   # the plan that skips the weekly run with the latest MoonBit when it would repeat CI (needs jq)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
-scripts/check-benchmark-workflow.sh  # the benchmark workflow runs only by hand (needs yq and jq)
-scripts/check-ci-artifacts.sh        # CI keeps the release binary of each architecture, and the SDK job takes it (needs yq and jq)
+scripts/test-check-schema.sh         # the JSON Schema cross-check, with a fake validator and a fake smock (needs jq)
+python3 scripts/check-doc-links.py   # the documents' links into the repository lead to a file, and to a heading when they name one (needs git)
+scripts/test-check-doc-links.sh      # that check, on small trees (needs python3 and git)
+scripts/check-openapi.sh             # the Admin API document is valid OpenAPI 3.1
+python3 bench/gen_definitions.py --check   # the benchmark's committed definitions are what their generator writes
 scripts/install-protoc.sh            # the pinned protoc, into ~/.local/bin, with its well-known types
 PROTOC=~/.local/bin/protoc scripts/gen-protobuf-fixtures.sh --check   # the protobuf fixtures are what their sources build
 PROTOC=~/.local/bin/protoc scripts/test-protobuf-fixtures.sh          # that check, on a copy of the working tree
+python3 -m unittest discover -s bench -p test_compare.py -v   # the benchmark's comparison of two runs, which the merge checklist reads
+helm lint --strict charts/smock --set adminAuth.tokenSecret.name=smock-admin-token   # the Helm chart passes helm's lint (needs helm)
+scripts/test-helm-chart.sh           # rendering tests of the Helm chart (needs helm, yq and jq)
+python3 -m unittest discover -s bench -p test_gke_script.py -v   # scripts/gke-bench.sh against fake gcloud, kubectl and docker commands, about 5 minutes
 scripts/build-conformance-runner.sh  # protobuf's conformance runner, from the pinned release, into ~/.local/bin (needs CMake and a C++17 compiler)
 scripts/check-conformance.sh         # protobuf's conformance suite against smock/protobuf, judged by protobuf-conformance/failure_list.txt
 scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, read smock's LLM responses (needs python3 and PyPI)
-scripts/test-helm-chart.sh           # rendering tests of the Helm chart (needs helm, yq and jq)
-scripts/test-helm-chart-on-kind.sh smock:dev   # the chart on a kind cluster (needs kind, kubectl and helm)
 ```
 
 `scripts/test-helm-chart.sh` renders `charts/smock` for each delivery mode
@@ -288,13 +302,17 @@ and that the chart's README lists every value with its default.
 delivery mode against Kubernetes' own Pod Security admission, installs the
 chart with the image into a namespace that enforces the Restricted
 standard, and checks that a Stub answers and that a ConfigMap update is
-served without a Pod restart; it deletes the cluster afterwards.
-`scripts/install-kubernetes-tools.sh` installs the pinned helm, kubectl and
-kind that CI uses.
+served without a Pod restart; it deletes the cluster afterwards. CI splits
+it in two, so that the cluster is created while smock builds:
+`--start <state directory>` starts creating the cluster in the background
+and returns, and `--cluster <state directory> <image>` waits for it and
+does the rest. `scripts/install-kubernetes-tools.sh` installs the pinned
+helm, kubectl and kind that CI uses.
 
 `scripts/check-schema.sh` runs the external validator check-jsonschema
-through `uvx` (or `pipx`) and needs `jq`; `scripts/check-openapi.sh` runs
-openapi-spec-validator the same way. The Admin API tests in `e2e/` check
+once over all the fixtures, through `uvx` (or `pipx`), and needs `jq`;
+`scripts/check-openapi.sh` runs openapi-spec-validator the same way, on
+the Admin API document. The Admin API tests in `e2e/` check
 every response against `openapi/admin.json` (`e2e/contract_test.mbt`).
 `e2e/import_openapi_golden_test.mbt` imports `openapi/admin.json`, the
 example of [docs/importing-openapi.md](docs/importing-openapi.md) and the
@@ -322,7 +340,7 @@ against a smock binary: every case of its `generic`, `http2` and `hpack`
 sections, strict cases included, against the plain port, as h2c, and then
 against the TLS port, as h2 by ALPN, with the self-signed certificate,
 which h2spec does not verify. `scripts/check-h2spec.sh dist/smock tls` runs
-one port alone. It takes about 40 seconds. smock serves `scripts/h2spec/definitions`, where a Stub at
+one port alone. Both ports take under a second on CI's runners. smock serves `scripts/h2spec/definitions`, where a Stub at
 `/`, the path h2spec requests, answers every method with 200 and a body of
 4 KiB; without a body, h2spec would skip its flow-control cases.
 `scripts/h2spec/plain.txt` and `scripts/h2spec/tls.txt` list the cases that
@@ -378,18 +396,73 @@ scripts/build-release.sh
 scripts/check-grpcurl.sh dist/smock
 ```
 
-CI runs all of these but `moon bench` (`.github/workflows/ci.yml`). The
-tests on wasm-gc, h2spec and the scripts from
-`scripts/check-release-workflow.sh` to `scripts/test-helm-chart.sh` run on
-linux/amd64; the rest run on linux/amd64 and linux/arm64
-(`.github/workflows/build-test.yml`). CI builds protobuf's conformance
-runner once and caches it
-([protobuf-conformance/README.md](protobuf-conformance/README.md)). The SDK
-job, `scripts/check-llm-sdks.sh`, runs after `build-test.yml`, with the
-release binary built there, and reads smock's [LLM
-responses](docs/definition-files/llm-responses.md#llm-responses) with the
-vendors' official SDKs, as applications call them
-([llm-sdks/README.md](llm-sdks/README.md)).
+CI runs all of these but `moon bench` and the tests of
+`scripts/gke-bench.sh` on each push to a branch and on each pull request
+(`.github/workflows/ci.yml`). It does not run on a pushed tag, since the
+release workflow checks that CI passed on the tagged commit
+([What a tag does](docs/releasing.md#what-a-tag-does)), nor on a push to a
+`dependabot/**` branch, whose pull request runs it. A newer push to a
+branch or a pull request cancels the run of the older one; on `main`,
+every commit keeps its run. The job `scripts` runs the commands from
+`scripts/check-release-workflow.sh` to `scripts/test-helm-chart.sh`, which
+need no build of smock, on linux/amd64; a step that fails does not stop
+the steps after it, so that one run shows every failure.
+`.github/workflows/build-test.yml` runs the rest, in jobs that run side by
+side:
+
+- `checks`, on linux/amd64 alone: `scripts/check-moonhttp-pin.sh`,
+  `moon fmt --check`, `moon check`, `scripts/check-no-io.sh`,
+  `scripts/check-no-c.sh`, `scripts/check-notice.sh`,
+  `scripts/test-dependency-checks.sh` and the tests on wasm-gc. None of
+  them runs native code: the checks read text or run only the compiler's
+  front end, and the tests run on wasm-gc. So they give the same answer
+  on either machine.
+- `test`, on linux/amd64 and linux/arm64: `moon test --target native`.
+- `release-test`, on both: the engine's tests in a release build, and
+  `scripts/test-openssl-asan.sh`.
+- `release`, on both: the commands from `scripts/build-release.sh` to
+  `scripts/test-helm-chart-on-kind.sh`, which build the release binary and
+  the image and check both, and the check of the image's SBOM. h2spec and
+  `scripts/test-check-grpcurl.sh` run on linux/amd64 alone: h2spec
+  publishes a Linux binary for amd64 only, and the test checks the grpcurl
+  check's own logic, which is the same on every machine. The job starts
+  creating the kind cluster before it builds
+  (`scripts/test-helm-chart-on-kind.sh --start`), so that the cluster is
+  ready when the image is.
+- `protobuf-conformance`, on linux/amd64: protobuf's conformance suite,
+  with a runner that CI builds once and caches
+  ([protobuf-conformance/README.md](protobuf-conformance/README.md)).
+- `llm-sdks`, the SDK job, on linux/amd64 once `release` has passed:
+  `scripts/check-llm-sdks.sh`, with the amd64 release binary built there,
+  reads smock's [LLM
+  responses](docs/definition-files/llm-responses.md#llm-responses) with
+  the vendors' official SDKs, as applications call them
+  ([llm-sdks/README.md](llm-sdks/README.md)).
+
+`release` hands each release binary over as the workflow artifact
+`release-linux-<arch>`. Then the job `keep` of `ci.yml`, which runs after
+the jobs of `build-test.yml` and the job `scripts`, and only when each of
+them that ran has passed and the run was not cancelled, keeps the binary of
+each architecture for 7 days as `smock-linux-amd64` and `smock-linux-arm64`,
+for a machine that cannot build it
+([On GKE Autopilot](bench/README.md#on-gke-autopilot)). A run in which a
+job failed keeps none; re-running its failed jobs within 7 days of the
+run, or the whole run, keeps them once every job has passed.
+
+On a push to `main` that merges a branch, the job `plan` skips `checks`,
+`test` and `release-test` when the merge's tree is the merged branch
+head's and a CI run on a push of that head, to a branch other than
+`main`, succeeded and was last updated within 24 hours
+(`scripts/ci-plan.sh`). That run tested the same tree, the workflows and
+scripts included. `release`, `protobuf-conformance`, `llm-sdks` and the
+job `scripts` run in every run, so `main`'s binaries are built and checked
+from `main`'s own commit, and `keep` keeps them once every job has passed.
+Every other run, and a run whose plan fails, runs every job.
+
+`.github/workflows/bench-tests.yml` runs the tests of `scripts/gke-bench.sh`
+(`bench/test_gke_script.py`), which take about four minutes, only on a push
+or pull request that changes that script, `scripts/install-oha.sh`,
+`scripts/build-release.sh`, `Dockerfile`, `bench/` or the workflow itself.
 
 The native build links OpenSSL 3 (on Debian and Ubuntu, `libssl-dev`).
 `prebuild.py`, which `moon` runs with `python3` before every native build,

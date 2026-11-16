@@ -23,7 +23,10 @@ pre-merge run compares with them.
 
 ## Checklist
 
-- [ ] **CI is green on the integration branch**, and its issues are done.
+- [ ] **CI is green on the integration branch**, in its run on the push
+  of the branch's head, and its issues are done. That run keeps the
+  release binaries that the GKE run below takes, and keeps them only when
+  every job passed.
   CI also runs h2spec, the HTTP/2 conformance tool, against the plain
   port and the TLS port, on linux/amd64
   ([Build and test](../CONTRIBUTING.md#build-and-test)). Before the merge,
@@ -119,8 +122,8 @@ pre-merge run compares with them.
   arm64 machine, which cannot build smock for amd64, take the release
   binary CI built for linux/amd64 on the push of the commit checked out
   (check that the run's `headSha` is `git rev-parse HEAD`; CI keeps it for
-  7 days; the script refuses a binary whose build information names
-  another commit).
+  7 days, from a run whose every job passed; the script refuses a binary
+  whose build information names another commit).
   First a dry run, which only reads:
 
   ```sh
@@ -241,6 +244,19 @@ pre-merge run compares with them.
   ```sh
   git switch main && git merge --no-ff integration/<name> && git push
   ```
+
+  CI's run on the push to `main` skips the jobs `checks`, `test` and
+  `release-test`, the checks of the sources and the test suites, when the
+  branch held all of `main`, so that the merge's tree is the branch
+  head's, and a CI run on a push of that head, to a branch other than
+  `main`, passed in the last 24 hours: that run tested the same tree
+  ([Build and test](../CONTRIBUTING.md#build-and-test)). The job
+  `release`, with its checks of the release binary and the image, h2spec
+  among them, the conformance suite, the SDK job and the job `scripts`
+  still run. Otherwise it runs every job, which takes longer and changes
+  nothing else. Either way, it builds and checks `main`'s release
+  binaries, and keeps them once every job has passed; the next comparison
+  on one node takes them as `main`'s.
 
 - [ ] **Keep the results** of both runs as the baseline of the next
   pre-merge run.

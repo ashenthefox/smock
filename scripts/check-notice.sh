@@ -14,8 +14,8 @@
 # - the words "smock compiles nothing from it" when the smock binary is
 #   built from none of its packages, and not otherwise.
 #
-# NOTICE may name no module that the build does not resolve. CI runs it on
-# every push (build-test.yml), and the release workflow before it builds
+# NOTICE may name no module that the build does not resolve. CI runs it
+# (build-test.yml, job checks), and the release workflow before it builds
 # the binaries it publishes. scripts/test-dependency-checks.sh tests it. It
 # needs moon, with the registry index updated (moon update), and jq.
 #

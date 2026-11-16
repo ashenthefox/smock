@@ -32,7 +32,7 @@ fixtures and commit them; the script reads the version from there.
 ## The check in CI
 
 On every push, CI runs the script with `--check`
-(`.github/workflows/ci.yml`, job `protobuf-fixtures`):
+(`.github/workflows/ci.yml`, job `scripts`):
 
 ```sh
 PROTOC=~/.local/bin/protoc scripts/gen-protobuf-fixtures.sh --check

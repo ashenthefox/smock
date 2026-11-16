@@ -9,12 +9,16 @@ raised on purpose.
 
 ## Where it runs
 
-`.github/workflows/ci.yml` runs it as the job `llm-sdks`, on every push and
-pull request, after its call of `build-test.yml`. It builds nothing: it
-takes the amd64 release binary that `build-test.yml` keeps, built with the
-pinned toolchain (`smock-linux-amd64`). The weekly run with the latest
-toolchain (`latest-toolchain.yml`) does not run it.
-`scripts/check-ci-artifacts.sh` checks these rules.
+`.github/workflows/build-test.yml` runs it as the job `llm-sdks` when
+`.github/workflows/ci.yml` calls it, on each push to a branch and each pull
+request, once the job `release` has built and checked the release
+binaries. It builds nothing: it takes the amd64 release binary that
+`release` hands over, built with the pinned toolchain
+(`release-linux-amd64`). The job `keep` of `ci.yml` keeps that binary as
+`smock-linux-amd64` only after this job, every other job of
+`build-test.yml` and the job `scripts` of `ci.yml` have passed. The
+weekly run with the latest toolchain (`latest-toolchain.yml`) does not run
+it. `scripts/check-ci-artifacts.sh` checks these rules.
 
 ## What is here
 

@@ -24,7 +24,19 @@ keeps the binaries, images, chart and notes as workflow artifacts, but
 publishes nothing. `scripts/check-release-workflow.sh`, run in CI, checks
 those rules.
 
-The tag names the version. Keep the `version` in `moon.mod` the same.
+The tag names the version. Keep the `version` in `moon.mod` the same. A
+pre-release tag adds a suffix to that version: `v0.4.0-rc.1` was tagged
+with `version = "0.4.0"`.
+
+Before it builds anything, the workflow's first job, plan, checks that
+the tag's version, without a pre-release suffix, is the `version` in
+`moon.mod` (`scripts/check-tag-version.sh`), and, for a pushed tag, that
+CI passed on the tagged commit (`scripts/check-ci-passed.sh`). CI does not
+run on tags, so the run it looks for is CI's run on a push of that commit
+to a branch, such as `main`. When either check fails, the workflow stops
+there and publishes nothing.
+[When plan stops a release](#when-plan-stops-a-release) says what to do
+then.
 
 ## Smoke-testing the image locally
 
@@ -77,7 +89,9 @@ Work through these steps in order:
    by hand. Going public does not start it, and the Schema's `$id`
    answers 404 until it has run.
 5. **Add a tag ruleset for `v*`**, so that the tags that publish a release
-   are protected. Rulesets answer 403 while the repository is private.
+   are protected. The ruleset `Release tags` forbids deleting and moving
+   such a tag, and no one may bypass it. Rulesets answer 403 while the
+   repository is private.
 6. **Tag `v0.1.0-rc.1` first.** It is a pre-release, and it runs the
    publishing path of the release workflow for the first time.
 7. **Make both packages public**, `ghcr.io/hirunefu/smock` and
@@ -94,8 +108,11 @@ Work through these steps in order:
 
 ## Every release after
 
-Check that CI is green on `main` and that `moon.mod` gives the new
-version.
+The release commit, on `main`, gives the new version in `moon.mod` and
+the CHANGELOG section below. The tag names that commit, and the release
+workflow stops before it builds anything unless `moon.mod` gives the
+tag's version and CI's run on a push of that commit has passed
+([What a tag does](#what-a-tag-does)).
 
 In [CHANGELOG.md](../CHANGELOG.md), move the entries under
 `## [Unreleased]` to a new section `## [<version>] - <date>` below it,
@@ -109,9 +126,9 @@ pre-release tag, such as `v<version>-rc.1`, takes its own section if there
 is one, else the section of `<version>`, else `Unreleased`.
 
 [NOTICE](../NOTICE) names the toolchain and every MoonBit module the
-build resolves, of any owner and transitive ones included. CI, on every
-push, and the release workflow fail when NOTICE leaves out a module the
-build resolves or names one it does not, when it gives a module another
+build resolves, of any owner and transitive ones included. CI and the
+release workflow fail when NOTICE leaves out a module the build resolves
+or names one it does not, when it gives a module another
 version than the build resolves, or another licence or source than the
 module's own module file, or when it names another toolchain than
 `.moonbit-version` (`scripts/check-notice.sh`). The section of a module
@@ -136,9 +153,64 @@ the toolchain, so check it by hand after a toolchain update. mimalloc's
 objdump -d --disassemble=mi_version ~/.moon/lib/libmoonbitrun.o
 ```
 
-Then push the tag `v<version>`. A pre-release tag, such as
+Push the release commit to `main`, and wait until CI's run on that push
+has passed:
+
+```sh
+gh run list -R hirunefu/smock --workflow CI --event push --commit "$(git rev-parse HEAD)"
+```
+
+A pushed `v*` tag can be neither deleted nor moved (step 5 of
+[The first release](#the-first-release)), so run what the job plan of the
+release workflow checks on the release commit before you push one: that
+the tag names the version in `moon.mod`, that CI passed on the commit, and
+that the release notes can be written. The version of a tag is a SemVer
+2.0 version with no build metadata, so a number has no leading zero and a
+pre-release has no empty part: `0.5.0-rc.1`, not `0.5.0-rc.01`.
+`scripts/check-ci-passed.sh` needs jq, and gh logged in:
+
+```sh
+tag=v0.5.0   # or a pre-release, such as v0.5.0-rc.1
+scripts/check-tag-version.sh "${tag#v}"
+GITHUB_REPOSITORY=hirunefu/smock scripts/check-ci-passed.sh "$(git rev-parse HEAD)"
+scripts/release-notes.sh "${tag#v}" "$(git rev-parse --short=12 HEAD)" "moonc v$(cat .moonbit-version)" ghcr.io/hirunefu/smock >/dev/null
+```
+
+Then push the tag on that commit. A pre-release tag, such as
 `v<version>-rc.1`, tries the publishing path first. The packages stay
 public, so nothing else needs doing in their settings.
+
+### When plan stops a release
+
+When plan fails, nothing has been published for the tag: every other job
+of the release workflow needs plan, so none of them runs.
+
+- **The tag came before CI's run on its commit had passed**, as when the
+  commit and the tag are pushed together. The job plan fails with
+  `check-ci-passed: CI has not passed on <commit>`. Wait until that CI run
+  has passed, then re-run the tag's release run, which looks for CI's run
+  again. If the CI run fails for a reason that another try can clear,
+  re-run it before the release run: its failed jobs within 7 days of the
+  run, or the whole run.
+
+  ```sh
+  tag=v0.5.0   # the tag that was pushed
+  gh run list -R hirunefu/smock --workflow CI --event push --commit "$(git rev-parse "$tag^{commit}")"   # CI's run: wait until it has passed
+  gh run rerun <CI run-id> -R hirunefu/smock --failed   # only if it failed; without --failed, the whole run
+  gh run list -R hirunefu/smock --workflow release.yml --event push --branch "$tag"   # the tag's release run
+  gh run rerun <release run-id> -R hirunefu/smock
+  ```
+
+- **The tag names another version than `moon.mod`, CHANGELOG.md has no
+  section for a tag that is not a pre-release, or CI fails on the tagged
+  commit for real.** A re-run checks the same commit, and fails the same
+  way. The tag stays, without a release, since it can be neither deleted
+  nor moved. Put the fix in a new commit, and release that under the next
+  version: `v<version>-rc.2` after `v<version>-rc.1`, or, after
+  `v<version>`, the next patch version. For a patch version, give it in
+  `moon.mod` and rename the CHANGELOG section of the version that was not
+  released, and its link, to it: no release carries the notes of a version
+  that was not released.
 
 ## Dependency updates
 
@@ -162,6 +234,10 @@ These pull requests run CI like any other. On both architectures it
 builds and tests smock, builds the image, smoke-tests it, makes its SBOM
 and installs the Helm chart on kind. Merge them into `main` when CI is
 green, without the runs of [Before merging into main](merging-into-main.md).
+CI runs for the pull request, not for the push of its `dependabot/**`
+branch, so `main`'s run after the merge runs every job: only a branch's
+push run lets `main` skip the tests of the same tree
+([Build and test](../CONTRIBUTING.md#build-and-test)).
 A new base brings a new glibc and OpenSSL, which smock uses for TLS, into
 the next release's image. It changes neither the binary nor the local
 benchmark, which uses the host's libraries. Such updates are mostly
@@ -186,7 +262,11 @@ the same Schemas again.
   tests with the latest stable toolchain, and opens an issue when that
   fails. It builds the modules smock imports with the rest, moonhttp
   among them, so a toolchain release that breaks moonhttp shows there
-  first. The maintainer moves the pin by hand.
+  first. A scheduled run builds nothing when the latest toolchain is the
+  pinned one and CI passed on a push of `main`'s head, the commit the
+  scheduled run checks out, in the last 7 days, since it would only
+  repeat that run; a run started by hand always builds and tests. The
+  maintainer moves the pin by hand.
 - **The MoonBit modules** imported in `moon.mod`. The maintainer moves
   them by hand, and checks NOTICE as
   [Every release after](#every-release-after) says. moonhttp moves only
@@ -230,8 +310,8 @@ version that a module file gives an import as a minimum, and the build
 resolves the highest version that any module asks for. So any change that
 raises the moonhttp version the build resolves is an upgrade, even with
 `moon.mod` unchanged: a new or upgraded module that needs a later moonhttp
-raises it too. CI fails on every push where the version the build resolves
-differs from the one `moon.mod` names, and names both
+raises it too. CI fails whenever the version the build resolves differs
+from the one `moon.mod` names, and names both
 (`scripts/check-moonhttp-pin.sh`). `moon tree` shows which module asks for
 which version.
 

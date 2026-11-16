@@ -349,8 +349,8 @@ rejects "the check finds that smock does not depend on a module NOTICE says it c
   unused-unrelated "$fixture/NOTICE" 'smock does not depend on example/unused'
 
 # This repository's NOTICE, toolchain and moon.mod, with the modules that
-# NOTICE names, which scripts/check-notice.sh checks against the build on
-# every push.
+# NOTICE names, which scripts/check-notice.sh checks against the build in
+# CI (build-test.yml, job checks).
 jq -n -L scripts --rawfile notice NOTICE '
   include "notice";
   $notice | notice_modules

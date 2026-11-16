@@ -3,7 +3,8 @@
 name: Native build setup
 description: >-
   Checks that the runner is the machine the job's matrix names, installs
-  OpenSSL and MoonBit, and updates the mooncakes registry index.
+  OpenSSL where the image lacks it, installs MoonBit, and updates the
+  mooncakes registry index.
 
 inputs:
   machine:
@@ -25,10 +26,20 @@ runs:
 
     # The native build links OpenSSL, the one C library ADR 0001 allows
     # (prebuild.py adds -lssl -lcrypto). The TLS tests and the benchmark
-    # also use the openssl command line tool.
-    - name: Install OpenSSL
+    # also use the openssl command line tool. GitHub's Ubuntu images have
+    # both packages, and then nothing is fetched: refreshing the package
+    # index alone takes 5 to 15 seconds, about as long as the rest of this
+    # setup.
+    - name: Install OpenSSL where the image lacks it
       shell: bash
-      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev openssl
+      run: |
+        if dpkg -s libssl-dev openssl >/dev/null 2>&1; then
+          echo "libssl-dev and openssl are installed:"
+          dpkg-query --show libssl-dev openssl
+        else
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libssl-dev openssl
+        fi
 
     - name: Install MoonBit (${{ inputs.toolchain }})
       shell: bash

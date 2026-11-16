@@ -1,0 +1,57 @@
+# Tests scripts/gke-bench.sh, the GKE run of the benchmark that the merge
+# checklist uses (docs/merging-into-main.md), against fake gcloud, kubectl
+# and docker commands (bench/test_gke_script.py). Nothing reaches a cloud.
+#
+# The tests take about four minutes and read only the files listed under
+# paths below (the script, the two scripts and the Dockerfile it runs or
+# copies, and bench/), so they run when a push or a pull request changes
+# one of those, and not in ci.yml. For a push to a branch, GitHub compares
+# the paths with what the push brought: a later push that changes none of
+# them starts no run, also when the last run here failed. Look at the last
+# run before relying on the script. For a pull request, GitHub compares
+# them with all that the pull request changes.
+#
+# ci.yml runs bench/test_compare.py. Of the harness's other tests
+# (bench/README.md), most of bench/test_bench.py and the load generator's
+# test in bench/test_gke.py need what a benchmark run needs (a release
+# build of smock, oha, openssl, taskset and a systemd user manager), and
+# the rest need python3 alone; benchmark.yml runs every test of the
+# harness before a benchmark.
+name: Benchmark script tests
+
+on:
+  push:
+    branches-ignore: ["dependabot/**"]
+    paths:
+      - scripts/gke-bench.sh
+      - scripts/install-oha.sh
+      - scripts/build-release.sh
+      - Dockerfile
+      - bench/**
+      - .github/workflows/bench-tests.yml
+  pull_request:
+    paths:
+      - scripts/gke-bench.sh
+      - scripts/install-oha.sh
+      - scripts/build-release.sh
+      - Dockerfile
+      - bench/**
+      - .github/workflows/bench-tests.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-tests-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gke-script:
+    name: Test scripts/gke-bench.sh against fake commands
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Test the GKE run of the benchmark
+        run: python3 -m unittest discover -s bench -p test_gke_script.py -v

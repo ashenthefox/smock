@@ -887,7 +887,8 @@ and an Arm run once failed for want of Arm nodes in its zone. To run on
 x86 nodes from an arm64 machine, which cannot build smock for amd64, as
 the pre-merge run does in us-central1-a, take the release binary that CI
 built for linux/amd64 from the commit checked out, from CI's run on the
-push of that commit (CI keeps it for 7 days):
+push of that commit (CI keeps it for 7 days, from a run whose every job
+passed):
 
 ```sh
 gh run list -R hirunefu/smock --workflow CI --branch <branch> --event push --limit 1 --json databaseId,headSha
@@ -901,7 +902,13 @@ scripts/gke-bench.sh --yes --arch amd64 --smock "$dir/smock"
 The run's `headSha` must be the commit checked out. A run on a pull request
 builds its merge commit instead, so take the run on the push; the script
 refuses a binary built from another commit. The artifact is there only if
-that run's linux/amd64 build and tests passed.
+every job of that run passed: the job `keep` of `.github/workflows/ci.yml`
+keeps it after all the others, those of `build-test.yml` and the job
+`scripts`. A run on `main` that merged a branch may have skipped the tests
+of a tree that a push run of the merged head, on a branch other than
+`main`, had passed in the last 24 hours, and still builds and checks the
+binaries from `main`'s commit, and keeps them once every job has passed
+([Build and test](../CONTRIBUTING.md#build-and-test)).
 
 - **Checks, before anything is made.** It checks that smock and oha, when
   given, are ELF executables of the run's architecture (from their
@@ -1126,7 +1133,8 @@ and gcloud's account as `<account>`.
 `python3 -m unittest discover -s bench` tests the helper, the load
 generator against smock on this machine, and the script against fake
 gcloud, kubectl and docker commands, including that every way a run ends
-deletes what it made.
+deletes what it made. The script's tests, `bench/test_gke_script.py`, also
+run in CI ([In CI](#in-ci)).
 
 ### Comparing smock binaries on one node
 
@@ -1197,13 +1205,14 @@ must be for the run's architecture, but may be built from any commit:
 the harness is the commit checked out, and the binaries are what the run
 compares. The script prints each one's SHA-256, and the commit it says
 when the machine can run it; each distinct binary gets one image, which
-the variants with it share. CI keeps a binary for 7 days; for an older
-commit, push a branch at it, and CI builds it again. The run starts each
-variant once the one before is ready, and before the load generator
-starts, checks (`gke.py placement`) that every variant is on one node,
-admitted with the profile's limits as its requests and limits. When not,
-or when a variant cannot join the first one's node in 15 minutes, it
-stops there, with the Pods, their events and their logs kept.
+the variants with it share. CI keeps a binary for 7 days, from a run whose
+every job passed; for an older commit, push a branch at it, and CI builds
+it again. The run starts each variant once the one before is ready, and
+before the load generator starts, checks (`gke.py placement`) that every
+variant is on one node, admitted with the profile's limits as its
+requests and limits. When not, or when a variant cannot join the first
+one's node in 15 minutes, it stops there, with the Pods, their events and
+their logs kept.
 
 Besides `raw/<profile>/`, with each variant's log and Service in
 `raw/<profile>/<label>/`, it writes a sample of each variant in each
@@ -1318,3 +1327,28 @@ runs on a schedule, on pull requests or on pushes:
 `scripts/check-benchmark-workflow.sh` checks in CI that it has no trigger
 but `workflow_dispatch`. GitHub's shared runners vary from run to run, so a
 single run is a rough measure.
+
+CI runs some of the harness's tests without a benchmark. On each push to a
+branch and each pull request, `.github/workflows/ci.yml` runs
+`bench/test_compare.py`, the tests of the comparison that the merge
+checklist reads, and checks the definitions against
+`bench/gen_definitions.py`. `.github/workflows/bench-tests.yml` runs
+`bench/test_gke_script.py`, the tests of `scripts/gke-bench.sh` against
+fake gcloud, kubectl and docker commands, which take about four minutes.
+It runs only on a push or pull request that changes the script,
+`scripts/install-oha.sh`, `scripts/build-release.sh`, `Dockerfile`,
+`bench/` or the workflow itself. For a push to a branch, GitHub compares
+those paths with what the push brought, so a later push that changes none
+of them starts no run, also when the last run failed: look at the last run
+before relying on the script. For a pull request, it compares them with
+all that the pull request changes, so each push to a pull request that
+changed one of them starts a run.
+
+Of the workflows, only the benchmark workflow runs the other tests: it
+runs every test of the harness before a benchmark. Most of
+`bench/test_bench.py`, and the load generator's test in
+`bench/test_gke.py`, need what a benchmark run needs: a release build of
+smock, oha, openssl, taskset and a systemd user manager.
+`bench/test_gen_definitions.py`, the rest of
+`bench/test_gke.py` and the tests of the targets in `bench/test_bench.py`
+need python3 alone.

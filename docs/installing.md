@@ -49,11 +49,12 @@ readable by UID 65532.
 
 To run a commit that no release holds yet, build the image from a checkout
 with `scripts/build-release.sh` and `docker build --tag smock:dev .`, or
-from the release binary that CI keeps for 7 days after each push (the
-`smock-linux-amd64` and `smock-linux-arm64` artifacts of its run), copied to
-`dist/smock`. Push it to a registry the cluster can pull from, then install
-the chart below from the checkout's `charts/smock`, with `image.repository`
-and `image.tag` naming that image.
+from the release binary that CI keeps for 7 days from the run on a push,
+when every job of that run passed (the `smock-linux-amd64` and
+`smock-linux-arm64` artifacts of the run), copied to `dist/smock`. Push it
+to a registry the cluster can pull from, then install the chart below from
+the checkout's `charts/smock`, with `image.repository` and `image.tag`
+naming that image.
 
 ## Helm chart
 

@@ -47,15 +47,18 @@ the run on a case that fails and is not listed, on a listed case that
 passes, and on a listed case that fails with another message.
 
 CI runs it on linux/amd64 (`.github/workflows/build-test.yml`, job
-`protobuf-conformance`), on every push and in the weekly run with the latest
-MoonBit. protobuf publishes no runner, so `scripts/build-conformance-runner.sh`
+`protobuf-conformance`), in every CI run and in each run of the weekly
+Latest MoonBit workflow that builds. protobuf publishes no runner, so `scripts/build-conformance-runner.sh`
 builds it from protobuf's release 36.2, the release of the protoc that
 builds the fixtures, with the versions of Abseil and JsonCpp that the
 release names, each checked against its pinned SHA-256. CI caches the
 runner until the script, or the protoc version it checks, changes. The
-build takes a few minutes. When the run fails, CI keeps the runner's lists
-of what differs from the failure list as the artifact
-`protobuf-conformance`.
+build takes a few minutes. A branch can restore the cache that `main`
+saved, and not another branch's, so the job runs on every push to `main`,
+also where `main` skips the tests of a tree that already passed
+([Build and test](../CONTRIBUTING.md#build-and-test)). When the run
+fails, CI keeps the runner's lists of what differs from the failure list
+as the artifact `protobuf-conformance`.
 
 ## Running it locally
 

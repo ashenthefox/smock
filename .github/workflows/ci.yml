@@ -1,133 +1,218 @@
+# Runs on each push to a branch and on each pull request.
+#
+# - Not on a pushed tag: a tag names a commit that a branch's run has
+#   tested, and the release workflow refuses a tag whose commit has no
+#   successful run here (scripts/check-ci-passed.sh).
+# - Not on a push to a dependabot/** branch: Dependabot opens a pull request
+#   for each, and the pull request's run tests the same change.
+# - A newer push to a branch cancels the run of the older one, except on
+#   main, where every commit keeps its run and its binaries.
+#
+# The job keep keeps the release binary of each architecture for 7 days,
+# smock-linux-amd64 and smock-linux-arm64, when every other job passed.
 name: CI
 
 on:
   push:
+    branches-ignore: ["dependabot/**"]
   pull_request:
 
 permissions:
   contents: read
 
+# One group for each branch or pull request, and one for each run on main.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     name: Build and test (pinned MoonBit)
     uses: ./.github/workflows/build-test.yml
+    # What the called workflow's jobs may ask for at most; only its job plan
+    # asks for actions: read.
+    permissions:
+      contents: read
+      actions: read
     with:
       toolchain: pinned
 
-  # The SDK job (llm-sdks/README.md): the official openai-python and
-  # anthropic-sdk-python, pinned with every package they need by version
-  # and hash, read the LLM responses of the amd64 release binary that
-  # build-test.yml keeps. It builds nothing. The weekly run with the latest
-  # toolchain (latest-toolchain.yml) does not run it.
-  llm-sdks:
-    name: Read LLM responses with the official SDKs
-    needs: build-test
+  # The checks that need no build of smock: of the workflows, of the scripts
+  # that other jobs run, of the documents, of committed files that are
+  # generated, and of the Helm chart's rendering. Each step runs whatever
+  # the steps before it found, so one run shows every failure.
+  scripts:
+    name: Checks of the workflows, scripts, documents and chart
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v8
-        with:
-          name: smock-linux-amd64
-          path: dist
+      # --- The workflows ----------------------------------------------------
 
-      # An artifact does not keep the file's mode.
-      - run: chmod +x dist/smock
+      - name: Check the release workflow
+        run: scripts/check-release-workflow.sh
 
-      - uses: actions/setup-python@v7
-        with:
-          python-version-file: llm-sdks/.python-version
+      - name: Test the release notes
+        if: ${{ !cancelled() }}
+        run: scripts/test-release-notes.sh
 
-      - name: Read smock's LLM responses with the pinned SDKs
-        run: scripts/check-llm-sdks.sh dist/smock
+      # The release workflow's checks of a pushed tag: that CI passed on its
+      # commit, and that it names the version in moon.mod.
+      - name: Test the release workflow's checks of a tag
+        if: ${{ !cancelled() }}
+        run: scripts/test-release-gates.sh
 
-  release-workflow:
-    name: Check the release workflow and test its release notes
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - run: scripts/check-release-workflow.sh
-      - run: scripts/test-release-notes.sh
+      # The benchmark itself runs only by hand (benchmark.yml); this checks
+      # its files. Its request mix and definitions are checked against smock
+      # by the tests in e2e/bench_test.mbt.
+      - name: Check the benchmark workflow
+        if: ${{ !cancelled() }}
+        run: scripts/check-benchmark-workflow.sh
 
-  # The documents link to each other by path and by the anchors that GitHub
-  # makes of their headings, and a heading that gets another name breaks
-  # the links to it with no other sign. This checks every link from a
-  # Markdown file into the repository (scripts/check-doc-links.py), without
-  # the network, and tests the check on small trees.
-  doc-links:
-    name: Check the documents' links
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - run: python3 scripts/check-doc-links.py
-      - run: scripts/test-check-doc-links.sh
+      # The GKE run of the benchmark of another architecture than its
+      # machine's takes the release binary that the job keep below keeps.
+      # This checks the conditions under which the jobs of build-test.yml
+      # run and the binaries are kept.
+      - name: Check that the release binaries are kept only when every job passed
+        if: ${{ !cancelled() }}
+        run: scripts/check-ci-artifacts.sh
 
-  # build-test.yml makes and checks the SBOM of the image it builds. This
-  # tests the scripts that do so on small SBOMs, also where the SBOM and
-  # NOTICE disagree.
-  sbom-scripts:
-    name: Test the SBOM scripts
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - run: scripts/test-sbom.sh
+      - name: Test that check
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-ci-artifacts.sh
 
-  # build-test.yml runs h2spec against smock and judges its report with
-  # scripts/h2spec-verdict.py. This tests the verdict on small reports.
-  h2spec-verdict:
-    name: Test the h2spec verdict
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - run: scripts/test-h2spec-verdict.sh
+      # What decides that a run may skip jobs: build-test.yml's plan on main
+      # (scripts/ci-plan.sh) and the weekly run's
+      # (scripts/latest-toolchain-plan.sh).
+      - name: Test the plan that skips tests of a tree that already passed
+        if: ${{ !cancelled() }}
+        run: scripts/test-ci-plan.sh
 
-  # The benchmark itself runs only by hand (benchmark.yml); this checks its
-  # files. Its request mix and definitions are checked against smock by the
-  # tests in e2e/bench_test.mbt. The GKE run of another architecture than
-  # its machine's takes the release binary that build-test.yml keeps, as
-  # the SDK job above takes the amd64 one.
-  benchmark-files:
-    name: Check the benchmark workflow, definitions and kept binaries
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - run: scripts/check-benchmark-workflow.sh
-      - run: scripts/check-ci-artifacts.sh
-      - run: python3 bench/gen_definitions.py --check
+      - name: Test the plan of the weekly run with the latest MoonBit
+        if: ${{ !cancelled() }}
+        run: scripts/test-latest-toolchain-plan.sh
 
-  # The Descriptor sets and protobuf messages that tests read are committed
-  # beside their .proto sources (fixtures/protobuf/README.md). This rebuilds
-  # every file that scripts/gen-protobuf-fixtures.sh writes, with the pinned
-  # protoc, and fails on any difference, naming each file that differs. A
-  # fixture added to the script is checked with no change here.
-  protobuf-fixtures:
-    name: Check the protobuf fixtures against their sources
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
+      # --- The scripts that build-test.yml runs --------------------------------
 
+      # build-test.yml makes and checks the SBOM of the image it builds.
+      # This tests the scripts that do so on small SBOMs, also where the
+      # SBOM and NOTICE disagree.
+      - name: Test the SBOM scripts
+        if: ${{ !cancelled() }}
+        run: scripts/test-sbom.sh
+
+      # build-test.yml runs h2spec against smock and judges its report with
+      # scripts/h2spec-verdict.py. This tests the verdict on small reports.
+      - name: Test the h2spec verdict
+        if: ${{ !cancelled() }}
+        run: scripts/test-h2spec-verdict.sh
+
+      # build-test.yml cross-checks the JSON Schema with smock on every
+      # fixture (scripts/check-schema.sh). This tests that check with a
+      # validator and a smock that answer as the test tells them.
+      - name: Test the cross-check of the JSON Schema
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-schema.sh
+
+      # --- The documents ----------------------------------------------------
+
+      # The documents link to each other by path and by the anchors that
+      # GitHub makes of their headings, and a heading that gets another
+      # name breaks the links to it with no other sign. This checks every
+      # link from a Markdown file into the repository
+      # (scripts/check-doc-links.py), without the network, and tests the
+      # check on small trees.
+      - name: Check the documents' links
+        if: ${{ !cancelled() }}
+        run: python3 scripts/check-doc-links.py
+
+      - name: Test the check of the documents' links
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-doc-links.sh
+
+      # The contract tests in e2e/ check smock's responses against the
+      # document; this checks the document itself.
+      - name: Check that the Admin API document is valid OpenAPI
+        if: ${{ !cancelled() }}
+        run: scripts/check-openapi.sh
+
+      # --- Committed files that are generated -------------------------------
+
+      - name: Check the benchmark's definitions against their generator
+        if: ${{ !cancelled() }}
+        run: python3 bench/gen_definitions.py --check
+
+      # The Descriptor sets and protobuf messages that tests read are
+      # committed beside their .proto sources (fixtures/protobuf/README.md).
+      # This rebuilds every file that scripts/gen-protobuf-fixtures.sh
+      # writes, with the pinned protoc, and fails on any difference, naming
+      # each file that differs. A fixture added to the script is checked
+      # with no change here.
       - name: Install protoc
+        if: ${{ !cancelled() }}
         run: scripts/install-protoc.sh "$RUNNER_TEMP/protoc"
 
-      - name: Rebuild the fixtures and compare them with the committed ones
+      - name: Rebuild the protobuf fixtures and compare them with the committed ones
+        if: ${{ !cancelled() }}
         run: scripts/gen-protobuf-fixtures.sh --check
 
-      - name: Test the check
+      - name: Test the check of the protobuf fixtures
+        if: ${{ !cancelled() }}
         run: scripts/test-protobuf-fixtures.sh
 
-  # The chart on a cluster is tested in build-test.yml, with the image built
-  # there.
-  helm-chart:
-    name: Rendering tests of the Helm chart
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
+      # --- The benchmark's comparison ---------------------------------------
 
+      # The comparison that the merge checklist reads
+      # (docs/merging-into-main.md). The tests of scripts/gke-bench.sh run
+      # when it or bench/ changes (bench-tests.yml).
+      - name: Test the benchmark comparison
+        if: ${{ !cancelled() }}
+        run: python3 -m unittest discover -s bench -p test_compare.py -v
+
+      # --- The Helm chart ---------------------------------------------------
+
+      # The chart on a cluster is tested in build-test.yml, with the image
+      # built there.
       - name: Install helm
+        if: ${{ !cancelled() }}
         run: scripts/install-kubernetes-tools.sh "$RUNNER_TEMP/bin" helm
 
       - name: Lint the chart
+        if: ${{ !cancelled() }}
         run: helm lint --strict charts/smock --set adminAuth.tokenSecret.name=smock-admin-token
 
       - name: Render the chart for each delivery mode and option and check it
+        if: ${{ !cancelled() }}
         run: scripts/test-helm-chart.sh
+
+  # Keeps the release binary of each architecture for a machine that cannot
+  # build it: the GKE benchmark of amd64 from an arm64 machine takes it
+  # (scripts/gke-bench.sh --arch amd64 --smock). It runs after every other
+  # job, and only when each of them passed, so a kept binary comes from a
+  # run whose every check passed. Where build-test.yml skipped the tests of
+  # a tree that already passed (its job plan), the same tree passed them in
+  # the merged branch's run. Each step renames what build-test.yml's job
+  # release handed over, and removes the handed-over copy.
+  keep:
+    name: Keep the release binaries
+    needs: [build-test, scripts]
+    if: ${{ !cancelled() && needs.build-test.result == 'success' && needs.scripts.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Keep the amd64 binary as smock-linux-amd64
+        uses: actions/upload-artifact/merge@v7
+        with:
+          name: smock-linux-amd64
+          pattern: release-linux-amd64
+          retention-days: 7
+          delete-merged: true
+
+      - name: Keep the arm64 binary as smock-linux-arm64
+        uses: actions/upload-artifact/merge@v7
+        with:
+          name: smock-linux-arm64
+          pattern: release-linux-arm64
+          retention-days: 7
+          delete-merged: true
