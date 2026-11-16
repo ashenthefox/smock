@@ -2,9 +2,13 @@
 # Tests of the release notes (scripts/release-notes.sh). Each test runs the
 # script, as the release workflow does, and checks the Markdown it prints.
 # The first tests put a test CHANGELOG.md next to a copy of the script and
-# check how the links it copies from it come out. The last tests render the
-# notes of Unreleased and of each released version from the repository's
-# own CHANGELOG.md and check that no relative link is left in them.
+# check how the links it copies from it come out. The next tests check the
+# links the notes have of their own, to documents of the repository: that
+# they name docs/installing.md for verifying the image and the chart, and
+# that each leads to a file and a heading this checkout has. The last tests
+# render the notes of Unreleased and of each released version from the
+# repository's own CHANGELOG.md and check that no relative link is left in
+# them.
 #
 # usage: scripts/test-release-notes.sh
 set -eu
@@ -81,6 +85,63 @@ has_line links "a link from the site's root stays as it is" \
   "- A link from the site's root: [the issues](/hirunefu/smock/issues)."
 has_line links "both relative links of a line lead to the tag" \
   '- Two links on a line: [one](https://github.com/hirunefu/smock/blob/v1.2.0/docs/one.md) and [two](https://github.com/hirunefu/smock/blob/v1.2.0/docs/two.md).'
+
+# --- The notes' own links ---------------------------------------------------
+
+# has_link <name> <description> <link>: the notes <name> have the Markdown
+# link <link>.
+has_link() {
+  if grep -qF -- "$3" "$tmp/$1.md"; then
+    pass "$1: $2"
+  else
+    fail "$1: $2"
+    echo "     no link: $3"
+  fi
+}
+
+# The notes do not say how to verify the image and the chart: they link to
+# the sections of docs/installing.md that do, at the release's tag.
+has_link links "the image's notes link to Verify the image in docs/installing.md" \
+  '[Installing smock](https://github.com/hirunefu/smock/blob/v1.2.0/docs/installing.md#verify-the-image)'
+has_link links "the chart's notes link to Verify the Helm chart in docs/installing.md" \
+  '[Installing smock](https://github.com/hirunefu/smock/blob/v1.2.0/docs/installing.md#verify-the-helm-chart)'
+
+# anchors <file>: prints the anchor GitHub gives each heading of the
+# Markdown file <file>, outside fenced code: the heading in lower case,
+# without its punctuation, with a hyphen for each space. It is right for
+# headings in ASCII that the file has once.
+anchors() {
+  awk '
+    /^(```|~~~)/ { fenced = !fenced; next }
+    !fenced && /^#+ / {
+      sub(/^#+ +/, "")
+      $0 = tolower($0)
+      gsub(/[^a-z0-9 _-]/, "")
+      gsub(/ /, "-")
+      print
+    }
+  ' "$1"
+}
+
+# The notes' own links are those from "## Container image" on, after the
+# CHANGELOG's section. Those to the repository name a file at the release's
+# tag, which the release workflow has checked out when it writes the notes.
+# So the file must be in this checkout, with a heading for the link's
+# fragment.
+tag=https://github.com/hirunefu/smock/blob/v1.2.0/
+sed -n '/^## Container image$/,$p' "$tmp/links.md" | grep -oE '[]][(][^ )]+' | cut -c3- >"$tmp/own-links"
+while read -r link; do
+  path=${link#"$tag"}
+  [ "$path" != "$link" ] || continue
+  file=${path%%#*}
+  if [ ! -f "$file" ]; then
+    fail "own links: the notes link to $path, and the repository has no $file"
+  elif [ "$file" != "$path" ] && ! anchors "$file" | grep -qxF -- "${path#*#}"; then
+    fail "own links: the notes link to $path, and $file has no heading with that anchor"
+  else
+    pass "own links: the repository has $path"
+  fi
+done <"$tmp/own-links"
 
 # --- The repository's CHANGELOG ---------------------------------------------
 

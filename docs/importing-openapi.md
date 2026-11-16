@@ -10,24 +10,20 @@ review the diff ([Regenerating](#regenerating)). The command came in
 smock 0.3.0.
 
 A part of the document that the command does not import, such as
-`callbacks`, is left out with a warning.
-[What is generated](#what-is-generated) says what becomes of each part,
-and [Limits](#limits) gives the bounds the command keeps to.
+`callbacks`, is left out with a warning. [What is
+generated](openapi/what-is-generated.md), a page of its own in
+`docs/openapi/`, says what becomes of each part, and [Limits](#limits) gives
+the bounds the command keeps to. The guide's other page there,
+[References, bundling and YAML](openapi/references-and-yaml.md), says which
+references the command follows, when a document must be bundled first, and
+how YAML is read.
 
 ## Contents
 
+On this page:
+
 - [Quick start](#quick-start)
 - [Validate the document first](#validate-the-document-first)
-- [What is generated](#what-is-generated)
-  - [Paths with parameters](#paths-with-parameters)
-  - [Servers and base paths](#servers-and-base-paths)
-  - [The main response](#the-main-response)
-  - [The other responses](#the-other-responses)
-  - [Bodies](#bodies)
-  - [Bodies from examples](#bodies-from-examples)
-  - [Samples from schemas](#samples-from-schemas)
-  - [Response headers](#response-headers)
-  - [IDs and conditions that repeat](#ids-and-conditions-that-repeat)
 - [The Mock and its Hosts](#the-mock-and-its-hosts)
 - [Selecting responses](#selecting-responses)
   - [Selecting examples](#selecting-examples)
@@ -35,14 +31,26 @@ and [Limits](#limits) gives the bounds the command keeps to.
 - [Regenerating](#regenerating)
   - [Overrides](#overrides)
   - [Checking that the file is current](#checking-that-the-file-is-current)
-- [References and bundling](#references-and-bundling)
-  - [References to other files](#references-to-other-files)
-  - [Bundling](#bundling)
-- [How YAML is read](#how-yaml-is-read)
 - [Problems and exit codes](#problems-and-exit-codes)
 - [Notes for Mockoon users](#notes-for-mockoon-users)
 - [Notes for Prism users](#notes-for-prism-users)
 - [Limits](#limits)
+
+On the guide's other pages:
+
+- [What is generated](openapi/what-is-generated.md)
+  - [Paths with parameters](openapi/what-is-generated.md#paths-with-parameters)
+  - [Servers and base paths](openapi/what-is-generated.md#servers-and-base-paths)
+  - [The main response](openapi/what-is-generated.md#the-main-response)
+  - [The other responses](openapi/what-is-generated.md#the-other-responses)
+  - [Bodies](openapi/what-is-generated.md#bodies)
+  - [Bodies from examples](openapi/what-is-generated.md#bodies-from-examples)
+  - [Samples from schemas](openapi/what-is-generated.md#samples-from-schemas)
+  - [Response headers](openapi/what-is-generated.md#response-headers)
+  - [IDs and conditions that repeat](openapi/what-is-generated.md#ids-and-conditions-that-repeat)
+- [References, bundling and YAML](openapi/references-and-yaml.md)
+  - [References and bundling](openapi/references-and-yaml.md#references-and-bundling)
+  - [How YAML is read](openapi/references-and-yaml.md#how-yaml-is-read)
 
 ## Quick start
 
@@ -214,15 +222,16 @@ curl -H "Smock-Status: 404" localhost:8080/v1/pets/7   # 404, Pet not found
 curl localhost:8080/pets/7                             # 404: no Stub matches
 ```
 
-- The path of the server, `/v1`, comes before every path
-  ([Servers and base paths](#servers-and-base-paths)).
+- The path of the server, `/v1`, comes before every path ([Servers and base
+  paths](openapi/what-is-generated.md#servers-and-base-paths)).
 - `/pets` stays an exact path, and `/pets/{petId}` becomes a pattern, so
-  every pet ID gets the same answers
-  ([Paths with parameters](#paths-with-parameters)).
+  every pet ID gets the same answers ([Paths with
+  parameters](openapi/what-is-generated.md#paths-with-parameters)).
 - A body is the first example the document gives, else a sample of the
-  schema ([Bodies](#bodies)). `listPets` has no example, so its body is a
-  sample: 0 for an integer, `string` for a string, and the first value of
-  an `enum` ([Samples from schemas](#samples-from-schemas)).
+  schema ([Bodies](openapi/what-is-generated.md#bodies)). `listPets` has no
+  example, so its body is a sample: 0 for an integer, `string` for a string,
+  and the first value of an `enum` ([Samples from
+  schemas](openapi/what-is-generated.md#samples-from-schemas)).
 - Each operation answers its main response, here its 200, by default. A
   request selects another response with `Smock-Status`, and a further
   named example with `Smock-Example`
@@ -240,12 +249,12 @@ The comments are there for the reader:
   another file ([Overrides](#overrides)). An `info` that is not an object,
   or a `title` or `version` that is not a string, is left out of the
   comment, with a warning, and the import goes on.
-- The comment above each Stub maps it back to the document: the method,
-  the path as the document writes it, the response key, the name of the
-  example its body comes from, if any, `sample cut` when its body is a
-  sample cut to its required parts ([Sample size](#sample-size)),
-  `deprecated` when the operation is, and the first line of the
-  operation's `summary`.
+- The comment above each Stub maps it back to the document: the method, the
+  path as the document writes it, the response key, the name of the example
+  its body comes from, if any, `sample cut` when its body is a sample cut to
+  its required parts ([Sample
+  size](openapi/what-is-generated.md#sample-size)), `deprecated` when the
+  operation is, and the first line of the operation's `summary`.
 - The comments hold no path and no smock version. So the same import gives
   the same bytes from any directory, and after an upgrade that does not
   change the conversion. No home directory reaches a committed file
@@ -254,10 +263,10 @@ The comments are there for the reader:
 The arguments:
 
 - `<document>`: the OpenAPI document, a file whose name ends in `.json`,
-  `.yaml` or `.yml`. A YAML document is read as YAML 1.2 (see
-  [How YAML is read](#how-yaml-is-read)). It is not stdin, and not a URL:
-  download the document first. A URL that cannot be read as a file gets
-  that advice too.
+  `.yaml` or `.yml`. A YAML document is read as YAML 1.2 (see [How YAML is
+  read](openapi/references-and-yaml.md#how-yaml-is-read)). It is not stdin,
+  and not a URL: download the document first. A URL that cannot be read as a
+  file gets that advice too.
 - `--mock <name>`: the name of the one Mock the file declares. Every Stub
   ID starts with it, and it names the Mock in metric labels and Admin API
   paths. It is not taken from the document's title, which changes between
@@ -271,17 +280,17 @@ The arguments:
   by hand in another file.
 - `--ref-dir <dir>`: the directory that references to other files are
   followed in. It is the document's own directory by default, and the
-  document must lie under it
-  ([References to other files](#references-to-other-files)).
+  document must lie under it ([References to other
+  files](openapi/references-and-yaml.md#references-to-other-files)).
 - `--output <file>`: the Definition file to write. Its name picks the
   format: `.yaml` or `.yml` writes YAML, with the comments above, and
   `.json` writes JSON, which has no comments. Both hold the same Stubs.
   Its directory must exist. A name that starts with `.` is refused, since
   smock skips such files.
 - `--base-path <path>`: a path to put in front of every path, in place of
-  the paths of the document's servers, such as `/mock/petstore`. `/`
-  means no prefix. It must start with `/` and hold no `?` or `#`. See
-  [Servers and base paths](#servers-and-base-paths).
+  the paths of the document's servers, such as `/mock/petstore`. `/` means
+  no prefix. It must start with `/` and hold no `?` or `#`. See [Servers and
+  base paths](openapi/what-is-generated.md#servers-and-base-paths).
 - `--overwrite on|off`: whether an existing `--output` is replaced. It is
   `off` by default: an existing file is refused before the document is
   read, and nothing is written.
@@ -290,723 +299,15 @@ The flags belong to one run, so none has an `SMOCK_` variable.
 
 ## Validate the document first
 
-The command is not a validator. It reads the parts it imports, and an
-error there stops it, but a mistake in a part it does not read, such as a
-request body, does not. Check the document with a validator first, such
-as [openapi-spec-validator](https://github.com/python-openapi/openapi-spec-validator),
+The command is not a validator. It reads the parts it imports, and an error
+there stops it, but a mistake in a part it does not read, such as a request
+body, does not. Check the document with a validator first, such as
+[openapi-spec-validator](https://github.com/python-openapi/openapi-spec-validator),
 which smock's own CI runs on the Admin API's document:
 
 ```sh
 uvx --from openapi-spec-validator==0.9.0 openapi-spec-validator api/petstore.json
 ```
-
-## What is generated
-
-The file declares one Mock, named by `--mock`, with the Hosts of `--hosts`
-and no other field, unless `--declare-mock` is `off`
-([The Mock and its Hosts](#the-mock-and-its-hosts)). Then come the Stubs
-of each operation. Operations at concrete paths come before
-those at templated paths. Otherwise, they keep the order the document
-writes them in: path keys, then methods in the order each Path Item writes
-them ([Paths with parameters](#paths-with-parameters)). An operation has a
-Stub for each response it answers, and for each further named example
-([Selecting responses](#selecting-responses)).
-
-| In the document | In the Definition file |
-|---|---|
-| The document | `version: 1`, then `mocks` with the one Mock, unless `--declare-mock` is `off`, then `stubs`. In YAML, a comment at the top names the document, its `info.title` and `info.version`, its OpenAPI version, and the flags whose value is not the default: `--mock`, then `--hosts` when the Mock has Hosts, `--declare-mock off`, and `--base-path` when given. |
-| An operation | One Stub per response: the main Stub, and one for each other response. One more Stub per further named example. In YAML, a comment above each gives the method, the path as written, the response key and the example's name, or `sample cut` for a sample cut to its required parts. |
-| `summary` | In YAML, its first line ends the Stub's comment. Control characters become spaces. |
-| `get`, `put`, `post`, `delete`, `options`, `head`, `patch`, `trace`, and 3.2's `query` | The `method`, in upper case. In 3.0 and 3.1, which do not define `query`, it is neither read nor checked. |
-| A key of 3.2's `additionalOperations` | The `method`, as written. In 3.0 and 3.1, which do not define `additionalOperations`, it is neither read nor checked. |
-| `head` | `HEAD` is answered only where the document has `head`. |
-| `servers`, of an operation, a Path Item or the document | The path of the first server, in front of the paths of the operations it applies to, unless `--base-path` replaces it ([Servers and base paths](#servers-and-base-paths)). The URL's host is not used. |
-| A path key without parameters | The exact `path`, percent-decoded as smock decodes request paths, so that the match index finds it. |
-| A path key with parameters, such as `/pets/{petId}` | A `path` pattern, in which each parameter matches text within one segment: `pattern: /pets/[^/]+` ([Paths with parameters](#paths-with-parameters)). |
-| `operationId` | The Stub ID `<mock>.<operationId>.<key>`, where `<key>` is the response's key as written, such as `petstore.listPets.200` and `petstore.listPets.default`. A further named example's Stub adds its name: `<mock>.<operationId>.<key>.<example>`, such as `petstore.getPet.200.dog`. |
-| No `operationId` | The Stub ID `<mock>.<METHOD> <path>.<key>`, with the path as written, such as `petstore.GET /pets.200`. |
-| The main response | The `status` of the main Stub (see below). |
-| Another response | The `status` of its Stub (see below), which also has the request condition `Smock-Status: <key>` ([Selecting responses](#selecting-responses)). |
-| A response's `content` | The body, as `json` or `body`, from one media type, with its `Content-Type` in `headers` ([Bodies](#bodies)). |
-| A media type's `examples` | The first gives the body. Each further one gets a Stub of its own, which also has the request condition `Smock-Example: <name>` ([Bodies from examples](#bodies-from-examples)). |
-| A media type's `example` | The body, when the media type has no `examples`. |
-| A media type's `schema` | One fixed sample of the schema, written in the file, when the media type has no example ([Samples from schemas](#samples-from-schemas)). A sample whose compact JSON would pass 64 KiB is cut to its required parts below its first level ([Sample size](#sample-size)). |
-| A response's `headers` | Each header in `headers`, after the `Content-Type`, with its example or a sample of its schema, on every Stub of the response ([Response headers](#response-headers)). |
-| Parameters, request bodies, `Content-Type`, `Accept` and `security` | No condition, so a request without a documented parameter still gets the documented answer. A path parameter's schema does not narrow its pattern either. |
-| `deprecated: true` | The operation is imported like any other. In YAML, the Stub's comment says `deprecated`. No `Deprecation` header is added, since the document does not declare one. |
-| `callbacks` | Not imported, with one warning per operation. |
-| `webhooks` | Not imported, with one warning: they are requests the API sends, not ones it answers. |
-| `security`, `links`, descriptions, tags and `x-` extensions | Nothing, and no warning. |
-| A `$ref` to a Path Item, a Response, a Header, an Example or, as 3.2 allows, a Media Type, in the same document or in another file under `--ref-dir` | Followed, as if the part it names were written in place (see [References and bundling](#references-and-bundling)). In 3.0 and 3.1, which allow no reference in place of a Media Type, a `$ref` in a media type is ignored, with a warning, and the rest of it is read as written. |
-| A `$ref` in a schema | Followed too, into other files as well. A recursive schema gives a finite sample ([Schema references and recursion](#schema-references-and-recursion)). |
-| Fields beside a Path Item's `$ref` | Ignored, with a warning for each but an `x-` extension, since OpenAPI leaves their meaning undefined. |
-
-A Stub matches on its method and its path. The Stub of a response other
-than the main one matches on `Smock-Status` too, and the Stub of a further
-named example on `Smock-Example`. The file holds only
-`status`, `headers`, and `json` or `body` in its responses: no
-`template`, `responses`, `variables`, `dataWrites`, `crud`, `fault`,
-`scenario` or `priority`, and no `data`.
-
-### Paths with parameters
-
-A path key with parameters becomes a pattern. Each `{name}` in it becomes
-`[^/]+`, which matches text within one path segment. Take three
-operations, written in this order:
-
-```json
-"/pets/{petId}": { "get": { "operationId": "getPetById", "responses": { "200": {} } } },
-"/pets/mine": { "get": { "operationId": "getMyPet", "responses": { "200": {} } } },
-"/files/{name}.json": { "get": { "operationId": "getFile", "responses": { "200": {} } } }
-```
-
-The file has their Stubs in this order:
-
-```yaml
-stubs:
-  # GET /pets/mine, 200
-  - id: petstore.getMyPet.200
-    mock: petstore
-    request:
-      method: GET
-      path: /pets/mine
-    response:
-      status: 200
-  # GET /files/{name}.json, 200
-  - id: petstore.getFile.200
-    mock: petstore
-    request:
-      method: GET
-      path:
-        pattern: /files/[^/]+\.json
-    response:
-      status: 200
-  # GET /pets/{petId}, 200
-  - id: petstore.getPetById.200
-    mock: petstore
-    request:
-      method: GET
-      path:
-        pattern: /pets/[^/]+
-    response:
-      status: 200
-```
-
-So `GET /pets/mine` gets its own Stub, and `GET /pets/7` the pattern's.
-
-- Literal text is percent-decoded as smock decodes request paths. Then
-  its ASCII punctuation other than `/` is escaped with `\`, so that it
-  stands for itself. So `/files/{name}.{ext}` becomes
-  `/files/[^/]+\.[^/]+`.
-- The path of the server, or `--base-path`, comes first. It is literal
-  text, escaped like the rest: under the server `https://api.example.com/v1.0`,
-  `/pets/{petId}` becomes `/v1\.0/pets/[^/]+`
-  ([Servers and base paths](#servers-and-base-paths)).
-- A parameter's schema does not narrow its pattern: an integer does not
-  become `[0-9]+`, and an `enum` does not become a list of values. A
-  request with a mistyped value still gets the documented answer, not the
-  Mock's 404.
-- smock decodes the path of a request before it matches it, so `%2F` is a
-  `/`. A value with an encoded `/`, as in `/pets/a%2Fb`, never fills one
-  segment. This agrees with OpenAPI 3.2.1.
-
-The operations are sorted, so that a concrete path comes before a
-templated one, as OpenAPI asks:
-
-- Each path, with the server's path or `--base-path` in front, is split
-  on `/`, and the paths are compared segment by segment from the left. A
-  literal segment comes first, then a segment that mixes literal text and
-  parameters, such as `{name}.json`, then a segment that is one
-  parameter.
-- When one path runs out first, and its segments are of the same kinds as
-  the other's so far, the shorter path comes first. So `/pets` comes
-  before `/pets/mine`.
-- Otherwise, the document's order is kept: path keys first, then methods.
-  The Stubs of one operation keep their order.
-- So an exact path always comes before a pattern that matches it, and
-  `smock check` gives no warning. No `priority` is written.
-- Problems still come in the order the document writes the operations.
-
-Two patterns that can match the same request, such as
-`/files/{name}.{ext}` and `/files/{name}.json`, keep the document's order.
-The first one answers `/files/a.json`, and there is no warning, since
-`smock check` does not compare two patterns. So list the specific one
-first in the document.
-
-### Servers and base paths
-
-The Mock answers where the real service does: the path of a server URL
-is put in front of every path. Take a document whose server is
-`https://api.example.com/v1`, with the path `/pets/{petId}`:
-
-```json
-"servers": [{ "url": "https://api.example.com/v1" }],
-"paths": {
-  "/pets/{petId}": { "get": { "operationId": "getPetById", "responses": { "200": {} } } }
-}
-```
-
-The Stub's path is:
-
-```yaml
-path:
-  pattern: /v1/pets/[^/]+
-```
-
-So `GET /v1/pets/7` gets the Stub, and `GET /pets/7` does not.
-
-- The server is the first of the operation's `servers`, else of its Path
-  Item's, else of the document's. An empty list counts as none. Without
-  any, there is no prefix, since OpenAPI's default server is `/`.
-- Variables, such as `{version}` in `https://api.example.com/{version}`,
-  are replaced by their `default`. A variable that the URL uses but that
-  has no string `default` is an error.
-- The path of an absolute URL is taken: its scheme and its host never
-  matter, and get no warning. A relative URL is resolved against `/`, so
-  `/v1`, `v1` and `./v1` all give `/v1`, and `//cdn.example.com/v1` gives
-  `/v1` too. Dot segments are resolved, as in `/a/../v1`.
-- A URL with a query or a fragment, such as `/v1?lang=en`, is an error.
-- The prefix is percent-decoded as smock decodes request paths, and one
-  trailing `/` is dropped, so `/v1/` gives `/v1`, and `/` gives no prefix.
-- The path key is then appended as it is. So the key `/` under the prefix
-  `/v1` gives `/v1/`, and `/` alone with no prefix.
-- When the servers in one list have different paths, such as
-  `https://api.example.com/v1` and `http://localhost:8080`, only the first
-  is used, and a warning names it. Servers that differ only in their
-  host give no warning.
-- Every `servers` list is read and checked, even one that an inner list
-  overrides for every operation.
-
-`--base-path` mounts the API where the system under test calls it
-instead:
-
-```sh
-smock import-openapi api/petstore.json --mock petstore --output defs/petstore.yaml --base-path /mock/petstore
-```
-
-```yaml
-path:
-  pattern: /mock/petstore/pets/[^/]+
-```
-
-- It replaces every prefix, and `servers` are then not read at all, so a
-  mistake in them gives no problem.
-- `--base-path /` means no prefix: each path comes from its path key
-  alone.
-- Its value must start with `/` and hold no `?` or `#`, or the command
-  stops with a usage error, exit status 2. It is decoded, and one
-  trailing `/` is dropped, as for a server's path.
-- In YAML, the comment at the top of the file lists `--base-path` after
-  the other flags.
-
-### The main response
-
-Each operation answers one main response. It is the first of these that
-the operation's `responses` has:
-
-1. the lowest explicit code from 200 to 299, then `2XX`;
-2. `default`, which answers 200;
-3. the lowest explicit code from 300 to 599, then `3XX`, `4XX` and `5XX`.
-
-An explicit code answers itself, and a range answers its first code: 200,
-300, 400 or 500.
-
-- An operation without `responses`, or with an empty one, answers 200
-  with an empty body, with a warning. Its Stub ID ends in `.200`.
-- An operation with only 1xx responses is left out, with a warning: smock
-  answers with a status from 200 to 599.
-- A response key that is not a code from 100 to 599, a range from `1XX`
-  to `5XX` in upper case, `default` or an `x-` extension is left out,
-  with a warning. `x-` keys are ignored.
-
-### The other responses
-
-Every other response gets a Stub of its own, which a request selects with
-`Smock-Status` ([Selecting responses](#selecting-responses)). Its status:
-
-- An explicit code from 200 to 599 answers itself.
-- `2XX` to `5XX` answer 200, 300, 400 and 500, as for the main response.
-- `default`, when it is not the main response, answers 500.
-- `1XX`, and explicit codes from 100 to 199, get no Stub, with a warning:
-  smock answers with a status from 200 to 599.
-
-### Bodies
-
-A response's body comes from one of its media types. It is the example
-that the document gives there ([Bodies from examples](#bodies-from-examples)),
-else one fixed sample of that media type's schema
-([Samples from schemas](#samples-from-schemas)). Either way, it is written
-in the file. Nothing is random and nothing is templated, so a
-reviewer sees what the Mock answers, and tests repeat. A `200` response
-whose `application/json` media type has no example, and whose schema is
-
-```yaml
-type: object
-properties:
-  id: { type: string, format: uuid }
-  born: { type: string, format: date }
-  tags: { type: array, items: { type: string } }
-  password: { type: string, writeOnly: true }
-```
-
-answers
-
-```yaml
-response:
-  status: 200
-  json:
-    id: 00000000-0000-4000-8000-000000000000
-    born: "2000-01-01"
-    tags:
-      - string
-```
-
-- **One media type.** It is `application/json`, with any parameters, else
-  the first `+json` type, else the first key. Media types are compared
-  case-insensitively, without their parameters. The response's other
-  media types are left out, with a warning.
-- **Content-Type.** It is written in `headers`, with the key as the
-  document writes it. It is not written for plain `application/json` with
-  a `json` body, since smock sends that Content-Type itself, nor for a
-  range such as `*/*`. A key with a control character is left out, with a
-  warning, since a header cannot hold it.
-- **`json` or `body`.** A JSON media type, `application/json` or
-  `*/*+json`, gives `json`. Under a range such as `*/*` or
-  `application/*`, a value that is not a string gives `json` too, so smock
-  sends it as JSON: some generators write `*/*` for every response. Any
-  other media type gives `body`: a string as it is, and a number or a
-  boolean as smock writes it. An object, an array or null there gives an
-  empty body, with a warning. These rules hold for examples and samples
-  alike.
-- **No body.** A response without `content`, or with an empty one, has no
-  body and no Content-Type. A media type with neither an example nor a
-  schema has an empty body and its Content-Type, with no warning. 204, 205
-  and 304 responses, and responses to HEAD, have no body and no
-  Content-Type: content that the document gives them is left out, with a
-  warning.
-- **Order.** In `response`, `status` comes first, then `headers`, then
-  `json` or `body`.
-
-### Bodies from examples
-
-The body comes from the examples the API's authors wrote, before any
-sample. For the media type a response answers with, the first of these
-gives it:
-
-1. its `examples`: the first is the response's body, and each further one
-   gets a Stub of its own, which a request selects with `Smock-Example`
-   ([Selecting responses](#selecting-responses));
-2. its `example`;
-3. a sample of its `schema` ([Samples from schemas](#samples-from-schemas)),
-   which uses the schemas' own examples at every level.
-
-A media type with both `example` and `examples` uses `examples`, with a
-warning. Take a `200` response whose examples are `cat`, then `dog`:
-
-```json
-"application/json": {
-  "examples": {
-    "cat": { "value": { "name": "Tom" } },
-    "dog": { "value": { "name": "Rex" } }
-  }
-}
-```
-
-The main Stub answers `cat`, and a Stub of its own answers `dog`:
-
-```yaml
-stubs:
-  # GET /pets/mine, 200, example dog
-  - id: petstore.getPet.200.dog
-    mock: petstore
-    request:
-      method: GET
-      path: /pets/mine
-      headers:
-        Smock-Example: dog
-    response:
-      status: 200
-      json:
-        name: Rex
-  # GET /pets/mine, 200, example cat
-  - id: petstore.getPet.200
-    mock: petstore
-    request:
-      method: GET
-      path: /pets/mine
-    response:
-      status: 200
-      json:
-        name: Tom
-```
-
-An Example Object gives one of its fields:
-
-| Media type | Field, the first it has |
-|---|---|
-| A JSON media type, `application/json` or `*/*+json` | 3.2's `dataValue`, then `value`, then 3.2's `serializedValue` |
-| Any other one, ranges such as `*/*` included | `serializedValue`, then `dataValue`, then `value` |
-
-- A `serializedValue` is the exact text of the body. It is written as
-  `body`, with its Content-Type, even for a JSON media type. So
-  `{"price": 9.90}` keeps its spaces and its `9.90`.
-- `dataValue` and `serializedValue` are read in every OpenAPI version.
-- An Example Object with none of these fields, such as one with only an
-  `externalValue`, is left out, with a warning. smock reads no
-  `externalValue`: it names another file or a URL. The other examples keep
-  their order, and when none is left, the next source gives the body.
-- An Example Object that is not an object is an error. So is a
-  `serializedValue` that is not a string, and `examples` that is not an
-  object.
-- Example data is copied as data: a `$ref` member in `example`, `value`
-  or `dataValue` stays as written, and so do `${` and keys that start
-  with `$`. A `$ref` that stands for a whole Example Object is followed.
-- An example body above 1 MiB, its compact JSON or its text, is left
-  empty, with a warning.
-
-### Samples from schemas
-
-The sample depends only on the schema. For each schema, nested ones
-included, after its `$ref` is followed
-([Schema references and recursion](#schema-references-and-recursion))
-and its `allOf`, `oneOf` and `anyOf` are merged
-([Composed schemas](#composed-schemas)), the first of these gives it:
-
-1. `const`;
-2. the first of `examples`, in 3.1 and 3.2;
-3. `example`;
-4. `default`;
-5. the first of `enum`;
-6. the type.
-
-The values of `const`, `examples`, `example`, `default` and `enum` are
-copied as data: a `$ref` member in them stays as written.
-
-The type is the first type other than `null` in a type array, in every
-version, and `null` when it is the only one. Without a type, the sample
-takes the one the keywords imply, tried in this order:
-
-| Type | Keywords |
-|---|---|
-| object | `properties`, `required`, `additionalProperties`, `patternProperties`, `propertyNames`, `minProperties`, `maxProperties` |
-| array | `items`, `prefixItems`, `contains`, `minItems`, `maxItems`, `uniqueItems` |
-| integer | `format` `int32` or `int64` |
-| number | `format` `float` or `double`, or `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf` |
-| string | `minLength`, `maxLength`, `pattern`, or any other `format` |
-
-Else the sample is null. `nullable` changes nothing. The schema `true`
-samples as null. The schema `false` gives no value: a property whose
-schema is `false` is left out, and as the whole body it gives an empty
-body.
-
-- **Strings** sample as the fixed sample of their `format`, from the
-  table below. Any other format, or none, gives `"string"`, repeated or
-  cut to fit `minLength` and `maxLength`. Length bounds do not change a
-  format's sample.
-- **Booleans** sample as `true`.
-- **Numbers** sample within their bounds: 0 when the bounds allow it,
-  else the nearest bound ([Numbers](#numbers)).
-- **Arrays** have `minItems` items, at least 1 and at most 100, with a
-  warning past 100. `maxItems: 0` gives `[]`. Items come from
-  `prefixItems`, then `items`, and the array ends where neither gives one.
-  An array with neither gives `[]`.
-- **Objects** have every property in `properties`, required or not, in
-  the order written, except `writeOnly` ones. `additionalProperties` and
-  `patternProperties` add nothing. A name in `required` that no property
-  defines is not added.
-
-| `format` | Sample |
-|---|---|
-| `date-time` | `2000-01-01T00:00:00Z` |
-| `date` | `2000-01-01` |
-| `time` | `00:00:00Z` |
-| `duration` | `P1D` |
-| `email`, `idn-email` | `user@example.com` |
-| `hostname`, `idn-hostname` | `example.com` |
-| `ipv4` | `192.0.2.1` |
-| `ipv6` | `2001:db8::1` |
-| `uri`, `uri-reference`, `iri`, `iri-reference` | `https://example.com/` |
-| `uri-template` | `https://example.com/{id}` |
-| `uuid` | `00000000-0000-4000-8000-000000000000` |
-| `json-pointer` | `/a` |
-| `relative-json-pointer` | `0` |
-| `regex` | `.*` |
-| `byte` | `c3RyaW5n` |
-
-The sampler does not honour these keywords, so a sample may not satisfy
-them: `pattern`, `multipleOf`, `uniqueItems`, `contains`,
-`minProperties`, `maxProperties`, `propertyNames`, the `dependent`
-keywords, the `unevaluated` keywords and the `content` keywords. They are
-ignored without a warning.
-
-A keyword the sampler reads that has the wrong type, such as
-`minItems: "3"`, is ignored, with a warning at its pointer. A Media Type
-Object that is not an object, or a `schema` that is neither an object nor
-a boolean, is an error.
-
-The file has no template, so `${` in a value and keys that start with `$`
-are written as they are, with no escaping.
-
-#### Numbers
-
-A number or an integer samples within `minimum`, `maximum`,
-`exclusiveMinimum` and `exclusiveMaximum`, so that a client that checks
-ranges accepts it. In a 3.1 document:
-
-```yaml
-count: { type: integer, minimum: 10, maximum: 20 }                   # samples as 10
-offset: { type: integer, minimum: -5 }                               # 0
-ratio: { type: number, exclusiveMinimum: 0 }                         # 1
-weight: { type: number, exclusiveMinimum: 0, exclusiveMaximum: 1 }   # 0.5
-```
-
-- **The value.** 0 when the bounds allow it. Else the nearest bound,
-  moved by 1 inside an exclusive bound, or to the middle of the two bounds
-  when that leaves the range.
-- **Versions.** In 3.0, `exclusiveMinimum` and `exclusiveMaximum` are
-  `true` or `false`, and `true` makes `minimum` or `maximum` exclusive. In
-  3.1 and 3.2, they are numbers, and the tighter of a bound and its
-  exclusive form counts, the exclusive one when they are equal. One of the
-  wrong type for the version is ignored, with a warning.
-- **Integers.** A bound that is not whole is rounded inward: a lower bound
-  up, an upper bound down. So `exclusiveMinimum: 2.5` gives 3. The middle
-  is rounded down.
-- **Nothing fits.** When no integer fits the bounds, as for
-  `minimum: 0.25` with `maximum: 0.75`, the sample is the lower bound,
-  rounded up, with a warning. So is a number's when no number fits, as
-  for a `minimum` above the `maximum`.
-- **Exact digits.** The arithmetic is exact decimal arithmetic on the
-  shortest decimal text of each bound: the shortest text that reads back
-  as the same 64-bit float, or every digit of a large integer. So every
-  platform writes the same digits. A bound written with more digits than
-  a float keeps is read as that shortest text:
-  `minimum: 0.30000000000000001` is `0.3`. The sample is a plain
-  decimal, without an exponent: `exclusiveMinimum: 0` with
-  `exclusiveMaximum: 1e-18` gives `0.0000000000000000005`.
-- **Large bounds.** A bound whose shortest text has more than 18 digits
-  before or after the point, such as `1e20` or `1e-19`, is ignored, with
-  a warning.
-- **`allOf`.** Each bound comes from the schema's own keyword, else from
-  the first branch that has it, not from the tightest branch.
-
-#### Composed schemas
-
-A schema with `allOf`, `oneOf` or `anyOf` is first merged with its
-branches into one schema, which is then sampled as above. Generators write
-such schemas for shared parts, and a nullable field as a `oneOf` with a
-null branch. The schema
-
-```yaml
-allOf:
-  - type: object
-    required: [id]
-    properties:
-      id: { type: string, format: uuid }
-  - type: object
-    properties:
-      email:
-        oneOf:
-          - type: "null"
-          - type: string
-            format: email
-```
-
-samples as
-
-```yaml
-json:
-  id: 00000000-0000-4000-8000-000000000000
-  email: user@example.com
-```
-
-- **`allOf`** is merged in order, a nested `allOf` included. `properties`
-  are joined by name, the schema's own first. A property met again is
-  merged the same way, with the one met first as its own schema.
-  `required` is joined. For any other keyword, such as `type`, `format` or
-  `items`, the schema's own value wins, then the first branch that has
-  one.
-- **Values from branches.** A branch's `const`, `examples`, `example`,
-  `default` and `enum` are used only when the merged schema is not an
-  object, since a branch's example shows only its part of an object. The
-  schema's own are used on an object too. Each keyword is merged on its
-  own, so a branch's `const` still comes before the schema's own
-  `example`, in the order of the list above.
-- **`oneOf` and `anyOf`** take their first branch that is not only null,
-  such as `{ type: "null" }`, `{ const: null }` or `{ enum: [null] }`. A
-  branch that is a `$ref` to such a schema, such as a `Null` schema under
-  `components`, counts as only null too. The branch is merged with the
-  schema's own keywords, after the branches of `allOf`. When every branch
-  is only null, the sample is null.
-- **`true` and `false`.** The branch `true` adds nothing. The branch
-  `false` allows no value: in `allOf`, the schema then gives no value, and
-  `oneOf` and `anyOf` skip it, as written or named by a `$ref`.
-- **Ignored.** `not`, `if`, `then`, `else` and `discriminator` are ignored,
-  without a warning.
-- **Wrong types.** An `allOf`, `oneOf` or `anyOf` that is not an array,
-  and a branch that is neither an object nor a boolean, are ignored, with
-  a warning. A keyword of the wrong type is ignored, with a warning where
-  it is written, in a branch too. The next branch that has the keyword
-  then gives it.
-
-#### Schema references and recursion
-
-A `$ref` in a schema is followed, by the rules of other references
-([References and bundling](#references-and-bundling)), and the schema it
-names is sampled in its place. A schema may name itself, directly or
-through others. The schema
-
-```yaml
-components:
-  schemas:
-    Node:
-      type: object
-      required: [name]
-      properties:
-        name: { type: string }
-        parent: { $ref: "#/components/schemas/Node" }
-        children:
-          type: array
-          items: { $ref: "#/components/schemas/Node" }
-```
-
-samples as
-
-```yaml
-json:
-  name: string
-  children: []
-```
-
-- **Keywords beside a `$ref`.** In 3.1 and 3.2, the schema the `$ref`
-  names counts as part of the schema that holds the `$ref`, not as an
-  `allOf` branch. The keywords beside the `$ref` come first, then those of
-  the schema it names, merged by the rules of `allOf`: `properties` joined
-  by name and `required` joined, and for any other keyword the first that
-  has one ([Composed schemas](#composed-schemas)). So
-  `{ $ref: "#/components/schemas/Pet", example: { name: Rex } }` samples
-  as its own example, and
-  `{ $ref: "#/components/schemas/Pet", description: A pet }` as Pet's
-  `example`, on an object too, where an `allOf` branch's would not be
-  used. In 3.0, the keywords beside a `$ref` are ignored, as 3.0
-  asks.
-- **Recursion.** A schema reached again through a `$ref` it is already
-  being sampled from ends the sample there. As an optional property, it is
-  left out. As the items of an array, it gives no item, so the array is
-  `[]`. Otherwise, as a required property, it is null.
-- **Cycles in `allOf`.** A `$ref` met again while a schema is merged with
-  its branches is skipped, so two schemas whose `allOf` name each other
-  are merged once each. A cycle of schemas is allowed, unlike a cycle of
-  other references.
-- **Depth.** A sample nests at most 32 levels: an object or an array
-  inside 32 others is null. Values copied from `const`, `examples`,
-  `example`, `default` and `enum` are not cut.
-- **`writeOnly`.** In 3.1 and 3.2, a property that is `writeOnly` beside
-  a `$ref` is left out without following the `$ref`.
-- **Identifiers.** A `$id` inside a document is an error when a `$ref`
-  lies under it, or beside it, since it would change what the `$ref`
-  names: smock does not resolve `$id`. Without one, it is ignored. So is a
-  `$id` at the root of a document, the one given or another file.
-  `$dynamicRef` is an error. `$schema` and `jsonSchemaDialect` are
-  ignored.
-
-#### Sample size
-
-A sample is first made with every property. Wide schemas that nest grow
-fast, so its size is bounded:
-
-- **Cut.** When its compact JSON would pass 64 KiB, it is made again with
-  only the required properties, and only `minItems` items, none when
-  `minItems` is 0, in every object and array nested more than one level
-  below the body. The body and the objects and arrays right inside it keep
-  every property and item. In YAML, the Stub's comment says `sample cut`.
-- **Empty.** When the cut sample would pass 1 MiB, the body is left
-  empty, with a warning.
-- **Bounded work.** The sampler stops as soon as a sample passes its
-  bound, so neither time nor memory grows past it.
-- **Problems.** Only the problems of the sample that is written are
-  reported: a part that only the first sample reached gives none.
-- **Headers.** A header's sample has the same bounds. When the cut
-  sample would pass 1 MiB, the header's value is empty, with a warning.
-
-### Response headers
-
-Each header that a response documents in `headers` is written in the
-Stub's response, so that clients that read it see it. Every Stub of the
-response sends it, those of its named examples too. A `200` response with
-
-```yaml
-headers:
-  X-Rate-Limit:
-    schema: { type: integer }
-  X-Request-Id:
-    example: req-1
-  Content-Length:
-    schema: { type: integer }
-```
-
-answers
-
-```yaml
-response:
-  status: 200
-  headers:
-    X-Rate-Limit: "0"
-    X-Request-Id: req-1
-```
-
-- **Value.** A header is written with its `example`, else the first of
-  its `examples` that gives a value, else a sample of its `schema`
-  ([Samples from schemas](#samples-from-schemas), bounded as in
-  [Sample size](#sample-size)). With none of these, it is left out, with
-  a warning (see below).
-- **Example Objects.** An Example Object gives a header its
-  `serializedValue` first, since it is the exact text of the header, then
-  its `dataValue`, then its `value`.
-- **`content`.** A header described with `content` takes its value the
-  same way from the media type there, after its own `example` and
-  `examples`.
-- **Text.** A string is written as it is. A number is written as smock
-  writes numbers, a boolean as `true` or `false`, and an array of these
-  joined with `,`, as style `simple` asks: `["a", 1]` is `a,1`.
-- **Order.** In `headers`, the `Content-Type` comes first, then the
-  documented headers, in the order the document writes them.
-
-These are skipped without a warning, since documenting them is common and
-right: `Content-Type`, which OpenAPI says to ignore here, and
-`Content-Length`, `Transfer-Encoding` and `Connection`, which smock sets
-itself.
-
-These are left out, with a warning:
-
-- `Smock-Mock`, which smock adds itself when the Default Mock answers;
-- a name that is not an HTTP token, such as one with a space;
-- a name that repeats an earlier one in another case, such as `x-id`
-  after `X-Id`, since header names are case-insensitive;
-- a header that nothing gives a value: one with no `example`, and no
-  `examples`, `schema` or `content` that gives one, or one whose schema
-  allows no value, such as `schema: false`;
-- a value that is an object or null, or an array that holds one or an
-  array;
-- a value with a character HTTP forbids in a field value: an ASCII
-  control character other than tab, such as a line break.
-
-A header with both `example` and `examples` uses `example`, with a
-warning. The examples after the one that gives the value are left out,
-with a warning each. A `schema` beside `content` is ignored, with a
-warning, and so is each media type of `content` after the first.
-
-### IDs and conditions that repeat
-
-- Two imported operations with the same `operationId` are an error that
-  names both places. So is any generated Stub ID that repeats. A Path
-  Item that two path keys name through `$ref` gives two operations, so an
-  `operationId` in it is an error.
-- When two operations' method and path come out the same, the first in
-  document order is kept, and the later one is left out with a warning.
-  Two paths that decode alike, such as `/a%2Fb` and `/a/b`, are the same
-  path. Two templated paths that differ only in their parameters' names,
-  such as `/pets/{id}` and `/pets/{petId}`, give the same pattern.
-- Operations that are left out take part in neither check.
 
 ## The Mock and its Hosts
 
@@ -1017,9 +318,9 @@ other Mocks depends on what else the directory holds:
   Default Mock, which answers every request whatever its Host. It needs no
   Hosts, as in the [Quick start](#quick-start).
 - **Several Mocks.** Each request goes to the Mock whose Hosts include its
-  Host, and otherwise to the Default Mock
-  ([Hosts and the Default Mock](definition-files.md#hosts-and-the-default-mock)).
-  So give the imported Mock its Hosts with `--hosts`:
+  Host, and otherwise to the Default Mock ([Hosts and the Default
+  Mock](definition-files.md#hosts-and-the-default-mock)). So give the
+  imported Mock its Hosts with `--hosts`:
 
   ```sh
   smock import-openapi api/petstore.json --mock petstore --hosts petstore.test,pets.internal:8080 --output defs/petstore.yaml
@@ -1074,7 +375,8 @@ imported with `--declare-mock off` whose Mock no file declares.
 
 ## Selecting responses
 
-Without `Smock-Status`, a request gets the main response. With it, it
+Without `Smock-Status`, a request gets [the main
+response](openapi/what-is-generated.md#the-main-response). With it, it
 gets the response whose key the header names, as the document writes it.
 Take an operation with a 200 and a 404:
 
@@ -1133,12 +435,12 @@ curl -H "Smock-Status: 503" localhost:8080/pets/mine   # 200: no Stub names 503
 
 ### Selecting examples
 
-A response's first named example is its body. Each further named example
-has a Stub of its own, which a request selects with `Smock-Example: <name>`,
+A response's first named example is its body. Each further named example has
+a Stub of its own, which a request selects with `Smock-Example: <name>`,
 alone for the main response, and after `Smock-Status` for another one
-([Bodies from examples](#bodies-from-examples)). Take a 200 whose examples
-are `cat`, then `dog`, and a 404 whose examples are `missing`, then
-`gone`:
+([Bodies from examples](openapi/what-is-generated.md#bodies-from-examples)).
+Take a 200 whose examples are `cat`, then `dog`, and a 404 whose examples
+are `missing`, then `gone`:
 
 ```json
 "/pets/mine": {
@@ -1259,7 +561,7 @@ method, path and `response`, without the two headers. The Session's
 requests then get that
 response, and other Sessions still get the main one. The system under
 test must pass the Session on, in the `baggage` header of its calls
-([Sessions and Ephemeral Stubs](../README.md#sessions-and-ephemeral-stubs)).
+([Sessions and Ephemeral Stubs](admin-api.md#sessions-and-ephemeral-stubs)).
 Below, the second `curl` stands for such a call:
 
 ```sh
@@ -1361,250 +663,6 @@ The same document and flags give the same bytes, so `git diff` fails
 only when the committed file is out of date with the document. Running
 from a fixed directory keeps the relative paths naming the same files.
 
-## References and bundling
-
-Documents describe shared parts once, under `components`, and point at
-them with `$ref`. The command follows a reference where it reads a Path
-Item, a Response, a Header, an Example, a Schema or, as 3.2 allows, a
-Media Type, within the document or into another file
-([References to other files](#references-to-other-files)):
-
-```json
-{
-  "openapi": "3.1.0",
-  "paths": {
-    "/pets": { "$ref": "#/components/pathItems/Pets" }
-  },
-  "components": {
-    "pathItems": {
-      "Pets": {
-        "get": {
-          "operationId": "listPets",
-          "responses": { "200": { "$ref": "#/components/responses/Ok" } }
-        }
-      }
-    },
-    "responses": {
-      "Ok": { "description": "OK" }
-    }
-  }
-}
-```
-
-This imports `listPets` as if both parts were written in place.
-
-- A reference names a part of the same document by its fragment, an
-  [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901) JSON Pointer such as
-  `#/components/responses/Ok`. The fragment is percent-decoded, `~1` in it
-  is `/` and `~0` is `~`, and it may step into arrays, as `#/x-list/0`.
-- A reference to a part that is itself a reference is followed on.
-- A problem in a part a reference names is reported where that part is
-  written, such as `/components/responses/Ok/content`, and only once,
-  however many references name it.
-- Operations reached through a Path Item's `$ref` keep the order of the
-  path keys.
-- The fields beside a Path Item's `$ref` are ignored, with a warning, but
-  `x-` extensions. The fields beside the `$ref` of a Response, a Header
-  or an Example are ignored, as OpenAPI asks.
-- A media type is a reference only from OpenAPI 3.2. In 3.0 and 3.1 a
-  `$ref` in a media type is ignored, with a warning, and the rest of the
-  media type is read as written. A common slip is a `$ref` to a schema
-  written in place of the media type's `schema`.
-- A `$ref` inside example data, in `example`, `value` or `dataValue`, is
-  data, not a reference: it is copied as written.
-- `$id` at the root of the document, and 3.2's `$self`, are ignored: a
-  reference names a part by its fragment.
-- A schema may name itself through `$ref`, directly or through others
-  ([Schema references and recursion](#schema-references-and-recursion)).
-- References in the parts the command does not read are not followed, so
-  a broken one there is no error. These parts are request bodies,
-  parameters, `security`, `callbacks`, `webhooks`, `links`, 1xx
-  responses, and components that no imported operation reaches.
-
-Each of these is an error at the `$ref`:
-
-- a `$ref` that is not a string;
-- a reference to a part the document does not have;
-- a fragment that is not a JSON Pointer, such as an `$anchor` name like
-  `#Pet`;
-- references that form a cycle, within a document or across files,
-  unless it passes through a Schema;
-- a URL, of any scheme, `file:` included, or an absolute path. smock
-  reads no URLs;
-- a reference to a file outside `--ref-dir`, to a file whose name does not
-  end in `.json`, `.yaml` or `.yml`, or to a file that cannot be read.
-
-In a schema, a `$id` inside a document is an error, at the `$id`, when
-a `$ref` lies under it or beside it. `$dynamicRef` is an error too.
-
-### References to other files
-
-A document split into several files can be imported. Here
-`api/openapi.yaml` names a response in another file:
-
-```yaml
-openapi: 3.1.0
-paths:
-  /pets:
-    get:
-      operationId: listPets
-      responses:
-        "200":
-          $ref: "responses/ok.yaml#/Ok"
-```
-
-```sh
-smock import-openapi api/openapi.yaml --mock petstore --output defs/petstore.yaml
-```
-
-The command reads `api/responses/ok.yaml` and follows the reference to its
-`Ok` member.
-
-- A reference to another file is a relative path, then an optional
-  fragment. The path is percent-decoded, so `my%20responses/ok.yaml` names
-  `my responses/ok.yaml`. It must end in `.json`, `.yaml` or `.yml`.
-- The path is resolved against the directory of the document that names
-  it. So a reference in `api/paths/pets.yaml` to `../responses/ok.yaml`
-  names `api/responses/ok.yaml`.
-- The file is read as the document is, by its extension: YAML 1.2 or
-  JSON. It need not be an OpenAPI document, so a JSON Schema file will
-  do. Its `openapi` field, if any, is not checked. The schema rules follow
-  the version of the document given on the command line.
-- Each file is read once, however many references name it. A reference
-  in it may name another file, or a part of the document itself.
-
-Files are read only under one directory, `--ref-dir`. By default it is
-the document's own directory, and the document must lie under it. A
-reference that leads outside it is an error, so a downloaded document
-cannot copy a secret such as `../../.npmrc` into a committed file:
-
-- a path that climbs above `--ref-dir`, such as `../shared/errors.yaml`
-  from a document at the top of it;
-- a file that a symlink leads outside `--ref-dir`, as for body files:
-  the file itself is the symlink, or a directory on its path is. A
-  symlink that stays inside is followed.
-
-When the parts a document shares sit in a directory beside it, give a
-`--ref-dir` that holds both:
-
-```sh
-smock import-openapi api/openapi.yaml --mock petstore --ref-dir . --output defs/petstore.yaml
-```
-
-A document outside `--ref-dir`, or a `--ref-dir` that is not a directory,
-is a usage error, with exit status 2.
-
-A problem in another file names it as `--ref-dir`, as given, joined with
-its path under `--ref-dir`, such as `./api/responses/ok.yaml` above.
-Without `--ref-dir`, the directory part of the document's path, as given,
-takes its place: `api/responses/ok.yaml`. A file that cannot be read is
-an error at each `$ref` that names it, with the document-level problems:
-
-```
-api/openapi.yaml: /paths/~1pets/get/responses/200/$ref: api/responses/ok.yaml cannot be read: no such file
-```
-
-The reasons are `no such file`, `not a regular file`, `a symlink leads it
-outside --ref-dir`, or the system's own, such as `permission denied`. A
-file that is not valid YAML or JSON is an error in it, once.
-
-No path reaches the generated file, so the same documents give the same
-bytes whatever `--ref-dir` and the paths given.
-
-### Bundling
-
-A document whose references name URLs, or more files than smock reads
-(see [Limits](#limits)), must be bundled into one file first, with
-another tool. A bundler copies what the references
-name into `components`, and points at it with references within the
-document. For example, with [Redocly CLI](https://redocly.com/docs/cli/):
-
-```sh
-npx @redocly/cli@2.55.0 bundle api/petstore.json --output api/petstore.bundled.json
-smock import-openapi api/petstore.bundled.json --mock petstore --output defs/petstore.json
-```
-
-A bundler fetches what the URLs name. smock never does.
-
-## How YAML is read
-
-A document whose name ends in `.yaml` or `.yml` is read as YAML 1.2, the
-YAML version OpenAPI recommends. One whose name ends in `.json` is read as
-JSON. Definition files are not read this way: they keep the safe subset
-of YAML that the [README](../README.md) describes, and the command writes
-its YAML output in that subset.
-
-Values without quotes are typed by the YAML 1.2 core schema:
-
-| Plain value | Read as |
-|---|---|
-| `null`, `Null`, `NULL`, `~`, or no value at all | null |
-| `true`, `True`, `TRUE`, `false`, `False`, `FALSE` | a boolean |
-| `007`, `+1`, `.5`, `0x1F`, `0o17` | a number: 7, 1, 0.5, 31 and 15 |
-| `yes`, `no`, `on`, `off`, `2020-01-01`, `1_000` | a string |
-
-Every key is a string, as OpenAPI asks, so an unquoted `200:` is the
-response key `"200"`. This document imports as if it were written in JSON
-with the key `"200"`:
-
-```yaml
-openapi: 3.1.0
-paths:
-  /pets:
-    get:
-      responses:
-        200:
-          description:
-          content:
-            application/json:
-              schema:
-                properties:
-                  born: { example: 2020-01-01 }
-                  code: { example: 007 }
-                  tag: { example: ~ }
-```
-
-Its body is `{"born": "2020-01-01", "code": 7, "tag": null}`.
-
-- A decimal integer keeps all its digits, as in JSON, even past 2^53.
-- Block scalars may have an indentation indicator, as in `|2` or `>-1`.
-  YAML writers emit one for text that starts with spaces, such as an
-  indented code sample in a `description`.
-- `openapi: 3.1` without quotes is the number 3.1, which is an error:
-  quote the version and give its patch, as in `openapi: "3.1.0"`. An
-  unquoted `3.1.0` is already a string. An unquoted `version: 1.0` under
-  `info` is a number too. It is left out of the comment at the top, with
-  a warning that says to quote it.
-
-Each of these is an error at its pointer, with a message that names it,
-and nothing is written:
-
-- anchors (`&`), aliases (`*`) and merge keys (`<<`);
-- tags, such as `!!str`;
-- a key that repeats in a mapping, such as `200:` and `"200":`;
-- more than one document, directives such as `%YAML 1.2`, and explicit
-  keys (`?`);
-- a hexadecimal or octal integer above 2^53 - 1: write it in decimal;
-- infinity and NaN, such as `.inf`, `-.Inf` and `.NaN`, which JSON
-  cannot hold;
-- tabs in indentation, and text that is not UTF-8.
-
-For example:
-
-```
-api/petstore.yaml: /paths/~1pets/get/responses/200: anchors (&) are not supported; reuse parts with $ref, or quote the value if it is text
-```
-
-A document that reuses parts with anchors and aliases can use `$ref`
-instead, which OpenAPI has for that. Or convert it to JSON with another
-tool first. A bundler such as [Redocly CLI](https://redocly.com/docs/cli/)
-reads the aliases and writes each part in full:
-
-```sh
-npx @redocly/cli@2.55.0 bundle api/petstore.yaml --output api/petstore.bundled.json
-smock import-openapi api/petstore.bundled.json --mock petstore --output defs/petstore.yaml
-```
-
 ## Problems and exit codes
 
 Each problem is one line on stdout, in the form `smock check` uses:
@@ -1613,12 +671,12 @@ Each problem is one line on stdout, in the form `smock check` uses:
 api/petstore.json: /paths/~1pets/get/responses/200/content/application~1xml: warning: left out: a response answers with one media type, here "application/json"
 ```
 
-- The document is named as given on the command line, and another file
-  that references name as
-  [References to other files](#references-to-other-files) says. The place
-  is an [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901) JSON Pointer to
-  where the construct is written, after following `$ref`. In a pointer,
-  `/` in a key is written `~1`, so `/paths/~1pets` is the path key
+- The document is named as given on the command line, and another file that
+  references name as [References to other
+  files](openapi/references-and-yaml.md#references-to-other-files) says. The
+  place is an [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901) JSON
+  Pointer to where the construct is written, after following `$ref`. In a
+  pointer, `/` in a key is written `~1`, so `/paths/~1pets` is the path key
   `/pets`.
 - Errors have no `warning:`. An error is what makes a faithful file
   impossible, such as invalid JSON, an unsupported version, a reference
@@ -1639,12 +697,13 @@ api/petstore.json: /paths/~1pets/get/responses/200/content/application~1xml: war
 | 1 | Nothing was written: the document or the output had an error. |
 | 2 | A usage error, such as a missing flag or a document outside `--ref-dir`, printed on stderr. |
 
-The input must be UTF-8 JSON, or YAML as
-[How YAML is read](#how-yaml-is-read) says. A leading byte order mark is
-skipped. A key that repeats in an object is an error at its pointer, as in
-a Definition file. `openapi` must be a string `3.<minor>.<patch>`, such as
-`"3.1.0"`, for 3.0, 3.1 or 3.2; the patch is ignored. A Swagger 2.0
-document is an error: convert it to OpenAPI 3.0 first.
+The input must be UTF-8 JSON, or YAML as [How YAML is
+read](openapi/references-and-yaml.md#how-yaml-is-read) says. A leading byte
+order mark is skipped. A key that repeats in an object is an error at its
+pointer, as in a Definition file. `openapi` must be a string
+`3.<minor>.<patch>`, such as `"3.1.0"`, for 3.0, 3.1 or 3.2; the patch is
+ignored. A Swagger 2.0 document is an error: convert it to OpenAPI 3.0
+first.
 
 Before it writes, the command loads its own output with the loader
 `smock check` uses, as a set of its own. With `--declare-mock off`, a
@@ -1666,27 +725,29 @@ result differs from Mockoon 9.9.0's import in these ways:
 
 - **One fixed sample.** Mockoon turns a schema into faker helpers, which
   give new data on every request. smock writes one fixed sample of the
-  schema in the file ([Samples from schemas](#samples-from-schemas)), so a
+  schema in the file ([Samples from
+  schemas](openapi/what-is-generated.md#samples-from-schemas)), so a
   reviewer sees what the Mock answers, and tests repeat.
 - **The default response.** smock answers the lowest 2xx response, else
-  `2XX`, else `default` ([The main response](#the-main-response)).
-  Mockoon answers each route's first response, the one with the lowest
-  status code, else `default`. So an operation with `default` or `2XX`,
-  and a `404`, answers 404 in Mockoon and 200 in smock. Mockoon's first
-  response also has a body made from the schema, even when the document
-  gives examples, while smock's has the first example.
+  `2XX`, else `default` ([The main
+  response](openapi/what-is-generated.md#the-main-response)). Mockoon
+  answers each route's first response, the one with the lowest status code,
+  else `default`. So an operation with `default` or `2XX`, and a `404`,
+  answers 404 in Mockoon and 200 in smock. Mockoon's first response also has
+  a body made from the schema, even when the document gives examples, while
+  smock's has the first example.
 - **Ranges and `example`.** Mockoon drops range keys such as `4XX`, and
-  reads a media type's `examples` but not its `example`. smock keeps both:
-  a range answers its first code, and `example` gives the body
-  ([Bodies from examples](#bodies-from-examples)).
-- **Concrete paths first.** Mockoon keeps the document's order of paths,
-  so `/pets/{petId}`, written before `/pets/mine`, answers
-  `GET /pets/mine`. smock puts concrete paths before templated ones
-  ([Paths with parameters](#paths-with-parameters)).
+  reads a media type's `examples` but not its `example`. smock keeps both: a
+  range answers its first code, and `example` gives the body ([Bodies from
+  examples](openapi/what-is-generated.md#bodies-from-examples)).
+- **Concrete paths first.** Mockoon keeps the document's order of paths, so
+  `/pets/{petId}`, written before `/pets/mine`, answers `GET /pets/mine`.
+  smock puts concrete paths before templated ones ([Paths with
+  parameters](openapi/what-is-generated.md#paths-with-parameters)).
 - **The other responses.** Mockoon's imported responses have no rules, so
-  only the first one answers until the route is edited. In smock, a
-  request selects any other response with `Smock-Status`, and a named
-  example with `Smock-Example` ([Selecting responses](#selecting-responses)).
+  only the first one answers until the route is edited. In smock, a request
+  selects any other response with `Smock-Status`, and a named example with
+  `Smock-Example` ([Selecting responses](#selecting-responses)).
 - **Serving and re-importing.** `mockoon-cli start --data openapi.yaml`
   converts the document each time it starts. smock never reads OpenAPI
   when it serves: import once, commit the file, and import again with
@@ -1744,33 +805,33 @@ Where the two differ, as checked against Prism 5.16.0:
   a run takes many times what it reads in memory.
 - The file is at most 64 MiB. A larger output is an error that gives its
   size, and nothing is written.
-- A large output needs room where smock runs. `smock serve` holds the
-  whole file in memory, parsed, as it holds every Definition file, and
-  while it reloads a changed file it holds the old set and the new one, so
-  give the Pod memory for both. A ConfigMap holds at most 1 MiB, so deploy
-  a larger file with the Helm chart's
-  [git-sync sidecar](../charts/smock/README.md#from-a-git-repository-git-sync)
-  or its [OCI image volume](../charts/smock/README.md#from-an-oci-image)
-  instead.
+- A large output needs room where smock runs. `smock serve` holds the whole
+  file in memory, parsed, as it holds every Definition file, and while it
+  reloads a changed file it holds the old set and the new one, so give the
+  Pod memory for both. A ConfigMap holds at most 1 MiB, so deploy a larger
+  file with the Helm chart's [git-sync
+  sidecar](../charts/smock/README.md#from-a-git-repository-git-sync) or its
+  [OCI image volume](../charts/smock/README.md#from-an-oci-image) instead.
 - A sampled array has at most 100 items. A larger `minItems` gives 100
   items, with a warning.
-- A sample nests at most 32 levels. An object or an array inside 32
-  others is null
-  ([Schema references and recursion](#schema-references-and-recursion)).
+- A sample nests at most 32 levels. An object or an array inside 32 others
+  is null ([Schema references and
+  recursion](openapi/what-is-generated.md#schema-references-and-recursion)).
 - A sample whose compact JSON would pass 64 KiB is made again, cut to its
-  required parts below its first level. When that would pass 1 MiB, the
-  body is left empty, with a warning ([Sample size](#sample-size)).
+  required parts below its first level. When that would pass 1 MiB, the body
+  is left empty, with a warning ([Sample
+  size](openapi/what-is-generated.md#sample-size)).
 - A bound of a sampled number has at most 18 digits before the point and
   18 after. A bound with more is ignored, with a warning
-  ([Numbers](#numbers)).
+  ([Numbers](openapi/what-is-generated.md#numbers)).
 - The file nests at most 1024 levels, the most the parsers read. A value
   of `const`, `examples`, `example`, `default` or `enum`, or an
   example's value, that would nest deeper is left out of its body, with a
   warning.
 - An example body is at most 1 MiB, its compact JSON or its text. A
   larger one is left empty, with a warning.
-- Each operation at a templated path adds pattern Stubs, one per
-  response and named example. The match index does not find them
-  ([Which Stub answers](definition-files.md#which-stub-answers)), so each
+- Each operation at a templated path adds pattern Stubs, one per response
+  and named example. The match index does not find them ([Which Stub
+  answers](definition-files/matching.md#which-stub-answers)), so each
   request of that method scans the Mock's pattern Stubs, in order. A
   document with many templated paths makes each request slower.

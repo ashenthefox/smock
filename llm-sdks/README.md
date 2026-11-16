@@ -1,6 +1,6 @@
 # The SDK job
 
-The SDK job reads smock's [LLM responses](../docs/definition-files.md#llm-responses)
+The SDK job reads smock's [LLM responses](../docs/definition-files/llm-responses.md#llm-responses)
 with the official SDKs of the vendors, openai-python and
 anthropic-sdk-python, as applications call them. It catches a change to
 smock that breaks an SDK before a release. Each SDK and every package it
@@ -71,27 +71,27 @@ retry checks, below, keep the default retries.
   `RESPONSES_GENERATED_ID_DIFFERENCES` and
   `MESSAGES_GENERATED_ID_DIFFERENCES`). Any other difference fails the
   check.
-- Mid-stream errors, with the docs'
-  [cut-short Stub](../docs/definition-files.md#mid-stream-errors) for each
+- Mid-stream errors, with the docs' [cut-short
+  Stub](../docs/definition-files/llm-errors.md#mid-stream-errors) for each
   API. openai-python raises `APIError` itself on Chat's error frame, with
   the message and the error object as its body. It yields the Responses
-  `error` event as a `ResponseErrorEvent`, and raises nothing; the
-  helper's `get_final_response()` then raises `RuntimeError`.
-  anthropic-sdk-python raises `APIStatusError` itself, not
-  `OverloadedError`, with status 200 and the type in the body. Each comes
-  after the text before the cut, from `create(stream=True)` and from the
-  `stream()` helper, and `create` without `stream` gets the whole reply.
+  `error` event as a `ResponseErrorEvent`, and raises nothing; the helper's
+  `get_final_response()` then raises `RuntimeError`. anthropic-sdk-python
+  raises `APIStatusError` itself, not `OverloadedError`, with status 200 and
+  the type in the body. Each comes after the text before the cut, from
+  `create(stream=True)` and from the `stream()` helper, and `create` without
+  `stream` gets the whole reply.
 - Error replies: the docs'
-  [429](../docs/definition-files.md#a-429-with-retry-after), in OpenAI's
-  form, and [529](../docs/definition-files.md#a-529-when-overloaded), in
+  [429](../docs/definition-files/llm-errors.md#a-429-with-retry-after), in OpenAI's
+  form, and [529](../docs/definition-files/llm-errors.md#a-529-when-overloaded), in
   Anthropic's, each response copied as written. Both SDKs get both, and
   each raises its own status error for the status, which keeps the body:
   `RateLimitError` for the 429, and `InternalServerError` from
   openai-python or `OverloadedError` from anthropic-sdk-python for the
   529.
 - Retries: with clients that keep the default retries, each call in a
-  [Session](../README.md#sessions-and-ephemeral-stubs) of its own, the
-  Journal holds one request of the 429, whose `x-should-retry` is
+  [Session](../docs/admin-api.md#sessions-and-ephemeral-stubs) of its own,
+  the Journal holds one request of the 429, whose `x-should-retry` is
   `"false"`, and three of the 529, which has none, as each SDK retries it
   twice. So the SDKs do retry, and the header is what stops them.
 
@@ -144,12 +144,12 @@ or smock's output must change, which is the case below.
 
 ## When smock's output changes
 
-A change that a raised pin brings to what an existing `llm` Stub sends
-ships in a minor release, with a line in `CHANGELOG.md` under `### Changed`
-that says what the Stub now sends and why, so that test authors know when
-to update recorded expectations. So does a change made to follow a
-vendor's documented form, which also updates the date of the vendor
-documents in [LLM responses](../docs/definition-files.md#llm-responses).
+A change that a raised pin brings to what an existing `llm` Stub sends ships
+in a minor release, with a line in `CHANGELOG.md` under `### Changed` that
+says what the Stub now sends and why, so that test authors know when to
+update recorded expectations. So does a change made to follow a vendor's
+documented form, which also updates the date of the vendor documents in [LLM
+responses](../docs/definition-files/llm-responses.md#llm-responses).
 
 The SDKs are used only in CI. Neither the binary nor the image holds them,
 so NOTICE and the SBOM do not name them.

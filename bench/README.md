@@ -111,7 +111,8 @@ A CPU limit equal to the request is a CFS quota over a 100 ms period, as
 here: under 50m, smock may run 5 ms in every 100 ms. smock runs with its
 defaults, so if they do not fit a memory limit, the run shows OOM kills
 rather than hiding them; the Journal's byte bound follows the memory limit
-([The Journal](../README.md#the-journal)): 13 MiB under 52Mi, 64 MiB under the others.
+([The Journal](../docs/admin-api.md#the-journal)): 13 MiB under 52Mi, 64 MiB
+under the others.
 Each profile measures idle RSS, then plain HTTP, TLS, and HTTP/2 as h2c
 and over TLS, and h2c with several streams on each connection
 ([HTTP/2 cases](#http2-cases)), all with keep-alive
@@ -218,18 +219,17 @@ requests at once (`"streams_per_connection": 4`, oha's `-p 4`). So about
 `--definitions` serves another definitions directory than
 `bench/definitions/`. `bench/definitions-scenarios/` is its Scenario
 variant: the same Mocks and Stubs, but each Stub that a request of the mix
-names has a [Scenario](../docs/definition-files.md#scenarios) clause, which
-requires `Started` and moves to `Seen`, and right after it a twin,
-`<id>-seen`, with the same request and response, which requires `Seen` and
-moves back to `Started`. Each request carries its own Session, so its
-Scenario is its own, and the two Stubs take turns. So in every Mock,
-every request of the mix matches a Scenario Stub and moves its Scenario:
-smock looks up the Session's states, checks the state the Stub requires,
-moves it, and records the move in the Journal. Every other request also
-tries the Stub whose state does not hold before the twin that answers,
-as the Stubs of a Scenario with the same request do. The plain set has no
-Scenario Stub, so each of its requests pays only the test of whether its
-Mock has one.
+names has a [Scenario](../docs/definition-files/scenarios.md#scenarios)
+clause, which requires `Started` and moves to `Seen`, and right after it a
+twin, `<id>-seen`, with the same request and response, which requires `Seen`
+and moves back to `Started`. Each request carries its own Session, so its
+Scenario is its own, and the two Stubs take turns. So in every Mock, every
+request of the mix matches a Scenario Stub and moves its Scenario: smock
+looks up the Session's states, checks the state the Stub requires, moves it,
+and records the move in the Journal. Every other request also tries the Stub
+whose state does not hold before the twin that answers, as the Stubs of a
+Scenario with the same request do. The plain set has no Scenario Stub, so
+each of its requests pays only the test of whether its Mock has one.
 
 To see what Scenarios cost, run each set on the same machine with the same
 plan and compare the runs with `bench/compare.py`, which names the
@@ -239,11 +239,11 @@ On GKE, a variant with the `scenarios` option serves it
 
 ## CRUD Stubs in the benchmark
 
-`bench/definitions-crud/` is the CRUD variant of the definitions: the
-same Mocks and Stubs, but two resources are
-[Data buckets](../docs/definition-files.md#data-buckets), each served by
-a [CRUD Stub](../docs/definition-files.md#crud-stubs) in place of the
-Stubs that answered its items one by one:
+`bench/definitions-crud/` is the CRUD variant of the definitions: the same
+Mocks and Stubs, but two resources are [Data
+buckets](../docs/definition-files/data-buckets.md#data-buckets), each served
+by a [CRUD Stub](../docs/definition-files/crud-stubs.md#crud-stubs) in place
+of the Stubs that answered its items one by one:
 
 - `items`, keyed by `sku`, holds the catalog's 600 items, which the 600
   item Stubs answered, in their order. The CRUD Stub `catalog-items`
@@ -260,7 +260,7 @@ Stub, so a run that serves this variant sends it a mix of its own,
 `bench/requests-crud.json`. `bench/gen_definitions.py` writes it from
 `bench/requests.json`: the same requests, with the same weights, but two.
 `catalog-search` becomes `catalog-list`, a
-[list query](../docs/definition-files.md#list-queries),
+[list query](../docs/definition-files/crud-stubs.md#list-queries),
 `GET /catalog/items?category=lighting&$sort=-stock&$limit=10`, which
 filters the 600 items to 100, sorts them and keeps 10. `update-order-status`
 becomes `update-order`, a `PATCH` of the order with the same body. Each of
@@ -380,7 +380,8 @@ gRPC status of its reply and its Journal entry: the Mock, the Stub,
 ## The mockoon log format in the benchmark
 
 `--log-format mockoon` runs smock in the `mockoon` log format
-([Run](../README.md#run)), so that a run measures what the format costs:
+([Logs](../docs/running.md#logs)), so that a run measures what the format
+costs:
 smock writes a `Transaction recorded` line to stdout for each request,
 and waits for each write to finish. `--log-format json`, the default,
 runs smock as runs before the option did: with no `--log-format`, and
@@ -532,7 +533,8 @@ generator that paces requests more finely than 1 ms.
 
 A full run of `bench/plan-autopilot.json` measures every target of its
 architecture; on GKE, idle RSS and peak memory come from smock's own
-[process and cgroup metrics](../README.md#run), so a smock without them leaves
+[process and cgroup metrics](../docs/admin-api.md#process-and-cgroup-metrics),
+so a smock without them leaves
 those two unmeasured. A run of `bench/plan.json`, as in CI, runs none of
 these profiles, and reports each target as not measured.
 
@@ -1094,7 +1096,9 @@ profile runs.
 The summary checks the targets of the run's architecture (`--arch`).
 Nothing outside smock's Pod can read its cgroup on Autopilot, so what
 smock used comes from its own
-`/metrics`, its [process and cgroup metrics](../README.md#run), which the load
+`/metrics`, its
+[process and cgroup metrics](../docs/admin-api.md#process-and-cgroup-metrics),
+which the load
 generator scrapes right before and right after each step, and a second
 into it: its CPU time and throttling during the step and in its first
 second, from its container's cgroup, with the CPU time a request and

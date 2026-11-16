@@ -49,6 +49,19 @@ jobs:
       - run: scripts/check-release-workflow.sh
       - run: scripts/test-release-notes.sh
 
+  # The documents link to each other by path and by the anchors that GitHub
+  # makes of their headings, and a heading that gets another name breaks
+  # the links to it with no other sign. This checks every link from a
+  # Markdown file into the repository (scripts/check-doc-links.py), without
+  # the network, and tests the check on small trees.
+  doc-links:
+    name: Check the documents' links
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 scripts/check-doc-links.py
+      - run: scripts/test-check-doc-links.sh
+
   # build-test.yml makes and checks the SBOM of the image it builds. This
   # tests the scripts that do so on small SBOMs, also where the SBOM and
   # NOTICE disagree.

@@ -3,10 +3,9 @@
 A release publishes the image `ghcr.io/hirunefu/smock:<version>`, the Helm
 chart `oci://ghcr.io/hirunefu/charts/smock` with version `<version>`, and a
 GitHub release with the binaries `smock-<version>-linux-amd64` and
-`smock-<version>-linux-arm64`, their SBOMs, `LICENSE` and `NOTICE`. The
-README's
-[Container image and release binaries](../README.md#container-image-and-release-binaries)
-says how people use them. This page is for the maintainer who makes one.
+`smock-<version>-linux-arm64`, their SBOMs, `LICENSE` and `NOTICE`.
+[Installing smock](installing.md) says how people use them. This page is
+for the maintainer who makes one.
 
 ## What a tag does
 
@@ -87,7 +86,7 @@ Work through these steps in order:
    Then, from a machine that is not logged in to GitHub or ghcr.io, check
    that `docker pull ghcr.io/hirunefu/smock:0.1.0-rc.1`,
    `helm show chart oci://ghcr.io/hirunefu/charts/smock --version 0.1.0-rc.1`
-   and the README's `cosign verify` work.
+   and [Installing smock](installing.md)'s `cosign verify` work.
 8. **Tag `v0.1.0`**, the version `moon.mod` gives.
 9. **Run `.github/workflows/latest-toolchain.yml` and
    `.github/workflows/benchmark.yml` by hand once.** Neither had run before
@@ -244,7 +243,7 @@ whatever the new version needs in smock. Before that branch merges into
 - **h2spec** against both traffic ports, with every case passing but
   those its lists give a reason for, and none of them waiting for an
   issue. CI runs it against both
-  ([Build and test](../README.md#build-and-test)).
+  ([Build and test](../CONTRIBUTING.md#build-and-test)).
 - **The e2e tests**, which CI runs. They check the limits and rules that
   moonhttp enforces as well as smock's own, so an upgrade that drops one
   fails them.
@@ -266,11 +265,11 @@ whatever the new version needs in smock. Before that branch merges into
   entry's `version` says the same. Each gRPC client gets the reply and its
   metadata, the error's status, message, trailer and details, and
   DEADLINE_EXCEEDED at its deadline, before the delay ends
-  ([Deadlines](grpc.md#deadlines)). Each Journal entry's `grpcStatus` says
-  the same. These calls check smock's trailers, its
-  [Trailers-Only](grpc.md#trailers-only) answers and its deadlines with
-  two gRPC stacks that share no code with moonhttp or grpcurl. The
-  results, with each client's version, go in the merge record.
+  ([Deadlines](grpc/state-and-faults.md#deadlines)). Each Journal entry's
+  `grpcStatus` says the same. These calls check smock's trailers, its
+  [Trailers-Only](grpc/metadata-and-status.md#trailers-only) answers and its
+  deadlines with two gRPC stacks that share no code with moonhttp or
+  grpcurl. The results, with each client's version, go in the merge record.
 - **The pre-merge local and GKE benchmark runs**, compared with the
   previous runs, as [Before merging into main](merging-into-main.md) says
   for every integration branch.

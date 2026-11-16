@@ -98,7 +98,7 @@ SMOCK_START_STOP_S = 1.5
 
 # The log formats smock may run with, its default first: json, on stderr,
 # which logs no request, and mockoon, on stdout, which writes a Transaction
-# recorded line for each request (README.md#run).
+# recorded line for each request (docs/running.md#logs).
 LOG_FORMATS = ("json", "mockoon")
 
 # How many bytes the run reads from smock's stdout at most at once: as much

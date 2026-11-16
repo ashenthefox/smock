@@ -26,7 +26,7 @@ if [ "$#" -ne 4 ]; then
 fi
 version=$1 commit=$2 toolchain=$3 image=$4
 blob=https://github.com/hirunefu/smock/blob/v$version
-readme=$blob/README.md
+installing=$blob/docs/installing.md
 changelog=$(dirname "$0")/../CHANGELOG.md
 
 if [ ! -f "$changelog" ]; then
@@ -111,8 +111,8 @@ cat <<NOTES
 
 \`$image:$version\`, for linux/amd64 and linux/arm64. It runs smock as UID
 65532 on a read-only root filesystem. Each architecture is signed with cosign
-and has an SPDX SBOM; [the README]($readme#verify-the-image) explains how to
-verify the signature and fetch the SBOM.
+and has an SPDX SBOM; [Installing smock]($installing#verify-the-image)
+explains how to verify the signature and fetch the SBOM.
 
 ## Helm chart
 
@@ -126,7 +126,7 @@ helm install smock oci://${image%/*}/charts/smock --version $version \\
 
 [Its README]($blob/charts/smock/README.md)
 lists its values. The chart is signed with cosign;
-[smock's README]($readme#verify-the-helm-chart) explains how to verify
+[Installing smock]($installing#verify-the-helm-chart) explains how to verify
 the signature.
 
 ## Binaries
