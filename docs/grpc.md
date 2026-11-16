@@ -3089,8 +3089,10 @@ To count a message's values, count the values of its JSON:
 of a served message, cut at `--journal-body-limit`, 4,096 octets by
 default, so raise that limit to count a large message there. Keep
 `--journal-max-bytes` well above the JSON's size too. An entry also
-counts its request line and headers, a few hundred octets or more, and
-the Journal evicts at once an entry that takes more than the bound.
+counts its request line and headers, a few hundred octets or more. The
+entry of an unmatched call holds the JSON again when its Near miss shows
+a body condition, and then counts up to three times the JSON's size. The
+Journal evicts at once an entry that takes more than the bound.
 smock never shows the JSON of a refused message, so count such a message
 with protobuf's own printer, told to print the fields without presence.
 In Python, with protobuf 5.26 or later:
