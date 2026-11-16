@@ -97,8 +97,8 @@ of each GitHub release include its section
   mooncrypt and moonbase, but compiles nothing from them, so NOTICE says
   so and the SBOM gives them `DEPENDS_ON`, not `STATIC_LINK`. The SBOM
   lists every module the build resolves, with the licence of its own
-  module file, and CI fails on every push when NOTICE leaves out such a
-  module or gives it another version.
+  module file, and CI fails when NOTICE leaves out such a module or gives
+  it another version.
 - `--http2-max-concurrent-streams` (`SMOCK_HTTP2_MAX_CONCURRENT_STREAMS`),
   100 by default, from 1 to 1000: the most streams an HTTP/2 connection may
   have in progress at once. smock advertises it in its SETTINGS and holds

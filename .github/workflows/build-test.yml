@@ -1,9 +1,28 @@
 # Builds and tests every module. ci.yml runs it with the pinned toolchain on
-# each push and pull request; latest-toolchain.yml runs it weekly with the
-# latest stable MoonBit. With the pinned toolchain, it keeps the release
-# binary of each architecture as a workflow artifact for 7 days,
-# smock-linux-amd64 and smock-linux-arm64; ci.yml's SDK job reads the amd64
-# one's LLM responses with the official SDKs.
+# each push to a branch and each pull request; latest-toolchain.yml runs it
+# weekly with the latest stable MoonBit.
+#
+# A check runs on both architectures only where it runs native code built for
+# that architecture; a check that reads text, or runs only the front end of
+# the compiler, runs once (the job checks). The debug tests, the engine's
+# tests in a release build and the release binary are three compiles that
+# share no output, so each architecture has a job for each (test,
+# release-test, release) and they run side by side.
+#
+# With the pinned toolchain, the job release hands over the release binary
+# of each architecture as a workflow artifact, release-linux-amd64 and
+# release-linux-arm64. The SDK job reads the amd64 binary's LLM responses
+# with the official SDKs, and ci.yml keeps both for 7 days as
+# smock-linux-amd64 and smock-linux-arm64 once every job of its run passed.
+#
+# On a push to main that merges a branch whose tests already passed on the
+# same tree, the job plan skips checks, test and release-test
+# (scripts/ci-plan.sh). The release jobs, the conformance suite and the SDK
+# job run in every run, so main's binaries are built and checked from
+# main's commit, and ci.yml keeps them once every job has passed.
+#
+# scripts/check-ci-artifacts.sh checks the conditions under which the jobs
+# here run and the binaries are handed over and kept.
 name: Build and test
 
 on:
@@ -18,29 +37,57 @@ permissions:
   contents: read
 
 jobs:
-  native:
-    name: native (linux/${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-24.04
-            machine: x86_64
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-            machine: aarch64
-    runs-on: ${{ matrix.runner }}
-    env:
-      SMOCK_VERSION: 0.0.0-ci.${{ github.run_number }}
+  # Runs only for a push to main, and decides whether the tests may be
+  # skipped: the push is a merge, its tree equals the merged branch head's,
+  # and a push run of that head, on a branch other than main, passed in the
+  # last 24 hours. The tree holds the workflows and scripts too, so an
+  # equal tree was tested the same way.
+  # Everywhere else this job is skipped and every job runs. The jobs that
+  # need it read "anything but false" as "run": a plan that fails, or that
+  # says nothing, skips nothing.
+  plan:
+    name: Plan (on main, tests of a tree that already passed are skipped)
+    if: inputs.toolchain == 'pinned' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      actions: read # scripts/ci-plan.sh looks up the merged branch's run
+    outputs:
+      full: ${{ steps.plan.outputs.full }}
+    steps:
+      # The commit and its parents: a merge's second parent is the merged
+      # branch head.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - id: plan
+        name: Decide whether the tests run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci-plan.sh >>"$GITHUB_OUTPUT"
+
+  # What does not depend on the machine: the checks of the sources and of
+  # the modules the build resolves, which run the compiler's front end at
+  # most, and the tests on wasm-gc.
+  checks:
+    name: checks and wasm-gc tests
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.full != 'false' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
-      # The runner check, OpenSSL, MoonBit and moon update.
-      - uses: ./.github/actions/native-setup
-        with:
-          machine: ${{ matrix.machine }}
-          toolchain: ${{ inputs.toolchain }}
+      - name: Install MoonBit (${{ inputs.toolchain }})
+        env:
+          TOOLCHAIN: ${{ inputs.toolchain }}
+        run: scripts/install-moonbit.sh "$TOOLCHAIN"
+
+      - name: Update the mooncakes registry index
+        run: moon update
 
       - run: moon version --all
 
@@ -76,8 +123,68 @@ jobs:
       - name: Test the moonhttp pin check, the C check of the resolved modules and the NOTICE check
         run: scripts/test-dependency-checks.sh
 
+      # moon skips every package whose supported_targets leave out wasm-gc,
+      # which is how packages that do I/O are marked. Every other package,
+      # including each new no-I/O package, is tested here with no change.
+      # scripts/check-no-io.sh keeps the packages that decide a response
+      # from leaving wasm-gc out.
+      - name: Test every no-I/O package on wasm-gc
+        run: moon test --target wasm-gc
+
+  test:
+    name: test (linux/${{ matrix.arch }})
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.full != 'false' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            machine: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # The runner check, OpenSSL, MoonBit and moon update.
+      - uses: ./.github/actions/native-setup
+        with:
+          machine: ${{ matrix.machine }}
+          toolchain: ${{ inputs.toolchain }}
+
+      - run: moon version --all
+
       - name: Test every module natively
         run: moon test --target native
+
+  release-test:
+    name: release-mode tests (linux/${{ matrix.arch }})
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.full != 'false' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            machine: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      # The runner check, OpenSSL, MoonBit and moon update.
+      - uses: ./.github/actions/native-setup
+        with:
+          machine: ${{ matrix.machine }}
+          toolchain: ${{ inputs.toolchain }}
 
       # A release build may fuse floating-point multiply-adds, so that a
       # seeded log-normal delay differs from the one wasm-gc draws.
@@ -87,6 +194,44 @@ jobs:
 
       - name: Test the OpenSSL bindings under AddressSanitizer and LeakSanitizer
         run: scripts/test-openssl-asan.sh
+
+  # The release binary, and every check that runs it or the image that
+  # packs it.
+  release:
+    name: release binary and image (linux/${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            machine: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      SMOCK_VERSION: 0.0.0-ci.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # The runner check, OpenSSL, MoonBit and moon update.
+      - uses: ./.github/actions/native-setup
+        with:
+          machine: ${{ matrix.machine }}
+          toolchain: ${{ inputs.toolchain }}
+
+      - run: moon version --all
+
+      - name: Install helm, kubectl and kind
+        run: scripts/install-kubernetes-tools.sh "$RUNNER_TEMP/bin"
+
+      # The cluster of the Helm chart's test below. Creating it takes most
+      # of that test's time and needs neither the binary nor the image, so
+      # it starts here and goes on while the binary compiles.
+      - name: Start creating the kind cluster
+        run: scripts/test-helm-chart-on-kind.sh --start "$RUNNER_TEMP/kind"
 
       - name: Build the release binary
         run: scripts/build-release.sh
@@ -126,7 +271,10 @@ jobs:
       - name: Call smock with grpcurl on the plain port (h2c) and the TLS port (h2)
         run: scripts/check-grpcurl.sh dist/smock
 
+      # This tests the check's own logic, which is the same on every
+      # machine, so it runs on one.
       - name: Test that the grpcurl check fails on each difference
+        if: matrix.arch == 'amd64'
         run: scripts/test-check-grpcurl.sh dist/smock
 
       # The release workflow builds and smoke-tests the image the same way.
@@ -146,7 +294,7 @@ jobs:
           syft-version: v1.54.1
 
       # The release workflow makes the published image's SBOM the same way,
-      # but only for a tag: this checks on every push that smock, its
+      # but only for a tag: this checks in every run that smock, its
       # MoonBit modules, and the runtime, mimalloc and simdutf of the
       # toolchain get into it. The modules are every module the build
       # resolves, moonhttp and the modules it imports among them; they and
@@ -165,60 +313,32 @@ jobs:
             and ([$modules[0][] | "\(.name)@\(.version)"] - $packages) == []' sbom.spdx.json
           scripts/check-sbom-notice.sh sbom.spdx.json
 
-      - name: Install helm, kubectl and kind
-        run: scripts/install-kubernetes-tools.sh "$RUNNER_TEMP/bin"
-
-      # Installs the chart with this image into a namespace that enforces
-      # the Restricted Pod Security Standard, and checks that a ConfigMap
-      # update reaches smock without a restart.
+      # Installs the chart with this image on the cluster started above,
+      # into a namespace that enforces the Restricted Pod Security Standard,
+      # and checks that a ConfigMap update reaches smock without a restart.
+      # It waits for the cluster first, and shows how its creation went.
       - name: Test the Helm chart on kind
-        run: scripts/test-helm-chart-on-kind.sh smock:ci
+        run: scripts/test-helm-chart-on-kind.sh --cluster "$RUNNER_TEMP/kind" smock:ci
 
       # An external JSON Schema validator and smock check must agree on
       # every Definition-file fixture under schema/v1/fixtures/.
       - name: Cross-check the JSON Schema with smock
         run: scripts/check-schema.sh dist/smock
 
-      # The contract tests in e2e/ check smock's responses against the
-      # document; this checks the document itself.
-      - name: Check that the Admin API document is valid OpenAPI
-        run: scripts/check-openapi.sh
-
-      # The release binary that scripts/build-release.sh made above and the
-      # image packs, kept once every check passed, for a machine that cannot
-      # build one of this architecture: the GKE benchmark of amd64 from an
-      # arm64 machine takes it (scripts/gke-bench.sh --arch amd64 --smock),
-      # and so does ci.yml's SDK job, which builds nothing (llm-sdks/).
-      # Its --version names this run's commit. scripts/check-ci-artifacts.sh
-      # checks this step, and the SDK job.
-      - name: Keep the release binary
+      # The binary that scripts/build-release.sh made above and the image
+      # packs, handed to the SDK job and to ci.yml's job keep, which keeps
+      # it as smock-linux-<arch> once every job passed and removes this
+      # copy. Its --version names this run's commit. Where a job failed,
+      # this copy stays, so that a re-run of the failed jobs within its 7
+      # days finds it.
+      - name: Hand over the release binary
         if: inputs.toolchain == 'pinned'
         uses: actions/upload-artifact@v7
         with:
-          name: smock-linux-${{ matrix.arch }}
+          name: release-linux-${{ matrix.arch }}
           path: dist/smock
           retention-days: 7
           if-no-files-found: error
-
-  wasm-gc:
-    name: wasm-gc (no-I/O packages)
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install MoonBit (${{ inputs.toolchain }})
-        run: scripts/install-moonbit.sh "${{ inputs.toolchain }}"
-
-      - name: Update the mooncakes registry index
-        run: moon update
-
-      # moon skips every package whose supported_targets leave out wasm-gc,
-      # which is how packages that do I/O are marked. Every other package,
-      # including each new no-I/O package, is tested here with no change.
-      # scripts/check-no-io.sh keeps the packages that decide a response
-      # from leaving wasm-gc out.
-      - name: Test every no-I/O package on wasm-gc
-        run: moon test --target wasm-gc
 
   # protobuf's conformance suite against smock/protobuf
   # (protobuf-conformance/README.md). protobuf publishes no runner, so
@@ -227,15 +347,20 @@ jobs:
   # or the protoc it pins, changes. The runner drives the testee, which
   # scripts/check-conformance.sh builds with moon, and fails on a result
   # that differs from protobuf-conformance/failure_list.txt; the lists of
-  # what differs are then kept.
+  # what differs are then kept. It runs on every push to main, also where
+  # the tests are skipped: a branch can restore the cache that main saved,
+  # and not another branch's.
   protobuf-conformance:
     name: protobuf's conformance suite (smock/protobuf)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
       - name: Install MoonBit (${{ inputs.toolchain }})
-        run: scripts/install-moonbit.sh "${{ inputs.toolchain }}"
+        env:
+          TOOLCHAIN: ${{ inputs.toolchain }}
+        run: scripts/install-moonbit.sh "$TOOLCHAIN"
 
       - name: Update the mooncakes registry index
         run: moon update
@@ -280,3 +405,32 @@ jobs:
           path: ${{ runner.temp }}/conformance
           retention-days: 7
           if-no-files-found: ignore
+
+  # The SDK job (llm-sdks/README.md): the official openai-python and
+  # anthropic-sdk-python, pinned with every package they need by version
+  # and hash, read the LLM responses of the amd64 release binary that the
+  # job release hands over. It builds nothing. The weekly run with the
+  # latest toolchain (latest-toolchain.yml) does not run it.
+  llm-sdks:
+    name: Read LLM responses with the official SDKs
+    needs: release
+    if: inputs.toolchain == 'pinned'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-linux-amd64
+          path: dist
+
+      # An artifact does not keep the file's mode.
+      - run: chmod +x dist/smock
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: llm-sdks/.python-version
+
+      - name: Read smock's LLM responses with the pinned SDKs
+        run: scripts/check-llm-sdks.sh dist/smock

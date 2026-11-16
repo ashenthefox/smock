@@ -1,6 +1,7 @@
 #!/bin/sh
 # Runs the SDK job (llm-sdks/README.md): reads smock's LLM responses with
-# the official SDKs, as CI does after it builds and tests smock.
+# the official SDKs, as CI does once it has built and checked the release
+# binary.
 #
 # It installs the SDKs pinned in llm-sdks/requirements.txt, and every
 # package they need, into a new virtual environment, each checked against

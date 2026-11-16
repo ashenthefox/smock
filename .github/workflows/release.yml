@@ -1,6 +1,10 @@
 # Releases smock. A version tag (v1.2.3, or v1.2.3-rc.1 for a pre-release)
 # starts it. It never runs on pull requests.
 #
+# Before anything else, its job plan checks that a tag names the version in
+# moon.mod (scripts/check-tag-version.sh) and that CI passed on the commit
+# of a pushed tag (scripts/check-ci-passed.sh): CI does not run on tags.
+#
 # 1. build: on an amd64 and an arm64 runner, each building for its own
 #    architecture without emulation, it builds smock with the MoonBit
 #    toolchain in .moonbit-version, packs the binary into the distroless image
@@ -60,6 +64,9 @@ jobs:
   plan:
     name: Plan the release
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read # scripts/check-ci-passed.sh looks up CI's run on the tagged commit
     outputs:
       version: ${{ steps.plan.outputs.version }}
       commit: ${{ steps.plan.outputs.commit }}
@@ -86,6 +93,23 @@ jobs:
             echo "commit=${GITHUB_SHA::12}"
             echo "toolchain=moonc v$(cat .moonbit-version)"
           } | tee -a "$GITHUB_OUTPUT"
+
+      # The tag names the version, and moon.mod must name the same one
+      # (docs/releasing.md); a pre-release tag names it with a suffix.
+      - name: Check that the tag names the version in moon.mod
+        if: github.ref_type == 'tag'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: scripts/check-tag-version.sh "$VERSION"
+
+      # CI does not run on a tag, so a pushed tag must name a commit that a
+      # branch's CI run has passed. When this fails because that run has
+      # not ended yet, re-run this workflow once it has.
+      - name: Check that CI passed on the tagged commit
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/check-ci-passed.sh "$(git rev-parse HEAD)"
 
       - name: Write the release notes
         env:
@@ -144,7 +168,7 @@ jobs:
 
       # NOTICE names the toolchain and every MoonBit module the build
       # resolves, with its version, and says which of them smock compiles
-      # nothing from (docs/releasing.md). CI runs it on every push too.
+      # nothing from (docs/releasing.md). CI runs it too (build-test.yml).
       - name: Check that NOTICE names the toolchain and every module the build resolves
         run: scripts/check-notice.sh
 

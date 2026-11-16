@@ -709,11 +709,11 @@ The guide then changes in four places:
 ### Get CI's binary
 
 smock is built for Linux only. CI builds a release binary for
-linux/amd64 and for linux/arm64 on every push, and keeps each for seven
-days after the run. GKE Autopilot runs x86 (amd64) nodes by default, so
-take the amd64 binary from the latest successful run on `main`, and
-check out the commit it was built from, so that the chart matches the
-binary:
+linux/amd64 and for linux/arm64 on every push to a branch, and keeps each
+for seven days after the run when every job of the run passed. GKE
+Autopilot runs x86 (amd64) nodes by default, so take the amd64 binary
+from the latest successful run on `main`, and check out the commit it
+was built from, so that the chart matches the binary:
 
 ```sh
 gh repo clone hirunefu/smock
@@ -831,7 +831,7 @@ grant. `rm -r "$dir"` removes CI's binary.
 
 | Symptom | Cause and fix |
 |---|---|
-| `gh run download` says `no valid artifacts found to download` or `no artifact matches any of the names or patterns provided`. | CI keeps the binaries for seven days after the run, and only when the run's build passed. A collaborator with write access can run CI on `main` again within 30 days of the run (`gh run rerun <run-id> -R hirunefu/smock`). They can also start the release workflow by hand (`gh workflow run release.yml -R hirunefu/smock --ref main`): it publishes nothing, and keeps the artifact `build-linux-amd64`, which holds `smock-0.0.0-dev.<n>-linux-amd64`, for 90 days. Take it from that run with `--workflow release.yml --event workflow_dispatch` in the run lookup and `-n build-linux-amd64`, and copy the file to `dist/smock`. Otherwise build from source on Linux x86_64, as in [Get CI's binary](#get-cis-binary). |
+| `gh run download` says `no valid artifacts found to download` or `no artifact matches any of the names or patterns provided`. | CI keeps the binaries for seven days after the run, and only when every job of the run passed. A collaborator with write access can run CI on `main` again within 30 days of the run (`gh run rerun <run-id> -R hirunefu/smock`). They can also start the release workflow by hand (`gh workflow run release.yml -R hirunefu/smock --ref main`): it publishes nothing, and keeps the artifact `build-linux-amd64`, which holds `smock-0.0.0-dev.<n>-linux-amd64`, for 90 days. Take it from that run with `--workflow release.yml --event workflow_dispatch` in the run lookup and `-n build-linux-amd64`, and copy the file to `dist/smock`. Otherwise build from source on Linux x86_64, as in [Get CI's binary](#get-cis-binary). |
 | `docker build` says `unknown flag: --provenance` or `the --chmod option requires BuildKit`. | The legacy builder is in use. Use Docker 23 or later, or buildx, without `DOCKER_BUILDKIT=0`. |
 | `docker run ... check /defs` says `exec format error`. | docker cannot run amd64 images on this Arm machine. On Linux arm64, download `smock-linux-arm64` into another directory the same way and run that binary's `check defs`. |
 | `docker push` is denied. | Run `gcloud auth configure-docker "$LOCATION-docker.pkg.dev"`, and check that the account may write to the repository. |

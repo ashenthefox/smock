@@ -1,7 +1,7 @@
 #!/bin/sh
 # Checks that the code which decides a response stays free of I/O and builds
-# for wasm-gc (spec #1, "I/O-independent engine"). CI's wasm-gc job skips any
-# package that leaves out wasm-gc, so without this check such a package
+# for wasm-gc (spec #1, "I/O-independent engine"). CI's tests on wasm-gc skip
+# any package that leaves out wasm-gc, so without this check such a package
 # could opt out, or read the environment, unnoticed.
 #
 # The protocol modules also stay independent of smock, so they can be
