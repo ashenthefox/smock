@@ -22,11 +22,12 @@
 // - the response encoding (`response_fields`, http2_responses.mbt);
 // - the writing of what the `Conn` queues, through the connection's one
 //   writer (`H2Writer`, http2_output.mbt);
-// - the tasks of the streams whose responses wait (`H2Connection::wait`),
-//   the slow writes of bodies larger than the client's windows, which
-//   resume as the client widens them (`H2Connection::write_slowly`,
-//   http2_windows.mbt), and the streams of Server-Sent Events
-//   (`H2Connection::start_events`, http2_events.mbt);
+// - the tasks of the streams whose responses wait (`H2Connection::wait`,
+//   and `wait_call` for a gRPC call, which its deadline can end,
+//   grpc_deadlines.mbt), the slow writes of bodies larger than the client's
+//   windows, which resume as the client widens them
+//   (`H2Connection::write_slowly`, http2_windows.mbt), and the streams of
+//   Server-Sent Events (`H2Connection::start_events`, http2_events.mbt);
 // - the HTTP/2 forms of the connection Faults (http2_faults.mbt): RST_STREAM
 //   for `reset`, half the response then RST_STREAM for `partial`, and
 //   GOAWAY for `close`;
@@ -103,7 +104,8 @@ fn header_list_bound(limit : Int32) -> Int32 {
 /// ends never reaches the engine, nor does one whose header list is over
 /// the header limits, which gets 431 instead, or whose request HTTP/1.1's
 /// rules refuse, which gets 400, or whose body is over `--body-limit`,
-/// which gets 413.
+/// which gets 413, nor a gRPC call that gRPC's rules refuse, which gets
+/// their answer as soon as what they refuse arrives (grpc_checks.mbt).
 ///
 /// In the mockoon log format, each stream whose request reached the engine
 /// gets its Transaction recorded line once its response has ended, written
@@ -156,10 +158,14 @@ async fn[S : @io.Reader + @io.Writer + ReadOutput] MockPorts::serve_http2(
       no_work_frames: NoWorkFrames::new(),
       settings_acked: false,
       refused: 0,
-      refused_status: 0,
+      refusal: Status(0),
       continuing: 0,
       connect: 0,
+      call_begun: 0,
+      first_message: 0,
       waiting: Map([]),
+      past_deadline: Map([]),
+      deadline_ended: [],
       blocked: Map([]),
       claimed: 0,
       window_deadline: forever,
@@ -246,17 +252,18 @@ priv struct H2Connection {
   /// Whether the client has acknowledged smock's SETTINGS, and so knows
   /// the concurrent-streams limit.
   mut settings_acked : Bool
-  /// The stream whose request smock refuses with `refused_status` for the
-  /// frame being handled, or 0: 400 for a request HTTP/1.1's rules refuse,
-  /// 413 for a body over `--body-limit`, 431 for a header list over
-  /// `--header-size-limit` or with more fields than `--header-count-limit`.
-  /// It gets that status once it is known whether that frame ended the
-  /// stream: on its `End` event, or else once the frame's events are all
-  /// taken. One frame brings at most one such stream. Both are set
-  /// together (`will_refuse`).
+  /// The stream whose request smock refuses with `refusal` for the frame
+  /// being handled, or 0: 400 for a request HTTP/1.1's rules refuse, 413
+  /// for a body over `--body-limit`, 431 for a header list over
+  /// `--header-size-limit` or with more fields than `--header-count-limit`,
+  /// and a gRPC status for a gRPC call smock refuses. It gets that answer
+  /// once it is known whether that frame ended the stream: on its `End`
+  /// event, or else once the frame's events are all taken. One frame brings
+  /// at most one such stream. Both are set together (`will_refuse`,
+  /// `will_refuse_call`).
   mut refused : Int32
-  /// The status `refused` gets.
-  mut refused_status : Int32
+  /// The answer `refused` gets.
+  mut refusal : Refusal
   /// The stream whose request, begun by the frame being handled, asks for
   /// `100 Continue`, or 0. It gets it once the frame's events are all taken,
   /// unless that frame ended the stream, since then no body is to come.
@@ -267,6 +274,18 @@ priv struct H2Connection {
   /// stream, its `End` answers it, and when it resets the stream, it never
   /// reaches the engine.
   mut connect : Int32
+  /// The stream whose gRPC call, begun by the frame being handled, is looked
+  /// up once that frame's events are all taken, or 0: a call that cannot
+  /// reach a gRPC Stub is answered then, without waiting for its message
+  /// (`answer_from_headers`). When the frame also ends the stream, its `End`
+  /// answers the call, and when it resets the stream, the call is dropped.
+  mut call_begun : Int32
+  /// The stream whose call to a built-in reflection service, its first
+  /// message made whole by the frame being handled, is answered once that
+  /// frame's events are all taken, or 0: then the client still sends
+  /// (`answer_first_message`). When the frame also ends the stream, its
+  /// `End` answers the call instead, with no RST_STREAM after it.
+  mut first_message : Int32
   /// The tasks of the streams whose response waits, by stream: from the end
   /// of the request until the response is queued in full, its body or its
   /// last event included, or the stream is reset. A task then lives on only
@@ -274,6 +293,17 @@ priv struct H2Connection {
   /// and the streams waiting are never more than the concurrent streams the
   /// connection allows.
   waiting : Map[Int32, @async.Task[Unit]]
+  /// The gRPC calls among them whose delay runs past their deadline, by
+  /// stream, until their tasks end: a client reset of one that arrives in
+  /// the last `deadline_tolerance_ms` before its deadline ends it as
+  /// DEADLINE_EXCEEDED (`reset_near_deadline`).
+  past_deadline : Map[Int32, PastDeadline]
+  /// The gRPC calls smock ended at their deadlines with DEADLINE_EXCEEDED,
+  /// by stream, oldest first, until the client's reset of each arrives: at
+  /// most `max_concurrent_streams` of them (`ended_at_deadline`). The first
+  /// reset of each does not count among the frames that do no work
+  /// (`deadline_reset`).
+  deadline_ended : Array[Int32]
   /// The slow writes waiting for the client to widen a window, by stream,
   /// in the order they began to wait, which a `Map` keeps.
   blocked : Map[Int32, WindowWait]
@@ -490,7 +520,33 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
         if self.refused != 0 {
           let stream = self.refused
           self.refused = 0
-          self.refuse(stream, self.refused_status, ended=false)
+          self.refuse(stream, self.refusal, ended=false)
+        }
+        // The gRPC call this frame began is looked up now that its events
+        // brought no reset. HEADERS that also ended its stream had it
+        // answered on its `End`, and a reset dropped it: either way it is no
+        // longer among the requests.
+        if self.call_begun != 0 {
+          let stream = self.call_begun
+          self.call_begun = 0
+          if self.requests.get(stream) is Some(request) &&
+            self.answer_from_headers(stream, request) {
+            // Answered, so it gets no `100 Continue`.
+            if self.continuing == stream {
+              self.continuing = 0
+            }
+          }
+        }
+        // A reflection call whose first message this frame made whole, on
+        // a stream it did not end.
+        if self.first_message != 0 {
+          let stream = self.first_message
+          self.first_message = 0
+          if self.requests.get(stream) is Some(request) &&
+            self.answer_first_message(stream, request, out) &&
+            self.continuing == stream {
+            self.continuing = 0
+          }
         }
         if self.continuing != 0 {
           let stream = self.continuing
@@ -552,8 +608,16 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
           self.will_refuse(stream, 400)
           continue
         }
-        // Refused before any of the body is read, as on HTTP/1.1.
-        if request.declared > self.body_limit.to_int64() {
+        if request.grpc {
+          // gRPC's own checks of a call, after spec E's: a body over the
+          // limit by its `content-length` comes last among them.
+          if check_head(request, self.body_limit, arrived=self.header_at)
+            is Some(refusal) {
+            self.will_refuse_call(stream, refusal)
+            continue
+          }
+        } else if request.declared > self.body_limit.to_int64() {
+          // Refused before any of the body is read, as on HTTP/1.1.
           self.will_refuse(stream, 413)
           continue
         }
@@ -564,19 +628,45 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
         self.idle_deadline = forever
         self.requests[stream] = request
         // A CONNECT goes to the engine when its HEADERS arrive, as soon as
-        // it is known that they brought no reset (RFC 9113, section 8.5).
+        // it is known that they brought no reset (RFC 9113, section 8.5). A
+        // gRPC call is refused before that.
         if request.meth == "CONNECT" {
           self.connect = stream
+        }
+        // A gRPC call is looked up as soon as its HEADERS are known to bring
+        // no reset, and answered then when it cannot reach a gRPC Stub.
+        if request.grpc {
+          self.call_begun = stream
         }
       }
       Data(stream~, data~) => {
         // DATA on a stream whose request has gone to the engine, as a
         // CONNECT's has once its HEADERS arrived, is discarded.
         if self.requests.get(stream) is Some(request) {
-          // A body that passes the limit is refused before it is kept.
+          // A body that passes the limit is refused before it is kept, and
+          // so is a gRPC call's message whose prefix gRPC's rules refuse.
           if data.length() > self.body_limit - request.received() {
             self.requests.remove(stream)
-            self.will_refuse(stream, 413)
+            if request.grpc {
+              self.will_refuse_call(stream, OverBodyLimit)
+            } else {
+              self.will_refuse(stream, 413)
+            }
+          } else if request.deframer is Some(deframer) {
+            match self.check_messages(request, deframer, data) {
+              Some(refusal) => {
+                self.requests.remove(stream)
+                self.will_refuse_call(stream, refusal)
+              }
+              None => {
+                request.receive(data)
+                // A reflection call is answered once its first message is
+                // whole, once the frame's events are all taken.
+                if request.reflection && deframer.whole_messages() > 0 {
+                  self.first_message = stream
+                }
+              }
+            }
           } else {
             request.receive(data)
           }
@@ -592,9 +682,13 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
         if stream == self.continuing {
           self.continuing = 0
         }
+        // Its `End` answers it, as the end of any call does.
+        if stream == self.first_message {
+          self.first_message = 0
+        }
         if stream == self.refused {
           self.refused = 0
-          self.refuse(stream, self.refused_status, ended=true)
+          self.refuse(stream, self.refusal, ended=true)
         } else if self.requests.get(stream) is Some(request) {
           self.requests.remove(stream)
           self.respond(stream, request, out)
@@ -627,13 +721,23 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
         if stream == self.continuing {
           self.continuing = 0
         }
+        // Whether the reset ends a gRPC call as DEADLINE_EXCEEDED.
+        let mut at_deadline = false
         if self.requests.contains(stream) {
           self.requests.remove(stream)
           self.end_stream()
         } else {
+          // A gRPC call's entry records DEADLINE_EXCEEDED for a client
+          // reset near its deadline before its task commits it.
+          if remote {
+            at_deadline = self.reset_near_deadline(stream)
+          }
           self.stop_waiting(stream)
         }
-        if early && self.reset_early(octets) {
+        // A client that keeps deadlines resets each call at its own, so
+        // such a reset does not count. The stream is closed from here on,
+        // so a second reset of it counts among the frames that do no work.
+        if early && !at_deadline && self.reset_early(octets) {
           return false
         }
       }
@@ -1077,13 +1181,17 @@ fn H2Connection::final_goaway(self : H2Connection) -> Unit {
 /// in a task of its own (`wait`), and so do the rest of a body larger than
 /// the windows (`write_slowly`) and the events of a stream of Server-Sent
 /// Events, whose HEADERS are queued at once (`start_events`); each writes
-/// to `out`.
+/// to `out`. A gRPC call is answered by the gRPC layer (`answer_call`).
 fn[S : @io.Writer + ReadOutput] H2Connection::respond(
   self : H2Connection,
   stream : Int32,
   request : H2Request,
   out : WatchedStream[S],
 ) -> Unit {
+  if request.grpc {
+    self.answer_call(stream, request, out)
+    return
+  }
   let ports = self.ports
   let incoming = request.to_engine()
   let outcome = ports.decide(
@@ -1431,6 +1539,16 @@ fn H2Connection::headers_only(
 }
 
 ///|
+/// What smock answers a request it refuses, with no Journal entry
+/// (`H2Connection::refuse`).
+priv enum Refusal {
+  /// The status, with no body, as HTTP/1.1 answers such a request.
+  Status(Int32)
+  /// The answer to a gRPC call smock refuses, as `refuse_call` sends it.
+  Call(CallRefusal)
+}
+
+///|
 /// The request on `stream` is refused with `status` once it is known
 /// whether the frame being handled ended the stream (`refused`): on its
 /// `End` event, or else once the frame's events are all taken.
@@ -1440,49 +1558,68 @@ fn H2Connection::will_refuse(
   status : Int32,
 ) -> Unit {
   self.refused = stream
-  self.refused_status = status
+  self.refusal = Status(status)
 }
 
 ///|
-/// Answers `stream`, whose request smock refuses, with `status` and no
-/// body, as HTTP/1.1 answers such a request, and counts it as rejected
-/// traffic: 400 for a request HTTP/1.1's rules refuse, 413 for a body over
-/// `--body-limit`, 431 for a header list over `--header-size-limit` or with
-/// more fields than `--header-count-limit`. The request never reaches the
-/// engine, so it has no Journal entry. A request that has not `ended` is
-/// then reset, so that the client stops sending it: with PROTOCOL_ERROR
-/// after a 400, as a malformed request (RFC 9113, section 8.1.1), and with
-/// NO_ERROR after a 413 or a 431 (section 8.1). One that has ended gets its
-/// status alone. No `connection` field is sent: the response ends only its
-/// stream.
+/// The gRPC call on `stream` is refused for `refusal`, once it is known
+/// whether the frame being handled ended the stream, as `will_refuse`
+/// refuses a request.
+fn H2Connection::will_refuse_call(
+  self : H2Connection,
+  stream : Int32,
+  refusal : CallRefusal,
+) -> Unit {
+  self.refused = stream
+  self.refusal = Call(refusal)
+}
+
+///|
+/// Answers `stream`, whose request smock refuses, with `refusal`, and
+/// counts it as rejected traffic. The request never reaches the engine, so
+/// it has no Journal entry. A refusal that is a status has no body, as
+/// HTTP/1.1 answers such a request: 400 for a request HTTP/1.1's rules
+/// refuse, 413 for a body over `--body-limit`, 431 for a header list over
+/// `--header-size-limit` or with more fields than `--header-count-limit`.
+/// A request that has not `ended` is then reset, so that the client stops
+/// sending it: with PROTOCOL_ERROR after a 400, as a malformed request (RFC
+/// 9113, section 8.1.1), and with NO_ERROR after a 413 or a 431 (section
+/// 8.1). One that has ended gets its status alone. No `connection` field is
+/// sent: the response ends only its stream. A refusal that is a gRPC
+/// status is sent as `refuse_call` sends it.
 fn H2Connection::refuse(
   self : H2Connection,
   stream : Int32,
-  status : Int32,
+  refusal : Refusal,
   ended~ : Bool,
 ) -> Unit {
-  let fields = response_fields(
-    status,
-    [],
-    0,
-    date=self.ports.dates.at(self.now),
-  )
-  self.conn.headers(stream, fields, end=true) catch {
-    _ => {
-      self.reset(stream, @http2.error_internal_error)
-      return
+  match refusal {
+    Status(status) => {
+      let fields = response_fields(
+        status,
+        [],
+        0,
+        date=self.ports.dates.at(self.now),
+      )
+      self.conn.headers(stream, fields, end=true) catch {
+        _ => {
+          self.reset(stream, @http2.error_internal_error)
+          return
+        }
+      }
+      self.streams.ended_by_smock(stream)
+      if !ended {
+        let code = if status == 400 {
+          @http2.error_protocol_error
+        } else {
+          @http2.error_no_error
+        }
+        self.reset(stream, code)
+      }
+      self.ports.rejected(self.last_read)
     }
+    Call(refusal) => self.refuse_call(stream, refusal, ended~)
   }
-  self.streams.ended_by_smock(stream)
-  if !ended {
-    let code = if status == 400 {
-      @http2.error_protocol_error
-    } else {
-      @http2.error_no_error
-    }
-    self.reset(stream, code)
-  }
-  self.ports.rejected(self.last_read)
   self.end_stream()
 }
 

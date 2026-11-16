@@ -1,0 +1,25 @@
+mocks:
+  - name: greeter
+    grpc:
+      descriptorSet: greeter.binpb
+stubs:
+  - id: hello-missing
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello
+      body: { json: { name: Ann } }
+    response:
+      headers: { x-served-by: smock }
+      grpc:
+        status: NOT_FOUND
+        trailers: { x-trace: abc, x-tag: [a, b], trace-bin: "AAE=" }
+  - id: hello
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello
+    response:
+      template: true
+      headers: { X-Greeted: "${body.name}" }
+      json: { message: "Hello ${body.name}" }
+      grpc:
+        trailers: { x-request-id: "${header.x-request-id}", name-bin: "${header.name-bin}" }

@@ -462,6 +462,7 @@ stubs:
                   actual:
                     - string
             status: 100
+            grpcStatus: OK
             fault: reset
             templateError:
               at: string
@@ -693,6 +694,7 @@ stubs:
                   actual:
                     - string
             status: 100
+            grpcStatus: OK
             fault: reset
             templateError:
               at: string
@@ -839,6 +841,12 @@ stubs:
                   type: string
                   code: string
                   message: string
+              grpc:
+                status: OK
+                message: string
+                trailers: {}
+                details:
+                  - "@type": string
             responses:
               - weight: 1
                 status: 200
@@ -891,6 +899,12 @@ stubs:
                     type: string
                     code: string
                     message: string
+                grpc:
+                  status: OK
+                  message: string
+                  trailers: {}
+                  details:
+                    - "@type": string
             variables: {}
             dataWrites:
               - op: set
@@ -1074,6 +1088,12 @@ stubs:
                 type: string
                 code: string
                 message: string
+            grpc:
+              status: OK
+              message: string
+              trailers: {}
+              details:
+                - "@type": string
           responses:
             - weight: 1
               status: 200
@@ -1126,6 +1146,12 @@ stubs:
                   type: string
                   code: string
                   message: string
+              grpc:
+                status: OK
+                message: string
+                trailers: {}
+                details:
+                  - "@type": string
           variables: {}
           dataWrites:
             - op: set
@@ -1499,6 +1525,14 @@ stubs:
               id: string
               data: string
               json: null
+          grpc:
+            status: OK
+            message: string
+            trailers:
+              - name: string
+                value: string
+            details:
+              - {}
         templateError:
           at: string
           message: string

@@ -74,6 +74,28 @@
           "description": "Whether the requests this Mock receives are recorded in the Journal. Turn it off so that a high-rate load test pays nothing for recording. Default true (on).",
           "type": "boolean",
           "default": true
+        },
+        "grpc": {
+          "description": "The Mock's gRPC settings: the Descriptor set that its gRPC Stubs are checked against and its calls are decoded with, and the built-in services it turns on. Each may be left out: a Mock that wants only the built-in services needs no set.",
+          "type": "object",
+          "properties": {
+            "descriptorSet": {
+              "description": "The Mock's Descriptor set: a self-contained FileDescriptorSet in protobuf's binary encoding, as protoc --include_imports -o or buf build -o writes it, read from a body file. It is a path relative to the body-file subdirectory of the definitions directory (files by default), such as greeter.binpb, with the path rules of bodyFile. It is read when the definitions are loaded, and a file that does not decode as a FileDescriptorSet is an error.",
+              "type": "string",
+              "pattern": "^(?!\\.)[^/]+(/(?!\\.)[^/]+)*$"
+            },
+            "health": {
+              "description": "Whether the Mock answers gRPC's standard health service, grpc.health.v1.Health, as gRPC's health servers do: Check and List say SERVING for the empty name and for each service of the Mock's Descriptor set, and Check gives NOT_FOUND for other names; once SIGTERM starts the drain, every answer says NOT_SERVING. Watch, which streams, gets UNIMPLEMENTED. A gRPC Stub on a health method, an Ephemeral one of the call's Session included, answers in its place. Health answers are not recorded in the Journal. Default false (off).",
+              "type": "boolean",
+              "default": false
+            },
+            "reflection": {
+              "description": "Whether the Mock answers gRPC's server reflection, grpc.reflection.v1 and grpc.reflection.v1alpha, so that tools such as grpcurl and Postman can list and describe its services without a local copy of the set. It answers from the Mock's Descriptor set, each file without its source info, and lists the health service when health is on, from a descriptor smock embeds unless the set defines grpc.health.v1 itself. It answers one request per call. Reflection answers are not recorded in the Journal. With it on, the Mock keeps the set's files as encoded, beside the set's model. Default false (off).",
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": ["name"],
@@ -302,7 +324,7 @@
       "additionalProperties": false
     },
     "request": {
-      "description": "The conditions a request must meet for the Stub to match it. Every condition given must hold. An omitted condition matches anything, so a Stub without request matches every request its Mock receives.",
+      "description": "The conditions a request must meet for the Stub to match it. Every condition given must hold. An omitted condition matches anything, so a Stub without request matches every request its Mock receives. On a gRPC Stub, whose exact path names a unary method of its Mock's Descriptor set, method may be left out and is otherwise POST, and query, cookies and every body condition but json make no sense: smock refuses them.",
       "type": "object",
       "properties": {
         "method": {
@@ -327,7 +349,7 @@
           "additionalProperties": { "$ref": "#/$defs/valueCondition" }
         },
         "headers": {
-          "description": "Header fields, by name, each with a value condition. Names are compared case-insensitively. An exact string or a pattern holds when one of the header's values equals the string or matches the pattern as a whole, so it fails when the header is absent, and a repeated header matches when any of its values does. Each header field line is one value: a line that joins values with commas, such as `b, a`, matches only as a whole. `$not` and `$exists` are about the header as a whole instead, and may hold when it is absent: see valueCondition. Headers that are not listed are ignored.",
+          "description": "Header fields, by name, each with a value condition. Names are compared case-insensitively. An exact string or a pattern holds when one of the header's values equals the string or matches the pattern as a whole, so it fails when the header is absent, and a repeated header matches when any of its values does. Each header field line is one value: a line that joins values with commas, such as `b, a`, matches only as a whole. `$not` and `$exists` are about the header as a whole instead, and may hold when it is absent: see valueCondition. Headers that are not listed are ignored. On a gRPC Stub, they are the call's metadata, every field, and an exact value on a field whose name ends with -bin loses its base64 padding when the files load, in each comma-separated element, as a call's -bin values lose theirs.",
           "type": "object",
           "propertyNames": { "$ref": "#/$defs/headerName" },
           "additionalProperties": { "$ref": "#/$defs/valueCondition" }
@@ -406,7 +428,7 @@
       "type": "object",
       "properties": {
         "json": {
-          "description": "The JSON value the body must contain. An object whose only member is `pattern`, with a string, is a pattern on the value in its place. It matches a string, or the JSON text of a number, `true` or `false`, as a whole; a number's text is its shortest form, so `1.50` is matched as `1.5`. It never matches `null`, an object or an array. Any other object needs each listed key, matched recursively, and may have others. An array needs the same length and is matched element by element. Any other value must be equal. To match an object such as `{\"pattern\": \"a.b\"}` itself, nest a pattern in it: `{\"pattern\": {\"pattern\": \"a\\\\.b\"}}`. An object whose only key starts with `$` is an operator on the value in its place: `$not` holds when the value does not meet the condition it holds, and a missing key holds it when a missing key does not meet that condition, so a missing key meets `{\"$not\": \"x\"}` but not `{\"$not\": {\"$exists\": false}}`; `$exists` (`true` or `false`) when the value is present, even `null`, or missing; `$includes` when the value is an array with an element that meets the condition it holds; `$last` when the value is an array with at least one element and its last element meets the condition it holds, as in `{\"messages\": {\"$last\": {\"role\": \"tool\"}}}`. Any other `$` key is reserved, and a key that starts with `$` is written `$$`: `$$ref` is the key `$ref`. smock checks the operators, not this Schema, because literal JSON is valid here."
+          "description": "The JSON value the body must contain. An object whose only member is `pattern`, with a string, is a pattern on the value in its place. It matches a string, or the JSON text of a number, `true` or `false`, as a whole; a number's text is its shortest form, so `1.50` is matched as `1.5`. It never matches `null`, an object or an array. Any other object needs each listed key, matched recursively, and may have others. An array needs the same length and is matched element by element. Any other value must be equal. To match an object such as `{\"pattern\": \"a.b\"}` itself, nest a pattern in it: `{\"pattern\": {\"pattern\": \"a\\\\.b\"}}`. An object whose only key starts with `$` is an operator on the value in its place: `$not` holds when the value does not meet the condition it holds, and a missing key holds it when a missing key does not meet that condition, so a missing key meets `{\"$not\": \"x\"}` but not `{\"$not\": {\"$exists\": false}}`; `$exists` (`true` or `false`) when the value is present, even `null`, or missing; `$includes` when the value is an array with an element that meets the condition it holds; `$last` when the value is an array with at least one element and its last element meets the condition it holds, as in `{\"messages\": {\"$last\": {\"role\": \"tool\"}}}`. Any other `$` key is reserved, and a key that starts with `$` is written `$$`: `$$ref` is the key `$ref`. smock checks the operators, not this Schema, because literal JSON is valid here. On a gRPC Stub, smock checks the condition against the method's input type when the definitions are loaded: each key names a field, by its proto name or its JSON name, or an extension of the type, by its full name in brackets such as [shop.priority], and each literal is a value of its field's type as smock prints the request message; proto names become JSON names, enum numbers and aliases become the enum's first name, and a float is rounded to 32 bits."
         }
       },
       "required": ["json"],
@@ -459,15 +481,15 @@
       "unevaluatedProperties": false
     },
     "responseFields": {
-      "description": "The fields of a response: its status, its headers, its body or LLM reply, and whether it is a template. This definition does not close itself to other properties so that weightedResponse can add weight; response and weightedResponse each close it with unevaluatedProperties: false.",
+      "description": "The fields of a response: its status, its headers, its body or LLM reply, and whether it is a template. An HTTP Stub's response needs status. A gRPC Stub, whose exact request path names a unary method of its Mock's Descriptor set, answers with json, the reply message, and grpc, the gRPC status and message its reply ends with; its response has no status, and status, body, bodyFile, events and llm make no sense on it: smock refuses them. This definition does not close itself to other properties so that weightedResponse can add weight; response and weightedResponse each close it with unevaluatedProperties: false.",
       "type": "object",
       "properties": {
         "status": {
-          "description": "The response status.",
+          "description": "The response status. An HTTP Stub's response needs it; a gRPC Stub's response has none.",
           "$ref": "#/$defs/status"
         },
         "headers": {
-          "description": "Header fields to send, by name: a value, or a non-empty array of values, each sent as its own field line, in order, such as several Set-Cookie fields. Content-Type takes one value. Names are compared case-insensitively, so two names that differ only in case, such as Set-Cookie and set-cookie, are rejected. smock sets Content-Length, Transfer-Encoding and Connection itself, and Smock-Mock when the Default Mock answers, so they cannot be given. smock sends Date with the current time, unless Date is given here.",
+          "description": "Header fields to send, by name: a value, or a non-empty array of values, each sent as its own field line, in order, such as several Set-Cookie fields. Content-Type takes one value. Names are compared case-insensitively, so two names that differ only in case, such as Set-Cookie and set-cookie, are rejected. smock sets Content-Length, Transfer-Encoding and Connection itself, and Smock-Mock when the Default Mock answers, so they cannot be given. smock sends Date with the current time, unless Date is given here. On a gRPC Stub, they are the reply's initial metadata, sent in its HEADERS, under the rules of grpc.trailers: smock refuses there what this Schema cannot tell apart from an HTTP Stub's headers, such as a Content-Type, a name starting with grpc-, or a value outside 0x20 to 0x7E.",
           "type": "object",
           "propertyNames": { "$ref": "#/$defs/responseHeaderName" },
           "patternProperties": {
@@ -488,10 +510,10 @@
           "pattern": "^(?!\\.)[^/]+(/(?!\\.)[^/]+)*$"
         },
         "json": {
-          "description": "The body as JSON: any JSON value, sent as compact JSON in UTF-8, with Content-Type: application/json unless headers gives a Content-Type. smock writes every number in its shortest form (9.90 is sent as 9.9); use body when the exact bytes matter. With template true, it is a structured template: a string that is exactly one ${expr} gives the value with its own type, an object with $each gives an array, and an object with $if gives its then or else."
+          "description": "The body as JSON: any JSON value, sent as compact JSON in UTF-8, with Content-Type: application/json unless headers gives a Content-Type. On a gRPC Stub, it is the reply message as ProtoJSON writes it, an object whose keys name fields of the method's output type by their proto names or JSON names, or its extensions by their full names in brackets, read and encoded when the definitions are loaded, or on each call once rendered when template is true, and it gets no Content-Type. smock writes every number in its shortest form (9.90 is sent as 9.9); use body when the exact bytes matter. With template true, it is a structured template: a string that is exactly one ${expr} gives the value with its own type, an object with $each gives an array, and an object with $if gives its then or else."
         },
         "template": {
-          "description": "Whether the header values (except Content-Type, which cannot contain ${), the body (body, bodyFile or json), the events and, in llm, the text, each chunk, id, model, each tool call's name, id and arguments, and the error's message are templates, rendered for each request. With template false, nothing is parsed or rendered: ${ is plain text and $each a plain key. Default false.",
+          "description": "Whether the header values (except Content-Type, which cannot contain ${), the body (body, bodyFile or json), the events, in llm, the text, each chunk, id, model, each tool call's name, id and arguments, and the error's message, and in grpc, the message, the trailer values and each detail, are templates, rendered for each request. With template false, nothing is parsed or rendered: ${ is plain text and $each a plain key. Default false.",
           "type": "boolean",
           "default": false
         },
@@ -500,9 +522,51 @@
           "type": "array",
           "items": { "$ref": "#/$defs/event" }
         },
-        "llm": { "$ref": "#/$defs/llm" }
+        "llm": { "$ref": "#/$defs/llm" },
+        "grpc": {
+          "description": "How a gRPC Stub's reply ends: its gRPC status, its status message, its trailing metadata and its error details. Only a gRPC Stub's response gives it; an HTTP Stub that gives it is refused. Without it, the reply ends with OK, no message and no trailing metadata. An error, a status other than OK, gives no json: a gRPC call gets a reply message or an error, never both. Only an error gives details.",
+          "type": "object",
+          "properties": {
+            "status": {
+              "description": "The gRPC status, by the name gRPC gives it, from OK to UNAUTHENTICATED. Never a template. Default OK.",
+              "enum": ["OK", "CANCELLED", "UNKNOWN", "INVALID_ARGUMENT", "DEADLINE_EXCEEDED", "NOT_FOUND", "ALREADY_EXISTS", "PERMISSION_DENIED", "RESOURCE_EXHAUSTED", "FAILED_PRECONDITION", "ABORTED", "OUT_OF_RANGE", "UNIMPLEMENTED", "INTERNAL", "UNAVAILABLE", "DATA_LOSS", "UNAUTHENTICATED"],
+              "default": "OK"
+            },
+            "message": {
+              "description": "The status message, any Unicode text, sent in grpc-message: smock percent-encodes its UTF-8, so octets 0x20 to 0x7E other than % stay as they are, every other octet becomes %XX, and a space at either end becomes %20. With template true, it is a text template, and the control characters it renders are kept, then percent-encoded.",
+              "type": "string"
+            },
+            "trailers": {
+              "description": "The trailing metadata, sent after grpc-status and grpc-message, in the shape of headers: by name, a value, or a non-empty array of values, each sent as its own field, in order. Names are sent in lower case and compared case-insensitively. A name holds only 0-9, a-z, _, - and . in lower case; content-type, te, names starting with grpc-, the fields HTTP/2 forbids (keep-alive, proxy-connection, upgrade) and the fields smock sets cannot be given. A value holds only characters from 0x20 to 0x7E, and the value of a name ending with -bin is binary, written in standard base64, padded or not, and sent without padding; smock checks both when the definitions are loaded, or once rendered when template is true, in which case each value is a text template, rendered as header values are, control characters becoming spaces. An error whose response gives headers is sent as HEADERS with them, then trailers; one without is Trailers-Only, one HEADERS block that ends the stream.",
+              "type": "object",
+              "propertyNames": { "$ref": "#/$defs/metadataName" },
+              "additionalProperties": { "$ref": "#/$defs/headerValues" }
+            },
+            "details": {
+              "description": "The error details, in the order given, such as google.rpc.ErrorInfo, RetryInfo or BadRequest: each an Any in ProtoJSON, @type, a type URL whose last segment names a type of the Mock's Descriptor set, beside the fields of its message. smock builds google.rpc.Status from the status, the message and the details, each packed in an Any, and sends it in grpc-status-details-bin, in base64 without padding, so the set need not hold google/rpc/status.proto. A detail type the set lacks, or a detail that does not fit its type, is a load error. Only an error gives details; an empty array sends none. With template true, each detail is a structured template, rendered then encoded, and one that fails to render or does not fit its type gets INTERNAL template failed.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "@type": {
+                    "description": "The type URL of the detail's message, such as type.googleapis.com/google.rpc.ErrorInfo.",
+                    "type": "string"
+                  }
+                },
+                "required": ["@type"]
+              }
+            }
+          },
+          "additionalProperties": false,
+          "if": {
+            "description": "OK: the status left out, or given as OK.",
+            "properties": { "status": { "description": "OK.", "const": "OK" } }
+          },
+          "then": {
+            "properties": { "details": { "description": "Only an error gives details.", "maxItems": 0 } }
+          }
+        }
       },
-      "required": ["status"],
       "dependentSchemas": {
         "body": {
           "properties": { "bodyFile": false, "json": false, "events": false, "llm": false }
@@ -515,11 +579,28 @@
         },
         "events": {
           "properties": { "llm": false }
+        },
+        "grpc": {
+          "properties": { "status": false },
+          "if": {
+            "properties": {
+              "grpc": {
+                "description": "An error: a status other than OK.",
+                "properties": {
+                  "status": { "description": "Not OK.", "not": { "const": "OK" } }
+                },
+                "required": ["status"]
+              }
+            }
+          },
+          "then": {
+            "properties": { "json": false }
+          }
         }
       }
     },
     "llm": {
-      "description": "An LLM reply, declared by its content instead of a body: smock writes it in the wire form of the API that api names, as a stream of Server-Sent Events with Content-Type: text/event-stream when the request's JSON body has stream: true, and otherwise as one JSON body with Content-Type: application/json (a Content-Type in headers is replaced). smock adds an x-request-id header, or request-id for anthropic-messages, unless headers give one of that name in any case; other headers are sent as written. The reply's id and the request id are generated from the Stub's random source, so fault.seed and --seed repeat them; the reply's model is model, or else the request's model when that is a string; its time is when smock received the request. See docs/definition-files.md, LLM responses.",
+      "description": "An LLM reply, declared by its content instead of a body: smock writes it in the wire form of the API that api names, as a stream of Server-Sent Events with Content-Type: text/event-stream when the request's JSON body has stream: true, and otherwise as one JSON body with Content-Type: application/json (a Content-Type in headers is replaced). smock adds an x-request-id header, or request-id for anthropic-messages, unless headers give one of that name in any case; other headers are sent as written. The reply's id and the request id are generated from the Stub's random source, so fault.seed and --seed repeat them; the reply's model is model, or else the request's model when that is a string; its time is when smock received the request. It is for HTTP Stubs: smock refuses it on a gRPC Stub, whose exact request path names a unary method of its Mock's Descriptor set. See docs/definition-files.md, LLM responses.",
       "type": "object",
       "properties": {
         "api": {
@@ -912,6 +993,15 @@
       "not": {
         "description": "A header field smock sets itself.",
         "pattern": "^([Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Ll][Ee][Nn][Gg][Tt][Hh]|[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]-[Ee][Nn][Cc][Oo][Dd][Ii][Nn][Gg]|[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn]|[Ss][Mm][Oo][Cc][Kk]-[Mm][Oo][Cc][Kk])$"
+      }
+    },
+    "metadataName": {
+      "description": "A name of a gRPC reply's metadata: in lower case, one or more of 0-9, a-z, _, - and ., other than a name gRPC reserves, a field HTTP/2 forbids or a field smock sets.",
+      "type": "string",
+      "pattern": "^[0-9A-Za-z_.-]+$",
+      "not": {
+        "description": "A name gRPC reserves (content-type, te and every name starting with grpc-), a field specific to an HTTP/1.1 connection, which HTTP/2 forbids, or a field smock sets itself.",
+        "pattern": "^([Gg][Rr][Pp][Cc]-.*|[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Tt][Yy][Pp][Ee]|[Tt][Ee]|[Kk][Ee][Ee][Pp]-[Aa][Ll][Ii][Vv][Ee]|[Pp][Rr][Oo][Xx][Yy]-[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn]|[Uu][Pp][Gg][Rr][Aa][Dd][Ee]|[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Ll][Ee][Nn][Gg][Tt][Hh]|[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]-[Ee][Nn][Cc][Oo][Dd][Ii][Nn][Gg]|[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn]|[Ss][Mm][Oo][Cc][Kk]-[Mm][Oo][Cc][Kk])$"
       }
     },
     "headerValues": {

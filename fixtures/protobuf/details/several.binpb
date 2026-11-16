@@ -1,0 +1,10 @@
+try again ☺Y
+(type.googleapis.com/google.rpc.ErrorInfo-
+QUOTAgreeter.svc
+
+burst2
+limit100
+(type.googleapis.com/google.rpc.RetryInfo
+4
+)type.googleapis.com/helloworld.HelloReply
+later

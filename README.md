@@ -1,12 +1,15 @@
 # smock
 
-smock is a mock server for HTTP/1.1, HTTP/2, HTTPS and Server-Sent Events. It
-stands in for the services a system depends on, on Kubernetes and on
-developers' machines. It is written in MoonBit ([ADR 0001](docs/adr/0001-moonbit-with-c-only-for-tls.md)).
+smock is a mock server for HTTP/1.1, HTTP/2, HTTPS, Server-Sent Events and
+gRPC unary calls. It stands in for the services a system depends on, on
+Kubernetes and on developers' machines. It is written in MoonBit ([ADR 0001](docs/adr/0001-moonbit-with-c-only-for-tls.md)).
 The domain terms are defined in [GLOSSARY.md](GLOSSARY.md).
 [LLM responses](docs/definition-files.md#llm-responses) stand in for the
 OpenAI Chat Completions, OpenAI Responses and Anthropic Messages APIs in
-tests of code that calls one.
+tests of code that calls one. A Mock that names a service's Descriptor set
+stands in for a [gRPC service](docs/grpc.md), on the same ports as HTTP:
+its gRPC Stubs answer unary calls, decoded from protobuf into JSON, with
+replies written as JSON.
 
 ## Documentation
 
@@ -21,6 +24,11 @@ reads it. The guides for people who use smock:
   JVM, browsers and behind a load balancer. It says what a Stub and the
   Journal see of an HTTP/2 request, and how smock bounds what one
   connection can cost.
+- [docs/grpc.md](docs/grpc.md) says how a Mock stands in for a gRPC
+  service: how to build the Descriptor set it names, what its gRPC Stubs
+  can hold, the JSON form of a call's message, reply metadata, status and
+  error details, unmatched calls, deadlines, Faults, server reflection and
+  health, gRPC's protocol checks, and what smock does not serve.
 - [docs/importing-openapi.md](docs/importing-openapi.md) turns an OpenAPI
   document into a Definition file.
 - [docs/migrating-from-mockoon.md](docs/migrating-from-mockoon.md) maps
@@ -65,7 +73,11 @@ definitions directory, then listens on the plain port and on the TLS port.
 Each port's `listening` log entry names the protocols it serves:
 `["http/1.1", "h2c"]` on the plain port, `["h2", "http/1.1"]` on the TLS
 port (`["http/1.1"]` with `--tls-http2 off`) and `["http/1.1"]` on the
-admin port.
+admin port. The plain and TLS ports serve gRPC unary calls beside HTTP,
+over h2c and h2: an HTTP/2 request whose `content-type` is
+`application/grpc`, alone or followed by `+` or `;`, is a gRPC call
+([Ports and detection](docs/grpc.md#ports-and-detection)). gRPC has no
+port of its own, and the admin port never serves it.
 It polls the directory every second and swaps in the new definition set
 when the files change, ConfigMap updates included; an invalid set is
 reported and the current one keeps serving
@@ -134,7 +146,7 @@ lists the settings:
 | `--tls-cert-file` | `SMOCK_TLS_CERT_FILE` | none: a generated self-signed certificate |
 | `--tls-key-file` | `SMOCK_TLS_KEY_FILE` | none: a generated self-signed certificate |
 | `--tls-mock-certs` | `SMOCK_TLS_MOCK_CERTS` | none: no Mock has a certificate of its own (see below) |
-| `--tls-http2` | `SMOCK_TLS_HTTP2` | `on`: ALPN on the TLS port offers `h2`, then `http/1.1`; `off` offers `http/1.1` alone ([h2 on the TLS port](docs/http2.md#h2-on-the-tls-port)) |
+| `--tls-http2` | `SMOCK_TLS_HTTP2` | `on`: ALPN on the TLS port offers `h2`, then `http/1.1`; `off` offers `http/1.1` alone, which turns gRPC over TLS off too ([h2 on the TLS port](docs/http2.md#h2-on-the-tls-port)) |
 | `--admin-port` | `SMOCK_ADMIN_PORT` | 9090 (0 picks a free port) |
 | `--admin-auth` | `SMOCK_ADMIN_AUTH` | `on`: the Admin API needs a bearer token; `off` for local use |
 | `--admin-token-file` | `SMOCK_ADMIN_TOKEN_FILE` | none: the token comes from `SMOCK_ADMIN_TOKEN` |
@@ -144,9 +156,9 @@ lists the settings:
 | `--log-format` | `SMOCK_LOG_FORMAT` | `json` by default (stderr, smock's own shape), or `mockoon` (stdout, the Mockoon CLI's shape, [for Mockoon users](docs/migrating-from-mockoon.md#logs)) |
 | `--body-file-dir` | `SMOCK_BODY_FILE_DIR` | `files` |
 | `--template-env` | `SMOCK_TEMPLATE_ENV` | none: templates read no environment variable; a comma-separated list of names lets them read those as `env.NAME`, with values read once at startup ([Environment variables](docs/definition-files.md#environment-variables)) |
-| `--header-size-limit` | `SMOCK_HEADER_SIZE_LIMIT` | 16384 bytes (16 KiB): larger request heads get 431; over HTTP/2, a larger header list, counted as RFC 7541 counts it, gets 431 on its stream, and a header block over twice the limit closes the connection ([Header lists](docs/http2.md#header-lists)) |
+| `--header-size-limit` | `SMOCK_HEADER_SIZE_LIMIT` | 16384 bytes (16 KiB): larger request heads get 431; over HTTP/2, a larger header list, counted as RFC 7541 counts it, gets 431 on its stream, and a header block over twice the limit closes the connection ([Header lists](docs/http2.md#header-lists)); it also bounds each block of a gRPC reply's metadata, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL ([Metadata size](docs/grpc.md#metadata-size)) |
 | `--header-count-limit` | `SMOCK_HEADER_COUNT_LIMIT` | 100 header fields: more get 431 |
-| `--body-limit` | `SMOCK_BODY_LIMIT` | 10485760 bytes (10 MiB): longer bodies get 413; over HTTP/2, per stream, on that stream alone ([Request bodies](docs/http2.md#request-bodies)) |
+| `--body-limit` | `SMOCK_BODY_LIMIT` | 10485760 bytes (10 MiB): longer bodies get 413; over HTTP/2, per stream, on that stream alone ([Request bodies](docs/http2.md#request-bodies)); a gRPC call gets RESOURCE_EXHAUSTED instead, and its message's decoded JSON is held to the limit too ([The body limit](docs/grpc.md#the-body-limit)), and to 32,768 values and 4 more for each octet of the message ([The values a message may print](docs/grpc.md#the-values-a-message-may-print)) |
 | `--http2-max-concurrent-streams` | `SMOCK_HTTP2_MAX_CONCURRENT_STREAMS` | 100, from 1 to 1000: the most streams an HTTP/2 connection may have in progress at once; a stream past it gets RST_STREAM `REFUSED_STREAM` ([Limits and timeouts](docs/http2.md#limits-and-timeouts)) |
 | `--read-timeout-ms` | `SMOCK_READ_TIMEOUT_MS` | 30000: a request must arrive whole within 30 s of its first byte, or, when it was pipelined behind a response, of that response; over HTTP/2, a stream whose request is late gets RST_STREAM `CANCEL` alone ([Limits and timeouts](docs/http2.md#limits-and-timeouts)) |
 | `--idle-timeout-ms` | `SMOCK_IDLE_TIMEOUT_MS` | 60000: a connection that waits 60 s for a request closes |
@@ -157,7 +169,7 @@ lists the settings:
 | `--journal-max-entries` | `SMOCK_JOURNAL_MAX_ENTRIES` | 10000: beyond it, the oldest entries are evicted |
 | `--journal-max-bytes` | `SMOCK_JOURNAL_MAX_BYTES` | a quarter of smock's memory limit (cgroup v2 `memory.max`), at least 1048576 bytes (1 MiB) and at most 67108864 (64 MiB); 64 MiB without a limit ([The Journal](#the-journal)): beyond it, the oldest entries are evicted |
 | `--journal-body-limit` | `SMOCK_JOURNAL_BODY_LIMIT` | 4096 bytes (4 KiB): the most of a request body an entry keeps, and of the form and XML values its Near miss keeps, in total |
-| `--state-max-bytes` | `SMOCK_STATE_MAX_BYTES` | an eighth of smock's memory limit (cgroup v2 `memory.max`), at least 1048576 bytes (1 MiB) and at most 67108864 (64 MiB); 64 MiB without a limit ([The state bound](docs/definition-files.md#the-state-bound)): the most bytes the per-Session state of the whole process takes; a request or an Admin API set whose writes would pass it gets 507 |
+| `--state-max-bytes` | `SMOCK_STATE_MAX_BYTES` | an eighth of smock's memory limit (cgroup v2 `memory.max`), at least 1048576 bytes (1 MiB) and at most 67108864 (64 MiB); 64 MiB without a limit ([The state bound](docs/definition-files.md#the-state-bound)): the most bytes the per-Session state of the whole process takes; a request or an Admin API set whose writes would pass it gets 507, and a gRPC call RESOURCE_EXHAUSTED ([smock's own failures](docs/grpc.md#smocks-own-failures)) |
 
 A request over a limit gets its status with `Connection: close`, then the
 connection closes; a timeout, read, idle or write, closes the connection
@@ -181,7 +193,15 @@ body, RST_STREAM `NO_ERROR` follows the 413, to stop the upload. See
 each stream, one HTTP/2 connection can hold request bodies of up to
 `--http2-max-concurrent-streams` × `--body-limit` in memory at once: about
 1 GiB with the defaults (100 × 10 MiB). For a small Pod, lower either flag
-([Limits and timeouts](docs/http2.md#limits-and-timeouts)).
+([Limits and timeouts](docs/http2.md#limits-and-timeouts)). A gRPC call
+over the limit gets RESOURCE_EXHAUSTED with `:status` 200 instead of 413,
+as gRPC servers answer it, and the JSON that smock decodes its message
+into is held to the limit as well
+([The body limit](docs/grpc.md#the-body-limit)). That JSON may also hold
+at most 32,768 values, and 4 more for each octet of the message, which
+bounds the memory that a small message costs once its JSON is parsed. No
+flag changes that bound
+([The values a message may print](docs/grpc.md#the-values-a-message-may-print)).
 
 Over HTTP/2, a request over a header limit gets 431 on its stream alone,
 and the connection stays open. The read timeout applies to each stream
@@ -234,9 +254,11 @@ update does not fail the tests running against the old Pod. SIGINT and
 SIGHUP do not drain: they end smock at once, cutting whatever is in
 flight, so that Ctrl-C stops a local smock promptly.
 
-- `/readyz` fails from the moment the signal arrives. The plain and TLS
-  listeners close, so new connections are refused, and idle HTTP/1.1
-  keep-alive connections close at once.
+- `/readyz` fails from the moment the signal arrives, and the gRPC
+  health service of each Mock that turns it on says NOT_SERVING
+  ([The drain](docs/grpc.md#the-drain)). The plain and TLS listeners
+  close, so new connections are refused, and idle HTTP/1.1 keep-alive
+  connections close at once.
 - Responses in progress finish with `Connection: close`, and their
   connections close after them. Server-Sent Event streams and pending
   delays go on. Over HTTP/1.1, an event stream whose client has gone away
@@ -471,18 +493,25 @@ The Admin API is JSON over HTTP/1.1 on the admin port, as
   `mock`. A Stub from a Definition file is labelled by its ID, every
   Ephemeral Stub by `stub="ephemeral"`, and a request that matched no Stub
   by `stub=""`. A request is labelled with the Mock that answered it, the
-  Default Mock included, or `mock=""` when no Mock did. A request the
-  protocol layer rejects (HTTP/1.1: 400, 413, 431, 501 or 505, such as a
-  malformed head or a body over `--body-limit`; HTTP/2: 400, 413 or 431 on
-  its stream) counts with `mock=""` and `stub=""`, timed from the read that
+  Default Mock included, or `mock=""` when no Mock did. gRPC calls count as
+  requests, with the same labels. A gRPC call that a Mock's built-in health
+  or reflection service answered counts under its Mock with `stub=""` too,
+  but it is not an unmatched request, and the Journal does not record it
+  ([The Journal and the metrics](docs/grpc.md#the-journal-and-the-metrics)).
+  A request the protocol layer rejects (HTTP/1.1: 400, 413, 431, 501 or
+  505, such as a malformed head or a body over `--body-limit`; HTTP/2: 400,
+  413 or 431 on its stream; a gRPC call: 405, 400, or 200 with the gRPC
+  status UNIMPLEMENTED, INTERNAL or RESOURCE_EXHAUSTED, as
+  [Protocol checks and limits](docs/grpc.md#protocol-checks-and-limits)
+  lists them) counts with `mock=""` and `stub=""`, timed from the read that
   brought it; it is not an unmatched request, and the Journal does not
-  record it. Labels never carry a path, Host, method,
-  status or Session, so the number of series stays bounded by the
-  Definition files. A request is counted once its response is written; the
-  Admin API, probes and `/metrics` are not counted. Only the `mockoon` log
-  format logs requests: a `Transaction recorded` line for each request
-  counted here, except those the protocol layer rejects. The `json` format
-  logs none.
+  record it. Labels never carry a path, Host, method, status, gRPC status
+  or Session, so the number of series stays bounded by the Definition
+  files. A request is counted once its response is written; the Admin API,
+  probes and `/metrics` are not counted. Only the `mockoon` log format logs
+  requests: a `Transaction recorded` line for each request counted here,
+  except those the protocol layer rejects and the answers of gRPC's
+  built-in services. The `json` format logs none.
 - `POST /v1/stubs/{id}/render` renders a Stub's response for the sample
   request in the body, against the definitions the replica serves now, as
   `smock render` does (below). The optional `time` and `seed` query
@@ -545,7 +574,10 @@ describes Hosts and the Default Mock.
 
 A request that no Stub matches gets the Mock's no-match response, with a
 `Smock-Near-Miss` header naming the closest Stub and the conditions it
-failed, such as `Smock-Near-Miss: get-user; failed=method`.
+failed, such as `Smock-Near-Miss: get-user; failed=method`. A gRPC call
+that no gRPC Stub matches gets UNIMPLEMENTED instead, with its Near miss
+in a `smock-near-miss` trailer
+([Unmatched calls](docs/grpc.md#unmatched-calls)).
 
 Every final response smock sends, on every port, carries a `Date` header
 with the current time, such as `Date: Thu, 22 Oct 2026 14:37:10 GMT`. A
@@ -558,9 +590,12 @@ Pointer, and exits with status 1 if there is any. It also warns about Stubs
 that can never match, because an earlier Stub always matches first, and
 about a [state that a Stub requires but no Stub moves its Scenario
 to](docs/definition-files.md#a-state-that-no-stub-moves-to); warnings do
-not change the exit status. It takes `--body-file-dir` and
-`--template-env` as `smock serve` does, and reads the listed environment
-variables from its own environment.
+not change the exit status. It reads the Descriptor set that each Mock
+names, and checks every gRPC Stub against its method's types
+([gRPC Stubs](docs/definition-files.md#grpc-stubs)). It takes
+`--body-file-dir`, `--template-env` and `--header-size-limit` as
+`smock serve` does, and reads the listed environment variables from its
+own environment.
 
 `smock render --dir defs get-user --request sample.json` shows what a Stub
 returns for a sample request before a test relies on it. The sample is JSON,
@@ -577,9 +612,9 @@ a rendering never reads the live Variables. `data` maps the name of each
 [Data bucket](docs/definition-files.md#data-buckets) of the Stub's Mock
 to the value templates read in place of its initial value; a rendering
 never reads a Session's copy. smock reads the directory as
-`smock serve` does, body files included. It takes `--body-file-dir` and
-`--template-env` as `smock serve` does, and reads the listed environment
-variables from its own environment. It prints the rendering as JSON, the
+`smock serve` does, body files included. It takes `--body-file-dir`,
+`--template-env` and `--header-size-limit` as `smock serve` does, and
+reads the listed environment variables from its own environment. It prints the rendering as JSON, the
 same as the Admin render operation's result without its `warnings`: the
 Stub's status, headers and body (`utf-8` text, or `base64`) or its
 Server-Sent Events, and the conditions the sample fails, with expected and
@@ -588,7 +623,13 @@ rendered even when the sample fails them, and a
 [templated](docs/definition-files.md#templates) response is rendered for the
 sample. An [LLM response](docs/definition-files.md#llm-responses) shows the
 reply the sample's body asks for: the JSON body, or a stream's events,
-each with its wait. `--time` (RFC 3339) and `--seed` fix the clock and the
+each with its wait. A [gRPC Stub](docs/grpc.md#rendering-a-grpc-stub)
+renders as a call to its method, whatever the sample's method and
+Content-Type, which are only conditions: the sample's body is the request
+message as JSON, checked against the method's input type, and the
+rendering shows the reply message as JSON, its initial metadata, and its
+gRPC status, message, trailing metadata and error details as
+`response.grpc`, never protobuf bytes. `--time` (RFC 3339) and `--seed` fix the clock and the
 random source of the rendering; without a seed, it uses the Stub's
 `fault.seed`, or a fresh one. A Stub with
 [`responses`](docs/definition-files.md#several-responses) renders the one
@@ -611,7 +652,9 @@ with the problem on stderr, for:
 - a sample that cannot be read or is not valid;
 - sample data for a bucket the Stub's Mock does not declare, or that
   breaks a keyed bucket's rules;
-- a sample whose method and path fit no operation of a CRUD Stub.
+- a sample whose method and path fit no operation of a CRUD Stub;
+- a sample whose body is not a message of a gRPC Stub's input type, as
+  JSON.
 
 `smock import-openapi api/petstore.yaml --mock petstore --output defs/petstore.yaml`
 converts an OpenAPI 3.0, 3.1 or 3.2 document into one Definition file,
@@ -710,7 +753,9 @@ quote this value`.
 ## Sessions and Ephemeral Stubs
 
 A test names its *Session* in the W3C `baggage` header of its requests, in
-the `smock-session` member, and Admin API calls name theirs the same way.
+the `smock-session` member, and Admin API calls name theirs the same way,
+as do gRPC calls, in their `baggage` metadata
+([Sessions](docs/grpc.md#sessions)).
 Through the Admin API, a test adds *Ephemeral Stubs* to a Mock from the
 Definition files, for its Session only:
 
@@ -732,7 +777,10 @@ curl localhost:8080/users/1                                           # 200, fro
   `eph-<n>`, and returns it. Its body must be inline. It is validated like a
   Stub from a Definition file: problems get 400 `invalid_stub` with the
   messages `smock check` gives. A Mock that does not exist gets 404
-  `unknown_mock`: Mocks come only from Definition files.
+  `unknown_mock`: Mocks come only from Definition files. An Ephemeral Stub
+  whose exact path names a method of its Mock's Descriptor set is a gRPC
+  Stub, which answers only gRPC calls
+  ([Ephemeral gRPC Stubs](docs/grpc.md#ephemeral-grpc-stubs)).
 - Requests with the Session try its Ephemeral Stubs of the Mock before any
   Stub from the Definition files: by their own `priority`, the newest first
   among equal priorities. Other Sessions never see them. Requests without a
@@ -840,7 +888,19 @@ curl -H "Authorization: Bearer change-me" -H "baggage: smock-session=checkout-42
   the definition set that answered. A request for a Host that no Mock
   answers is recorded too, with no Mock; one the protocol layer rejects
   (HTTP/1.1: 400, 413, 431, 501 or 505; HTTP/2: 400, 413 or 431 on its
-  stream) is not.
+  stream; gRPC: 405, 400, or 200 with the gRPC status UNIMPLEMENTED,
+  INTERNAL or RESOURCE_EXHAUSTED) is not.
+- A gRPC call is recorded as a `POST` to its method's path, such as
+  `/helloworld.Greeter/SayHello`, with its metadata as header fields and
+  its message, decoded into JSON, as the body, whose `size` counts the
+  octets received. Its entry adds `grpcStatus`, the name of the gRPC
+  status the call got, such as `OK`, `NOT_FOUND` or `UNIMPLEMENTED`, while
+  its `status` is 200, the HTTP status that gRPC sends with every gRPC
+  status. An HTTP request's entry has no `grpcStatus`. A filter finds calls as it finds
+  requests, by `POST`, the method's path and the metadata as headers,
+  `-bin` values without their base64 padding. The answers of a Mock's
+  built-in health and reflection services are not recorded
+  ([The Journal and the metrics](docs/grpc.md#the-journal-and-the-metrics)).
 - A request is in the Journal as soon as its client has the whole
   response: smock records it just before it writes the response's last
   bytes, so a query made right after a call always finds it. A stream of
@@ -1085,19 +1145,29 @@ to date.
 
 ## Layout
 
-The repository is a MoonBit workspace (`moon.work`) of five modules:
+The repository is a MoonBit workspace (`moon.work`) of seven modules:
 
 | Directory | Module | What it is |
 |---|---|---|
 | `.` | `smock/smock` | smock itself. Its parts are packages of this module. |
+| `grpc/` | `smock/grpc` | gRPC's wire rules: the content type, the 5-octet prefix that frames each message, the seventeen status codes with their names, the percent-encoding of a status message, the rules of reply metadata, and a call's `-bin` values without their padding. |
 | `http1/` | `smock/http1` | The HTTP/1.1 codec. |
+| `protobuf/` | `smock/protobuf` | Protobuf's wire format, a reader of Descriptor sets (FileDescriptorSets) that checks them and indexes their messages, fields, enums and methods for lookups, messages decoded into JSON and encoded from it, the well-known types in their ProtoJSON forms included, gRPC's `google.rpc.Status` encoded with error details, and JSON values checked against a field's type as smock prints it (documented in `protobuf/README.mbt.md`). |
 | `re2/` | `smock/re2` | RE2-syntax regular expressions. |
 | `xml/` | `smock/xml` | An XML parser that refuses DTDs, with simple paths that select values (documented in `xml/README.mbt.md`). |
 | `yaml/` | `smock/yaml` | Safe-subset YAML: `parse` turns a document into the tree `@json.parse` gives for the equivalent JSON, and `write` turns a tree into a document, with comments, that `parse` reads back as the same tree. `parse` also has a YAML 1.2 mode for OpenAPI documents, which Definition files never use (documented in `yaml/yaml.mbt`). |
 
-The four protocol modules do no I/O and do not depend on smock, so they can
+The six protocol modules do no I/O and do not depend on smock, so they can
 be published on mooncakes on their own. `scripts/check-no-io.sh` checks
 that.
+
+`fixtures/protobuf/` holds the Descriptor sets and protobuf messages that
+tests read, and the descriptor of gRPC's `health.proto` that smock embeds,
+beside the `.proto` files they are built from.
+`scripts/gen-protobuf-fixtures.sh` rebuilds them with the pinned protoc,
+which `scripts/install-protoc.sh` installs, and CI checks on every push
+that the committed ones are what their sources build; the README there
+says how to add one.
 
 Packages of `smock/smock`:
 
@@ -1114,7 +1184,8 @@ Packages of `smock/smock`:
   (file, JSON Pointer, message). Its validation is written by hand and
   follows the JSON Schema. The snapshot holds each Mock's Stubs in matching
   order and their match index, which finds the Stubs a request can match
-  by its method and exact path, and each response's templates, parsed.
+  by its method and exact path, each response's templates, parsed, and
+  each Mock's Descriptor set, decoded.
 - `engine`: decides the response to each request from the snapshot,
   including its Faults, and renders a named Stub's response for a sample
   request, for `smock render` and the Admin render operation. It also holds
@@ -1222,6 +1293,11 @@ Packages of `smock/smock`:
   times it writes, which the Admin API and the CLI also read.
 - `buildinfo`: the version, commit and toolchain the binary was built with.
 - `e2e`: tests that run the `smock` binary as a black box (native).
+- `protobuf-conformance`: the testee of protobuf's conformance suite, a
+  program built on `smock/protobuf`, with the list of the suite's cases
+  that the module fails (native). smock's image does not hold it.
+  `scripts/check-conformance.sh` runs the suite on it
+  ([protobuf-conformance/README.md](protobuf-conformance/README.md)).
 - `schema`: a test over every Definition-file fixture in
   `schema/v1/fixtures/` that needs no `smock` binary: each, written as YAML
   by `smock/yaml`, reads back as the same tree (native).
@@ -1259,6 +1335,10 @@ HTTP/2 conformance tool, and the lists of h2spec's cases that do not pass on
 the plain port and on the TLS port, each with its reason (see
 [Build and test](#build-and-test)).
 
+`scripts/grpcurl/` holds the definition set that CI serves to grpcurl, a
+real gRPC client, and the calls grpcurl makes, each with what it prints
+(see [Build and test](#build-and-test)).
+
 ## Toolchain
 
 The MoonBit toolchain version is pinned in `.moonbit-version`, and CI installs
@@ -1288,6 +1368,9 @@ scripts/check-schema.sh dist/smock   # the JSON Schema and smock agree
 scripts/check-openapi.sh       # the Admin API document is valid OpenAPI 3.1
 scripts/install-h2spec.sh      # the pinned h2spec, into ~/.local/bin
 scripts/check-h2spec.sh dist/smock   # h2spec's conformance cases against the plain and TLS ports (needs h2spec, python3 and jq)
+scripts/install-grpcurl.sh     # the pinned grpcurl, into ~/.local/bin
+scripts/check-grpcurl.sh dist/smock  # grpcurl calls smock on the plain and TLS ports, and the gRPC guide shows those calls (needs grpcurl, curl and jq)
+scripts/test-check-grpcurl.sh dist/smock   # that check fails on each difference
 docker build --tag smock:dev .
 scripts/smoke-test-image.sh smock:dev 0.0.0-dev <commit> "moonc <version>"   # the container image
 scripts/check-release-workflow.sh    # the release workflow publishes only for tags (needs yq and jq)
@@ -1296,6 +1379,11 @@ scripts/test-sbom.sh                 # the SBOM scripts, and the check that the 
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
 scripts/check-benchmark-workflow.sh  # the benchmark workflow runs only by hand (needs yq and jq)
 scripts/check-ci-artifacts.sh        # CI keeps the release binary of each architecture, and the SDK job takes it (needs yq and jq)
+scripts/install-protoc.sh            # the pinned protoc, into ~/.local/bin, with its well-known types
+PROTOC=~/.local/bin/protoc scripts/gen-protobuf-fixtures.sh --check   # the protobuf fixtures are what their sources build
+PROTOC=~/.local/bin/protoc scripts/test-protobuf-fixtures.sh          # that check, on a copy of the working tree
+scripts/build-conformance-runner.sh  # protobuf's conformance runner, from the pinned release, into ~/.local/bin (needs CMake and a C++17 compiler)
+scripts/check-conformance.sh         # protobuf's conformance suite against smock/protobuf, judged by protobuf-conformance/failure_list.txt
 scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, read smock's LLM responses (needs python3 and PyPI)
 scripts/test-helm-chart.sh           # rendering tests of the Helm chart (needs helm, yq and jq)
 scripts/test-helm-chart-on-kind.sh smock:dev   # the chart on a kind cluster (needs kind, kubectl and helm)
@@ -1370,11 +1458,42 @@ scripts/build-release.sh
 scripts/check-h2spec.sh dist/smock
 ```
 
+`scripts/check-grpcurl.sh` calls a smock binary with grpcurl 1.9.4, a
+real gRPC client. smock serves `scripts/grpcurl/definitions`: the Mock of
+the [gRPC guide's quick start](docs/grpc.md#quick-start), with reflection
+and health on, and a second Mock, so that only grpcurl's `-authority`
+reaches the first. Each file of `scripts/grpcurl/calls` is one call: its
+grpcurl command, as the guide writes it for the plain port, then what
+grpcurl prints, and its exit status when it is not 0. Each call runs on
+the plain port over h2c, and on the TLS port over h2 with the self-signed
+certificate, which grpcurl's `-insecure` does not verify. They list and
+describe the services through reflection, call with JSON and metadata,
+make the same calls with `-protoset` and no reflection, print an error's
+details with `-format-error`, check health through reflection, call
+another Host, and call in a Session whose Ephemeral Stub the script adds
+first. Any difference fails the run, which shows it and what grpcurl
+printed. The script also checks the guide: each grpcurl command the guide
+shows must be one of these calls, the output it shows after one must be
+what grpcurl prints, and it must show the set's Definition file.
+`scripts/test-check-grpcurl.sh` checks that each kind of difference fails
+the check. To add a call, add its file, run the script, and compare what
+it prints with what the file says. `scripts/install-grpcurl.sh` installs
+grpcurl 1.9.4, checked against its SHA-256, into a directory,
+`~/.local/bin` unless one is given, on linux/amd64 and linux/arm64:
+
+```sh
+scripts/install-grpcurl.sh
+scripts/build-release.sh
+scripts/check-grpcurl.sh dist/smock
+```
+
 CI runs all of these but `moon bench` (`.github/workflows/ci.yml`). The
 tests on wasm-gc, h2spec and the scripts from
 `scripts/check-release-workflow.sh` to `scripts/test-helm-chart.sh` run on
 linux/amd64; the rest run on linux/amd64 and linux/arm64
-(`.github/workflows/build-test.yml`).
+(`.github/workflows/build-test.yml`). CI builds protobuf's conformance
+runner once and caches it
+([protobuf-conformance/README.md](protobuf-conformance/README.md)).
 The SDK job, `scripts/check-llm-sdks.sh`, runs after `build-test.yml`,
 with the release binary built there, and reads smock's
 [LLM responses](docs/definition-files.md#llm-responses) with the
@@ -1438,7 +1557,9 @@ native build, such as `scripts/build-release.sh`, records in the binary.
 realistic requests matched against a definition set with many Stubs with
 the Journal on, over HTTP/1.1 and HTTP/2, at fixed arrival rates under the
 CPU and memory limits of small GKE Autopilot Pods, and checks the
-provisional performance targets.
+provisional performance targets. A gRPC variant of its definitions
+measures gRPC unary calls over h2c in a run of its own, held to no target
+([gRPC calls in the benchmark](bench/README.md#grpc-calls-in-the-benchmark)).
 [bench/README.md](bench/README.md) says how to run it on a machine, on GKE
 Autopilot and in CI, what a run writes and how to compare runs. The
 [chart's sizing table](charts/smock/README.md#sizing) has what it measured.

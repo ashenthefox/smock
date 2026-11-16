@@ -1,0 +1,62 @@
+{
+  "about": "The request mix of the gRPC variant of the release benchmark's definitions (bench/definitions-grpc/), which bench/bench.py sends when it serves that variant, in the case grpc-keep-alive. bench/gen_definitions.py writes it: a gRPC call to each method of the Mock shop, by weight, each with a Session of its own, the headers a gRPC client sends over HTTP/2, and its framed request message in a file under bench/ (`bodyFile`), which oha sends with -D. get-order is matched by a condition on the message and gets a static reply, quote-order a templated reply, and track-order NOT_FOUND, sent as Trailers-Only. Every call gets the HTTP status 200, which is all that oha sees; `expect.grpcStatus` is the gRPC status that the Journal records, which e2e/bench_test.mbt checks.",
+  "requests": [
+    {
+      "name": "get-order",
+      "weight": 60,
+      "method": "POST",
+      "host": "shop.bench.internal",
+      "target": "/bench.shop.v1.Orders/GetOrder",
+      "headers": [
+        ["content-type", "application/grpc"],
+        ["te", "trailers"],
+        ["user-agent", "grpc-java-netty/1.85.1"],
+        ["grpc-accept-encoding", "gzip"],
+        ["authorization", "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdG9yZWZyb250IiwiYXVkIjoib3JkZXJzIiwiZXhwIjoxOTI0OTkyMDAwfQ.bm90LWEtcmVhbC1zaWduYXR1cmUtYmVuY2htYXJrLW9ubHk"],
+        ["traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-5fb6b8c4d2a1e370-01"],
+        ["baggage", "tenant=acme-eu,smock-session=bench-grpc-get-order,deployment=perf"]
+      ],
+      "body": null,
+      "bodyFile": "requests-grpc/get-order.grpc",
+      "expect": { "session": "bench-grpc-get-order", "status": 200, "grpcStatus": "OK", "mock": "shop", "stub": "get-order-partner-gold", "viaDefault": false }
+    },
+    {
+      "name": "quote-order",
+      "weight": 25,
+      "method": "POST",
+      "host": "shop.bench.internal",
+      "target": "/bench.shop.v1.Orders/QuoteOrder",
+      "headers": [
+        ["content-type", "application/grpc"],
+        ["te", "trailers"],
+        ["user-agent", "grpc-java-netty/1.85.1"],
+        ["grpc-accept-encoding", "gzip"],
+        ["authorization", "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdG9yZWZyb250IiwiYXVkIjoib3JkZXJzIiwiZXhwIjoxOTI0OTkyMDAwfQ.bm90LWEtcmVhbC1zaWduYXR1cmUtYmVuY2htYXJrLW9ubHk"],
+        ["traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-8a3c60f7d188e3b2-01"],
+        ["baggage", "tenant=acme-eu,smock-session=bench-grpc-quote-order,deployment=perf"]
+      ],
+      "body": null,
+      "bodyFile": "requests-grpc/quote-order.grpc",
+      "expect": { "session": "bench-grpc-quote-order", "status": 200, "grpcStatus": "OK", "mock": "shop", "stub": "quote-order", "viaDefault": false }
+    },
+    {
+      "name": "track-order",
+      "weight": 15,
+      "method": "POST",
+      "host": "shop.bench.internal",
+      "target": "/bench.shop.v1.Orders/TrackOrder",
+      "headers": [
+        ["content-type", "application/grpc"],
+        ["te", "trailers"],
+        ["user-agent", "grpc-java-netty/1.85.1"],
+        ["grpc-accept-encoding", "gzip"],
+        ["authorization", "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdG9yZWZyb250IiwiYXVkIjoib3JkZXJzIiwiZXhwIjoxOTI0OTkyMDAwfQ.bm90LWEtcmVhbC1zaWduYXR1cmUtYmVuY2htYXJrLW9ubHk"],
+        ["traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-c2f1e7a95b04d6e8-01"],
+        ["baggage", "tenant=acme-eu,smock-session=bench-grpc-track-order,deployment=perf"]
+      ],
+      "body": null,
+      "bodyFile": "requests-grpc/track-order.grpc",
+      "expect": { "session": "bench-grpc-track-order", "status": 200, "grpcStatus": "NOT_FOUND", "mock": "shop", "stub": "track-order", "viaDefault": false }
+    }
+  ]
+}

@@ -17,6 +17,8 @@
 // handled, when it has no delay and what it sends fits the windows, and
 // otherwise in the stream's task. RST_STREAM is a frame, so no Fault over
 // HTTP/2 needs the socket option that HTTP/1.1's `reset` sets (ADR 0001).
+// gRPC calls take the same forms, with no `content-length`
+// (grpc_faults.mbt).
 
 ///|
 /// Carries out a close Fault on `stream`, whose Journal entry is `entry`:

@@ -103,7 +103,7 @@ async test "--state-max-bytes: a request whose writes would pass the bound gets 
             #|# HELP smock_state_bytes Bytes the per-Session state takes, as the bound on it counts them (--state-max-bytes).
             #|# TYPE smock_state_bytes gauge
             #|smock_state_bytes 186
-            #|# HELP smock_state_writes_refused_total Requests and Admin API sets whose writes to per-Session state were refused with 507, since they would pass its bound (--state-max-bytes).
+            #|# HELP smock_state_writes_refused_total Requests and Admin API sets whose writes to per-Session state were refused with 507, or RESOURCE_EXHAUSTED for a gRPC call, since they would pass its bound (--state-max-bytes).
             #|# TYPE smock_state_writes_refused_total counter
             #|smock_state_writes_refused_total 1
           ),

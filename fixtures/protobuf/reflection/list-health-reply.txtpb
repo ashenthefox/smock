@@ -1,0 +1,9 @@
+valid_host: "reflected.svc"
+original_request {
+  list_services: "*"
+}
+list_services_response {
+  service {
+    name: "grpc.health.v1.Health"
+  }
+}

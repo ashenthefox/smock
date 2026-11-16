@@ -111,14 +111,16 @@ async fn main {
 /// cannot be read or is not valid, when no Stub has the ID, when the Stub
 /// has no response at the index `--response` gives, when the sample's data
 /// names a Data bucket the Stub's Mock does not declare or breaks a keyed
-/// bucket's rules, or when the sample fits no operation of a CRUD Stub.
-/// Every problem goes to stderr.
+/// bucket's rules, when the sample fits no operation of a CRUD Stub, or
+/// when its body is not a message of a gRPC Stub's input type. Every
+/// problem goes to stderr.
 async fn render(settings : @settings.RenderSettings) -> Int32 {
   let snapshot = match
     load_definitions(
       settings.dir,
       body_file_dir=settings.body_file_dir,
       template_env=settings.template_env,
+      header_size_limit=settings.header_size_limit,
     ) {
     Ok(snapshot) => snapshot
     Err(diagnostics) => {
@@ -194,6 +196,7 @@ async fn check(settings : @settings.CheckSettings) -> Int32 {
       dir,
       body_file_dir=settings.body_file_dir,
       template_env=settings.template_env,
+      header_size_limit=settings.header_size_limit,
     ) {
     Ok(snapshot) => {
       for warning in snapshot.warnings() {
@@ -214,15 +217,18 @@ async fn check(settings : @settings.CheckSettings) -> Int32 {
 /// Loads the definitions directory `dir` as `smock serve` does, with its
 /// body files in `body_file_dir`, for `smock check` and `smock render`.
 /// Templates may read the environment variables `template_env` lists, with
-/// their values from smock's own environment.
+/// their values from smock's own environment, and each block of a static
+/// gRPC reply's metadata may take `header_size_limit` octets.
 async fn load_definitions(
   dir : String,
   body_file_dir~ : String,
   template_env~ : Array[String],
+  header_size_limit~ : Int32,
 ) -> Result[@definitions.Snapshot, Array[@definitions.Diagnostic]] {
   @defdir.load(
     Some(dir),
     body_file_dir~,
     env=@server.template_env(template_env),
+    header_size_limit~,
   )
 }

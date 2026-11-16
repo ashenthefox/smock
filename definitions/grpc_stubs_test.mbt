@@ -1,0 +1,710 @@
+// gRPC Stubs at load: a Stub whose exact path names a unary method of its
+// Mock's Descriptor set. The sets are those scripts/gen-protobuf-fixtures.sh
+// builds with protoc: gRPC's helloworld.proto (greeter_set_test.mbt),
+// fixtures/protobuf/catalog/catalog.proto (catalog_set_test.mbt),
+// fixtures/protobuf/oneofs/oneofs.proto (oneofs_set_test.mbt) and
+// fixtures/protobuf/scalars/scalars.proto (scalars_set_test.mbt).
+
+///|
+/// The bytes of a set that the fixture script wrote in hex.
+fn set_bytes(hex : String) -> Bytes raise {
+  @hex.decode(hex.replace_all(old="\n", new=""))
+}
+
+///|
+/// Loads `a.yaml`, which declares the Mock `greeter`, whose set is gRPC's
+/// helloworld.proto, the Mock `catalog`, whose set is catalog.proto, the
+/// Mock `oneofs`, whose set is oneofs.proto, the Mock `scalars`, whose set
+/// is scalars.proto, the Mock `plain`, with no set, and then `stubs`, the
+/// lines of its `stubs` array. Renders what `smock check` would print:
+/// every problem, one per line; or, for a valid set, each Stub with its
+/// kind, then each warning.
+fn check_stubs(stubs : String) -> String raise {
+  let yaml =
+    #|mocks:
+    #|  - { name: greeter, grpc: { descriptorSet: greeter.binpb } }
+    #|  - { name: catalog, grpc: { descriptorSet: catalog.binpb } }
+    #|  - { name: oneofs, grpc: { descriptorSet: oneofs.binpb } }
+    #|  - { name: scalars, grpc: { descriptorSet: scalars.binpb } }
+    #|  - { name: plain }
+    #|stubs:
+    #|
+  match
+    @definitions.load({
+      files: [("a.yaml", @utf8.encode(yaml + stubs))],
+      body_files: [
+        ("greeter.binpb", set_bytes(greeter_set)),
+        ("catalog.binpb", set_bytes(catalog_set)),
+        ("oneofs.binpb", set_bytes(oneofs_set)),
+        ("scalars.binpb", set_bytes(scalars_set)),
+      ],
+    }) {
+    Ok(snapshot) => {
+      let lines = []
+      for mock in snapshot.mocks {
+        for stub in mock.stubs {
+          let kind = match stub.serves {
+            Ordinary({ grpc_method: Some(rpc), .. }) =>
+              "gRPC Stub of \{rpc.name}"
+            Ordinary(_) | Crud(_) => "HTTP Stub"
+          }
+          lines.push("\{mock.name}: \{stub.id}: \{kind}")
+        }
+      }
+      for warning in snapshot.warnings() {
+        lines.push(warning.to_string())
+      }
+      lines.join("\n")
+    }
+    Err(problems) => problems.map(problem => problem.to_string()).join("\n")
+  }
+}
+
+///|
+test "a Stub whose exact path names a unary method of its Mock's set is a gRPC Stub, which needs no status; an HTTP Stub still does" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: hello
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: { json: { message: Hello Tom } }
+        #|  - id: hello-http
+        #|    mock: plain
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: { json: { message: Hello Tom } }
+      ),
+    ),
+    content=(
+      #|a.yaml: /stubs/1/response: needs "status"
+    ),
+  )
+  inspect(
+    check_stubs(
+      (
+        #|  - id: hello
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: { json: { message: Hello Tom } }
+        #|  - id: count
+        #|    mock: catalog
+        #|    request: { path: /catalog.Catalog/CountItems }
+        #|    response: { json: { count: 3 } }
+        #|  - id: hello-http
+        #|    mock: plain
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: { status: 200, json: { message: Hello Tom } }
+      ),
+    ),
+    content=(
+      #|greeter: hello: gRPC Stub of SayHello
+      #|catalog: count: gRPC Stub of CountItems
+      #|plain: hello-http: HTTP Stub
+    ),
+  )
+}
+
+///|
+test "a gRPC Stub's json reply is read as ProtoJSON and checked against the method's output type: its first problem is at its pointer" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: hello
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: { json: { mesage: Hi } }
+        #|  - id: count
+        #|    mock: catalog
+        #|    request: { path: /catalog.Catalog/CountItems }
+        #|    responses:
+        #|      - { weight: 2, json: { count: 2147483648, exact: "yes", shelf: 1 } }
+        #|      - { json: { count: "-2147483649" } }
+        #|      - { json: { count: 1.5, exact: null } }
+        #|      - { json: [] }
+        #|      - { json: { count: "2147483647", exact: true, shelf: "" } }
+        #|      - { json: { count: -2147483648, exact: null } }
+        #|      - { json: { shelf: A1, in_stock: true } }
+        #|      - { json: {} }
+      ),
+    ),
+    content=(
+      #|a.yaml: /stubs/0/response/json/mesage: is not a field of helloworld.HelloReply
+      #|a.yaml: /stubs/1/responses/0/json/count: must be an integer from -2147483648 to 2147483647: the field count of catalog.CountReply has the type int32
+      #|a.yaml: /stubs/1/responses/1/json/count: must be an integer from -2147483648 to 2147483647: the field count of catalog.CountReply has the type int32
+      #|a.yaml: /stubs/1/responses/2/json/count: must be an integer from -2147483648 to 2147483647: the field count of catalog.CountReply has the type int32
+      #|a.yaml: /stubs/1/responses/3/json: must be an object: the message is a catalog.CountReply
+      #|a.yaml: /stubs/1/responses/6/json/in_stock: is not a field of catalog.CountReply
+    ),
+  )
+}
+
+///|
+/// The names of the header fields of each response of each Stub that
+/// `check_stubs` loads, one Stub per line, or every problem.
+fn reply_headers(stubs : String) -> String raise {
+  let yaml =
+    #|mocks:
+    #|  - { name: greeter, grpc: { descriptorSet: greeter.binpb } }
+    #|stubs:
+    #|
+  match
+    @definitions.load({
+      files: [("a.yaml", @utf8.encode(yaml + stubs))],
+      body_files: [("greeter.binpb", set_bytes(greeter_set))],
+    }) {
+    Ok(snapshot) =>
+      snapshot.mocks[0].stubs
+      .iter()
+      .map(stub => {
+        guard stub.serves is Ordinary(ordinary) else { return stub.id }
+        let names = ordinary.responses
+          .iter()
+          .map(weighted => {
+            let names = match weighted.response.headers {
+              Written(headers) => headers.iter().map(header => header.0)
+              Templated(headers) => headers.iter().map(header => header.0)
+            }
+            "[\{names.collect().join(", ")}]"
+          })
+          .collect()
+        "\{stub.id}: \{names.join(" ")}"
+      })
+      .collect()
+      .join("\n")
+    Err(problems) => problems.map(problem => problem.to_string()).join("\n")
+  }
+}
+
+///|
+test "a gRPC Stub's json reply gets no Content-Type, and a templated one is not checked when the files load" {
+  inspect(
+    reply_headers(
+      (
+        #|  - id: hello
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    responses: [{ json: { message: Hello Tom } }, { json: {} }]
+        #|  - id: hello-templated
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello, headers: { x-name: Tom } }
+        #|    response: { template: true, json: { mesage: "${body.name}" } }
+        #|  - id: hello-http
+        #|    mock: greeter
+        #|    request: { path: /hello }
+        #|    response: { status: 200, json: { message: Hello Tom } }
+      ),
+    ),
+    content=(
+      #|hello: [] []
+      #|hello-templated: []
+      #|hello-http: [Content-Type]
+    ),
+  )
+}
+
+///|
+test "a Stub on a client-, server- or bidi-streaming method is a problem at its path that points to R3" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: stream-reply
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHelloStreamReply }
+        #|    response: { json: { mesage: Hi } }
+        #|  - id: bidi
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHelloBidiStream }
+        #|    response: { json: {} }
+        #|  - id: upload
+        #|    mock: catalog
+        #|    request: { path: /catalog.Catalog/UploadItems }
+        #|    response: { json: {} }
+      ),
+    ),
+    content=(
+      #|a.yaml: /stubs/0/request/path: the method helloworld.Greeter/SayHelloStreamReply is server-streaming, and smock serves only unary methods: streaming methods are planned for R3
+      #|a.yaml: /stubs/1/request/path: the method helloworld.Greeter/SayHelloBidiStream is bidi-streaming, and smock serves only unary methods: streaming methods are planned for R3
+      #|a.yaml: /stubs/2/request/path: the method catalog.Catalog/UploadItems is client-streaming, and smock serves only unary methods: streaming methods are planned for R3
+    ),
+  )
+}
+
+///|
+test "a method whose input or output type comes from an editions file is not served yet, each side on its own; a nested type and a type of a proto2 file are served" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: get-item
+        #|    mock: catalog
+        #|    request: { path: /catalog.Catalog/GetItem }
+        #|    response: { json: { price: 1, tags: [], sku: x } }
+        #|  - id: find-items
+        #|    mock: catalog
+        #|    request: { path: /catalog.Catalog/FindItems }
+        #|    response: { json: { count: 1 } }
+        #|  - id: get-shelf
+        #|    mock: catalog
+        #|    request: { path: /catalog.Catalog/GetShelf }
+        #|    response: { json: {} }
+        #|  - id: get-legacy-item
+        #|    mock: catalog
+        #|    request: { path: /catalog.Catalog/GetLegacyItem }
+        #|    response: { json: {} }
+        #|  - id: get-edition-item
+        #|    mock: catalog
+        #|    request: { path: /catalog.Catalog/GetEditionItem }
+        #|    response: { json: {} }
+      ),
+    ),
+    content=(
+      #|a.yaml: /stubs/0/response/json/sku: is not a field of catalog.Item
+      #|a.yaml: /stubs/4/request/path: the input type edition.EditionRequest is not served yet: edition.proto, which defines it, is an editions file, and editions come in a later spec
+    ),
+  )
+}
+
+///|
+test "fields that make no sense on a gRPC Stub are refused at load, each at its pointer, saying why" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: conditions
+        #|    mock: greeter
+        #|    request:
+        #|      path: /helloworld.Greeter/SayHello
+        #|      query: { page: "1" }
+        #|      cookies: { session: abc }
+        #|      body: Tom
+        #|    response: { status: 200, body: hi }
+        #|  - id: body-pattern
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello, body: { pattern: ".*" } }
+        #|    responses:
+        #|      - { bodyFile: greeter.binpb }
+        #|      - { events: [{ data: hi }] }
+        #|      - { llm: { api: openai-chat, text: hi } }
+        #|  - id: body-form
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello, body: { form: {} } }
+        #|    response: {}
+        #|  - id: body-xml
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello, body: { xml: {} } }
+        #|    response: {}
+      ),
+    ),
+    content=(
+      #|a.yaml: /stubs/0/request/query: makes no sense on a gRPC Stub: a gRPC call's path has no query
+      #|a.yaml: /stubs/0/request/cookies: makes no sense on a gRPC Stub: a gRPC call sends metadata, which headers conditions match, not cookies
+      #|a.yaml: /stubs/0/request/body: an exact-text condition makes no sense on a gRPC Stub: a call's message is matched as JSON, with a json condition
+      #|a.yaml: /stubs/0/response/status: makes no sense on a gRPC Stub: a gRPC reply's HTTP status is always 200, and grpc.status gives its gRPC status
+      #|a.yaml: /stubs/0/response/body: makes no sense on a gRPC Stub: its reply message is json, which smock encodes with the method's output type
+      #|a.yaml: /stubs/1/request/body/pattern: makes no sense on a gRPC Stub: a call's message is matched as JSON, with a json condition
+      #|a.yaml: /stubs/1/responses/0/bodyFile: makes no sense on a gRPC Stub: its reply message is json, which smock encodes with the method's output type
+      #|a.yaml: /stubs/1/responses/1/events: makes no sense on a gRPC Stub: a unary call gets one reply message, not an event stream
+      #|a.yaml: /stubs/1/responses/2/llm: makes no sense on a gRPC Stub: an LLM reply is written in an LLM API's HTTP wire form
+      #|a.yaml: /stubs/2/request/body/form: makes no sense on a gRPC Stub: a call's message is matched as JSON, with a json condition
+      #|a.yaml: /stubs/3/request/body/xml: makes no sense on a gRPC Stub: a call's message is matched as JSON, with a json condition
+    ),
+  )
+}
+
+///|
+test "a gRPC Stub's method may be left out, and when given must be POST; a method that is not an HTTP token gets that problem alone" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: post
+        #|    mock: greeter
+        #|    request: { method: POST, path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+        #|  - id: any
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+      ),
+    ),
+    content=(
+      #|greeter: post: gRPC Stub of SayHello
+      #|greeter: any: gRPC Stub of SayHello
+    ),
+  )
+  inspect(
+    check_stubs(
+      (
+        #|  - id: get
+        #|    mock: greeter
+        #|    request: { method: GET, path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+        #|  - id: lower-case
+        #|    mock: greeter
+        #|    request: { method: post, path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+        #|  - id: not-a-token
+        #|    mock: greeter
+        #|    request: { method: "PO ST", path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+      ),
+    ),
+    content=(
+      #|a.yaml: /stubs/0/request/method: must be POST on a gRPC Stub, or left out: a gRPC call is always a POST
+      #|a.yaml: /stubs/1/request/method: must be POST on a gRPC Stub, or left out: a gRPC call is always a POST
+      #|a.yaml: /stubs/2/request/method: must be an HTTP token, such as GET
+    ),
+  )
+}
+
+///|
+test "a gRPC Stub serves every field that makes sense for gRPC: its delay, its connection Faults and its reply headers included" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: served
+        #|    mock: greeter
+        #|    priority: 1
+        #|    scenario: { name: greeting, requires: Started, moveTo: Greeted }
+        #|    variables: { name: "${body.name}" }
+        #|    fault: { seed: 7 }
+        #|    request:
+        #|      method: POST
+        #|      path: /helloworld.Greeter/SayHello
+        #|      headers: { x-tenant: acme }
+        #|      body: { json: { name: Tom } }
+        #|    responses:
+        #|      - { weight: 2, template: true, json: { message: "Hello ${body.name}" } }
+        #|      - { json: {} }
+        #|  - id: faults
+        #|    mock: greeter
+        #|    fault: { delay: { fixed: 50 }, connection: { kind: reset, probability: 1 } }
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: { headers: { x-served-by: smock } }
+      ),
+    ),
+    content=(
+      #|greeter: served: gRPC Stub of SayHello
+      #|greeter: faults: gRPC Stub of SayHello
+    ),
+  )
+}
+
+///|
+test "a gRPC Stub and an HTTP Stub never shadow each other: a catch-all HTTP Stub before a gRPC Stub gets no warning, and a gRPC Stub after an identical one does" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: catch-all
+        #|    mock: greeter
+        #|    request: {}
+        #|    response: { status: 404 }
+        #|  - id: any-greeter-path
+        #|    mock: greeter
+        #|    request: { method: POST, path: { pattern: "/helloworld[.]Greeter/.*" } }
+        #|    response: { status: 404 }
+        #|  - id: hello
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: { json: { message: Hello } }
+        #|  - id: hello-again
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello, body: { json: { name: Tom } } }
+        #|    response: { json: { message: Hello Tom } }
+        #|  - id: after-hello
+        #|    mock: greeter
+        #|    request: { path: /hello }
+        #|    response: { status: 200 }
+      ),
+    ),
+    content=(
+      #|greeter: catch-all: HTTP Stub
+      #|greeter: any-greeter-path: HTTP Stub
+      #|greeter: hello: gRPC Stub of SayHello
+      #|greeter: hello-again: gRPC Stub of SayHello
+      #|greeter: after-hello: HTTP Stub
+      #|a.yaml: /stubs/1: warning: the Stub "any-greeter-path" can never match: the Stub "catch-all" at a.yaml: /stubs/0 is tried first and matches every request this one would
+      #|a.yaml: /stubs/3: warning: the Stub "hello-again" can never match: the Stub "hello" at a.yaml: /stubs/2 is tried first and matches every request this one would
+      #|a.yaml: /stubs/4: warning: the Stub "after-hello" can never match: the Stub "catch-all" at a.yaml: /stubs/0 is tried first and matches every request this one would
+    ),
+  )
+}
+
+///|
+test "a method whose input and output types have fields in a oneof and proto3 optional fields is served" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: choose
+        #|    mock: oneofs
+        #|    request: { path: /oneofs.Picker/Choose }
+        #|    response: { json: { name: x } }
+      ),
+    ),
+    content=(
+      #|oneofs: choose: gRPC Stub of Choose
+    ),
+  )
+}
+
+///|
+/// The reply message of each response of each Stub that `check_stubs`
+/// loads, as the files' load encoded it, in hex, one Stub per line, or
+/// every problem. A response that the load did not encode shows as
+/// `none`.
+fn reply_messages(stubs : String) -> String raise {
+  let yaml =
+    #|mocks:
+    #|  - { name: catalog, grpc: { descriptorSet: catalog.binpb } }
+    #|stubs:
+    #|
+  match
+    @definitions.load({
+      files: [("a.yaml", @utf8.encode(yaml + stubs))],
+      body_files: [("catalog.binpb", set_bytes(catalog_set))],
+    }) {
+    Ok(snapshot) => {
+      let lines = []
+      for stub in snapshot.mocks[0].stubs {
+        guard stub.serves is Ordinary(ordinary) else { continue }
+        let messages = []
+        for weighted in ordinary.responses {
+          messages.push(
+            match weighted.response.encoded {
+              Some(encoded) => "[\{@hex.encode(encoded.message)}]"
+              None => "none"
+            },
+          )
+        }
+        lines.push("\{stub.id}: \{messages.join(" ")}")
+      }
+      lines.join("\n")
+    }
+    Err(problems) => problems.map(problem => problem.to_string()).join("\n")
+  }
+}
+
+///|
+test "a static reply is encoded when the files load, with every proto3 field type its output type has; a templated one is encoded once rendered, and an HTTP Stub's reply never" {
+  // protoc encodes `price: 12 tags: "a" kind: BOOK stock { count: 1 }
+  // picture: "\001"` as 080c1201611801220208012a0101.
+  inspect(
+    reply_messages(
+      (
+        #|  - id: item
+        #|    mock: catalog
+        #|    request: { path: /catalog.Catalog/GetItem }
+        #|    responses:
+        #|      - json: { price: "12", tags: [a], kind: BOOK, stock: { count: 1 }, picture: AQ== }
+        #|      - json: { picture: AQ, stock: { count: 1 }, kind: 1, tags: [a], price: 12 }
+        #|      - json: {}
+        #|      - {}
+        #|  - id: item-templated
+        #|    mock: catalog
+        #|    request: { path: /catalog.Catalog/GetItem, headers: { x-id: a } }
+        #|    response: { template: true, json: { tags: ["${body.id}"] } }
+        #|  - id: item-http
+        #|    mock: catalog
+        #|    request: { path: /item }
+        #|    response: { status: 200, json: { price: 12 } }
+      ),
+    ),
+    content=(
+      #|item: [080c1201611801220208012a0101] [080c1201611801220208012a0101] [] []
+      #|item-templated: none
+      #|item-http: none
+    ),
+  )
+}
+
+///|
+test "an input type of fields of every scalar type, enums, nested messages, proto3 optional fields, repeated fields, maps and oneofs is served, a type that nests itself included" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: place
+        #|    mock: scalars
+        #|    request: { path: /scalars.Orders/Place, body: { json: { price: 9.99, status: ACTIVE } } }
+        #|    response: { json: { id: "1" } }
+        #|  - id: check
+        #|    mock: scalars
+        #|    request: { path: /scalars.Orders/Check }
+        #|    response: { json: {} }
+        #|  - id: walk
+        #|    mock: scalars
+        #|    request: { path: /scalars.Orders/Walk }
+        #|    response: { json: {} }
+        #|  - id: send
+        #|    mock: scalars
+        #|    request: { path: /scalars.Orders/Send }
+        #|    response: { json: {} }
+        #|  - id: find-items
+        #|    mock: catalog
+        #|    request: { path: /catalog.Catalog/FindItems }
+        #|    response: { json: { count: 1 } }
+      ),
+    ),
+    content=(
+      #|catalog: find-items: gRPC Stub of FindItems
+      #|scalars: place: gRPC Stub of Place
+      #|scalars: check: gRPC Stub of Check
+      #|scalars: walk: gRPC Stub of Walk
+      #|scalars: send: gRPC Stub of Send
+    ),
+  )
+}
+
+///|
+test "an input type that reaches a type of a proto2 file is served" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: remember
+        #|    mock: scalars
+        #|    request: { path: /scalars.Orders/Remember }
+        #|    response: { json: {} }
+      ),
+    ),
+    content=(
+      #|scalars: remember: gRPC Stub of Remember
+    ),
+  )
+}
+
+///|
+test "a CRUD Stub stays an HTTP Stub even when its path names a method of its Mock's set: it has no request path" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: hello-crud
+        #|    mock: greeter
+        #|    crud: { bucket: greetings, path: /helloworld.Greeter/SayHello }
+        #|data:
+        #|  - { mock: greeter, name: greetings, key: id, json: [] }
+      ),
+    ),
+    content=(
+      #|greeter: hello-crud: HTTP Stub
+    ),
+  )
+}
+
+///|
+test "a gRPC Stub gives the path of its method, and an HTTP Stub none, whatever its path" {
+  let yaml =
+    #|mocks:
+    #|  - { name: greeter, grpc: { descriptorSet: greeter.binpb } }
+    #|  - { name: plain }
+    #|stubs:
+    #|  - id: hello
+    #|    mock: greeter
+    #|    request: { path: /helloworld.Greeter/SayHello }
+    #|    response: {}
+    #|  - id: other-path
+    #|    mock: greeter
+    #|    request: { path: /hello }
+    #|    response: { status: 200 }
+    #|  - id: pattern
+    #|    mock: greeter
+    #|    request: { path: { pattern: "/helloworld.Greeter/.*" } }
+    #|    response: { status: 200 }
+    #|  - id: no-set
+    #|    mock: plain
+    #|    request: { path: /helloworld.Greeter/SayHello }
+    #|    response: { status: 200 }
+    #|  - id: hello-crud
+    #|    mock: greeter
+    #|    crud: { bucket: greetings, path: /helloworld.Greeter/SayHello }
+    #|data:
+    #|  - { mock: greeter, name: greetings, key: id, json: [] }
+    #|
+  guard @definitions.load({
+      files: [("a.yaml", @utf8.encode(yaml))],
+      body_files: [("greeter.binpb", set_bytes(greeter_set))],
+    })
+    is Ok(snapshot) else {
+    fail("the files load")
+  }
+  let lines = []
+  for mock in snapshot.mocks {
+    for stub in mock.stubs {
+      let path = match stub.grpc_path() {
+        Some(path) => path
+        None => "-"
+      }
+      lines.push("\{stub.id}: \{path}")
+    }
+  }
+  inspect(
+    lines.join("\n"),
+    content=(
+      #|hello: /helloworld.Greeter/SayHello
+      #|other-path: -
+      #|pattern: -
+      #|hello-crud: -
+      #|no-set: -
+    ),
+  )
+}
+
+///|
+test "an HTTP Stub of a Mock with a set whose exact path has the form /package.Service/Method, but names no method of the set, gets a warning at its path" {
+  inspect(
+    check_stubs(
+      (
+        #|  - id: hello
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello }
+        #|    response: {}
+        #|  - id: typo
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHelo }
+        #|    response: { status: 200 }
+        #|  - id: no-such-service
+        #|    mock: greeter
+        #|    request: { method: POST, path: /helloworld.Greeters/SayHello }
+        #|    response: { status: 200 }
+        #|  - id: rest
+        #|    mock: greeter
+        #|    request: { path: /users/1 }
+        #|    response: { status: 200 }
+        #|  - id: no-package
+        #|    mock: greeter
+        #|    request: { path: /Greeter/SayHello }
+        #|    response: { status: 200 }
+        #|  - id: version
+        #|    mock: greeter
+        #|    request: { path: /v1.2/items }
+        #|    response: { status: 200 }
+        #|  - id: three-names
+        #|    mock: greeter
+        #|    request: { path: /helloworld.Greeter/SayHello/again }
+        #|    response: { status: 200 }
+        #|  - id: pattern
+        #|    mock: greeter
+        #|    request: { path: { pattern: "/helloworld[.]Greeter/SayHelo" } }
+        #|    response: { status: 200 }
+        #|  - id: plain-typo
+        #|    mock: plain
+        #|    request: { path: /helloworld.Greeter/SayHelo }
+        #|    response: { status: 200 }
+        #|  - id: crud
+        #|    mock: greeter
+        #|    crud: { bucket: greetings, path: /helloworld.Greeter/List }
+        #|data:
+        #|  - { mock: greeter, name: greetings, key: id, json: [] }
+      ),
+    ),
+    content=(
+      #|greeter: hello: gRPC Stub of SayHello
+      #|greeter: typo: HTTP Stub
+      #|greeter: no-such-service: HTTP Stub
+      #|greeter: rest: HTTP Stub
+      #|greeter: no-package: HTTP Stub
+      #|greeter: version: HTTP Stub
+      #|greeter: three-names: HTTP Stub
+      #|greeter: pattern: HTTP Stub
+      #|greeter: crud: HTTP Stub
+      #|plain: plain-typo: HTTP Stub
+      #|a.yaml: /stubs/1/request/path: warning: the Stub "typo" is an HTTP Stub that gRPC calls never reach: its path has the form of a gRPC method, /package.Service/Method, but the Mock's Descriptor set has no method helloworld.Greeter/SayHelo
+      #|a.yaml: /stubs/2/request/path: warning: the Stub "no-such-service" is an HTTP Stub that gRPC calls never reach: its path has the form of a gRPC method, /package.Service/Method, but the Mock's Descriptor set has no method helloworld.Greeters/SayHello
+    ),
+  )
+}

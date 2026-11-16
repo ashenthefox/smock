@@ -1,0 +1,43 @@
+// Written for smock's tests: methods whose output types reach the
+// well-known types Struct and Value, at the top or through nested
+// messages, and a type of a proto2 file; and a method whose input type
+// has fields of the well-known types Struct, Value and ListValue,
+// singular, repeated and as a map's values. gRPC Stubs serve all of them
+// now; the directory's name is from when they did not.
+syntax = "proto3";
+
+package unserved;
+
+import "google/protobuf/struct.proto";
+import "old.proto";
+
+service Clock {
+  rpc Now (TimeRequest) returns (TimeReply);
+  rpc Schedule (TimeRequest) returns (ScheduleReply);
+  rpc Stamp (TimeRequest) returns (google.protobuf.Struct);
+  rpc Describe (Described) returns (TimeRequest);
+}
+
+message TimeRequest {
+  string zone = 1;
+}
+
+message TimeReply {
+  google.protobuf.Value at = 1;
+}
+
+message ScheduleReply {
+  message Slot {
+    google.protobuf.Struct start = 1;
+    old.Note note = 2;
+    ScheduleReply next = 3;
+  }
+  repeated Slot slots = 1;
+  map<string, Slot> by_name = 2;
+}
+
+message Described {
+  google.protobuf.Struct labels = 1;
+  repeated google.protobuf.Value values = 2;
+  map<string, google.protobuf.ListValue> lists = 3;
+}

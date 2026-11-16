@@ -192,11 +192,15 @@ struct H2Client {
 }
 
 ///|
-/// An HTTP/2 client over `wire`, which has sent nothing yet.
-fn H2Client::new(wire : Wire) -> H2Client {
+/// An HTTP/2 client over `wire`, which has sent nothing yet, with the
+/// SETTINGS `settings`, by default moonhttp's.
+fn H2Client::new(
+  wire : Wire,
+  settings~ : @http2.Settings = @http2.settings,
+) -> H2Client {
   {
     wire,
-    conn: @http2.Conn::new(Client),
+    conn: @http2.Conn::new(Client, settings~),
     buf: FixedArray::make(16 * 1024, b'\x00'),
     events: [],
   }
@@ -204,12 +208,16 @@ fn H2Client::new(wire : Wire) -> H2Client {
 
 ///|
 /// Opens an HTTP/2 connection to smock's plain port and sends the preface
-/// and the client's SETTINGS. With `preface_in` greater than 0, the preface
-/// goes out in pieces of that many octets, with a pause between them, so
-/// that smock reads it in parts.
-async fn Smock::h2c(self : Smock, preface_in~ : Int32 = 0) -> H2Client {
+/// and the client's SETTINGS, `settings`, by default moonhttp's. With
+/// `preface_in` greater than 0, the preface goes out in pieces of that many
+/// octets, with a pause between them, so that smock reads it in parts.
+async fn Smock::h2c(
+  self : Smock,
+  preface_in~ : Int32 = 0,
+  settings~ : @http2.Settings = @http2.settings,
+) -> H2Client {
   let tcp = @socket.Tcp::connect(@socket.Addr::parse("127.0.0.1:\{self.port}"))
-  let client = H2Client::new(Cleartext(tcp))
+  let client = H2Client::new(Cleartext(tcp), settings~)
   if preface_in > 0 {
     let opening = client.conn.take()
     let preface = @http2.preface.length()

@@ -34,7 +34,8 @@ pre-merge run compares with them.
 - [ ] **If the branch raises moonhttp**, it has passed the gate of
   [Upgrading moonhttp](releasing.md#upgrading-moonhttp): h2spec against
   both traffic ports, the e2e tests, and the interop check by hand with
-  curl, Go, the JVM and a browser, with the results in the merge record.
+  curl, Go, the JVM and a browser, and with gRPC calls from grpc-java and
+  grpc-python, with the results in the merge record.
   The runs below follow, as for any branch. Any change that raises the
   moonhttp version the build resolves is such an upgrade, and CI fails on
   it until `moon.mod` names the new version.

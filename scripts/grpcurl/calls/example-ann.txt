@@ -1,0 +1,13 @@
+$ grpcurl -plaintext -authority greeter.svc -H 'x-tenant: acme' -format-error -d '{"name":"Ann"}' localhost:8080 helloworld.Greeter/SayHello
+{
+  "code": 5,
+  "message": "no user called Ann",
+  "details": [
+    {
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      "domain": "greeter.svc",
+      "reason": "USER_UNKNOWN"
+    }
+  ]
+}
+exit status 69

@@ -133,6 +133,11 @@ priv struct Reader {
   /// The Data buckets Stubs may read and write, by the name of their Mock:
   /// those any file of the set declares.
   mock_buckets : Map[String, MockBuckets]
+  /// The Descriptor sets that the Mocks of any file of the set name.
+  sets : DeclaredSets
+  /// The most octets each block of a static gRPC reply's metadata may
+  /// take, `--header-size-limit`.
+  header_size_limit : Int32
 }
 
 ///|
@@ -141,6 +146,8 @@ fn Reader::new(
   buckets~ : Map[String, Map[String, BucketKey]],
   body_files~ : Map[String, Bytes],
   env~ : @template.Env,
+  sets~ : DeclaredSets,
+  header_size_limit~ : Int32,
 ) -> Reader {
   let mock_buckets = Map([])
   for mock, keys in buckets {
@@ -152,6 +159,8 @@ fn Reader::new(
     body_files,
     env,
     mock_buckets,
+    sets,
+    header_size_limit,
     mocks: [],
     mock_names: Map([]),
     hosts: Map([]),
@@ -178,6 +187,13 @@ priv struct MockDecl {
   no_match_headers : Array[(String, String)]
   /// Whether the Journal records the requests the Mock answers.
   journal : Bool
+  /// The Descriptor set that `grpc.descriptorSet` names, decoded, if any.
+  descriptor_set : @protobuf.DescriptorSet?
+  /// Whether the Mock's built-in health service answers: `grpc.health`.
+  health : Bool
+  /// The files that the Mock's built-in reflection service answers with,
+  /// when `grpc.reflection` turns it on (`GrpcFields`).
+  reflection : ReadOnlyArray[Bytes]?
 }
 
 ///|
@@ -277,6 +293,8 @@ fn Reader::read_file(
     body_files: Some(self.body_files),
     env: self.env,
     buckets: self.mock_buckets,
+    sets: self.sets,
+    header_size_limit: self.header_size_limit,
   }
   let top = match parsed {
     Ok(top) => top
@@ -341,6 +359,11 @@ priv struct File {
   /// The Data buckets a Stub may read and write, by the name of the Mock
   /// that declares them. A Mock that declares none is not listed.
   buckets : Map[String, MockBuckets]
+  /// The Descriptor sets that the Mocks name, which tell a gRPC Stub.
+  sets : DeclaredSets
+  /// The most octets each block of a static gRPC reply's metadata may
+  /// take, `--header-size-limit`.
+  header_size_limit : Int32
 }
 
 ///|
@@ -385,6 +408,7 @@ fn File::read_mock(self : File, pointer : String, json : Json) -> MockDecl? {
   let mut no_match_status = 404
   let mut no_match_headers = []
   let mut journal = true
+  let mut grpc = no_grpc
   for key, value in mock {
     let field = child_pointer(pointer, key)
     match key {
@@ -407,6 +431,7 @@ fn File::read_mock(self : File, pointer : String, json : Json) -> MockDecl? {
           False => journal = false
           _ => self.error(field, "must be true or false")
         }
+      "grpc" => grpc = self.read_grpc(field, value)
       _ => self.unknown_field(field)
     }
   }
@@ -418,7 +443,125 @@ fn File::read_mock(self : File, pointer : String, json : Json) -> MockDecl? {
     no_match_status,
     no_match_headers,
     journal,
+    descriptor_set: grpc.descriptor_set,
+    health: grpc.health,
+    reflection: grpc.reflection,
   })
+}
+
+///|
+/// What a Mock's `grpc` gives.
+priv struct GrpcFields {
+  /// The Descriptor set that `descriptorSet` names, decoded, or `None`
+  /// when it names none, or one that is not there or does not decode.
+  descriptor_set : @protobuf.DescriptorSet?
+  /// `health`: whether the built-in health service answers.
+  health : Bool
+  /// When `reflection` turns the built-in reflection service on, the files
+  /// it answers with: each file of the set, in the order of the set, as
+  /// the set encodes it without its SourceCodeInfo, none without a set.
+  /// `None` when reflection is off, so that a Mock without it keeps no
+  /// more than its set's model.
+  reflection : ReadOnlyArray[Bytes]?
+}
+
+///|
+/// What a Mock without `grpc` has: no Descriptor set and no built-in
+/// service.
+let no_grpc : GrpcFields = {
+  descriptor_set: None,
+  health: false,
+  reflection: None,
+}
+
+///|
+/// Reads a Mock's `grpc`, a closed object: the Descriptor set its
+/// `descriptorSet` names, decoded, or none, with the problem reported, and
+/// whether its `health` and `reflection` turn the built-in services on.
+/// Each may be left out, so a Mock may turn a service on without a set.
+/// With reflection on, the Mock also keeps the set's files as reflection
+/// sends them.
+fn File::read_grpc(self : File, pointer : String, json : Json) -> GrpcFields {
+  guard json is Object(grpc) else {
+    self.error(pointer, "must be an object")
+    return no_grpc
+  }
+  let mut read = None
+  let mut health = false
+  let mut reflection = false
+  for key, value in grpc {
+    let field = child_pointer(pointer, key)
+    match key {
+      "descriptorSet" => read = self.read_descriptor_set(field, value)
+      "health" => health = self.flag(field, value)
+      "reflection" => reflection = self.flag(field, value)
+      _ => self.unknown_field(field)
+    }
+  }
+  let files = if !reflection {
+    None
+  } else if read is Some((_, bytes)) {
+    // The set decoded, so its files split.
+    Some(
+      @protobuf.files_without_source_info(bytes) catch {
+        _ => abort("a Descriptor set that decodes splits into its files")
+      },
+    )
+  } else {
+    Some(ReadOnlyArray::from_array([]))
+  }
+  { descriptor_set: read.map(read => read.0), health, reflection: files, }
+}
+
+///|
+/// Reads `json`, the value at `pointer`, as a boolean, false by default:
+/// any other value is a problem, and false.
+fn File::flag(self : File, pointer : String, json : Json) -> Bool {
+  match json {
+    True => true
+    False => false
+    _ => {
+      self.error(pointer, "must be true or false")
+      false
+    }
+  }
+}
+
+///|
+/// Reads the Descriptor set that `json`, the value at `pointer`, names: a
+/// body file, with the path rules of `bodyFile`, that holds a
+/// self-contained FileDescriptorSet in protobuf's binary encoding. It has
+/// none, and each problem is reported, when the file is missing, does not
+/// decode, or fails the checks of `@protobuf.read_descriptor_set`. The set
+/// comes with the octets it was read from.
+fn File::read_descriptor_set(
+  self : File,
+  pointer : String,
+  json : Json,
+) -> (@protobuf.DescriptorSet, Bytes)? {
+  guard self.string(pointer, json) is Some(path) else { return None }
+  guard self.body_file(pointer, path) is Some(bytes) else { return None }
+  // `declared_sets` has read it already.
+  let decoded = match self.sets.by_path.get(path) {
+    Some(decoded) => decoded
+    None => decode_set(bytes)
+  }
+  match decoded {
+    Decoded(set) => Some((set, bytes))
+    NotASet(NotDecoded(err)) => {
+      self.error(
+        pointer,
+        "\{path.escape()}: not a Descriptor set, a FileDescriptorSet in protobuf's binary encoding: \{err}",
+      )
+      None
+    }
+    NotASet(Invalid(problems)) => {
+      for problem in problems {
+        self.error(pointer, "\{path.escape()}: \{problem}")
+      }
+      None
+    }
+  }
 }
 
 ///|
@@ -538,6 +681,8 @@ fn File::read_stub(self : File, pointer : String, json : Json) -> Stub? {
     serves_ranges: false,
     reads_variables: false,
     reads_data: false,
+    encoded: None,
+    grpc: None,
   }
   let mut weighted = None
   let mut variables = no_variable_writes
@@ -552,6 +697,9 @@ fn File::read_stub(self : File, pointer : String, json : Json) -> Stub? {
     _ => no_mock_buckets
   }
   let buckets = mock_buckets.templates
+  // Whether it is a gRPC Stub, wherever `mock` and `request` are among its
+  // members, which decides how its responses are read.
+  let grpc = self.grpc_method_of(stub)
   for key, value in stub {
     let field = child_pointer(pointer, key)
     match key {
@@ -559,9 +707,23 @@ fn File::read_stub(self : File, pointer : String, json : Json) -> Stub? {
       "mock" => mock = self.name(field, value).unwrap_or("")
       "request" => request = self.read_conditions(field, value)
       "response" =>
-        response = self.read_response(pointer, field, value, buckets~)
+        response = self.read_response(
+          pointer,
+          field,
+          value,
+          buckets~,
+          descriptor_set=grpc.map(named => named.set),
+        )
       "responses" =>
-        weighted = Some(self.read_responses(pointer, field, value, buckets~))
+        weighted = Some(
+          self.read_responses(
+            pointer,
+            field,
+            value,
+            buckets~,
+            descriptor_set=grpc.map(named => named.set),
+          ),
+        )
       "variables" =>
         variables = self.read_variables(pointer, field, value, buckets~)
       "dataWrites" =>
@@ -580,6 +742,62 @@ fn File::read_stub(self : File, pointer : String, json : Json) -> Stub? {
   }
   self.require(stub, pointer, "id")
   self.require(stub, pointer, "mock")
+  let served = match grpc {
+    Some(named) => self.check_grpc_stub(pointer, stub, named)
+    None => { input: None, output: None, }
+  }
+  if grpc is Some(_) {
+    // Its exact conditions on binary metadata are matched as a call's
+    // values reach the Stubs, without their padding.
+    request = unpadded_conditions(request)
+  }
+  if grpc is Some(named) && served.input is Some(input) {
+    // Its `json` condition is checked against its input type, and matched
+    // as smock prints a call's message.
+    request = self.grpc_conditions(
+      child_pointer(pointer, "request"),
+      stub,
+      request,
+      named.set,
+      input,
+    )
+  }
+  if grpc is Some(named) && served.output is Some(output) {
+    // Its static replies, encoded with its output type, are kept. An
+    // error has no reply message.
+    if stub.get("response") is Some(json) && !response.is_grpc_error() {
+      response = {
+        ..response,
+        encoded: self.encode_reply(
+          child_pointer(pointer, "response"),
+          json,
+          named.set,
+          output,
+        ),
+      }
+    }
+    if weighted is Some((responses, _)) &&
+      stub.get("responses") is Some(Array(items)) {
+      let at = child_pointer(pointer, "responses")
+      for i, item in items {
+        if i < responses.length() && !responses[i].response.is_grpc_error() {
+          let weighted = responses[i]
+          responses[i] = {
+            ..weighted,
+            response: {
+              ..weighted.response,
+              encoded: self.encode_reply(
+                child_pointer(at, i.to_string()),
+                item,
+                named.set,
+                output,
+              ),
+            },
+          }
+        }
+      }
+    }
+  }
   if stub.contains("crud") {
     // A CRUD Stub has `crud` in place of conditions, responses, a Scenario
     // clause and writes of its own.
@@ -626,6 +844,7 @@ fn File::read_stub(self : File, pointer : String, json : Json) -> Stub? {
       total_weight,
       variables,
       data_writes,
+      grpc_method: grpc.map(grpc => grpc.rpc),
     }),
     fault,
   })
@@ -1490,10 +1709,7 @@ fn File::read_body_file(self : File, pointer : String, json : Json) -> Bytes {
 /// the body-file subdirectory and stays inside it: its names are not empty,
 /// and none starts with `.`, as smock skips such files.
 fn File::body_file(self : File, pointer : String, path : String) -> Bytes? {
-  let inside = path
-    .split("/")
-    .all(name => !name.is_empty() && !name.has_prefix("."))
-  if !inside {
+  if !is_inside(path) {
     self.error(
       pointer, "must be a path inside the body-file subdirectory, such as users/1.json, with no name starting with .",
     )
@@ -1537,11 +1753,20 @@ let no_match_names_set_by_smock : Array[String] = [
 /// Returns the fields as (name, value, JSON Pointer of the value). Header
 /// names are case-insensitive, so no two may differ only in case, a rule
 /// the JSON Schema cannot express, and none may be one of `set_by_smock`.
+///
+/// With `metadata`, they are the metadata of a gRPC reply, its initial or
+/// its trailing metadata, under gRPC's rules instead of HTTP's
+/// (`File::check_metadata_name`, `File::metadata_value`): the names are
+/// returned in lower case, as HTTP/2 sends them, and a `-bin` value as
+/// written without its base64 padding. With `templated`, the values are
+/// templates, whose rendered values the engine checks.
 fn File::read_headers(
   self : File,
   pointer : String,
   json : Json,
   set_by_smock~ : Array[String] = response_names_set_by_smock,
+  metadata~ : Bool = false,
+  templated~ : Bool = false,
 ) -> Array[(String, String, String)] {
   let out = []
   guard json is Object(headers) else {
@@ -1553,7 +1778,18 @@ fn File::read_headers(
   for name, value in headers {
     let field = child_pointer(pointer, name)
     let lower = name.to_lower()
-    if !@http1.is_token(name) {
+    if metadata {
+      if self.check_metadata_name(field, lower, set_by_smock) {
+        if names.get(lower) is Some(earlier) {
+          self.error(
+            field,
+            "the header name \{earlier.escape()} is already given: header names are case-insensitive",
+          )
+        } else {
+          names[lower] = name
+        }
+      }
+    } else if !@http1.is_token(name) {
       self.error(field, "is not a valid header name")
     } else if set_by_smock.contains(lower) {
       self.error(field, "is set by smock and cannot be given")
@@ -1566,8 +1802,12 @@ fn File::read_headers(
       names[lower] = name
     }
     let push_field = (text : String, at : String) => {
-      if @http1.is_field_value(text) {
-        out.push((name, text, at))
+      if metadata && !templated {
+        if self.metadata_value(at, lower, text) is Some(sent) {
+          out.push((lower, sent, at))
+        }
+      } else if @http1.is_field_value(text) {
+        out.push((if metadata { lower } else { name }, text, at))
       } else {
         self.error(at, "must not contain control characters other than tab")
       }
@@ -1576,7 +1816,7 @@ fn File::read_headers(
       String(text) => push_field(text, field)
       // smock reads Content-Type, to escape a templated body, so it takes
       // one string, where it can be given.
-      _ if lower == "content-type" && !set_by_smock.contains(lower) =>
+      _ if lower == "content-type" && !metadata && !set_by_smock.contains(lower) =>
         self.error(field, "must be a string")
       Array([]) => self.error(field, "must not be an empty array")
       Array(items) =>
@@ -1591,6 +1831,65 @@ fn File::read_headers(
     }
   }
   out
+}
+
+///|
+/// Checks `name`, in lower case, the name of a field of a gRPC reply's
+/// metadata at `pointer`, and reports why it cannot be one: it is outside
+/// gRPC's grammar, smock sets it (`set_by_smock`), gRPC reserves it, or
+/// HTTP/2 forbids it, since it is specific to an HTTP/1.1 connection.
+/// Returns whether it can be one.
+fn File::check_metadata_name(
+  self : File,
+  pointer : String,
+  name : String,
+  set_by_smock : Array[String],
+) -> Bool {
+  let problem = if !@grpc.is_metadata_name(name) {
+    "is not a gRPC metadata name: in lower case, it may hold only 0-9, a-z, _, - and ."
+  } else if set_by_smock.contains(name) {
+    "is set by smock and cannot be given"
+  } else if @grpc.is_reserved_name(name) {
+    "is reserved by gRPC, which keeps content-type, te and every name starting with grpc- for itself"
+  } else if name is ("keep-alive" | "proxy-connection" | "upgrade") {
+    "is specific to an HTTP/1.1 connection, which HTTP/2 forbids"
+  } else {
+    return true
+  }
+  self.error(pointer, problem)
+  false
+}
+
+///|
+/// The value `text` of the field `name`, in lower case, of a gRPC reply's
+/// metadata, as written at `pointer`, as it is sent: as it is, when it
+/// holds only characters from 0x20 to 0x7E, or, for a `-bin` field,
+/// without its padding, when it is standard base64, padded or not. Reports
+/// why it cannot be one, and returns `None`, otherwise.
+fn File::metadata_value(
+  self : File,
+  pointer : String,
+  name : String,
+  text : String,
+) -> String? {
+  if @grpc.is_binary_name(name) {
+    match @grpc.unpadded_base64(text) {
+      Some(value) => Some(value.to_owned())
+      None => {
+        self.error(
+          pointer, "must be standard base64, padded or not: a field whose name ends with -bin is binary",
+        )
+        None
+      }
+    }
+  } else if @grpc.is_ascii_value(text) {
+    Some(text)
+  } else {
+    self.error(
+      pointer, "must hold only characters from 0x20 to 0x7E: other values go in a field whose name ends with -bin, in base64",
+    )
+    None
+  }
 }
 
 ///|

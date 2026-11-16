@@ -29,6 +29,13 @@ pub struct Engine {
   /// The environment variables templates may read, with the values read
   /// at startup: every reload and Ephemeral Stub is read with them.
   priv env : @template.Env
+  /// `--header-size-limit`, the most octets each block of a static gRPC
+  /// reply's metadata may take: every reload and Ephemeral Stub is read
+  /// with it.
+  priv header_size_limit : Int32
+  /// `--body-limit`, the most octets the message of a sample request that
+  /// renders a gRPC Stub may take as JSON, as a call's decoded message may.
+  priv body_limit : Int32
 }
 
 ///|
@@ -43,6 +50,22 @@ pub(all) struct Request {
   /// The header fields in the order they were sent.
   headers : Array[(String, String)]
   body : Bytes
+}
+
+///|
+/// The marker of a request that is a gRPC call, which `handle` takes beside
+/// the request. The request is the call as the engine sees it: the method
+/// `POST`, the target its `:path`, the metadata as headers, and the message
+/// decoded into JSON as the body.
+#derive(Debug)
+pub(all) struct GrpcCall {
+  /// The path that names the method called, such as
+  /// `/helloworld.Greeter/SayHello`: the exact path of the gRPC Stubs on
+  /// the method.
+  path : String
+  /// The count of octets the call's DATA frames brought: the size of the
+  /// body as received, which the Journal entry records.
+  octets : Int32
 }
 
 ///|
@@ -67,8 +90,9 @@ pub(all) struct Outcome {
   scenario : ScenarioMove?
   /// Why the Stub that matched could not serve its own content, when it
   /// could not: the response is then the 500 `template failed` or
-  /// `data write failed`. There is none for a request answered as planned,
-  /// so that it pays nothing for it.
+  /// `data write failed`, or for a gRPC call INTERNAL with that message.
+  /// There is none for a request answered as planned, so that it pays
+  /// nothing for it.
   content_error : ContentError?
 }
 
@@ -92,10 +116,12 @@ pub(all) struct ContentError {
 #derive(Debug)
 pub(all) enum ContentFailure {
   /// A template could not be rendered, a value of the Stub's `variables` or
-  /// `dataWrites` included: the response is the 500 `template failed`.
+  /// `dataWrites` included: the response is the 500 `template failed`, or
+  /// for a gRPC call INTERNAL `template failed`.
   Template(TemplateError)
   /// A write of the Stub's `dataWrites` could not be applied: the response
-  /// is the 500 `data write failed`.
+  /// is the 500 `data write failed`, or for a gRPC call INTERNAL
+  /// `data write failed`.
   Data(DataError)
 }
 
@@ -180,6 +206,60 @@ pub(all) struct ResponsePlan {
   delay_ms : Int32
   /// A connection Fault to inject instead of a normal response.
   fault : @definitions.ConnectionKind?
+  /// The gRPC part of the plan of a gRPC call: how its answer ends, a gRPC
+  /// Stub's reply, the UNIMPLEMENTED of a call that no Stub matched, or
+  /// smock's own failure when the Stub that matched could not serve its
+  /// content (`grpc_failure`). The server sends the reply's message only
+  /// when its status is `OK`. `None` for an HTTP request: every plan of a
+  /// gRPC call has one.
+  grpc : GrpcPart?
+}
+
+///|
+/// The gRPC part of a plan: what a gRPC call's reply carries beside its
+/// message, which is the plan's body as JSON, and the message encoded when
+/// it could be.
+#derive(Debug)
+pub(all) struct GrpcPart {
+  /// The gRPC status the reply ends with.
+  status : @grpc.Status
+  /// The text of its `grpc-message`, if it has one.
+  message : String?
+  /// Its trailing metadata, after the status and the message, such as the
+  /// `smock-near-miss` field of a call that no Stub matched.
+  trailers : ReadOnlyArray[(String, String)]
+  /// The reply message, encoded when the files were loaded, for a reply
+  /// without templates; `None` for one that the server encodes from the
+  /// plan's body, once rendered, and for an answer without a message.
+  encoded : @definitions.EncodedMessage?
+  /// The error details of an error's reply, each an Any in ProtoJSON, as
+  /// written or rendered, which the server sends in google.rpc.Status, in
+  /// `grpc-status-details-bin`. Empty without details.
+  details : ReadOnlyArray[Json]
+  /// google.rpc.Status of details as written, encoded when the files were
+  /// loaded; `None` for rendered ones, which the server encodes, and
+  /// without details.
+  encoded_status : @definitions.EncodedStatus?
+  /// Whether the answer is smock's own rather than a Stub's reply: the
+  /// UNIMPLEMENTED of a call that no Stub matched, or smock's own failure
+  /// when the Stub that matched could not serve its content. It carries
+  /// nothing the Stub wrote, so it is sent as it is, never replaced by the
+  /// INTERNAL of a reply too large to send.
+  own : Bool
+}
+
+///|
+/// The gRPC part that a gRPC Stub's reply starts from: the status `OK`,
+/// with no message, no trailing metadata, no encoded message and no
+/// details. Each reply gets its own (`plan_response`).
+let grpc_ok : GrpcPart = {
+  status: Ok,
+  message: None,
+  trailers: [],
+  encoded: None,
+  details: [],
+  encoded_status: None,
+  own: false,
 }
 
 ///|
@@ -209,12 +289,23 @@ pub(all) enum Body {
 ///
 /// `state_max_bytes` bounds the per-Session state of the whole process, as
 /// it counts it: by default, `default_state_max_bytes` (64 MiB).
+///
+/// `header_size_limit` is `--header-size-limit`, the limit `snapshot` was
+/// loaded with: by default, 16 KiB. Each block of a static gRPC reply's
+/// metadata of a reload or an Ephemeral Stub may take at most that many
+/// octets.
+///
+/// `body_limit` is `--body-limit`: by default, `default_body_limit`
+/// (10 MiB). A sample request that renders a gRPC Stub may give a message
+/// whose JSON takes at most that many octets once decoded, as a call's may.
 pub fn Engine::Engine(
   snapshot : @definitions.Snapshot,
   match_index~ : Bool = true,
   journal~ : JournalSettings = JournalSettings(),
   env~ : @template.Env = @template.no_env,
   state_max_bytes~ : Int32 = default_state_max_bytes,
+  header_size_limit~ : Int32 = @definitions.default_header_size_limit,
+  body_limit~ : Int32 = default_body_limit,
 ) -> Engine {
   let state = StateBound::new(state_max_bytes)
   {
@@ -228,8 +319,15 @@ pub fn Engine::Engine(
     state,
     journal: Journal::new(journal),
     env,
+    header_size_limit,
+    body_limit,
   }
 }
+
+///|
+/// The default of `--body-limit`, 10 MiB, which an engine takes as its
+/// `body_limit` unless it is given another.
+pub let default_body_limit : Int32 = 10 * 1024 * 1024
 
 ///|
 /// The engine's side of the Admin API status: what it serves.
@@ -297,6 +395,76 @@ pub fn Engine::mock_for_host(self : Engine, host : String) -> String? {
 }
 
 ///|
+/// The Mock that answers a gRPC call to `request`, from the snapshot
+/// served, chosen as `handle` chooses it: the Mock whose Hosts include the
+/// request's Host, given by `authority` when given, else the Default Mock.
+/// `None` when neither answers. Its Descriptor set, if it has one, is its
+/// `descriptor_set`. Unlike `mock_for_host`, it answers with the Default
+/// Mock, since a call that it answers is served.
+pub fn Engine::mock_for_call(
+  self : Engine,
+  request : Request,
+  authority? : String,
+) -> @definitions.Mock? {
+  let found = match host_of(request, authority) {
+    Some(host) => self.snapshot.mock_for_host(host)
+    None => None
+  }
+  match found {
+    Some(_) => found
+    None => self.snapshot.default_mock()
+  }
+}
+
+///|
+/// Whether a gRPC call to `path`, the `:path` it sends, of the Mock `mock`
+/// in `session` goes to the Stubs, as `handle` matches it: whether the
+/// Mock has a gRPC Stub on the path in its Definition files, or the
+/// Session an Ephemeral gRPC Stub of the Mock on it that answers calls.
+/// Whether any of them matches the call is not asked. A Mock's built-in
+/// services answer only the calls that do not go to the Stubs.
+pub fn Engine::has_grpc_stub(
+  self : Engine,
+  mock : @definitions.Mock,
+  path : String,
+  session~ : String?,
+) -> Bool {
+  if mock.grpc_candidates(path).length() > 0 {
+    return true
+  }
+  guard self.ephemeral.of(mock.name, session) is Some(list) else {
+    return false
+  }
+  for e in list {
+    if e.answers is GrpcCalls && e.stub.grpc_path() is Some(on) && on == path {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// The value of smock's own `Smock-Mock` field on an answer to the gRPC
+/// call `request` that no Stub gives, such as a built-in service's: the
+/// Mock's name and `via=default` when the Default Mock answers the call,
+/// as `handle` adds it to every answer of the Default Mock, or `None` when
+/// a Mock's Hosts include the call's Host, given by `authority` when given.
+pub fn Engine::default_mock_field(
+  self : Engine,
+  request : Request,
+  authority? : String,
+) -> String? {
+  if host_of(request, authority) is Some(host) &&
+    self.snapshot.mock_for_host(host) is Some(_) {
+    return None
+  }
+  match self.snapshot.default_mock() {
+    Some(mock) => Some("\{header_safe(mock.name)}; via=default")
+    None => None
+  }
+}
+
+///|
 /// What a reload did.
 #derive(Debug)
 pub(all) struct ReloadResult {
@@ -359,21 +527,24 @@ pub fn ReloadOutcome::name(self : ReloadOutcome) -> String {
 /// `read_problems`, at the time `at` (milliseconds since the Unix epoch).
 /// `digest` is the set's digest when the caller has computed it already,
 /// as `@definitions.load` takes it. Templates read the environment
-/// variables the engine was created with. Every file is validated and a
-/// whole new snapshot is built:
+/// variables the engine was created with, and static gRPC replies are held
+/// to its header size limit. Every file is validated and a whole new
+/// snapshot is built:
 ///
 /// - When it is valid and its digest differs from the served one, it
 ///   replaces the served snapshot at once, and each Stub with a seed gets a
 ///   new generator, created from its seed. Plans the engine returned before
 ///   stay as they were: they hold their own bytes. Ephemeral Stubs stay,
 ///   generators included, except those of a Mock the new set does not
-///   declare, which are dropped. Then each Scenario state stays while its
-///   name is one of the known states of its Mock, Session and Scenario;
-///   any other goes back to `Started`, and the states of a Mock that is
-///   gone are dropped. Variables and the copies of Data buckets stay,
-///   except those of a Mock that is gone, which are dropped. So are the
-///   copies of a bucket that the new set no longer declares, or whose
-///   initial value or `key` it changed (`bucket_changed`).
+///   declare, which are dropped. They are not read again, but an Ephemeral
+///   gRPC Stub answers only while the Mock's new set has its method as a
+///   unary method. Then each Scenario state stays while its name is one of
+///   the known states of its Mock, Session and Scenario; any other goes
+///   back to `Started`, and the states of a Mock that is gone are dropped.
+///   Variables and the copies of Data buckets stay, except those of a Mock
+///   that is gone, which are dropped. So are the copies of a bucket that
+///   the new set no longer declares, or whose initial value or `key` it
+///   changed (`bucket_changed`).
 /// - When it is valid with the digest served, nothing is swapped.
 /// - When it is invalid, the served snapshot stays.
 ///
@@ -390,7 +561,13 @@ pub fn Engine::reload(
   let mut scenario_states_reset = 0
   let mut data_buckets_reset = 0
   let (result, errors) : (ReloadOutcome, Array[@definitions.Diagnostic]) = match
-    @definitions.load(set, read_problems~, env=self.env, digest?) {
+    @definitions.load(
+      set,
+      read_problems~,
+      env=self.env,
+      header_size_limit=self.header_size_limit,
+      digest?,
+    ) {
     Ok(snapshot) if snapshot.digest == old_digest => (Unchanged, [])
     Ok(snapshot) => {
       self.snapshot = snapshot
@@ -400,6 +577,9 @@ pub fn Engine::reload(
         snapshot.mocks.iter().map(mock => (mock.name, mock)),
       )
       self.ephemeral.remove_where((mock, _) => !mocks.contains(mock)) |> ignore
+      // An Ephemeral gRPC Stub that stays answers while the new set has its
+      // method as a unary method.
+      self.recheck_ephemeral(mocks)
       // Only then are Scenario states checked, since the known states
       // include those of the Ephemeral Stubs that stay.
       scenario_states_reset = self.prune_scenario_states(mocks)
@@ -439,6 +619,17 @@ pub fn Engine::reload(
 ///   way, so that no `host` field is added to the request: the Journal
 ///   lists only the fields the client sent, and header conditions see only
 ///   a `host` field it sent. HTTP/1.1 never gives it.
+/// - `grpc`, when given, marks the request as a gRPC call, made with the
+///   method it names. A gRPC call is matched only against the Mock's gRPC
+///   Stubs on that method: the Session's Ephemeral gRPC Stubs, in their
+///   order, then those of the Definition files, in matching order. Its Near
+///   miss is chosen among every gRPC Stub of the Mock, the Session's
+///   Ephemeral gRPC Stubs first. An Ephemeral gRPC Stub whose method a
+///   reload took away answers no call. A call that none matches is planned
+///   UNIMPLEMENTED, with a fixed message that says why and its Near miss in
+///   a trailer, never with the Mock's `noMatch`, and so is a call whose
+///   Host reaches no Mock. Its Journal entry records the call's octets as
+///   the body's size. HTTP never gives it.
 /// - `session` is the request's Session key, or `None` without a Session.
 /// - `now` is the time the request was received, in milliseconds since the
 ///   Unix epoch.
@@ -448,6 +639,7 @@ pub fn Engine::handle(
   self : Engine,
   request : Request,
   authority? : String,
+  grpc? : GrpcCall,
   session~ : String?,
   now~ : Int64,
   rand~ : @prng.Generator,
@@ -474,13 +666,17 @@ pub fn Engine::handle(
   }
   let incoming = Incoming::new(request)
   // The Ephemeral Stubs of the Mock and the Session come first, in their
-  // own order, then the Stubs from Definition files. The match index only
-  // narrows the search among the latter. The Near miss of a request that
-  // matched nothing is chosen among every candidate, in that order.
+  // own order, then the Stubs from Definition files: their HTTP Stubs, as
+  // the files load them, since a request never matches a gRPC Stub. The
+  // match index only narrows the search among the latter. Each Ephemeral
+  // Stub answers HTTP requests or gRPC calls, or since a reload nothing
+  // (`Answers`), and is tried for those only. The Near miss of a request
+  // that matched nothing is chosen among every candidate, in that order.
   let ephemeral = match mock {
     Some(mock) => self.ephemeral.of(mock.name, session)
     None => None
   }
+  let answers : Answers = if grpc is None { HttpRequests } else { GrpcCalls }
   // A Stub with a Scenario clause matches only in the state it requires,
   // checked once its request conditions hold. The Session's states for the
   // Mock are looked up at most once, and only when a Stub has a clause.
@@ -490,9 +686,12 @@ pub fn Engine::handle(
   if ephemeral is Some(list) {
     for i in 0..<list.length() {
       let e = list[i]
+      if e.answers != answers {
+        continue
+      }
       match e.stub.serves {
         Ordinary(ordinary) =>
-          if incoming.meets(ordinary.request) {
+          if on_method(ordinary, grpc) && incoming.meets(ordinary.request) {
             if ordinary.scenario is Some(_) && !states_known {
               states = self.scenarios.of(e.mock, session)
               states_known = true
@@ -526,7 +725,11 @@ pub fn Engine::handle(
       states_known = true
     }
     let current = states
-    let found = if self.match_index {
+    let found = if grpc is Some(call) {
+      // A gRPC call is matched against the gRPC Stubs on its method alone,
+      // which the snapshot lists by path, with or without the match index.
+      incoming.first_match(mock.grpc_candidates(call.path), current)
+    } else if self.match_index {
       if gated {
         mock.first_candidate(request.meth, incoming.path, stub => {
           incoming.matches(stub, current)
@@ -537,15 +740,7 @@ pub fn Engine::handle(
         })
       }
     } else {
-      let stubs = mock.stubs
-      let mut found = None
-      for i in 0..<stubs.length() {
-        if incoming.matches(stubs[i], current) {
-          found = Some(stubs[i])
-          break
-        }
-      }
-      found
+      incoming.first_match(mock.http_stubs, current)
     }
     if found is Some(stub) {
       matched = Some({
@@ -618,7 +813,8 @@ pub fn Engine::handle(
           //    A value that fails to render, a data write that cannot be
           //    applied, or writes that do not fit, write nothing, and no
           //    response is picked: the request gets the template failure,
-          //    the data write failure, or 507.
+          //    the data write failure, or 507, and a gRPC call each in
+          //    gRPC's form, INTERNAL or RESOURCE_EXHAUSTED.
           let mut context : @template.Context? = None
           let mut failed : ResponsePlan? = None
           if ordinary.writes_variables() || ordinary.writes_data() {
@@ -641,14 +837,20 @@ pub fn Engine::handle(
             catch {
               ValueFailed(error) => {
                 content_error = Some(ContentError::new(stub, Template(error)))
-                failed = Some(template_failed(stub.id, error))
+                failed = Some(
+                  template_failed(stub.id, error, grpc=grpc is Some(_)),
+                )
               }
               ApplyFailed(error) => {
                 content_error = Some(ContentError::new(stub, Data(error)))
-                failed = Some(data_write_failed(stub.id, error))
+                failed = Some(
+                  data_write_failed(stub.id, error, grpc=grpc is Some(_)),
+                )
               }
               StateLimitReached(message) =>
-                failed = Some(state_limit_reached(stub.id, message))
+                failed = Some(
+                  state_limit_reached(stub.id, message, grpc=grpc is Some(_)),
+                )
             } noraise {
               written => {
                 context = Some(written.context)
@@ -668,7 +870,8 @@ pub fn Engine::handle(
               //    rendered from its templates. One that serves byte ranges
               //    answers the request's Range field. Only a response that
               //    reads Variables, and does not continue from their values,
-              //    looks them up.
+              //    looks them up. The reply to a gRPC call, which only a
+              //    gRPC Stub matches, gets its gRPC part.
               plan_response(
                 response,
                 incoming,
@@ -686,11 +889,12 @@ pub fn Engine::handle(
                 } else {
                   None
                 },
+                grpc=grpc is Some(_),
               ) catch {
                 RenderError(at~, message~) => {
                   let error = TemplateError::{ at, message, }
                   content_error = Some(ContentError::new(stub, Template(error)))
-                  template_failed(stub.id, error)
+                  template_failed(stub.id, error, grpc=grpc is Some(_))
                 }
               }
             }
@@ -724,6 +928,10 @@ pub fn Engine::handle(
     }
     None =>
       match mock {
+        // A gRPC call gets UNIMPLEMENTED in gRPC's form, never the 404 of
+        // an HTTP request.
+        None if grpc is Some(_) =>
+          grpc_unimplemented("no Mock for this Host", None)
         None => no_mock(host, self.snapshot.hosts())
         Some(mock) => {
           // Only now, when every candidate has failed, are conditions
@@ -739,17 +947,15 @@ pub fn Engine::handle(
               }
             }
           }
-          let ephemeral = match ephemeral {
-            Some(list) => list.iter().map(e => (e.stub, StubSource::Ephemeral))
-            None => Iter::empty()
+          // A gRPC call's Near miss is chosen among every gRPC Stub of its
+          // Mock, as an HTTP request's is among every HTTP Stub, so a call
+          // to a method that no Stub is on has one too.
+          near_miss = incoming.near_miss(ephemeral, mock, answers, states)
+          if grpc is Some(call) {
+            grpc_unimplemented(unmatched_call(mock, call.path), near_miss)
+          } else {
+            no_match(mock, near_miss)
           }
-          near_miss = incoming.near_miss(
-            ephemeral.concat(
-              mock.stubs.iter().map(stub => (stub, StubSource::File)),
-            ),
-            states,
-          )
-          no_match(mock, near_miss)
         }
       }
   }
@@ -776,6 +982,10 @@ pub fn Engine::handle(
         content_error~,
         crud=crud_called,
         near_miss~,
+        body_size=match grpc {
+          Some(call) => call.octets
+          None => request.body.length()
+        },
         plan~,
         digest=self.snapshot.digest,
         now~,
@@ -792,6 +1002,20 @@ pub fn Engine::handle(
     matched: source,
     scenario,
     content_error,
+  }
+}
+
+///|
+/// Whether the ordinary Stub `ordinary` may answer `call`: when it is a
+/// gRPC call, the path of the Stub's method is the call's `:path` as sent,
+/// as for the file gRPC Stubs a call is matched against
+/// (`@definitions.Mock::grpc_candidates`), so a path with a query or an
+/// encoded octet, which names no method, reaches no Ephemeral gRPC Stub
+/// either. An HTTP request, with no `call`, may reach any.
+fn on_method(ordinary : @definitions.Ordinary, call : GrpcCall?) -> Bool {
+  match call {
+    None => true
+    Some(call) => ordinary.grpc_path() is Some(path) && path == call.path
   }
 }
 
@@ -841,6 +1065,23 @@ fn Incoming::matches(
 }
 
 ///|
+/// The first of `stubs`, file Stubs in the order they are tried, that the
+/// request matches in the current states, `states` (`matches`), or `None`
+/// when it matches none. A plain loop, as `handle` needs.
+fn Incoming::first_match(
+  self : Incoming,
+  stubs : ReadOnlyArray[@definitions.Stub],
+  states : Map[String, String]?,
+) -> @definitions.Stub? {
+  for i in 0..<stubs.length() {
+    if self.matches(stubs[i], states) {
+      return Some(stubs[i])
+    }
+  }
+  None
+}
+
+///|
 /// Whether the request matches `stub`, a file Stub of a Mock whose file
 /// Stubs have no Scenario clause: as `matches` says, without the test of
 /// a clause.
@@ -872,6 +1113,56 @@ fn no_match(mock : @definitions.Mock, near_miss : NearMiss?) -> ResponsePlan {
     body: Bytes(b"{\"error\":\"no Stub matched\"}"),
     delay_ms: 0,
     fault: None,
+    grpc: None,
+  }
+}
+
+///|
+/// The fixed message of the UNIMPLEMENTED answer to a gRPC call to `path`
+/// that `mock` answers and that no gRPC Stub matched: why the call can
+/// reach no gRPC Stub, when the Mock has no Descriptor set, or the set no
+/// method at `path`, or the method streams, and `no Stub matched`
+/// otherwise. The server answers the first three as soon as the call's
+/// HEADERS arrive.
+fn unmatched_call(mock : @definitions.Mock, path : String) -> String {
+  guard mock.descriptor_set is Some(set) else {
+    return "the Mock has no Descriptor set"
+  }
+  guard set.find_method(path) is Some(rpc) else { return "unknown method" }
+  if rpc.is_unary() {
+    "no Stub matched"
+  } else {
+    "streaming methods are not served yet"
+  }
+}
+
+///|
+/// The response to a gRPC call that no gRPC Stub matches: Trailers-Only
+/// UNIMPLEMENTED with the fixed message `message`, such as `no Stub
+/// matched`, and the Near miss, if any, in the `smock-near-miss` trailer,
+/// in the form of the `Smock-Near-Miss` header. Its HTTP status is 200, as
+/// gRPC sends every answer. The Mock's `noMatch` applies to HTTP requests
+/// only, so neither its status nor its headers reach the call.
+fn grpc_unimplemented(message : String, near_miss : NearMiss?) -> ResponsePlan {
+  {
+    status: 200,
+    // Room for the Smock-Mock field the Default Mock adds.
+    headers: Array(capacity=1),
+    body: Bytes(b""),
+    delay_ms: 0,
+    fault: None,
+    grpc: Some({
+      status: Unimplemented,
+      message: Some(message),
+      trailers: match near_miss {
+        Some(near_miss) => [("smock-near-miss", near_miss.header_value())]
+        None => []
+      },
+      encoded: None,
+      details: [],
+      encoded_status: None,
+      own: true,
+    }),
   }
 }
 
@@ -891,6 +1182,7 @@ fn no_mock(host : String?, hosts : Array[String]) -> ResponsePlan {
     body: Bytes(@utf8.encode(body.stringify())),
     delay_ms: 0,
     fault: None,
+    grpc: None,
   }
 }
 

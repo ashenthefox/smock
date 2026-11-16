@@ -1,0 +1,124 @@
+// Written for smock's tests of proto2 types: required and optional fields,
+// closed enums, repeated scalars with and without `packed = true`, a group
+// and a type that an extension extends, which smock serves; a MessageSet,
+// which it does not serve; and methods that reach types of labels.proto,
+// an editions file.
+syntax = "proto2";
+
+package shipping;
+
+import "labels.proto";
+
+service Orders {
+  // The ticket's example.
+  rpc Place (Order) returns (Order);
+  // Presence, closed enums, packing, and required fields in nested
+  // messages.
+  rpc Track (Parcel) returns (Parcel);
+  // An output type that reaches types of labels.proto.
+  rpc Print (Order) returns (Sheet);
+  // An input type of labels.proto.
+  rpc Scan (labels.Label) returns (Order);
+  // An input type that reaches a MessageSet.
+  rpc Pack (Crate) returns (Order);
+  // An input type with a group.
+  rpc Plan (Itinerary) returns (Order);
+  // An output type that an extension extends.
+  rpc Stamp (Order) returns (Stamped);
+}
+
+// The order of the ticket's example.
+message Order {
+  required int64 id = 1;
+  optional string note = 2;
+}
+
+// A closed enum, as every enum of a proto2 file is.
+enum State {
+  NEW = 0;
+  SHIPPED = 1;
+  DELIVERED = 2;
+}
+
+message Parcel {
+  optional State state = 1;
+  repeated State history = 2;
+  // Not packed, as proto2's repeated scalars are unless they say so.
+  repeated int32 weights = 3;
+  repeated int32 sizes = 4 [packed = true];
+  optional Order order = 5;
+  repeated Order orders = 6;
+  map<string, State> states = 7;
+  optional string label = 8;
+  repeated string tags = 9;
+  map<string, string> notes = 10;
+  optional bool fragile = 11 [default = true];
+  optional int32 count = 12 [default = 7];
+  oneof carrier {
+    State carrier_state = 13;
+    string carrier_name = 14;
+  }
+  map<int32, Order> by_id = 15;
+}
+
+// What a client may send in place of an Order: one without its required
+// id.
+message Draft {
+  optional int64 id = 1;
+  optional string note = 2;
+}
+
+// What a client may send in place of a Parcel: numbers that State does not
+// define, repeated scalars packed or not as Parcel does not, messages
+// without the required id, and map entries as messages, in any order and
+// without a value.
+message ParcelOnTheWire {
+  message StateEntry {
+    optional string key = 1;
+    optional int32 value = 2;
+  }
+  message OrderEntry {
+    optional int32 key = 1;
+    optional Draft value = 2;
+  }
+  repeated int32 state = 1;
+  repeated int32 history = 2 [packed = true];
+  repeated int32 sizes = 4;
+  optional Draft order = 5;
+  repeated Draft orders = 6;
+  repeated StateEntry states = 7;
+  optional int32 carrier_state = 13;
+  optional string carrier_name = 14;
+  repeated OrderEntry by_id = 15;
+}
+
+// Types of labels.proto, an editions file, reached through fields.
+message Sheet {
+  optional labels.Label label = 1;
+  optional labels.Color color = 2;
+}
+
+// A MessageSet, whose extensions use another wire form.
+message Bag {
+  option message_set_wire_format = true;
+  extensions 4 to max;
+}
+
+message Crate {
+  optional Bag bag = 1;
+}
+
+message Itinerary {
+  repeated group Stop = 1 {
+    optional string city = 2;
+  }
+}
+
+message Stamped {
+  optional string by = 1;
+  extensions 100 to 199;
+}
+
+extend Stamped {
+  optional string stamp = 100;
+}

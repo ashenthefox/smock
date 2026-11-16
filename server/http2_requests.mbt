@@ -23,7 +23,9 @@ priv struct H2Request {
   /// The regular fields, in the order received, with their names in lower
   /// case as HTTP/2 sends them. Several `cookie` fields are one field, their
   /// values joined with `; `, in their order, at the place of the first
-  /// (RFC 9113, section 8.2.3), as one Cookie line is over HTTP/1.1.
+  /// (RFC 9113, section 8.2.3), as one Cookie line is over HTTP/1.1. A gRPC
+  /// call's binary metadata, whose name ends with `-bin`, is without the
+  /// base64 padding that ends each comma-separated element of its value.
   headers : Array[(String, String)]
   /// The body length its `content-length` declares, or -1 without one. Of
   /// several, the largest, so that none over `--body-limit` passes.
@@ -38,6 +40,26 @@ priv struct H2Request {
   /// When the read timeout ends it, in `@async.now()` milliseconds: the
   /// read timeout after the read that brought its first frame.
   deadline : Int64
+  /// Whether it is a gRPC call: its `content-type` is `application/grpc`,
+  /// alone or followed by `+` or `;`.
+  grpc : Bool
+  /// Whether it is a gRPC call whose content subtype smock does not serve:
+  /// any but none or `proto`, such as `json`. Of several `content-type`
+  /// fields that make it a call, the last decides, as in grpc-go.
+  unserved_subtype : Bool
+  /// For a gRPC call, how far the framing of its messages is read, as its
+  /// body arrives; `None` for an HTTP request.
+  deframer : @grpc.Deframer?
+  /// For a gRPC call with a `grpc-timeout`, when its deadline passes, in
+  /// `@async.now()` milliseconds: the timeout after the read that brought
+  /// its HEADERS (`check_head`). `forever` for a call without one, or
+  /// whose timeout no delay can outlast, and for an HTTP request.
+  mut call_deadline : Int64
+  /// Whether it is a call to the built-in reflection service of its Mock,
+  /// as found when its HEADERS arrived (`answer_from_headers`): it is
+  /// answered as soon as its first message is whole, even while the
+  /// client still sends.
+  mut reflection : Bool
 }
 
 ///|
@@ -131,6 +153,8 @@ fn H2Request::new(
   let mut cookies : StringBuilder? = None
   let mut declared = -1L
   let mut expects = false
+  let mut grpc = false
+  let mut unserved_subtype = false
   for place in 0..<fields.length() {
     let field = fields[place]
     let name = field.name
@@ -169,6 +193,10 @@ fn H2Request::new(
         }
       } else if name == b"expect" && @http1.expects_continue(value) {
         expects = true
+      } else if name == b"content-type" &&
+        @grpc.content_subtype(field.value[:]) is Some(subtype) {
+        grpc = true
+        unserved_subtype = !is_served_subtype(subtype)
       }
       headers.push(text)
     }
@@ -176,6 +204,12 @@ fn H2Request::new(
   decoded.keep(fields.length())
   if cookies is Some(joined) {
     headers[cookie] = ("cookie", joined.to_string())
+  }
+  // A gRPC call's binary metadata loses its padding, so that padded and
+  // unpadded clients look alike to the Stubs and in the Journal. An HTTP
+  // request's fields stay as received.
+  if grpc {
+    unpad_binary_metadata(headers)
   }
   // Only a CONNECT has no `:path`, as moonhttp sees to: its target is
   // `:authority`, as an HTTP/1.1 CONNECT's target is in authority-form.
@@ -192,6 +226,33 @@ fn H2Request::new(
     body: b"",
     parts: None,
     deadline,
+    grpc,
+    unserved_subtype,
+    deframer: if grpc {
+      Some(@grpc.Deframer())
+    } else {
+      None
+    },
+    call_deadline: forever,
+    reflection: false,
+  }
+}
+
+///|
+/// Takes the base64 padding off the value of each field of binary metadata
+/// among `headers`, the regular fields of a gRPC call, whose name ends with
+/// `-bin`: the `=` that end each comma-separated element go, the commas
+/// stay, and the value is not decoded (`@grpc.unpadded_elements`). A value
+/// without padding is kept, so only a padded one costs a new String.
+fn unpad_binary_metadata(headers : Array[(String, String)]) -> Unit {
+  for i in 0..<headers.length() {
+    let (name, value) = headers[i]
+    if @grpc.is_binary_name(name) {
+      let unpadded = @grpc.unpadded_elements(value)
+      if !physical_equal(unpadded, value) {
+        headers[i] = (name, unpadded)
+      }
+    }
   }
 }
 
@@ -315,21 +376,38 @@ fn H2Request::receive(self : H2Request, data : Bytes) -> Unit {
 }
 
 ///|
+/// The engine's view of the request as `to_engine` gives it, with an empty
+/// body: how a gRPC call that cannot reach a gRPC Stub goes to the engine,
+/// from its HEADERS or once it has ended.
+fn H2Request::without_body(self : H2Request) -> @engine.Request {
+  {
+    meth: self.meth,
+    target: self.target,
+    version: "HTTP/2",
+    headers: self.headers,
+    body: b"",
+  }
+}
+
+///|
 /// The engine's view of the request, once it has ended, or for a CONNECT
 /// once its HEADERS have arrived: `:method` is the method, `:path` the
 /// target as sent (`:authority` for a CONNECT), the version `HTTP/2`, and
 /// the headers the regular fields; pseudo-header fields are not among them.
-/// `authority` goes to the engine beside it.
+/// `authority` goes to the engine beside it. A body that came in several
+/// DATA frames is joined into one, and the buffer that held them is let
+/// go, so that the request holds its body once while the engine, or the
+/// gRPC layer's decoder, works on it.
 fn H2Request::to_engine(self : H2Request) -> @engine.Request {
-  let body = match self.parts {
-    Some(parts) => parts.to_bytes()
-    None => self.body
+  if self.parts is Some(parts) {
+    self.body = parts.to_bytes()
+    self.parts = None
   }
   {
     meth: self.meth,
     target: self.target,
     version: "HTTP/2",
     headers: self.headers,
-    body,
+    body: self.body,
   }
 }

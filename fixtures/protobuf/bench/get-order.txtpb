@@ -1,0 +1,6 @@
+# The call of the benchmark's mix to GetOrder: the order of customer 10042
+# made through the partner channel, which one gRPC Stub of
+# bench/definitions-grpc/ matches.
+order_id: "7f9c2ba4-e88f-4c1a-9c5b-2d3a1e8f6b10"
+customer_id: 10042
+channel: CHANNEL_PARTNER

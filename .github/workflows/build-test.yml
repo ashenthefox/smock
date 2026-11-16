@@ -112,6 +112,23 @@ jobs:
         if: matrix.arch == 'amd64'
         run: scripts/check-h2spec.sh dist/smock plain tls
 
+      # grpcurl, a real gRPC client, pinned by version and SHA-256, calls
+      # the release binary on the plain port (h2c) and on the TLS port (h2):
+      # list and describe through reflection, calls with JSON and metadata,
+      # the same calls with -protoset and no reflection, an error with
+      # details through -format-error, and health checks. Each call's
+      # expected output is in scripts/grpcurl/calls, and the gRPC guide
+      # shows only those calls. Any difference fails the step and shows
+      # what grpcurl printed.
+      - name: Install grpcurl
+        run: scripts/install-grpcurl.sh "$RUNNER_TEMP/bin"
+
+      - name: Call smock with grpcurl on the plain port (h2c) and the TLS port (h2)
+        run: scripts/check-grpcurl.sh dist/smock
+
+      - name: Test that the grpcurl check fails on each difference
+        run: scripts/test-check-grpcurl.sh dist/smock
+
       # The release workflow builds and smoke-tests the image the same way.
       - name: Build the container image
         run: docker build --provenance=false --tag smock:ci .
@@ -202,3 +219,64 @@ jobs:
       # from leaving wasm-gc out.
       - name: Test every no-I/O package on wasm-gc
         run: moon test --target wasm-gc
+
+  # protobuf's conformance suite against smock/protobuf
+  # (protobuf-conformance/README.md). protobuf publishes no runner, so
+  # scripts/build-conformance-runner.sh builds conformance_test_runner from
+  # the pinned protobuf release, and the build is cached until the script,
+  # or the protoc it pins, changes. The runner drives the testee, which
+  # scripts/check-conformance.sh builds with moon, and fails on a result
+  # that differs from protobuf-conformance/failure_list.txt; the lists of
+  # what differs are then kept.
+  protobuf-conformance:
+    name: protobuf's conformance suite (smock/protobuf)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install MoonBit (${{ inputs.toolchain }})
+        run: scripts/install-moonbit.sh "${{ inputs.toolchain }}"
+
+      - name: Update the mooncakes registry index
+        run: moon update
+
+      # The runner links the image's C++ library, so the cache is the
+      # image's, by its ImageOS, such as ubuntu24.
+      - name: Name the runner image
+        id: image
+        run: echo "os=$ImageOS" >>"$GITHUB_OUTPUT"
+
+      - name: Restore protobuf's conformance runner
+        id: runner
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/smock/conformance-runner
+          key: conformance-runner-${{ steps.image.outputs.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-conformance-runner.sh', 'scripts/install-protoc.sh') }}
+
+      - name: Build protobuf's conformance runner
+        if: steps.runner.outputs.cache-hit != 'true'
+        run: scripts/build-conformance-runner.sh ~/.cache/smock/conformance-runner
+
+      # Saved as soon as it is built, so that a failing suite does not
+      # build it again on the next run.
+      - name: Cache protobuf's conformance runner
+        if: steps.runner.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/smock/conformance-runner
+          key: ${{ steps.runner.outputs.cache-primary-key }}
+
+      - name: Run protobuf's conformance suite against smock/protobuf
+        run: >-
+          scripts/check-conformance.sh
+          ~/.cache/smock/conformance-runner/conformance_test_runner
+          "$RUNNER_TEMP/conformance"
+
+      - name: Keep what differs from the failure list
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: protobuf-conformance
+          path: ${{ runner.temp }}/conformance
+          retention-days: 7
+          if-no-files-found: ignore

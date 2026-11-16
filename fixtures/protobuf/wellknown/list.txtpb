@@ -1,0 +1,4 @@
+# A ListValue, as a method's whole message.
+values { string_value: "Tom" }
+values { null_value: NULL_VALUE }
+values { number_value: 7 }

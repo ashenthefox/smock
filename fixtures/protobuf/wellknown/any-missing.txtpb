@@ -1,0 +1,4 @@
+# An Any that holds a type the set lacks: a HelloRequest's octets, under
+# another name.
+type_url: "type.googleapis.com/missing.Greeting"
+value: "\n\003Tom"

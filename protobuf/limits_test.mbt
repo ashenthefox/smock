@@ -1,0 +1,897 @@
+// The decoder's bounds, through the public interface: what `decode_json`
+// prints is counted as it is printed, and a message whose JSON passes the
+// limit it is given is refused as soon as it does, however small the
+// message. The messages are written by hand, as hostile clients write
+// them; the sets are protoc's (scripts/gen-protobuf-fixtures.sh).
+
+///|
+/// `input` decoded as a message of the type whose full name is `name` in
+/// the set the script wrote in `hex`, with its JSON bounded by `limit`, as
+/// text, or the error that stops it.
+fn bounded(
+  hex : String,
+  name : String,
+  input : Bytes,
+  limit~ : Int32,
+) -> String {
+  let set = hex_set(hex)
+  guard set.find_message(name) is Some(message) else {
+    abort("no message \{name}")
+  }
+  @utf8.decode(@protobuf.decode_json(set, message, input[:], limit~)) catch {
+    err => "error: \{err}"
+  }
+}
+
+///|
+/// `count` copies of `record`, joined.
+fn repeated(record : Bytes, count : Int32) -> Bytes {
+  let out = @buffer.Buffer(size_hint=record.length() * count)
+  for _ in 0..<count {
+    out.write_bytes(record)
+  }
+  out.to_bytes()
+}
+
+///|
+test "the JSON is counted as it is printed: a message whose JSON passes the limit is refused, and one whose JSON is at the limit is printed" {
+  // Three empty Items, each printed with every field at its default.
+  let items = repeated(b"\x52\x00", 3)
+  let text = bounded(collections_set, "collections.Lists", items, limit=1000)
+  inspect(
+    "\{text.length()} \{text}",
+    content=(
+      #|219 {"numbers":[],"offsets":[],"codes":[],"ratios":[],"weights":[],"flags":[],"kinds":[],"words":[],"blobs":[],"items":[{"name":"","sizes":[],"stock":{}},{"name":"","sizes":[],"stock":{}},{"name":"","sizes":[],"stock":{}}]}
+    ),
+  )
+  inspect(
+    [
+      bounded(collections_set, "collections.Lists", items, limit=219),
+      bounded(collections_set, "collections.Lists", items, limit=218),
+    ].join("\n"),
+    content=(
+      #|{"numbers":[],"offsets":[],"codes":[],"ratios":[],"weights":[],"flags":[],"kinds":[],"words":[],"blobs":[],"items":[{"name":"","sizes":[],"stock":{}},{"name":"","sizes":[],"stock":{}},{"name":"","sizes":[],"stock":{}}]}
+      #|error: the decoded message passes the limit of 218 octets
+    ),
+  )
+}
+
+///|
+test "what the decoder holds to print a message is bounded by the limit too: the records of a field that do not come together, a message field sent again, and each entry of a map" {
+  // 200 numbers and 200 flags, each an unpacked record of 0: together,
+  // as two runs of records, or one after the other, as 400 runs.
+  let together = repeated(b"\x08\x00", 200) + repeated(b"\x30\x00", 200)
+  let apart = repeated(b"\x08\x00\x30\x00", 200)
+  let filled = (input : Bytes, limit : Int32) => {
+    let text = bounded(collections_set, "collections.Lists", input, limit~)
+    if text.has_prefix("error: ") {
+      text
+    } else {
+      "\{text.length()} octets"
+    }
+  }
+  // A Node's child sent 100 times, merged into one.
+  let children = (count : Int32, limit : Int32) => {
+    bounded(scalars_set, "scalars.Node", repeated(b"\x12\x00", count), limit~)
+  }
+  // A map of 100 entries, from 0 to 99, each with the value 1.
+  let entries = @buffer.Buffer()
+  for key in 0..<100 {
+    entries.write_bytes(b"\x12\x04\x08")
+    entries.write_byte(key.to_byte())
+    entries.write_bytes(b"\x10\x01")
+  }
+  let counts = (limit : Int32) => {
+    let text = bounded(
+      collections_set,
+      "collections.Tagged",
+      entries.to_bytes(),
+      limit~,
+    )
+    if text.has_prefix("error: ") {
+      text
+    } else {
+      "\{text.length()} octets"
+    }
+  }
+  inspect(
+    [
+      filled(together, 2000),
+      filled(apart, 2000),
+      filled(apart, 100000),
+      children(1, 1000),
+      children(100, 1000),
+      counts(2000),
+      counts(100000),
+    ].join("\n"),
+    content=(
+      #|1716 octets
+      #|error: the decoded message passes the limit of 2000 octets
+      #|1716 octets
+      #|{"name":"","child":{"name":""}}
+      #|error: the decoded message passes the limit of 1000 octets
+      #|error: the decoded message passes the limit of 2000 octets
+      #|712 octets
+    ),
+  )
+}
+
+///|
+/// What decoding `input` as the type `name` of the set in `hex` gives:
+/// `decoded`, or the error's message, without its position.
+fn depth_outcome(hex : String, name : String, input : Bytes) -> String {
+  let set = hex_set(hex)
+  guard set.find_message(name) is Some(message) else {
+    abort("no message \{name}")
+  }
+  let _ = @protobuf.decode_json(set, message, input[:], limit=no_limit) catch {
+    DecodeError(message~, ..) => return message
+    error => return error.to_string()
+  }
+  "decoded"
+}
+
+///|
+/// A Burrow that holds `levels` more, each in the one before, through
+/// `field`: 2, a message field, 3, a group, whose field 1 holds the next,
+/// or 4, a map's values. The last holds `last`.
+fn burrows(levels : Int32, field : Int32, last : Bytes) -> Bytes {
+  let mut message = last
+  for _ in 0..<levels {
+    let inner = message
+    message = nested(w => {
+      match field {
+        3 => {
+          w.tag(3, StartGroup)
+          message_field(w, 1, inner)
+          w.tag(3, EndGroup)
+        }
+        4 => message_field(w, 4, nested(e => message_field(e, 2, inner)))
+        _ => message_field(w, field, inner)
+      }
+    })
+  }
+  message
+}
+
+///|
+test "messages nest 100 deep and no deeper through each path: a message field, a group and a map's values, each group and map entry counting as a message" {
+  let dig = (levels : Int32, field : Int32, last : Bytes) => {
+    depth_outcome(limits_set, "limits.Burrow", burrows(levels, field, last))
+  }
+  // A group with nothing in it, and a map entry with nothing in it, at the
+  // depth after the last Burrow.
+  let empty_group = b"\x1b\x1c"
+  let empty_entry = b"\x22\x00"
+  inspect(
+    [
+      // The last Burrow at depth 100, then one deeper.
+      dig(100, 2, b""),
+      dig(101, 2, b""),
+      // A group and its Burrow are two levels: the last Burrow at depth
+      // 100, then its empty group at 101.
+      dig(50, 3, b""),
+      dig(50, 3, empty_group),
+      // A map entry and its Burrow are two levels, too.
+      dig(50, 4, b""),
+      dig(50, 4, empty_entry),
+      // protoc's Burrow, with each path, nested in each path.
+      dig(1, 3, fixture(burrow)),
+    ].join("\n"),
+    content=(
+      #|decoded
+      #|messages nest deeper than 100
+      #|decoded
+      #|messages nest deeper than 100
+      #|decoded
+      #|messages nest deeper than 100
+      #|decoded
+    ),
+  )
+  inspect(
+    bounded(limits_set, "limits.Burrow", fixture(burrow), limit=no_limit),
+    content=(
+      #|{"name":"top","inner":{"name":"inner","rooms":{}},"layer":{"inner":{"name":"layer","rooms":{}}},"rooms":{"room":{"name":"room","rooms":{}}}}
+    ),
+  )
+}
+
+///|
+/// An Any of the Any `inner`, `levels` times.
+fn anys(levels : Int32, inner : Bytes) -> Bytes {
+  let mut message = inner
+  for _ in 0..<levels {
+    message = any_of("type.googleapis.com/google.protobuf.Any", message)
+  }
+  message
+}
+
+///|
+/// A Struct of one member, `x`, whose Value holds a Struct of the same,
+/// `levels` times, the last holding the Value `last`.
+fn structs(levels : Int32, last : Bytes) -> Bytes {
+  let mut message = struct_of([("x", last)])
+  for _ in 1..<levels {
+    let inner = message
+    message = struct_of([("x", nested(w => message_field(w, 5, inner)))])
+  }
+  message
+}
+
+///|
+/// A Value that holds a ListValue of one Value, `levels` times, the last
+/// being `last`.
+fn listed_values(levels : Int32, last : Bytes) -> Bytes {
+  let mut message = last
+  for _ in 0..<levels {
+    let inner = message
+    message = nested(w => message_field(w, 6, list_of([inner])))
+  }
+  message
+}
+
+///|
+test "messages nest 100 deep and no deeper through an Any, a Struct and its Values, and a ListValue, as protobuf's parsers count their messages" {
+  let hello = any_of(
+    "type.googleapis.com/helloworld.HelloRequest",
+    nested(w => string_field(w, 1, "Tom")),
+  )
+  let empty_list = nested(w => message_field(w, 6, b""))
+  inspect(
+    [
+      // An Any is one level: the HelloRequest at depth 100, then 101.
+      dynamic_depth("google.protobuf.Any", anys(99, hello)),
+      dynamic_depth("google.protobuf.Any", anys(100, hello)),
+      // A Struct, its entry and its Value are three levels: the last
+      // Struct at depth 96 and its Value at 98, then the Struct at 99 and
+      // its Value at 101.
+      dynamic_depth("google.protobuf.Struct", structs(33, number_value(1.0))),
+      dynamic_depth("google.protobuf.Struct", structs(34, number_value(1.0))),
+      // A Value and its ListValue are two levels: the last Value at depth
+      // 100, then its ListValue at 101.
+      dynamic_depth(
+        "google.protobuf.Value",
+        listed_values(50, number_value(1.0)),
+      ),
+      dynamic_depth("google.protobuf.Value", listed_values(50, empty_list)),
+    ].join("\n"),
+    content=(
+      #|decoded
+      #|messages nest deeper than 100
+      #|decoded
+      #|messages nest deeper than 100
+      #|decoded
+      #|messages nest deeper than 100
+    ),
+  )
+}
+
+///|
+/// What decoding `input` as the type `name` of dynamic.proto's set gives,
+/// as `depth_outcome` says.
+fn dynamic_depth(name : String, input : Bytes) -> String {
+  depth_outcome(dynamic_set, name, input)
+}
+
+///|
+/// Octets that are UTF-8 or not, at the start, the middle and the end of a
+/// string: each kind of bad sequence, a sequence cut short, and good ones
+/// of every length, a byte order mark included.
+let utf8_cases : Array[Bytes] = [
+  b"plain", b"\xef\xbb\xbfbom", b"\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x88", b"\x80",
+  b"a\xbfb", b"\xc0\x80", b"\xc1\xbf", b"\xe0\x80\x80", b"\xe0\x9f\xbf", b"\xed\xa0\x80",
+  b"\xed\xbf\xbf", b"\xf0\x80\x80\x80", b"\xf0\x8f\xbf\xbf", b"\xf4\x90\x80\x80",
+  b"\xf5\x80\x80\x80", b"\xff", b"\xfe\xfe", b"\xc3", b"\xe2\x82", b"\xf0\x9f\x98",
+  b"x\xe2\x82", b"\xe2\x82x", b"\xf0\x9f\x98x", b"\xc3\xc3\xa9", b"\xe2\x28\xa1",
+]
+
+///|
+test "a proto2 string that is not UTF-8 prints as UTF-8 decoders repair it, U+FFFD for each maximal subpart, and a proto3 one is refused, whatever its bad sequence" {
+  for octets in utf8_cases {
+    // A proto2 Burrow's name, printed with no copy of the repaired text.
+    let printed = bounded(
+      limits_set,
+      "limits.Burrow",
+      nested(w => {
+        w.tag(1, Len)
+        w.length_delimited(octets)
+      }),
+      limit=no_limit,
+    )
+    let lossy = @utf8.decode_lossy(octets)
+    assert_eq(printed, "{\"name\":\"\{lossy}\",\"rooms\":{}}")
+    // A proto3 Every's string.
+    let strict = bounded(
+      scalars_set,
+      "scalars.Every",
+      nested(w => {
+        w.tag(9, Len)
+        w.length_delimited(octets)
+      }),
+      limit=no_limit,
+    )
+    let good = try @utf8.decode(octets, ignore_bom=false) catch {
+      _ => false
+    } noraise {
+      _ => true
+    }
+    assert_eq(
+      strict.has_prefix("error: ") && strict.contains("not UTF-8"),
+      !good,
+    )
+  }
+}
+
+///|
+test "the JSON counts wherever it is printed: through a message field, a list, a map, a group, an Any's message, a Struct and a ListValue, a message is printed at its JSON's length and refused one octet short" {
+  let hello = any_of(
+    "type.googleapis.com/helloworld.HelloRequest",
+    nested(w => string_field(w, 1, "Tom")),
+  )
+  let cases : Array[(String, String, Bytes)] = [
+    (limits_set, "limits.Burrow", fixture(burrow)),
+    (collections_set, "collections.Lists", repeated(b"\x52\x00", 2)),
+    // Maps whose JSON is longer than what is held to print them.
+    (
+      collections_set,
+      "collections.Tagged",
+      fixture(tagged) + nested(w => string_field(w, 1, "x".repeat(400))),
+    ),
+    (dynamic_set, "google.protobuf.Any", anys(2, hello)),
+    (
+      dynamic_set,
+      "google.protobuf.Struct",
+      structs(3, nested(w => string_field(w, 3, "x".repeat(400)))),
+    ),
+    (dynamic_set, "google.protobuf.Value", listed_values(3, number_value(1.5))),
+  ]
+  let out = []
+  for case in cases {
+    let (hex, name, input) = case
+    let text = bounded(hex, name, input, limit=no_limit)
+    let at = bounded(hex, name, input, limit=text.length())
+    let short = bounded(hex, name, input, limit=text.length() - 1)
+    out.push(
+      "\{name}: \{at == text}, \{short.has_prefix("error: the decoded message passes")}",
+    )
+  }
+  inspect(
+    out.join("\n"),
+    content=(
+      #|limits.Burrow: true, true
+      #|collections.Lists: true, true
+      #|collections.Tagged: true, true
+      #|google.protobuf.Any: true, true
+      #|google.protobuf.Struct: true, true
+      #|google.protobuf.Value: true, true
+    ),
+  )
+}
+
+///|
+test "an Any's message is printed in place, after its @type: one with no field to print leaves @type alone" {
+  // google.protobuf.Any, and e.E, a message with no fields.
+  let any = file_proto(
+    "google/protobuf/any.proto",
+    package_name="google.protobuf",
+    body=w => {
+      message_field(
+        w,
+        4,
+        message_proto("Any", body=w => {
+          message_field(w, 2, field_proto("type_url", 1, 9))
+          message_field(w, 2, field_proto("value", 2, 12))
+        }),
+      )
+    },
+  )
+  let e = file_proto("e.proto", package_name="e", body=w => {
+    message_field(w, 4, message_proto("E"))
+  })
+  let set = @protobuf.read_descriptor_set(set_of([any, e])) catch {
+    err => abort("not a set: \{err}")
+  }
+  guard set.find_message("google.protobuf.Any") is Some(message) else {
+    abort("no Any")
+  }
+  let printed = (input : Bytes, limit : Int32) => {
+    @utf8.decode(@protobuf.decode_json(set, message, input[:], limit~)) catch {
+      err => "error: \{err}"
+    }
+  }
+  let empty = any_of("type.googleapis.com/e.E", b"")
+  inspect(
+    [printed(empty, 100), printed(empty, 35), printed(empty, 34)].join("\n"),
+    content=(
+      #|{"@type":"type.googleapis.com/e.E"}
+      #|{"@type":"type.googleapis.com/e.E"}
+      #|error: the decoded message passes the limit of 34 octets
+    ),
+  )
+}
+
+///|
+/// A set written field by field: google.protobuf.Any and Duration, and in
+/// the package `e`, `E`, a message with no field, `F`, with the string
+/// `name`, and messages that hold an Any: `Only` alone, as `a`, `Last`
+/// after the string `pad`, `First` before it, `Middle` between the strings
+/// `before` and `after`, `List` as the repeated `items`, and `Map` as the
+/// values of the map `items`, whose keys are strings.
+fn any_holders() -> @protobuf.DescriptorSet {
+  let any_type = ".google.protobuf.Any"
+  // A repeated field numbered 1, of the message type `type_name`.
+  let listed = (name : String, type_name : String) => {
+    nested(w => {
+      string_field(w, 1, name)
+      varint_field(w, 3, 1)
+      varint_field(w, 4, 3)
+      varint_field(w, 5, 11)
+      string_field(w, 6, type_name)
+    })
+  }
+  let any = file_proto(
+    "google/protobuf/any.proto",
+    package_name="google.protobuf",
+    body=w => {
+      message_field(
+        w,
+        4,
+        message_proto("Any", body=w => {
+          message_field(w, 2, field_proto("type_url", 1, 9))
+          message_field(w, 2, field_proto("value", 2, 12))
+        }),
+      )
+    },
+  )
+  let duration = file_proto(
+    "google/protobuf/duration.proto",
+    package_name="google.protobuf",
+    body=w => {
+      message_field(
+        w,
+        4,
+        message_proto("Duration", body=w => {
+          message_field(w, 2, field_proto("seconds", 1, 3))
+          message_field(w, 2, field_proto("nanos", 2, 5))
+        }),
+      )
+    },
+  )
+  let entry = message_proto("ItemsEntry", body=w => {
+    message_field(w, 2, field_proto("key", 1, 9))
+    message_field(w, 2, field_proto("value", 2, 11, type_name=any_type))
+    // MessageOptions with map_entry true.
+    message_field(w, 7, nested(w => varint_field(w, 7, 1)))
+  })
+  let holders = file_proto(
+    "e.proto",
+    package_name="e",
+    dependencies=["google/protobuf/any.proto"],
+    body=w => {
+      message_field(w, 4, message_proto("E"))
+      message_field(
+        w,
+        4,
+        message_proto("F", body=w => {
+          message_field(w, 2, field_proto("name", 1, 9))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("Only", body=w => {
+          message_field(w, 2, field_proto("a", 1, 11, type_name=any_type))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("Last", body=w => {
+          message_field(w, 2, field_proto("pad", 1, 9))
+          message_field(w, 2, field_proto("a", 2, 11, type_name=any_type))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("First", body=w => {
+          message_field(w, 2, field_proto("a", 1, 11, type_name=any_type))
+          message_field(w, 2, field_proto("pad", 2, 9))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("Middle", body=w => {
+          message_field(w, 2, field_proto("before", 1, 9))
+          message_field(w, 2, field_proto("a", 2, 11, type_name=any_type))
+          message_field(w, 2, field_proto("after", 3, 9))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("List", body=w => {
+          message_field(w, 2, listed("items", any_type))
+        }),
+      )
+      message_field(
+        w,
+        4,
+        message_proto("Map", body=w => {
+          message_field(w, 2, listed("items", ".e.Map.ItemsEntry"))
+          message_field(w, 3, entry)
+        }),
+      )
+    },
+  )
+  @protobuf.read_descriptor_set(set_of([any, duration, holders])) catch {
+    err => abort("not a set: \{err}")
+  }
+}
+
+///|
+/// `input` decoded as a message of the type whose full name is `name` in
+/// `set`, with its JSON bounded by `limit`, as text, or the error that
+/// stops it.
+fn bounded_in(
+  set : @protobuf.DescriptorSet,
+  name : String,
+  input : Bytes,
+  limit~ : Int32,
+) -> String {
+  guard set.find_message(name) is Some(message) else {
+    abort("no message \{name}")
+  }
+  @utf8.decode(@protobuf.decode_json(set, message, input[:], limit~)) catch {
+    err => "error: \{err}"
+  }
+}
+
+///|
+test "the JSON is held to the limit after an Any's object too: a message that ends one octet past the limit, with the brace after an Any of a message with no field, is refused" {
+  let set = any_holders()
+  // An Only whose Any holds an E.
+  let only = nested(w => {
+    message_field(w, 1, any_of("type.googleapis.com/e.E", b""))
+  })
+  inspect(
+    [
+      bounded_in(set, "e.Only", only, limit=no_limit),
+      bounded_in(set, "e.Only", only, limit=41),
+      bounded_in(set, "e.Only", only, limit=40),
+    ].join("\n"),
+    content=(
+      #|{"a":{"@type":"type.googleapis.com/e.E"}}
+      #|{"a":{"@type":"type.googleapis.com/e.E"}}
+      #|error: the decoded message passes the limit of 40 octets
+    ),
+  )
+}
+
+///|
+/// How `decode_json` holds the JSON of `input`, a message of the type
+/// whose full name is `name` in `set`, to every limit from 0 to the JSON's
+/// size and two more: `held` when it raises `TooLarge` with each limit
+/// under the size, and prints the text that it prints with no limit with
+/// every other. Or else the first limit with which it does not, and what
+/// it does with it.
+fn swept(set : @protobuf.DescriptorSet, name : String, input : Bytes) -> String {
+  guard set.find_message(name) is Some(message) else {
+    abort("no message \{name}")
+  }
+  let whole = @protobuf.decode_json(set, message, input[:], limit=no_limit) catch {
+    err => return "error: \{err}"
+  }
+  for limit in 0..<=(whole.length() + 2) {
+    let outcome = try
+      @protobuf.decode_json(set, message, input[:], limit~)
+    catch {
+      TooLarge(limit=passed) => "refused at \{passed}"
+      err => "error: \{err}"
+    } noraise {
+      text =>
+        if text == whole {
+          "printed"
+        } else {
+          "printed otherwise, as \{text.length()} octets"
+        }
+    }
+    let wanted = if limit < whole.length() {
+      "refused at \{limit}"
+    } else {
+      "printed"
+    }
+    if outcome != wanted {
+      return "with the limit \{limit}, \{outcome}"
+    }
+  }
+  "held"
+}
+
+///|
+test "the JSON is held to every limit wherever an Any is printed: as the whole message, last, first and in the middle of its message, in a list, in a map and in another Any, with a message of no field, one with a field and a well-known type, in the first room made for the text or past it" {
+  let set = any_holders()
+  let url = (name : String) => "type.googleapis.com/\{name}"
+  // An F whose name is `name`.
+  let f = (name : Bytes) => {
+    nested(w => {
+      w.tag(1, Len)
+      w.length_delimited(name)
+    })
+  }
+  let empty = any_of(url("e.E"), b"")
+  let filled = any_of(url("e.F"), f(b"Tom"))
+  // 30 control characters, which the JSON prints with six octets each: a
+  // text that outgrows the room first made for it, twice the message and
+  // 16 octets.
+  let controls = repeated(b"\x01", 30)
+  let long = any_of(url("e.F"), f(controls))
+  let only = (any : Bytes) => nested(w => message_field(w, 1, any))
+  let last = (pad : Bytes, any : Bytes) => {
+    nested(w => {
+      w.tag(1, Len)
+      w.length_delimited(pad)
+      message_field(w, 2, any)
+    })
+  }
+  let first = (any : Bytes) => {
+    nested(w => {
+      message_field(w, 1, any)
+      string_field(w, 2, "p")
+    })
+  }
+  let middle = (any : Bytes) => {
+    nested(w => {
+      string_field(w, 1, "b")
+      message_field(w, 2, any)
+      string_field(w, 3, "a")
+    })
+  }
+  let list = (anys : Array[Bytes]) => {
+    nested(w => {
+      for any in anys {
+        message_field(w, 1, any)
+      }
+    })
+  }
+  let map = (entries : Array[(String, Bytes)]) => {
+    nested(w => {
+      for entry in entries {
+        message_field(
+          w,
+          1,
+          nested(e => {
+            string_field(e, 1, entry.0)
+            message_field(e, 2, entry.1)
+          }),
+        )
+      }
+    })
+  }
+  let cases : Array[(String, Bytes)] = [
+    // The Any as the whole message, holding a message with a field: the
+    // text ends with that message's brace, so nothing is printed after
+    // the Any's object that a limit one octet short could refuse instead.
+    ("google.protobuf.Any", filled),
+    // The Any alone, last, first and in the middle of its message.
+    ("e.Only", only(empty)),
+    ("e.Only", only(filled)),
+    ("e.Last", last(b"p", empty)),
+    ("e.Last", last(b"p", filled)),
+    ("e.First", first(empty)),
+    ("e.First", first(filled)),
+    ("e.Middle", middle(empty)),
+    ("e.Middle", middle(filled)),
+    // In a repeated field, and as a map's values, under keys long enough
+    // for the JSON to take more than what is held to print the map.
+    ("e.List", list([empty, filled, empty])),
+    ("e.Map", map([("k".repeat(80), empty), ("l".repeat(80), filled)])),
+    // An Any in an Any, printed as its `value`, and one in the message
+    // that an Any holds, both with their braces to come off.
+    ("google.protobuf.Any", any_of(url("google.protobuf.Any"), empty)),
+    ("google.protobuf.Any", any_of(url("e.Only"), only(empty))),
+    ("google.protobuf.Any", any_of(url("e.Middle"), middle(filled))),
+    // A well-known type, printed as `value`.
+    (
+      "e.Last",
+      last(
+        b"p",
+        any_of(
+          url("google.protobuf.Duration"),
+          seconds_and_nanos(1, 500_000_000),
+        ),
+      ),
+    ),
+    // Texts that outgrow their first room: before an Any that ends the
+    // message, in an Any, and in an Any that another holds in a list.
+    ("e.Last", last(controls, empty)),
+    ("e.Last", last(b"p", long)),
+    ("e.List", list([any_of(url("e.Only"), only(long)), empty])),
+  ]
+  let out = []
+  for case in cases {
+    let (name, input) = case
+    let text = bounded_in(set, name, input, limit=no_limit)
+    let shown = if text.length() > 100 {
+      "\{name}, \{text.length()} octets"
+    } else {
+      text
+    }
+    out.push("\{swept(set, name, input)}: \{shown}")
+  }
+  inspect(
+    out.join("\n"),
+    content=(
+      #|held: {"@type":"type.googleapis.com/e.F","name":"Tom"}
+      #|held: {"a":{"@type":"type.googleapis.com/e.E"}}
+      #|held: {"a":{"@type":"type.googleapis.com/e.F","name":"Tom"}}
+      #|held: {"pad":"p","a":{"@type":"type.googleapis.com/e.E"}}
+      #|held: {"pad":"p","a":{"@type":"type.googleapis.com/e.F","name":"Tom"}}
+      #|held: {"a":{"@type":"type.googleapis.com/e.E"},"pad":"p"}
+      #|held: {"a":{"@type":"type.googleapis.com/e.F","name":"Tom"},"pad":"p"}
+      #|held: {"before":"b","a":{"@type":"type.googleapis.com/e.E"},"after":"a"}
+      #|held: {"before":"b","a":{"@type":"type.googleapis.com/e.F","name":"Tom"},"after":"a"}
+      #|held: e.List, 132 octets
+      #|held: e.Map, 262 octets
+      #|held: {"@type":"type.googleapis.com/google.protobuf.Any","value":{"@type":"type.googleapis.com/e.E"}}
+      #|held: {"@type":"type.googleapis.com/e.Only","a":{"@type":"type.googleapis.com/e.E"}}
+      #|held: google.protobuf.Any, 118 octets
+      #|held: {"pad":"p","a":{"@type":"type.googleapis.com/google.protobuf.Duration","value":"1.500s"}}
+      #|held: e.Last, 230 octets
+      #|held: e.Last, 241 octets
+      #|held: e.List, 316 octets
+    ),
+  )
+}
+
+///|
+test "Anys three deep, each in the message of the one before, are printed with the widest limit, and held to every limit from 0 to past their JSON's size: the text may pass its limit by one octet, not by one for each Any around it, which would pass the largest Int32" {
+  let set = any_holders()
+  let only = (any : Bytes) => nested(w => message_field(w, 1, any))
+  let holding = (inner : Bytes) => {
+    only(any_of("type.googleapis.com/e.Only", inner))
+  }
+  // An Only whose Any holds an Only, whose Any holds an Only, whose Any
+  // holds an E.
+  let deep = holding(holding(only(any_of("type.googleapis.com/e.E", b""))))
+  inspect(
+    [
+      // The largest Int32, which is `no_limit`, then each limit from 0 to
+      // the JSON's size and two more.
+      bounded_in(set, "e.Only", deep, limit=0x7FFF_FFFF),
+      swept(set, "e.Only", deep),
+    ].join("\n"),
+    content=(
+      #|{"a":{"@type":"type.googleapis.com/e.Only","a":{"@type":"type.googleapis.com/e.Only","a":{"@type":"type.googleapis.com/e.E"}}}}
+      #|held
+    ),
+  )
+}
+
+///|
+test "a length that runs past its message, or past the message that holds it, makes the message not parse, at any level and before anything is allocated for it" {
+  let past = [
+    // A Burrow's name: 5 octets announced, 1 sent.
+    depth_outcome(limits_set, "limits.Burrow", b"\x0a\x05a"),
+    // The same in the Burrow it holds, whose 3 octets end before the name
+    // does, though a name of 1 octet follows them.
+    depth_outcome(limits_set, "limits.Burrow", b"\x12\x03\x0a\x05a\x0a\x01a"),
+    // In a group, and in a map entry.
+    depth_outcome(limits_set, "limits.Burrow", b"\x1b\x0a\x03\x0a\x05a\x1c"),
+    depth_outcome(limits_set, "limits.Burrow", b"\x22\x03\x0a\x05a"),
+    // A packed record of numbers.
+    depth_outcome(collections_set, "collections.Lists", b"\x0a\x05\x01"),
+    // The largest length a varint holds, 2^64 - 1.
+    depth_outcome(
+      limits_set, "limits.Burrow", b"\x0a\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01a",
+    ),
+    // A HelloRequest's name in an Any, and a Struct's key.
+    dynamic_depth(
+      "google.protobuf.Any",
+      any_of("type.googleapis.com/helloworld.HelloRequest", b"\x0a\x05a"),
+    ),
+    dynamic_depth("google.protobuf.Struct", b"\x0a\x03\x0a\x05a"),
+  ]
+  inspect(
+    past.join("\n"),
+    content=(
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+      #|a length of 18446744073709551615 runs past the end of the input, which has 1 octets left
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+      #|a length of 5 runs past the end of the input, which has 1 octets left
+    ),
+  )
+}
+
+///|
+/// What `input` prints as the type `name` of the set in `hex`, with no
+/// limit on the JSON's octets: the octets of its JSON, or the error that
+/// stops it.
+fn printed_size(hex : String, name : String, input : Bytes) -> String {
+  let text = bounded(hex, name, input, limit=no_limit)
+  if text.has_prefix("error: ") {
+    text
+  } else {
+    "\{text.length()} octets"
+  }
+}
+
+///|
+test "the values a message prints are bounded by its size, 32,768 and 4 more for each octet: a list of empty wide messages is refused as soon as it passes that, one that prints exactly that many is printed, and a list whose elements print 4 values an octet or fewer is printed at any length" {
+  // An empty Row, 2 octets, prints 61 values: itself and its 60 fields. A
+  // Table prints 3 more: itself, `rows` and `note`.
+  let rows = (count : Int32) => repeated(b"\x0a\x00", count)
+  let table = (input : Bytes) => printed_size(wide_set, "wide.Table", input)
+  let lists = (input : Bytes) => {
+    printed_size(collections_set, "collections.Lists", input)
+  }
+  inspect(
+    [
+      // 1,236 octets may print 37,712 values: 618 Rows print 37,701, and
+      // 619 print 37,762 where 1,238 octets may print 37,720.
+      table(rows(618)),
+      table(rows(619)),
+      // 621 Rows print 37,884 values. With a note of 35 letters the
+      // message takes 1,279 octets, which may print exactly 37,884; with
+      // one of 34 it may print 37,880.
+      table(rows(621) + b"\x12\x23" + repeated(b"a", 35)),
+      table(rows(621) + b"\x12\x22" + repeated(b"a", 34)),
+      // The guide's example in a Table: 9,500 empty Rows, 19,000 octets,
+      // 579,503 values.
+      table(rows(9500)),
+      // An empty Item, 2 octets, prints 4 values, so a list of them stays
+      // within 4 values an octet whatever its length: 10,000 print 40,011
+      // values, more than 32,768.
+      lists(repeated(b"\x52\x00", 10000)),
+      // A value that is sent takes an octet: 40,000 packed numbers.
+      lists(b"\x0a\xc0\xb8\x02" + repeated(b"\x01", 40000)),
+    ].join("\n"),
+    content=(
+      #|292334 octets
+      #|error: the decoded message holds more than 37720 values, the most for a message of its size
+      #|293788 octets
+      #|error: the decoded message holds more than 37880 values, the most for a message of its size
+      #|error: the decoded message holds more than 108768 values, the most for a message of its size
+      #|340117 octets
+      #|80117 octets
+    ),
+  )
+  // Canonical ProtoJSON prints no default, so each value it prints takes
+  // an octet or more of the message: the same 9,500 Rows print 9,502
+  // values, `{"rows":[{},{},...]}`.
+  let canonical = canonical(wide_set, "wide.Table", rows(9500))
+  inspect(canonical.length(), content="28510")
+}
+
+///|
+test "the values bound counts a message's octets as sent, whatever they carry: rows of 60 fields with one small number each are printed up to 728 and no further, and 9,500 empty Rows are printed once an unknown field of zeros takes their message to 136,684 octets" {
+  let table = (input : Bytes) => printed_size(wide_set, "wide.Table", input)
+  // A Row whose `f1` is 1 takes 4 octets and prints 61 values, as an empty
+  // one does: 728 print 44,411 values where 2,912 octets may print 44,416,
+  // and 729 print 44,472 where 2,916 octets may print 44,432.
+  let numbered = (count : Int32) => repeated(b"\x0a\x02\x08\x01", count)
+  // 9,500 empty Rows, 19,000 octets, then field 15, which a Table lacks,
+  // with 117,679 or 117,680 zeros: 136,683 octets, which may print 579,500
+  // values, or 136,684, which may print 579,504. The Table prints 579,503
+  // either way.
+  let rows = repeated(b"\x0a\x00", 9500)
+  inspect(
+    [
+      table(numbered(728)),
+      table(numbered(729)),
+      table(rows + b"\x7a\xaf\x97\x07" + repeated(b"\x00", 117679)),
+      table(rows + b"\x7a\xb0\x97\x07" + repeated(b"\x00", 117680)),
+    ].join("\n"),
+    content=(
+      #|344364 octets
+      #|error: the decoded message holds more than 44432 values, the most for a message of its size
+      #|error: the decoded message holds more than 579500 values, the most for a message of its size
+      #|4493520 octets
+    ),
+  )
+}

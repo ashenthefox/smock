@@ -1,0 +1,2 @@
+# A Value that holds a Struct, as a method's whole message.
+struct_value { fields { key: "ok" value { bool_value: true } } }

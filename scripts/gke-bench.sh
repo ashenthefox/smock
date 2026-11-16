@@ -7,7 +7,7 @@
 #    external IP addresses), and nothing left by an earlier run; then prints
 #    how long the run takes and what it costs;
 # 2. with --yes, builds the images on this machine (smock with the
-#    benchmark's definitions and their Scenario and CRUD variants, one for
+#    benchmark's definitions and their Scenario, CRUD and gRPC variants, one for
 #    each binary a run of variants compares, and the load generator) for the architecture of the run
 #    (--arch, this machine's by default), with the release binary it builds
 #    or is given: the images only copy files, so this machine builds them
@@ -74,7 +74,7 @@
 #                    gh run download <run-id> -R hirunefu/smock -n smock-linux-<arch> gets the
 #                    one CI built (CI's run on the push of that commit)
 #   --oha FILE       use this oha (of the run's architecture) instead of the pinned one
-#   --variant LABEL=FILE[,no-init][,no-first-second][,scenarios][,crud]
+#   --variant LABEL=FILE[,no-init][,no-first-second][,scenarios][,crud][,grpc]
 #                    compare release binaries, or one binary with other options, on one node:
 #                    2 to 4 variants, the first the baseline, each in a Pod of its own under
 #                    each profile, which one load generator measures in turn; LABEL (1 to 16
@@ -83,9 +83,13 @@
 #                    that prints its node's CPU, no-first-second the load generator's scrape
 #                    of its /metrics a second into each step, scenarios serves the
 #                    Scenario variant of the definitions (bench/definitions-scenarios/) in
-#                    place of bench/definitions/, and crud their CRUD variant
+#                    place of bench/definitions/, crud their CRUD variant
 #                    (bench/definitions-crud/), which the load generator sends its own
-#                    mix (bench/requests-crud.json); not with --smock
+#                    mix (bench/requests-crud.json), and grpc their gRPC variant
+#                    (bench/definitions-grpc/), which it sends its own mix of gRPC calls
+#                    (bench/requests-grpc.json) in grpc-keep-alive alone, the plan's
+#                    case for it: give grpc to every variant or to none; a run without
+#                    --variant serves bench/definitions/; not with --smock
 #   --rounds N       how many times the load generator measures each variant's steps, the
 #                    variants' order turned each round and step (default: 4); only with --variant
 #
@@ -243,12 +247,14 @@ profiles="" cases="" out="" time_limit=100m smock_binary="" oha_binary="" arch="
 # the first the baseline, and how many rounds the load generator measures
 # them in (--rounds); none in a run of one smock. Each variant's binary,
 # its options as gke.py takes them (",no-init,no-first-second,scenarios"
-# or ",crud" in its place, or fewer), whether its Pod has the init container, the definitions it
+# or ",crud" or ",grpc" in its place, or fewer), whether its Pod has the init container, the definitions it
 # serves as the repository names them, its SHA-256, the image of its
 # binary and that image's reference once pushed, by label; and the images
 # of smock, one for each distinct binary, named for the first variant with
-# it, with their references once pushed.
-variant_args=() variants=() rounds="" smock_images=()
+# it, with their references once pushed. The definitions whose cases the
+# run runs: the gRPC variant's when every variant serves it, else the
+# benchmark's.
+variant_args=() variants=() rounds="" smock_images=() run_definitions=bench/definitions
 declare -A variant_file=() variant_options=() variant_init=() variant_definitions=() variant_sha256=()
 declare -A variant_image=() variant_ref=()
 declare -A image_ref=()
@@ -529,13 +535,14 @@ wrong() {
 }
 
 # Reads the variants --variant gives,
-# LABEL=FILE[,no-init][,no-first-second][,scenarios][,crud] each, into variants and the maps by label, with the SHA-256 of each one's
-# binary, which a dry run needs even when the checks stop early, and the
-# rounds (4 unless --rounds says otherwise); exits when they cannot make a
-# run, as gke.py would refuse them once the cluster is made. gke.py plan
-# checks the names each label makes under the profiles.
+# LABEL=FILE[,no-init][,no-first-second][,scenarios][,crud][,grpc] each, into variants and the maps by label, with the SHA-256 of each one's
+# binary, which a dry run needs even when the checks stop early, the
+# definitions whose cases the run runs, and the rounds (4 unless --rounds
+# says otherwise); exits when they cannot make a run, as gke.py would
+# refuse them once the cluster is made. gke.py plan checks the names each
+# label makes under the profiles.
 read_variants() {
-  local text label file option options seen=" "
+  local text label file option options serving seen=" " grpc="" other=""
   if [ ${#variant_args[@]} -eq 0 ]; then
     [ -z "$rounds" ] || wrong "--rounds needs --variant: smock alone is measured once"
     return 0
@@ -545,7 +552,7 @@ read_variants() {
     wrong "a run compares 2 to 4 variants, not ${#variant_args[@]}"
   fi
   for text in "${variant_args[@]}"; do
-    [[ $text == *=?* ]] || wrong "--variant $text: give it as LABEL=FILE[,no-init][,no-first-second][,scenarios][,crud]"
+    [[ $text == *=?* ]] || wrong "--variant $text: give it as LABEL=FILE[,no-init][,no-first-second][,scenarios][,crud][,grpc]"
     label=${text%%=*}
     IFS=, read -r -a options <<<"${text#*=}"
     file=${options[0]}
@@ -555,25 +562,41 @@ read_variants() {
     fi
     [[ $seen != *" $label "* ]] || wrong "variant $label is given twice: give each its own label"
     seen+="$label "
-    variant_init[$label]=1 variant_options[$label]="" variant_definitions[$label]=bench/definitions
+    variant_init[$label]=1 variant_options[$label]="" variant_definitions[$label]=bench/definitions serving=()
     for option in "${options[@]:1}"; do
       case $option in
       no-init) variant_init[$label]=0 ;;
       no-first-second) ;;
       scenarios) variant_definitions[$label]=bench/definitions-scenarios ;;
       crud) variant_definitions[$label]=bench/definitions-crud ;;
-      *) wrong "variant $label: no option $option; there are no-init, no-first-second, scenarios and crud" ;;
+      grpc) variant_definitions[$label]=bench/definitions-grpc ;;
+      *) wrong "variant $label: no option $option; there are no-init, no-first-second, scenarios, crud and grpc" ;;
       esac
-      [[ ${variant_options[$label]}, == *",$option,"* ]] || variant_options[$label]+=",$option"
+      if [[ ${variant_options[$label]}, != *",$option,"* ]]; then
+        variant_options[$label]+=",$option"
+        case $option in scenarios | crud | grpc) serving+=("$option") ;; esac
+      fi
     done
-    if [[ ${variant_options[$label]}, == *",scenarios,"* && ${variant_options[$label]}, == *",crud,"* ]]; then
-      wrong "variant $label: scenarios and crud serve other definitions: give one of them"
+    if [ ${#serving[@]} -gt 1 ]; then
+      wrong "variant $label: $(and_list "${serving[@]}") serve other definitions: give one of them"
+    fi
+    if [ "${variant_definitions[$label]}" = bench/definitions-grpc ]; then
+      grpc=${grpc:-$label}
+    else
+      other=${other:-$label}
     fi
     [ -f "$file" ] || wrong "no file $file"
     variants+=("$label")
     variant_file[$label]=$file
     variant_sha256[$label]=$(sha256sum "$file" | cut -d ' ' -f 1)
   done
+  # grpc-keep-alive runs against the gRPC variant alone, and every step
+  # runs every variant.
+  if [ -n "$grpc" ] && [ -n "$other" ]; then
+    wrong "variant $grpc serves bench/definitions-grpc, which only its own case runs against, and variant $other" \
+      "does not: give every variant the grpc option, or none"
+  fi
+  [ -z "$grpc" ] || run_definitions=bench/definitions-grpc
   rounds=${rounds:-4}
   [[ $rounds =~ ^[1-9][0-9]{0,2}$ ]] || wrong "--rounds is a number of rounds, at least 1, not $rounds"
 }
@@ -640,7 +663,7 @@ repository=smock-bench-$run_id
 labels="purpose=smock-bench,run=$run_id"
 registry=$REGION-docker.pkg.dev
 out=${out:-$ROOT/bench/results/gke-$run_id}
-selection=(${profiles:+--profiles "$profiles"} ${cases:+--cases "$cases"})
+selection=(${profiles:+--profiles "$profiles"} ${cases:+--cases "$cases"} --definitions "$run_definitions")
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/smock-gke-bench.XXXXXX") || die "cannot make a temporary directory"
 kubeconfig=$work/kubeconfig
@@ -1052,8 +1075,9 @@ share_images() {
 
 # Writes the build context of an image of smock into DIRECTORY (the first
 # argument): the binary (the second), LICENSE and NOTICE, which the
-# Dockerfile copies too, the benchmark's definitions and their Scenario
-# and CRUD variants, which a scenarios and a crud variant serve.
+# Dockerfile copies too, the benchmark's definitions and their Scenario,
+# CRUD and gRPC variants, which a scenarios, a crud and a grpc variant
+# serve.
 smock_context() {
   mkdir -p "$1/dist"
   cp "$2" "$1/dist/smock"
@@ -1061,6 +1085,7 @@ smock_context() {
   cp -r "$ROOT/bench/definitions" "$1/definitions"
   cp -r "$ROOT/bench/definitions-scenarios" "$1/definitions-scenarios"
   cp -r "$ROOT/bench/definitions-crud" "$1/definitions-crud"
+  cp -r "$ROOT/bench/definitions-grpc" "$1/definitions-grpc"
 }
 
 build_images() {
@@ -1096,7 +1121,8 @@ build_images() {
     built_images+=("$generator_image")
     cp "$oha_binary" "$work/generator-image/oha"
     cp "$ROOT/bench/bench.py" "$ROOT/bench/requests.json" "$ROOT/bench/requests-crud.json" \
-      "$work/generator-image/bench/"
+      "$ROOT/bench/requests-grpc.json" "$work/generator-image/bench/"
+    cp -r "$ROOT/bench/requests-grpc" "$work/generator-image/bench/requests-grpc"
     cp "$plan" "$work/generator-image/bench/plan.json"
     cp "$ROOT/bench/gke/gke.py" "$ROOT/bench/gke/generator.py" "$work/generator-image/bench/gke/"
   fi

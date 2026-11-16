@@ -355,6 +355,102 @@ class Definitions(unittest.TestCase):
         self.assertFalse((out / "results").exists())
 
 
+def planned(*argv):
+    """The run that `bench.py run` with `argv` would make, without starting
+    anything: its plan, its steps and its estimate. Raises BenchError for
+    a run it refuses."""
+    out = Path(tempfile.mkdtemp(prefix="smock-bench-test-"))
+    try:
+        return harness.Run(harness.arguments(["run", "--out", str(out / "results"), *argv]))
+    finally:
+        shutil.rmtree(out, ignore_errors=True)
+
+
+class GrpcVariant(unittest.TestCase):
+    """bench/definitions-grpc/, the gRPC variant of the definitions, is sent
+    its own mix, bench/requests-grpc.json, of gRPC calls, each with a body
+    from a file, in its own case, grpc-keep-alive of
+    bench/plan-autopilot.json: a run that serves the variant runs that case
+    alone, and a run of other definitions leaves it out. oha counts a call
+    by its HTTP status alone, which is 200 whatever its gRPC status."""
+
+    PLAN = str(BENCH / "plan-autopilot.json")
+    GRPC = str(BENCH / "definitions-grpc")
+
+    def test_a_run_of_the_grpc_variant_runs_grpc_keep_alive_alone_with_its_mix_and_every_call_gets_200(self):
+        out = bench(self, "--plan", self.PLAN, "--definitions", self.GRPC, "--profiles", "chart-default",
+                    "--rate", "100", *SHORT)
+        summary = read(out, "summary.json")
+        [result] = summary["cases"]
+        self.assertEqual((result["id"], result["protocol"], result["connection"], result["connections"],
+                          result["streams_per_connection"]),
+                         ("grpc-keep-alive@chart-default", "h2c", "keep-alive", 64, 1))
+        conditions = read(out, "conditions.json")
+        self.assertEqual(conditions["definitions"]["directory"], "bench/definitions-grpc")
+        self.assertEqual(conditions["definitions"]["digest"], definition_set_digest(BENCH / "definitions-grpc"))
+        self.assertEqual(conditions["request_mix"], {
+            "file": "bench/requests-grpc.json",
+            "sha256": hashlib.sha256((BENCH / "requests-grpc.json").read_bytes()).hexdigest(),
+            "weights": {"get-order": 60, "quote-order": 25, "track-order": 15},
+        })
+        # Every call got the HTTP status 200, the NOT_FOUND ones included,
+        # over the load generator's few connections.
+        self.assertEqual(result["errors"], 0)
+        self.assertEqual(result["requests"]["ok"], result["requests"]["scheduled"])
+        self.assertGreaterEqual(result["requests"]["ok"], 390)
+        self.assertEqual({kind["name"]: kind["connections"] for kind in result["per_request"]},
+                         {"get-order": 38, "quote-order": 16, "track-order": 10})
+        for kind in result["per_request"]:
+            self.assertGreater(kind["ok"], 0, kind["name"])
+            self.assertEqual((kind["ok"], kind["unexpected_status"]), (kind["scheduled"], 0), kind["name"])
+        self.assertLess(result["tcp_passive_opens"], result["connections"] + result["requests"]["scheduled"] / 4)
+        # Its CPU time a call, and idle RSS before it.
+        self.assertIsNotNone(result["smock_cpu"]["us_per_request"])
+        self.assertEqual([idle["profile"] for idle in summary["idle_rss"]], ["chart-default"])
+        self.assertIn("definition set ", (out / "summary.md").read_text())
+        self.assertIn("(bench/definitions-grpc, request mix bench/requests-grpc.json), on ",
+                      (out / "summary.md").read_text())
+
+    def test_a_run_of_the_grpc_variant_has_one_case_and_a_run_of_other_definitions_leaves_it_out(self):
+        # 1 case under 3 profiles at 8 rates, 24 steps of about 27 s and the
+        # pauses between them, with idle RSS under each profile: 11 minutes
+        # and some.
+        grpc = planned("--plan", self.PLAN, "--definitions", self.GRPC)
+        self.assertEqual({spec["case"] for spec in grpc.specs}, {"grpc-keep-alive"})
+        self.assertEqual(len(grpc.specs), 24)
+        self.assertEqual([profile["name"] for profile in grpc.idle_profiles],
+                         ["autopilot-burst-min", "autopilot-min", "chart-default"])
+        self.assertEqual(int(grpc.estimate_s() / 60), 11)
+        # Every other definitions directory runs every other case, and no
+        # more than before the case was in the plan.
+        plan = read(BENCH, "plan-autopilot.json")
+        without = Path(tempfile.mkdtemp(prefix="smock-bench-test-")) / "plan.json"
+        self.addCleanup(shutil.rmtree, without.parent, ignore_errors=True)
+        without.write_text(json.dumps({**plan, "cases": [case for case in plan["cases"]
+                                                         if case["name"] != "grpc-keep-alive"]}))
+        for definitions in ("definitions", "definitions-scenarios", "definitions-crud"):
+            run = planned("--plan", self.PLAN, "--definitions", str(BENCH / definitions))
+            before = planned("--plan", str(without), "--definitions", str(BENCH / definitions))
+            self.assertNotIn("grpc-keep-alive", {spec["case"] for spec in run.specs}, definitions)
+            self.assertEqual(run.specs, before.specs, definitions)
+            self.assertEqual(run.estimate_s(), before.estimate_s(), definitions)
+
+    def test_a_case_and_definitions_that_do_not_go_together_are_refused_before_anything_starts(self):
+        for argv, problem in (
+                (["--plan", self.PLAN, "--cases", "grpc-keep-alive"],
+                 "case grpc-keep-alive runs only when smock serves bench/definitions-grpc, not bench/definitions: "
+                 "give --definitions bench/definitions-grpc"),
+                (["--plan", self.PLAN, "--definitions", self.GRPC, "--cases", "grpc-keep-alive,http-keep-alive"],
+                 "a run that serves bench/definitions-grpc runs grpc-keep-alive alone: leave http-keep-alive out "
+                 "of --cases"),
+                (["--definitions", self.GRPC],
+                 "bench/plan.json has no case that runs when smock serves bench/definitions-grpc: run a plan that "
+                 "has one, such as bench/plan-autopilot.json")):
+            with self.assertRaises(harness.BenchError, msg=argv) as raised:
+                planned(*argv)
+            self.assertEqual(str(raised.exception), problem)
+
+
 class CpuLimits(unittest.TestCase):
     """smock runs under CPU limits of 250m, 500m, 1 and 2 cores, on CPUs of
     its own, apart from the load generator's."""
@@ -948,6 +1044,29 @@ class Protocols(unittest.TestCase):
         for protocol in ("http", "https"):
             self.assertIn("--disable-keepalive", self.command(protocol, "new-per-request"), protocol)
 
+    def test_a_request_with_a_body_file_sends_its_octets_with_d_from_the_file_in_place_of_a_string(self):
+        # A gRPC call's framed message holds NUL octets, which a command
+        # line cannot carry: oha reads them from the file, which bench/
+        # holds, on this machine and in the load generator's image.
+        request = {**self.REQUEST, "body": None, "bodyFile": "requests-grpc/get-order.grpc"}
+        body = (BENCH / "requests-grpc" / "get-order.grpc").read_bytes()
+        self.assertIn(b"\x00", body)
+        for protocol in ("http", "https", "h2c", "h2"):
+            command = harness.oha_request(protocol, request, "10.0.0.7", "8080")
+            self.assertEqual(option_value(command, "-D"), str(BENCH / "requests-grpc" / "get-order.grpc"), protocol)
+            self.assertNotIn("-d", command, protocol)
+            self.assertEqual(command[-1].rsplit("/", 1)[-1], "orders?page=2", protocol)
+        # A string body still goes with -d, and no body with neither.
+        self.assertNotIn("-D", self.command("h2c"))
+        command = harness.oha_request("h2c", {**self.REQUEST, "body": None}, "10.0.0.7", "8080")
+        self.assertFalse({"-d", "-D"} & set(command))
+        # Sent as raw HTTP/1.1, as an idle connection's request is, it is
+        # the file's octets, with their length.
+        raw = harness.raw_request(request)
+        head, sent = raw.split(b"\r\n\r\n", 1)
+        self.assertEqual(sent, body)
+        self.assertIn(f"Content-Length: {len(body)}".encode(), head.split(b"\r\n"))
+
     def test_a_multiplexed_case_sends_as_many_requests_at_once_on_each_connection_as_it_has_streams(self):
         # oha's -p: it runs connections times streams requests at once, each
         # connection carrying that many streams.
@@ -1260,20 +1379,25 @@ class AutopilotProfiles(unittest.TestCase):
         })
         cases = {c["name"]: c for c in plan["cases"]}
         self.assertEqual({name: (c["protocol"], c["connection"], c["connections"], c.get("streams_per_connection", 1),
-                                 c.get("local_only", False)) for name, c in cases.items()}, {
-            "http-keep-alive": ("http", "keep-alive", 64, 1, False),
-            "https-keep-alive": ("https", "keep-alive", 64, 1, False),
-            "h2c-keep-alive": ("h2c", "keep-alive", 64, 1, False),
-            "h2-keep-alive": ("h2", "keep-alive", 64, 1, False),
+                                 c.get("local_only", False), c.get("definitions"))
+                          for name, c in cases.items()}, {
+            "http-keep-alive": ("http", "keep-alive", 64, 1, False, None),
+            "https-keep-alive": ("https", "keep-alive", 64, 1, False, None),
+            "h2c-keep-alive": ("h2c", "keep-alive", 64, 1, False, None),
+            "h2-keep-alive": ("h2", "keep-alive", 64, 1, False, None),
             # About 64 requests at once, as in the others, but 4 at a time
             # on each of 16 connections; only on one machine.
-            "h2c-multiplexed": ("h2c", "keep-alive", 16, 4, True),
+            "h2c-multiplexed": ("h2c", "keep-alive", 16, 4, True, None),
+            # gRPC calls, as h2c-keep-alive sends requests, but only when
+            # smock serves the gRPC variant of the definitions.
+            "grpc-keep-alive": ("h2c", "keep-alive", 64, 1, False, "definitions-grpc"),
         })
         # The HTTP/2 cases differ from http-keep-alive in the protocol
-        # alone, and the multiplexed one in its connections, their streams
-        # and where it runs: its ladders included.
-        mine = ("name", "protocol", "connections", "streams_per_connection", "local_only")
-        for name in ("h2c-keep-alive", "h2-keep-alive", "h2c-multiplexed"):
+        # alone, the multiplexed one in its connections, their streams
+        # and where it runs, and the gRPC one in the definitions it runs
+        # against: their ladders included.
+        mine = ("name", "protocol", "connections", "streams_per_connection", "local_only", "definitions")
+        for name in ("h2c-keep-alive", "h2-keep-alive", "h2c-multiplexed", "grpc-keep-alive"):
             self.assertEqual({key: value for key, value in cases[name].items() if key not in mine},
                              {key: value for key, value in cases["http-keep-alive"].items() if key not in mine}, name)
         for case in cases.values():

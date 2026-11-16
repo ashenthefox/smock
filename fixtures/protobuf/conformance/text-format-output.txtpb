@@ -1,0 +1,6 @@
+# A message asked for in protobuf's text format, which smock does not
+# write.
+protobuf_payload: "\010\001"
+requested_output_format: TEXT_FORMAT
+message_type: "protobuf_test_messages.proto3.TestAllTypesProto3"
+test_category: TEXT_FORMAT_TEST

@@ -1,15 +1,22 @@
 import {
+  "smock/grpc",
   "smock/http1",
+  "smock/protobuf",
   "smock/re2",
   "smock/xml",
   "smock/yaml",
   "smock/smock/llm",
   "smock/smock/template",
   "moonbitlang/core/buffer",
+  "moonbitlang/core/encoding/base64",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/int",
   "moonbitlang/core/json",
 }
+
+import {
+  "moonbitlang/core/encoding/hex",
+} for "test"
 
 import {
   "moonbitlang/core/random",

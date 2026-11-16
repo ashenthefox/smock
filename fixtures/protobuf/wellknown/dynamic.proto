@@ -1,0 +1,47 @@
+// Written for smock's tests: methods whose types hold the well-known types
+// whose JSON forms hold any JSON value or a message of another type,
+// Struct, Value, ListValue, NullValue and Any: singular, repeated, as a
+// map's values, in a oneof, as a proto3 optional field, and as a method's
+// whole input or output type. The files of those types, under
+// google/protobuf/, are protobuf's. helloworld.proto is gRPC's: an Any
+// holds its HelloRequest, as it holds a Duration and an Empty, so the set
+// holds their files too.
+syntax = "proto3";
+
+package dynamic;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "helloworld.proto";
+
+service Documents {
+  // Every type, in one message.
+  rpc Put (Document) returns (Document);
+  // The types as a method's whole input or output type.
+  rpc Wrap (google.protobuf.Any) returns (google.protobuf.Any);
+  rpc Describe (google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc Echo (google.protobuf.Value) returns (google.protobuf.Value);
+  rpc List (google.protobuf.ListValue) returns (google.protobuf.ListValue);
+  // Types that only an Any holds, so that the set holds their files.
+  rpc Greet (helloworld.HelloRequest) returns (google.protobuf.Empty);
+  rpc Wait (google.protobuf.Duration) returns (google.protobuf.Empty);
+}
+
+message Document {
+  google.protobuf.Struct labels = 1;
+  google.protobuf.Value value = 2;
+  google.protobuf.ListValue list = 3;
+  google.protobuf.NullValue nothing = 4;
+  repeated google.protobuf.Value values = 5;
+  map<string, google.protobuf.Value> by_name = 6;
+  google.protobuf.Any attachment = 7;
+  repeated google.protobuf.Any attachments = 8;
+  oneof choice {
+    google.protobuf.NullValue none = 9;
+    string word = 10;
+  }
+  optional google.protobuf.NullValue maybe = 11;
+  repeated google.protobuf.NullValue nothings = 12;
+}

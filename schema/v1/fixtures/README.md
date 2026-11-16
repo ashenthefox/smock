@@ -48,6 +48,23 @@ disagree.
   key other than the literal `key`. So do CRUD Stubs: a `crud.bucket` that
   its Mock does not declare, or that has no `key`, and `crud.headers` that
   give two names that differ only in case.
+  So do rules that depend on whether a Stub is a gRPC Stub, which the
+  Schema cannot see, since a Stub is one when its exact path names a method
+  of its Mock's Descriptor set: an HTTP Stub's response without `status`,
+  an HTTP Stub's response that gives `grpc`, a gRPC Stub on a streaming
+  method, a gRPC Stub's `json` condition with a key that names no
+  field of the method's input type, a gRPC Stub that gives a field
+  that makes no sense on it, such as `query`, or a reply's `body` or `llm`,
+  or a `method` other than `POST`, and a gRPC Stub's `headers` that give a
+  name gRPC reserves, such as `grpc-foo` or a Content-Type. So do metadata
+  values that break gRPC's rules, in `headers` or `grpc.trailers`: a value
+  outside 0x20 to 0x7E, or a `-bin` value that is not base64. smock checks
+  them only when the response is not a template, which the Schema does not
+  tell apart. The Schema itself refuses, in `grpc.trailers`, names outside
+  gRPC's grammar and names that gRPC reserves. So do error details in
+  `grpc.details` whose `@type` names a type the Mock's set lacks, or that
+  do not fit their type: the Schema checks only that each is an object
+  with `@type`, and that only an error gives them.
 
 A field joins the Schema only together with smock's support for it, so no
 fixture is accepted by the Schema and rejected by smock for a field smock
@@ -55,9 +72,16 @@ lacks.
 
 Each definitions directory also gets the files under `body-files/` as its
 body-file subdirectory (`files/`, the default), so a fixture can refer to
-`users/1.json` with `bodyFile`, or to `orders.json` with a Data bucket's
-`jsonFile`. A fixture whose `bodyFile` or `jsonFile` names a file that is
-not there belongs in `invalid-beyond-schema/`.
+`users/1.json` with `bodyFile`, to `orders.json` with a Data bucket's
+`jsonFile`, or to `greeter.binpb`, the Descriptor set of gRPC's
+`helloworld.proto`, with a Mock's `grpc.descriptorSet`. A fixture whose
+`bodyFile`, `jsonFile` or `descriptorSet` names a file that is not there
+belongs in `invalid-beyond-schema/`, as does one whose `descriptorSet` names
+a file that does not decode as a Descriptor set, or a set that smock
+refuses: `orders-without-imports.binpb`, which lacks a file it imports, and
+`duplicate-name.binpb`, in which two files define one message.
+`greeter.binpb` and those two sets are copies that
+`scripts/gen-protobuf-fixtures.sh` writes (`fixtures/protobuf/README.md`).
 
 Adding a fixture is adding a file, named after what it shows and ending in
 `.json`, `.yaml` or `.yml`. `valid/users-from-jsonnet.json` is exported from

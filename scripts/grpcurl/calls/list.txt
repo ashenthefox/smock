@@ -1,0 +1,3 @@
+$ grpcurl -plaintext -authority greeter.svc localhost:8080 list
+grpc.health.v1.Health
+helloworld.Greeter

@@ -1,0 +1,2 @@
+# The ticket's example: an Any that holds a helloworld.HelloRequest.
+[type.googleapis.com/helloworld.HelloRequest] { name: "Tom" }

@@ -75,6 +75,16 @@ fn pick_response(ordinary : @definitions.Ordinary, draw : UInt64) -> Int32? {
 ///   too. A reply that takes more than `@llm.max_reply_bytes` once encoded
 ///   is a render error at the `llm` field, and its waits are not drawn.
 ///
+/// The reply to a gRPC call, when `grpc` is true, gets the plan's gRPC
+/// part last: the status of the response's `grpc`, `OK` without one, its
+/// message, as written or rendered after the body, its trailing metadata,
+/// as written or rendered after the message, its error details, as written
+/// with google.rpc.Status encoded when the files were loaded, or rendered
+/// after the trailing metadata, and the reply message encoded when the
+/// files were loaded, if it was. The header fields are its
+/// initial metadata. A rendered value of either that gRPC metadata cannot
+/// carry is a render error (`sent_metadata`).
+///
 /// Every template of the response renders in one rendering for the
 /// request: `context`, the one that the Stub's Variables left, or, without
 /// one, the request's first rendering, made here from `now`, `draw`,
@@ -93,6 +103,7 @@ fn plan_response(
   vars~ : Map[String, Json]?,
   data~ : Map[String, Json],
   copies~ : Map[String, Json]?,
+  grpc~ : Bool,
 ) -> ResponsePlan raise @template.RenderError {
   let status = response.status
   let mut context = context
@@ -126,21 +137,46 @@ fn plan_response(
       let headers = Array(capacity=fields.length() + room)
       for i in 0..<fields.length() {
         let field = fields[i]
-        headers.push((field.0, field.1.render(rendering)))
+        let value = field.1.render(rendering)
+        // A gRPC reply's headers are its initial metadata.
+        headers.push(
+          (
+            field.0,
+            if grpc {
+              sent_metadata(field.0, value, field.1.pointer)
+            } else {
+              value
+            },
+          ),
+        )
       }
       headers
     }
   }
-  match response.body {
+  let plan = match response.body {
     Bytes(bytes) =>
       if response.serves_ranges {
         range_response(status, headers, bytes, incoming.request)
       } else {
-        { status, headers, body: Bytes(bytes), delay_ms: 0, fault: None, }
+        {
+          status,
+          headers,
+          body: Bytes(bytes),
+          delay_ms: 0,
+          fault: None,
+          grpc: None,
+        }
       }
     Events(events) => {
       set_content_type(headers, "text/event-stream")
-      { status, headers, body: Events(events), delay_ms: 0, fault: None, }
+      {
+        status,
+        headers,
+        body: Events(events),
+        delay_ms: 0,
+        fault: None,
+        grpc: None,
+      }
     }
     Template(template) => {
       let rendering = rendering_for(
@@ -152,6 +188,7 @@ fn plan_response(
         data~,
         copies~,
       )
+      context = Some(rendering)
       render_body(status, headers, template, rendering)
     }
     Llm(llm) => {
@@ -190,9 +227,131 @@ fn plan_response(
           Events(sse_events(events, waits))
         }
       }
-      { status, headers, body, delay_ms: 0, fault: None, }
+      { status, headers, body, delay_ms: 0, fault: None, grpc: None, }
     }
   }
+  guard grpc else { return plan }
+  guard response.grpc is Some(reply) else {
+    return { ..plan, grpc: Some({ ..grpc_ok, encoded: response.encoded, }), }
+  }
+  let message = match reply.message {
+    None => None
+    Some(Written(text)) => Some(text)
+    Some(Templated(text)) => {
+      let rendering = rendering_for(
+        incoming,
+        context,
+        now~,
+        draw~,
+        vars~,
+        data~,
+        copies~,
+      )
+      context = Some(rendering)
+      Some(text.render(rendering))
+    }
+  }
+  let trailers = match reply.trailers {
+    Written(fields) => fields
+    Templated(fields) => {
+      let rendering = rendering_for(
+        incoming,
+        context,
+        now~,
+        draw~,
+        vars~,
+        data~,
+        copies~,
+      )
+      context = Some(rendering)
+      let trailers = Array(capacity=fields.length())
+      for i in 0..<fields.length() {
+        let field = fields[i]
+        trailers.push(
+          (
+            field.0,
+            sent_metadata(field.0, field.1.render(rendering), field.1.pointer),
+          ),
+        )
+      }
+      ReadOnlyArray::from_array(trailers)
+    }
+  }
+  // Details as written come with google.rpc.Status encoded at load;
+  // rendered ones have none, and the server encodes them.
+  let mut encoded_status : @definitions.EncodedStatus? = None
+  let details = match reply.details {
+    Written(details, encoded) => {
+      encoded_status = encoded
+      details
+    }
+    Templated(templates) => {
+      let rendering = rendering_for(
+        incoming,
+        context,
+        now~,
+        draw~,
+        vars~,
+        data~,
+        copies~,
+      )
+      let details = Array(capacity=templates.length())
+      for i in 0..<templates.length() {
+        details.push(templates[i].render_value(rendering))
+      }
+      ReadOnlyArray::from_array(details)
+    }
+  }
+  {
+    ..plan,
+    grpc: Some({
+      status: reply.status,
+      message,
+      trailers,
+      encoded: response.encoded,
+      details,
+      encoded_status,
+      own: false,
+    }),
+  }
+}
+
+///|
+/// `value`, the rendered value of the field `name`, in lower case, of a
+/// gRPC reply's metadata, as it is sent: as it is, when it holds only
+/// characters from 0x20 to 0x7E, or, for a `-bin` field, without its
+/// padding, when it is standard base64, padded or not.
+///
+/// Raises `RenderError` at `at`, the template's pointer, otherwise: gRPC
+/// metadata cannot carry it, and the call gets `template_failed`.
+fn sent_metadata(
+  name : String,
+  value : String,
+  at : String,
+) -> String raise @template.RenderError {
+  if @grpc.is_binary_name(name) {
+    guard @grpc.unpadded_base64(value) is Some(unpadded) else {
+      raise @template.RenderError(
+        at~,
+        message="the rendered value is not standard base64, which a field whose name ends with -bin holds",
+      )
+    }
+    return if unpadded.length() == value.length() {
+      value
+    } else {
+      unpadded.to_owned()
+    }
+  }
+  for c in value {
+    if c < ' ' || c > '~' {
+      let code = c.to_int().to_string(radix=16).to_upper().pad_start(4, '0')
+      raise @template.RenderError(
+        at~,
+        message="the rendered value holds U+\{code}, and gRPC metadata values hold only characters from 0x20 to 0x7E",
+      )
+    }
+  }
+  value
 }
 
 ///|
@@ -484,13 +643,21 @@ fn render_body(
       Events(ReadOnlyArray::from_array(rendered))
     }
   }
-  { status, headers, body, delay_ms: 0, fault: None, }
+  { status, headers, body, delay_ms: 0, fault: None, grpc: None, }
 }
 
 ///|
 /// The response to a request whose template could not be rendered: 500,
-/// with what went wrong.
-fn template_failed(stub : String, error : TemplateError) -> ResponsePlan {
+/// with what went wrong, or for a gRPC call (`grpc`), INTERNAL `template
+/// failed` in gRPC's form (`grpc_failure`).
+fn template_failed(
+  stub : String,
+  error : TemplateError,
+  grpc~ : Bool = false,
+) -> ResponsePlan {
+  if grpc {
+    return grpc_failure(Internal, template_failed_message)
+  }
   json_failure(500, {
     "error": "template failed",
     "stub": Json::string(stub),
@@ -498,6 +665,13 @@ fn template_failed(stub : String, error : TemplateError) -> ResponsePlan {
     "message": Json::string(error.message),
   })
 }
+
+///|
+/// The fixed `grpc-message` of smock's own INTERNAL to a gRPC call whose
+/// Stub's template could not be rendered, or whose rendered reply or error
+/// details do not fit their types, which the server finds when it encodes
+/// them.
+pub let template_failed_message : String = "template failed"
 
 ///|
 /// A response of smock's own that says what went wrong: `status`, with
@@ -509,5 +683,27 @@ fn json_failure(status : Int32, body : Json) -> ResponsePlan {
     body: Bytes(@template.compact_json_bytes(body)),
     delay_ms: 0,
     fault: None,
+    grpc: None,
+  }
+}
+
+///|
+/// smock's own answer to a gRPC call whose Stub could not serve its
+/// content: the gRPC status `status`, with the fixed ASCII `message`, such
+/// as `template failed`, which the server sends as Trailers-Only, and no
+/// delay or Fault. smock's own HTTP answers never reach a gRPC call: the
+/// HTTP status is 200, as gRPC sends every answer, and there is no body and
+/// no header field, so that the answer has no initial metadata. The
+/// Journal entry records `status` as the call's gRPC status, and the
+/// content error, if any, says why.
+fn grpc_failure(status : @grpc.Status, message : String) -> ResponsePlan {
+  {
+    status: 200,
+    // Room for the Smock-Mock field the Default Mock adds.
+    headers: Array(capacity=1),
+    body: Bytes(b""),
+    delay_ms: 0,
+    fault: None,
+    grpc: Some({ ..grpc_ok, status, message: Some(message), own: true, }),
   }
 }

@@ -1,0 +1,487 @@
+#!/bin/sh
+# Rebuilds every Descriptor set and every protoc-encoded message under
+# fixtures/protobuf/ from its .proto sources, into the committed paths, and
+# the copies of them that tests read elsewhere. It runs the protoc it finds:
+# $PROTOC, or else protoc on the PATH. fixtures/protobuf/README.md says how
+# to add a set and its messages, and which protoc built the committed bytes.
+#
+# The output depends only on the sources and on protoc's version: each set
+# is built with the same include directory, the same file names in the same
+# order, no source info and no source-retention options, and each message
+# with --deterministic_output. So two runs give the same bytes.
+#
+# With --check, which CI runs on every push, it writes nothing: it builds
+# every file into a temporary directory, and fails if a committed one
+# differs or is missing, naming each. It then needs the pinned protoc, the
+# one scripts/install-protoc.sh installs.
+#
+# usage: scripts/gen-protobuf-fixtures.sh [--check]
+set -eu
+cd "$(dirname "$0")/.."
+
+case ${1:-} in
+"") check="" ;;
+--check) check=true ;;
+*)
+  echo "usage: scripts/gen-protobuf-fixtures.sh [--check]" >&2
+  exit 2
+  ;;
+esac
+
+# The protoc that built the committed fixtures, as `protoc --version` says:
+# the one scripts/install-protoc.sh pins.
+built_with="libprotoc $(sed -n 's/^version=//p' scripts/install-protoc.sh)"
+
+protoc=${PROTOC:-protoc}
+if ! version=$("$protoc" --version 2>/dev/null); then
+  echo "gen-protobuf-fixtures: cannot run $protoc; install protoc with scripts/install-protoc.sh, or give its path in PROTOC" >&2
+  exit 2
+fi
+if [ "$version" != "$built_with" ]; then
+  if [ -n "$check" ]; then
+    echo "gen-protobuf-fixtures: $protoc is $version, not $built_with, which built the committed fixtures; install it with scripts/install-protoc.sh, and give its path in PROTOC" >&2
+    exit 2
+  fi
+  echo "gen-protobuf-fixtures: $protoc is $version, not $built_with, which built the committed fixtures; their bytes may change" >&2
+fi
+
+# Where the script writes: the repository, or with --check a temporary
+# directory, where each file has the path it is committed at. $written
+# lists those paths, one per line.
+out=.
+written=""
+if [ -n "$check" ]; then
+  out=$(mktemp -d)
+  trap 'rm -rf "$out"' EXIT
+fi
+
+# wrote <path>: notes that the script wrote <path>.
+wrote() {
+  written="$written$1
+"
+  [ -n "$check" ] || echo "gen-protobuf-fixtures: wrote $1"
+}
+
+# target <path>: the file to write for <path>, in a directory that exists.
+target() {
+  mkdir -p "$out/$(dirname "$1")"
+  echo "$out/$1"
+}
+
+fixtures=fixtures/protobuf
+
+# build_set <flags> <directory> <set> <file>...: builds the Descriptor set
+# of the .proto files of fixtures/protobuf/<directory>, named relative to
+# it, with protoc's <flags>, a list split on spaces, into
+# fixtures/protobuf/<directory>/<set>.
+build_set() {
+  flags=$1
+  dir=$fixtures/$2
+  path=$dir/$3
+  shift 3
+  # shellcheck disable=SC2086 # the flags are split on purpose
+  "$protoc" -I "$dir" $flags --descriptor_set_out="$(target "$path")" "$@"
+  wrote "$path"
+}
+
+# descriptor_set <directory> <set> <file>...: builds the Descriptor set of
+# the .proto files, with every file they import, into
+# fixtures/protobuf/<directory>/<set>.
+descriptor_set() {
+  build_set --include_imports "$@"
+}
+
+# message <directory> <proto file> <type> <name> [<proto file>...]:
+# encodes the message in fixtures/protobuf/<directory>/<name>.txtpb, in
+# protobuf's text format, as the type <type> of <proto file>, into
+# fixtures/protobuf/<directory>/<name>.binpb. The types of the other proto
+# files are in reach too, so an Any in the text can hold one of them.
+message() {
+  dir=$fixtures/$1
+  proto=$2
+  type=$3
+  path=$dir/$4.binpb
+  text=$dir/$4.txtpb
+  shift 4
+  "$protoc" -I "$dir" --encode="$type" --deterministic_output "$proto" "$@" <"$text" >"$(target "$path")"
+  wrote "$path"
+}
+
+# copy <fixture> <path>: copies a fixture, as the script built it, where a
+# test reads it.
+copy() {
+  cp "$out/$fixtures/$1" "$(target "$2")"
+  wrote "$2"
+}
+
+# hex_test <fixture> <name> <doc comment> <package> [<licence>]: writes the
+# fixture in hex as the string constant <name> of a test file of the
+# MoonBit package in <package>, for tests that read no files. <licence>, a
+# sentence that names the licence of files the fixture holds, goes in the
+# file's header.
+hex_test() {
+  hex_test_file test "$@"
+}
+
+# hex_wbtest <fixture> <name> <doc comment> <package> [<licence>]: the
+# same, in a whitebox test file of the package, <name>_wbtest.mbt. A
+# whitebox test reads the package's private items, and cannot read the
+# constants of its other tests.
+hex_wbtest() {
+  hex_test_file wbtest "$@"
+}
+
+# hex_test_file <kind> <fixture> <name> <doc comment> <package>
+# [<licence>]: writes the fixture in hex as the string constant <name> of
+# <package>/<name>_<kind>.mbt.
+hex_test_file() {
+  path=$5/$3_$1.mbt
+  {
+    echo "// Generated by scripts/gen-protobuf-fixtures.sh. Do not edit."
+    if [ -n "${6:-}" ]; then
+      echo "// $6"
+    fi
+    printf '\n///|\n/// %s\nlet %s : String =\n' "$4" "$3"
+    od -An -v -tx1 "$out/$fixtures/$2" | tr -d ' \n' | fold -w 64 | sed 's/^/  #|/'
+    echo
+  } >"$(target "$path")"
+  wrote "$path"
+}
+
+# hex_source <fixture> <name> <doc comment> <path> <licence>: writes the
+# fixture in hex as the string constant <name> of <path>, a source file of
+# a MoonBit package, for code that embeds it in smock. <licence>, a
+# sentence that names the licence of the files the fixture holds, goes in
+# the file's header.
+hex_source() {
+  path=$4
+  {
+    echo "// Generated by scripts/gen-protobuf-fixtures.sh. Do not edit."
+    echo "// $5"
+    printf '\n///|\n/// %s\nlet %s : String =\n' "$3" "$2"
+    od -An -v -tx1 "$out/$fixtures/$1" | tr -d ' \n' | fold -w 64 | sed 's/^/  #|/'
+    echo
+  } >"$(target "$path")"
+  wrote "$path"
+}
+
+# The fixtures. A new one goes at the end of this list, and a copy or a
+# hex_test after the fixture it takes.
+
+# gRPC's helloworld.proto, and the same rebuilt with one more field in each
+# message.
+descriptor_set helloworld greeter.binpb helloworld.proto
+descriptor_set helloworld-v2 greeter.binpb helloworld.proto
+copy helloworld/greeter.binpb schema/v1/fixtures/body-files/greeter.binpb
+hex_test helloworld/greeter.binpb greeter_set "The Descriptor set of gRPC's helloworld.proto, fixtures/protobuf/helloworld/greeter.binpb, in hex." protobuf
+hex_test helloworld/greeter.binpb greeter_set "The Descriptor set of gRPC's helloworld.proto, fixtures/protobuf/helloworld/greeter.binpb, in hex." definitions
+hex_test helloworld/greeter.binpb greeter_set "The Descriptor set of gRPC's helloworld.proto, fixtures/protobuf/helloworld/greeter.binpb, in hex." engine
+
+# A service whose methods reach types that gRPC Stubs serve, and types
+# they do not serve yet, from a proto3, a proto2 and an editions file.
+descriptor_set catalog catalog.binpb catalog.proto
+hex_test catalog/catalog.binpb catalog_set "The Descriptor set of fixtures/protobuf/catalog/catalog.proto, fixtures/protobuf/catalog/catalog.binpb, in hex." definitions
+hex_test catalog/catalog.binpb catalog_set "The Descriptor set of fixtures/protobuf/catalog/catalog.proto, fixtures/protobuf/catalog/catalog.binpb, in hex." engine
+
+# Every part of the descriptor model: proto2, proto3 and an edition, nested
+# types, enums with an alias, groups, extensions, maps, oneofs and streaming.
+descriptor_set model shop.binpb shop/orders.proto
+hex_test model/shop.binpb shop_set "The Descriptor set of fixtures/protobuf/model/shop/orders.proto and its imports, fixtures/protobuf/model/shop.binpb, in hex." protobuf
+
+# A set built without --include_imports, which lacks the file that
+# orders.proto imports.
+build_set "" orders orders-without-imports.binpb orders.proto
+copy orders/orders-without-imports.binpb schema/v1/fixtures/body-files/orders-without-imports.binpb
+
+# A set with source info and custom options, which smock skips.
+build_set "--include_imports --include_source_info" annotated annotated.binpb annotated.proto
+
+# The image that buf build -o writes for helloworld.proto with its defaults:
+# source info, and Buf's field 8042 in each file.
+message buf-image buf/alpha/image/v1/image.proto buf.alpha.image.v1.Image greeter
+
+# Sets that protoc would never write, written as text: a file twice, a name
+# defined twice, and types that do not resolve.
+message invalid google/protobuf/descriptor.proto google.protobuf.FileDescriptorSet twice
+message invalid google/protobuf/descriptor.proto google.protobuf.FileDescriptorSet duplicate-name
+message invalid google/protobuf/descriptor.proto google.protobuf.FileDescriptorSet unresolved
+copy invalid/duplicate-name.binpb schema/v1/fixtures/body-files/duplicate-name.binpb
+
+# A method whose types hold a oneof and a proto3 optional field.
+descriptor_set oneofs oneofs.binpb oneofs.proto
+hex_test oneofs/oneofs.binpb oneofs_set "The Descriptor set of fixtures/protobuf/oneofs/oneofs.proto, fixtures/protobuf/oneofs/oneofs.binpb, in hex." definitions
+
+# The request and reply of a call to SayHello, and messages of catalog.proto
+# with string, bool and int32 fields, which smock/protobuf decodes and
+# encodes.
+message helloworld helloworld.proto helloworld.HelloRequest hello-request
+message helloworld helloworld.proto helloworld.HelloReply hello-reply
+message catalog catalog.proto catalog.CountRequest count-request
+message catalog catalog.proto catalog.CountReply count-reply
+hex_test catalog/catalog.binpb catalog_set "The Descriptor set of fixtures/protobuf/catalog/catalog.proto, fixtures/protobuf/catalog/catalog.binpb, in hex." protobuf
+hex_test helloworld/hello-request.binpb hello_request "HelloRequest { name: \"Tom\" }, as protoc encodes it: fixtures/protobuf/helloworld/hello-request.binpb, in hex." protobuf
+hex_test helloworld/hello-reply.binpb hello_reply "HelloReply { message: \"Hello Tom\" }, as protoc encodes it: fixtures/protobuf/helloworld/hello-reply.binpb, in hex." protobuf
+hex_test catalog/count-request.binpb count_request "A CountRequest with a shelf that JSON escapes, and in_stock true, as protoc encodes it: fixtures/protobuf/catalog/count-request.binpb, in hex." protobuf
+hex_test catalog/count-reply.binpb count_reply "CountReply { count: -5, exact: true, shelf: \"A1\" }, as protoc encodes it: fixtures/protobuf/catalog/count-reply.binpb, in hex." protobuf
+hex_test oneofs/oneofs.binpb oneofs_set "The Descriptor set of fixtures/protobuf/oneofs/oneofs.proto, fixtures/protobuf/oneofs/oneofs.binpb, in hex." protobuf
+
+# Request messages of every scalar type, an enum with an alias, nested
+# messages and proto3 optional fields, and what a client may send in place
+# of an Order.
+descriptor_set scalars scalars.binpb scalars.proto
+message scalars scalars.proto scalars.Order order
+message scalars scalars.proto scalars.Every every-max
+message scalars scalars.proto scalars.Every every-min
+message scalars scalars.proto scalars.Every every-floats
+message scalars scalars.proto scalars.Every every-specials
+message scalars scalars.proto scalars.Every every-infinity
+message scalars scalars.proto scalars.Every every-presence
+message scalars scalars.proto scalars.OrderOnTheWire order-twice
+message scalars scalars.proto scalars.OrderOnTheWire order-newer
+message scalars scalars.proto scalars.OrderOnTheWire order-not-utf8
+hex_test scalars/scalars.binpb scalars_set "The Descriptor set of fixtures/protobuf/scalars/scalars.proto, fixtures/protobuf/scalars/scalars.binpb, in hex." protobuf
+hex_test scalars/scalars.binpb scalars_set "The Descriptor set of fixtures/protobuf/scalars/scalars.proto, fixtures/protobuf/scalars/scalars.binpb, in hex." definitions
+hex_test scalars/order.binpb order "The order of the ticket's example, as protoc encodes it: fixtures/protobuf/scalars/order.binpb, in hex." protobuf
+hex_test scalars/every-max.binpb every_max "An Every with each scalar field at its largest value, as protoc encodes it: fixtures/protobuf/scalars/every-max.binpb, in hex." protobuf
+hex_test scalars/every-min.binpb every_min "An Every with each signed scalar field at its smallest value, as protoc encodes it: fixtures/protobuf/scalars/every-min.binpb, in hex." protobuf
+
+# A method whose input type has fields of the well-known type Timestamp.
+descriptor_set stamped stamped.binpb stamped.proto
+
+# A service whose output types hold every proto3 field type but the
+# well-known types, and replies of them, which smock/protobuf encodes from
+# ProtoJSON.
+descriptor_set replies replies.binpb replies.proto
+message replies replies.proto replies.User user
+for reply in maxima minima specials lists maps choice inner; do
+  message replies replies.proto replies.Everything "$reply"
+done
+hex_test replies/replies.binpb replies_set "The Descriptor set of fixtures/protobuf/replies/replies.proto, fixtures/protobuf/replies/replies.binpb, in hex." protobuf
+hex_test replies/user.binpb user_reply "The User of fixtures/protobuf/replies/user.txtpb, as protoc encodes it, in hex." protobuf
+for reply in maxima minima specials lists maps choice inner; do
+  hex_test "replies/$reply.binpb" "everything_$reply" "The Everything of fixtures/protobuf/replies/$reply.txtpb, as protoc encodes it, in hex." protobuf
+done
+
+# Output types that reach well-known types that gRPC Stubs do not serve
+# yet, at the top or through nested messages, and a type of a proto2 file;
+# and an input type with well-known types that they do not serve yet.
+descriptor_set unserved unserved.binpb unserved.proto
+
+# A request of version 2 of helloworld.proto, which carries the field
+# version that version 1 lacks.
+message helloworld-v2 helloworld.proto helloworld.HelloRequest hello-request
+
+# Request messages with repeated fields, maps, a oneof and merged messages,
+# and what a client may send in place of them.
+descriptor_set collections collections.binpb collections.proto
+message collections collections.proto collections.Tagged tagged
+message collections collections.proto collections.TaggedOnTheWire tagged-counts
+message collections collections.proto collections.TaggedOnTheWire tagged-tags
+message collections collections.proto collections.Lists lists
+message collections collections.proto collections.ListsOnTheWire lists-on-the-wire
+message collections collections.proto collections.Lists lists-more
+message collections collections.proto collections.MapsOnTheWire maps
+message collections collections.proto collections.MapsOnTheWire maps-gaps
+message collections collections.proto collections.Choice choice-word
+message collections collections.proto collections.Choice choice-number
+message collections collections.proto collections.Choice choice-item
+message collections collections.proto collections.ChoiceOnTheWire choice-every
+message collections collections.proto collections.Choice box-first
+message collections collections.proto collections.Choice box-second
+hex_test collections/collections.binpb collections_set "The Descriptor set of fixtures/protobuf/collections/collections.proto, fixtures/protobuf/collections/collections.binpb, in hex." protobuf
+hex_wbtest collections/collections.binpb collections_set "The Descriptor set of fixtures/protobuf/collections/collections.proto, fixtures/protobuf/collections/collections.binpb, in hex." protobuf
+hex_test collections/tagged.binpb tagged "The Tagged of the ticket's example, as protoc encodes it: fixtures/protobuf/collections/tagged.binpb, in hex." protobuf
+hex_test collections/lists.binpb lists "A Lists with its scalars packed, as protoc encodes it: fixtures/protobuf/collections/lists.binpb, in hex." protobuf
+hex_test collections/lists-on-the-wire.binpb lists_on_the_wire "The values of lists.binpb with its scalars unpacked, as protoc encodes them: fixtures/protobuf/collections/lists-on-the-wire.binpb, in hex." protobuf
+
+# A method whose input type has the fields that gRPC Stubs' conditions are
+# checked and normalised against, and requests with floats that conditions
+# meet once normalised.
+descriptor_set users users.binpb users.proto
+message users users.proto users.Query query
+message users users.proto users.Query ratio-9-99
+message users users.proto users.Query ratio-16777217
+hex_test users/users.binpb users_set "The Descriptor set of fixtures/protobuf/users/users.proto, fixtures/protobuf/users/users.binpb, in hex." definitions
+
+# proto2 types, which smock serves with their required fields, closed
+# enums and packing, messages of them and what a client may send in place
+# of them; a MessageSet, a group, a type that an extension extends, and
+# types of an editions file, which it does not serve.
+descriptor_set shipping shipping.binpb shipping.proto
+message shipping shipping.proto shipping.Order order
+message shipping shipping.proto shipping.Draft draft
+message shipping shipping.proto shipping.Parcel parcel
+message shipping shipping.proto shipping.ParcelOnTheWire parcel-unknown
+message shipping shipping.proto shipping.ParcelOnTheWire carrier-unknown
+message shipping shipping.proto shipping.ParcelOnTheWire parcel-unpacked
+message shipping shipping.proto shipping.Parcel parcel-not-utf8
+message shipping shipping.proto shipping.ParcelOnTheWire parcel-without-ids
+hex_test shipping/shipping.binpb shipping_set "The Descriptor set of fixtures/protobuf/shipping/shipping.proto and its imports, fixtures/protobuf/shipping/shipping.binpb, in hex." protobuf
+hex_wbtest shipping/shipping.binpb shipping_set "The Descriptor set of fixtures/protobuf/shipping/shipping.proto and its imports, fixtures/protobuf/shipping/shipping.binpb, in hex." protobuf
+hex_test shipping/shipping.binpb shipping_set "The Descriptor set of fixtures/protobuf/shipping/shipping.proto and its imports, fixtures/protobuf/shipping/shipping.binpb, in hex." definitions
+hex_test shipping/parcel.binpb shipping_parcel "A Parcel with every field set, some at their defaults, as protoc encodes it: fixtures/protobuf/shipping/parcel.binpb, in hex." protobuf
+hex_test shipping/parcel-unknown.binpb shipping_unknown "Numbers that the closed enum State does not define, in place of a Parcel's, as protoc encodes them: fixtures/protobuf/shipping/parcel-unknown.binpb, in hex." protobuf
+hex_test shipping/parcel-not-utf8.binpb shipping_not_utf8 "A Parcel whose strings are not UTF-8, as protoc encodes it: fixtures/protobuf/shipping/parcel-not-utf8.binpb, in hex." protobuf
+
+# Methods whose types hold Timestamp, Duration, FieldMask, the wrappers and
+# Empty, built from protobuf's files beside them, and requests and replies
+# of them.
+wellknown_licence="It holds protobuf's files, under protobuf's licence: fixtures/protobuf/wellknown/LICENSE."
+descriptor_set wellknown wellknown.binpb wellknown.proto
+message wellknown wellknown.proto wellknown.Lease lease
+message wellknown wellknown.proto wellknown.Known known
+message wellknown wellknown.proto wellknown.Known known-defaults
+message wellknown wellknown.proto wellknown.Lease lease-too-late
+message wellknown google/protobuf/timestamp.proto google.protobuf.Timestamp now
+message wellknown google/protobuf/duration.proto google.protobuf.Duration wait
+message wellknown google/protobuf/wrappers.proto google.protobuf.FloatValue scale
+hex_test wellknown/wellknown.binpb wellknown_set "The Descriptor set of fixtures/protobuf/wellknown/wellknown.proto, fixtures/protobuf/wellknown/wellknown.binpb, in hex." protobuf "$wellknown_licence"
+hex_wbtest wellknown/wellknown.binpb wellknown_set "The Descriptor set of fixtures/protobuf/wellknown/wellknown.proto, fixtures/protobuf/wellknown/wellknown.binpb, in hex." protobuf "$wellknown_licence"
+hex_test wellknown/wellknown.binpb wellknown_set "The Descriptor set of fixtures/protobuf/wellknown/wellknown.proto, fixtures/protobuf/wellknown/wellknown.binpb, in hex." definitions "$wellknown_licence"
+hex_test wellknown/lease.binpb lease "The Lease of the ticket's example, as protoc encodes it: fixtures/protobuf/wellknown/lease.binpb, in hex." protobuf
+hex_test wellknown/known.binpb known "A Known with every field set, as protoc encodes it: fixtures/protobuf/wellknown/known.binpb, in hex." protobuf
+hex_test wellknown/known-defaults.binpb known_defaults "A Known with each singular field set to a message that holds its default, as protoc encodes it: fixtures/protobuf/wellknown/known-defaults.binpb, in hex." protobuf
+
+# A proto2 file with extensions, declared at the top level and in a
+# message, and with groups, and requests and replies of its types.
+descriptor_set extensions shop.binpb shop.proto
+message extensions shop.proto shop.Order order
+message extensions shop.proto shop.Order order-full
+message extensions shop.proto shop.Itinerary itinerary
+descriptor_set extensions edition.binpb edition.proto
+descriptor_set extensions reach.binpb reach.proto
+hex_test extensions/shop.binpb extensions_set "The Descriptor set of fixtures/protobuf/extensions/shop.proto, fixtures/protobuf/extensions/shop.binpb, in hex." protobuf
+hex_test extensions/shop.binpb extensions_set "The Descriptor set of fixtures/protobuf/extensions/shop.proto, fixtures/protobuf/extensions/shop.binpb, in hex." definitions
+hex_test extensions/order-full.binpb order_full "An Order with every field and every extension set, as protoc encodes it: fixtures/protobuf/extensions/order-full.binpb, in hex." protobuf
+hex_test extensions/itinerary.binpb itinerary "An Itinerary with groups nested in groups, as protoc encodes it: fixtures/protobuf/extensions/itinerary.binpb, in hex." protobuf
+hex_test extensions/edition.binpb edition_extensions_set "The Descriptor set of fixtures/protobuf/extensions/edition.proto and shop.proto, which it imports, fixtures/protobuf/extensions/edition.binpb, in hex." protobuf
+hex_test extensions/edition.binpb edition_extensions_set "The Descriptor set of fixtures/protobuf/extensions/edition.proto and shop.proto, which it imports, fixtures/protobuf/extensions/edition.binpb, in hex." definitions
+hex_test extensions/reach.binpb reach_extensions_set "The Descriptor set of fixtures/protobuf/extensions/reach.proto and its imports, fixtures/protobuf/extensions/reach.binpb, in hex." definitions
+
+# Methods whose types hold Struct, Value, ListValue, NullValue and Any,
+# built from protobuf's files and gRPC's helloworld.proto beside them, and
+# requests and replies of them.
+descriptor_set wellknown dynamic.binpb dynamic.proto
+for name in any-hello any-duration any-empty any-missing; do
+  message wellknown dynamic.proto google.protobuf.Any "$name"
+done
+message wellknown dynamic.proto dynamic.Document document
+message wellknown dynamic.proto dynamic.Document document-nulls
+message wellknown dynamic.proto google.protobuf.Struct struct
+message wellknown dynamic.proto google.protobuf.Value value
+message wellknown dynamic.proto google.protobuf.ListValue list
+hex_test wellknown/dynamic.binpb dynamic_set "The Descriptor set of fixtures/protobuf/wellknown/dynamic.proto, fixtures/protobuf/wellknown/dynamic.binpb, in hex." protobuf "$wellknown_licence"
+hex_wbtest wellknown/dynamic.binpb dynamic_set "The Descriptor set of fixtures/protobuf/wellknown/dynamic.proto, fixtures/protobuf/wellknown/dynamic.binpb, in hex." protobuf "$wellknown_licence"
+hex_test wellknown/dynamic.binpb dynamic_set "The Descriptor set of fixtures/protobuf/wellknown/dynamic.proto, fixtures/protobuf/wellknown/dynamic.binpb, in hex." definitions "$wellknown_licence"
+hex_test wellknown/document.binpb document "A Document with every field set, as protoc encodes it: fixtures/protobuf/wellknown/document.binpb, in hex." protobuf
+hex_test wellknown/document-nulls.binpb document_nulls "A Document of what a reply's nulls set, as protoc encodes it: fixtures/protobuf/wellknown/document-nulls.binpb, in hex." protobuf
+for name in any-hello any-duration any-empty any-missing; do
+  hex_test "wellknown/$name.binpb" "$(echo "$name" | tr - _)" "The Any of fixtures/protobuf/wellknown/$name.txtpb, as protoc encodes it, in hex." protobuf
+done
+
+# gRPC's health.proto, whose set smock embeds for its built-in health
+# service, and requests and replies of the service.
+descriptor_set health health.binpb grpc/health/v1/health.proto
+for name in check-greeter check-nope; do
+  message health grpc/health/v1/health.proto grpc.health.v1.HealthCheckRequest "$name"
+done
+for name in serving not-serving; do
+  message health grpc/health/v1/health.proto grpc.health.v1.HealthCheckResponse "$name"
+done
+for name in list-greeter list-greeter-not-serving; do
+  message health grpc/health/v1/health.proto grpc.health.v1.HealthListResponse "$name"
+done
+hex_source health/health.binpb health_set "The Descriptor set of gRPC's health.proto, fixtures/protobuf/health/health.binpb, in hex: the descriptor of the built-in health service." server/health_set.mbt "It holds gRPC's health.proto, under the Apache License 2.0, which NOTICE names."
+
+# gRPC's helloworld.proto with googleapis' error_details.proto, the error
+# details of gRPC Stubs, and the google.rpc.Status of replies with details,
+# encoded through googleapis' status.proto, which the set does not hold.
+details_licence="It holds protobuf's duration.proto, under protobuf's licence: fixtures/protobuf/details/LICENSE."
+descriptor_set details details.binpb helloworld.proto google/rpc/error_details.proto
+for name in error-info retry-info bad-request several templated; do
+  message details google/rpc/status.proto google.rpc.Status "$name" google/rpc/error_details.proto helloworld.proto
+done
+message details helloworld.proto helloworld.HelloRequest hello-ann
+for package in protobuf definitions engine; do
+  hex_test details/details.binpb details_set "The Descriptor set of gRPC's helloworld.proto and googleapis' google/rpc/error_details.proto, fixtures/protobuf/details/details.binpb, in hex." "$package" "$details_licence"
+done
+for name in error-info retry-info bad-request several; do
+  hex_test "details/$name.binpb" "$(echo "$name" | tr - _)_status" "The google.rpc.Status of fixtures/protobuf/details/$name.txtpb, as protoc encodes it, in hex." protobuf
+done
+# The set of the definition set that scripts/check-grpcurl.sh serves to
+# grpcurl, with protobuf's LICENSE beside it.
+copy details/details.binpb scripts/grpcurl/definitions/files/greeter.binpb
+
+# gRPC's reflection.proto, whose messages the tests of a Mock's built-in
+# reflection service send and expect: requests, and their replies. A reply
+# that carries files has an empty file_descriptor_response, which the
+# tests fill with the files of the sets below, each a set of one file
+# without source info, as reflection sends files: annotated.proto alone,
+# protobuf's descriptor.proto alone, and gRPC's health.proto built from its
+# own directory, so that the set names it health.proto.
+reflection_requests="list by-filename by-symbol by-extension extension-numbers health-symbol health-filename missing-file missing-symbol missing-extension missing-type"
+for name in $reflection_requests; do
+  message reflection grpc/reflection/v1/reflection.proto grpc.reflection.v1.ServerReflectionRequest "$name"
+done
+for name in $reflection_requests nothing list-health health-filename-missing; do
+  message reflection grpc/reflection/v1/reflection.proto grpc.reflection.v1.ServerReflectionResponse "$name-reply"
+done
+build_set "" annotated annotated-file.binpb annotated.proto
+build_set "" annotated descriptor-file.binpb google/protobuf/descriptor.proto
+"$protoc" -I "$fixtures/health/grpc/health/v1" --descriptor_set_out="$(target "$fixtures/reflection/health-proto.binpb")" health.proto
+wrote "$fixtures/reflection/health-proto.binpb"
+
+# A type that holds itself through a message field, a group and a map's
+# values, for the decoder's bound on nesting, and a message of it.
+descriptor_set limits limits.binpb limits.proto
+message limits limits.proto limits.Burrow burrow
+hex_test limits/limits.binpb limits_set "The Descriptor set of fixtures/protobuf/limits/limits.proto, fixtures/protobuf/limits/limits.binpb, in hex." protobuf
+hex_test limits/burrow.binpb burrow "A Burrow that holds another in each way, as protoc encodes it: fixtures/protobuf/limits/burrow.binpb, in hex." protobuf
+
+# A type of 60 fields without presence, each printed at its default, for
+# the decoder's bound on the values a message prints.
+descriptor_set limits wide.binpb wide.proto
+hex_test limits/wide.binpb wide_set "The Descriptor set of fixtures/protobuf/limits/wide.proto, fixtures/protobuf/limits/wide.binpb, in hex." protobuf
+
+# protobuf's conformance messages, proto3, proto2 and editions, whose set
+# the testee of protobuf's conformance suite decodes and encodes with
+# (protobuf-conformance/README.md), and requests of the suite's pipe
+# protocol, from protobuf's conformance.proto, each with the testee's
+# answer, named <request>-response.
+descriptor_set conformance conformance.binpb test_messages_proto3.proto test_messages_proto2.proto test_messages_proto3_editions.proto test_messages_proto2_editions.proto test_messages_edition2023.proto test_messages_edition_unstable.proto
+conformance_requests="binary-to-json json-to-binary json-to-json binary-to-binary text-format text-format-output editions not-protobuf unknown-type"
+for name in $conformance_requests; do
+  message conformance conformance.proto conformance.ConformanceRequest "$name"
+  message conformance conformance.proto conformance.ConformanceResponse "$name-response"
+done
+
+# The set of the gRPC Mock of the release benchmark's gRPC variant, which
+# bench/gen_definitions.py copies to bench/definitions-grpc/files/, and the
+# request messages of its mix, which bench/test_gen_definitions.py
+# compares with the ones that script encodes by hand.
+descriptor_set bench shop.binpb shop.proto
+message bench shop.proto bench.shop.v1.GetOrderRequest get-order
+message bench shop.proto bench.shop.v1.QuoteRequest quote-order
+message bench shop.proto bench.shop.v1.TrackOrderRequest track-order
+
+# The end of the list of fixtures. With --check: every file the script
+# wrote, compared with the committed one.
+if [ -n "$check" ]; then
+  count=0
+  stale=0
+  for path in $written; do
+    count=$((count + 1))
+    if [ ! -f "$path" ]; then
+      echo "gen-protobuf-fixtures: $path is missing: its sources build it" >&2
+      stale=$((stale + 1))
+    elif ! cmp -s "$out/$path" "$path"; then
+      echo "gen-protobuf-fixtures: $path differs from what its sources build" >&2
+      stale=$((stale + 1))
+    fi
+  done
+  if [ "$stale" -gt 0 ]; then
+    echo "gen-protobuf-fixtures: $stale of $count files are not what the script writes; run it with $built_with and commit the result" >&2
+    exit 1
+  fi
+  echo "gen-protobuf-fixtures: the $count files the script writes are up to date"
+fi

@@ -1,0 +1,21 @@
+// Written for smock's tests: a method whose input type has fields of the
+// well-known type Timestamp, singular, repeated and as map values.
+syntax = "proto3";
+
+package stamped;
+
+import "google/protobuf/timestamp.proto";
+
+service Clock {
+  rpc Stamp (Stamped) returns (Ack);
+}
+
+message Stamped {
+  google.protobuf.Timestamp at = 1;
+  repeated google.protobuf.Timestamp history = 2;
+  map<string, google.protobuf.Timestamp> by_name = 3;
+}
+
+message Ack {
+  bool ok = 1;
+}

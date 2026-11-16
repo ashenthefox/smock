@@ -1,0 +1,33 @@
+# RESOURCE_EXHAUSTED, with a message beyond ASCII and three details in
+# order: an ErrorInfo whose metadata map has two entries, a RetryInfo, and a
+# HelloReply, a type of the set that is not one of googleapis' details.
+# protoc writes the entries of a map in an Any in the order of the text, so
+# the text gives them sorted by key, as smock writes them.
+code: 8
+message: "try again ☺"
+details {
+  [type.googleapis.com/google.rpc.ErrorInfo] {
+    reason: "QUOTA"
+    domain: "greeter.svc"
+    metadata {
+      key: "burst"
+      value: "2"
+    }
+    metadata {
+      key: "limit"
+      value: "10"
+    }
+  }
+}
+details {
+  [type.googleapis.com/google.rpc.RetryInfo] {
+    retry_delay {
+      seconds: 30
+    }
+  }
+}
+details {
+  [type.googleapis.com/helloworld.HelloReply] {
+    message: "later"
+  }
+}

@@ -1,6 +1,8 @@
 members = [
   ".",
+  "./grpc",
   "./http1",
+  "./protobuf",
   "./re2",
   "./xml",
   "./yaml",

@@ -1,0 +1,10 @@
+# The google.rpc.Status of the ticket's example: NOT_FOUND, the message of
+# hello-unknown for a call for Ann, and its ErrorInfo.
+code: 5
+message: "no user called Ann"
+details {
+  [type.googleapis.com/google.rpc.ErrorInfo] {
+    reason: "USER_UNKNOWN"
+    domain: "greeter.svc"
+  }
+}

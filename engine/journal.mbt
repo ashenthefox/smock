@@ -18,9 +18,10 @@ pub struct JournalSettings {
   /// its fixed fields, two for each UTF-16 code unit of the text it holds
   /// (the request line, the header fields, the Session, Host, Mock and
   /// Stub names, the Scenario move, the names of the Variables and Data
-  /// buckets written, why a data write failed, the CRUD operation and its
-  /// key, and the Near miss), 32 for each value its Near miss keeps from a
-  /// form or an XML body, and the bytes of its truncated body.
+  /// buckets written, why a template or a data write failed, the CRUD
+  /// operation and its key, and the Near miss), 32 for each value its Near
+  /// miss keeps from a form or an XML body, and the bytes of its truncated
+  /// body.
   max_bytes : Int32
   /// The most bytes of a request body an entry keeps, and of the values its
   /// Near miss keeps from a form or an XML body, in total, each value
@@ -70,8 +71,11 @@ pub struct JournalEntry {
   /// The request as it was received, except that its body is only the
   /// first bytes, as many as the Journal keeps.
   request : Request
-  /// The length of the whole body, in bytes.
+  /// The length of the whole body, in bytes: for a gRPC call, the octets
+  /// its DATA frames brought, whose message the body holds decoded.
   body_size : Int32
+  /// Whether the body is cut at the Journal's body limit.
+  body_truncated : Bool
   /// The ID of the Stub that matched, if any.
   stub : String?
   /// Where the Stub that matched comes from, if one did.
@@ -104,15 +108,20 @@ pub struct JournalEntry {
   /// The Near miss, when no Stub matched and the Mock had candidates.
   near_miss : NearMiss?
   /// The response status, or `None` when a connection Fault ended the
-  /// request before a status was written.
-  status : Int32?
+  /// request before a status was written. A gRPC reply's is 200.
+  mut status : Int32?
+  /// The gRPC status a gRPC call got: its plan's, or the one the server
+  /// sets with `set_grpc_status` before it commits the entry. `None` for an
+  /// HTTP request, and for a gRPC call that a connection Fault ended before
+  /// a status was written.
+  mut grpc_status : @grpc.Status?
   /// The connection Fault injected instead of the response, if any.
-  fault : @definitions.ConnectionKind?
+  mut fault : @definitions.ConnectionKind?
   /// Why the Stub's template could not be rendered, when it could not: the
-  /// client then got a 500.
-  template_error : TemplateError?
+  /// client then got a 500, or, for a gRPC call, INTERNAL.
+  mut template_error : TemplateError?
   /// The bytes the entry counts against the Journal's byte bound.
-  priv size : Int32
+  priv mut size : Int32
 }
 
 ///|
@@ -121,6 +130,31 @@ pub struct JournalEntry {
 pub fn JournalEntry::finish(self : JournalEntry, at~ : Int64) -> Unit {
   let duration = at - self.received_at
   self.duration_ms = Some(if duration < 0L { 0L } else { duration })
+}
+
+///|
+/// Sets the gRPC status that the entry's call really got, `status`, when
+/// it ends otherwise than its plan said, and, when one is given, the
+/// template error `template_error`, which says why, in place of the one the
+/// entry has. The HTTP status stays as it is.
+///
+/// The server calls it before it commits the entry, since the error's text
+/// counts toward the entry's bytes under the Journal's byte bound, two
+/// bytes for each UTF-16 code unit, as the entry's other text does;
+/// `finish` still runs after the commit.
+pub fn JournalEntry::set_grpc_status(
+  self : JournalEntry,
+  status : @grpc.Status,
+  template_error? : TemplateError,
+) -> Unit {
+  self.grpc_status = Some(status)
+  if template_error is Some(error) {
+    if self.template_error is Some(old) {
+      self.size -= 2 * (old.at.length() + old.message.length())
+    }
+    self.size += 2 * (error.at.length() + error.message.length())
+    self.template_error = Some(error)
+  }
 }
 
 ///|
@@ -175,6 +209,7 @@ fn Journal::entry(
   content_error~ : ContentError?,
   crud~ : CrudCall?,
   near_miss~ : NearMiss?,
+  body_size~ : Int32,
   plan~ : ResponsePlan,
   digest~ : String,
   now~ : Int64,
@@ -275,7 +310,8 @@ fn Journal::entry(
     } else {
       request
     },
-    body_size: request.body.length(),
+    body_size,
+    body_truncated: truncated,
     stub,
     stub_source,
     scenario,
@@ -286,6 +322,12 @@ fn Journal::entry(
     crud,
     near_miss,
     status,
+    // A call that a reset or close Fault ends gets no status, gRPC's no more
+    // than HTTP's.
+    grpc_status: match plan.grpc {
+      Some(part) if status is Some(_) => Some(part.status)
+      _ => None
+    },
     fault: plan.fault,
     template_error,
     size: 256 + 2 * text + body.length() + value_overhead * values,
@@ -463,6 +505,7 @@ let vacated : JournalEntry = {
   digest: "",
   request: { meth: "", target: "", version: "", headers: [], body: b"", },
   body_size: 0,
+  body_truncated: false,
   stub: None,
   stub_source: None,
   scenario: None,
@@ -473,6 +516,7 @@ let vacated : JournalEntry = {
   crud: None,
   near_miss: None,
   status: None,
+  grpc_status: None,
   fault: None,
   template_error: None,
   size: 0,
@@ -917,7 +961,7 @@ pub impl ToJson for JournalEntry with fn to_json(self) {
   let optional = (value : String?) => {
     value.map_or(Json::null(), value => Json::string(value))
   }
-  {
+  let members : Map[String, Json] = {
     "seq": Json::number(self.seq.to_double()),
     "receivedAt": Json::string(@log.format_time(self.received_at)),
     "durationMs": self.duration_ms.map_or(Json::null(), ms => {
@@ -938,7 +982,11 @@ pub impl ToJson for JournalEntry with fn to_json(self) {
           "value": Json::string(header.1),
         }),
       ),
-      "body": body_json(self.request.body, size=self.body_size),
+      "body": body_json(
+        self.request.body,
+        size=self.body_size,
+        truncated=self.body_truncated,
+      ),
     },
     "stub": optional(self.stub),
     "stubSource": optional(self.stub_source.map(source => source.name())),
@@ -964,9 +1012,17 @@ pub impl ToJson for JournalEntry with fn to_json(self) {
     "status": self.status.map_or(Json::null(), status => {
       Json::number(status.to_double())
     }),
-    "fault": self.fault.map_or(Json::null(), kind => Json::string(kind.name())),
-    "templateError": self.template_error.map_or(Json::null(), error => {
-      ToJson::to_json(error)
-    }),
   }
+  // Only a gRPC call's entry has it, after its HTTP status: an HTTP
+  // request's entry is as it was before gRPC.
+  if self.grpc_status is Some(status) {
+    members["grpcStatus"] = Json::string(status.name())
+  }
+  members["fault"] = self.fault.map_or(Json::null(), kind => {
+    Json::string(kind.name())
+  })
+  members["templateError"] = self.template_error.map_or(Json::null(), error => {
+    ToJson::to_json(error)
+  })
+  Json::object(members)
 }

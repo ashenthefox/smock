@@ -1,0 +1,15 @@
+mocks:
+  - name: greeter
+    grpc:
+      descriptorSet: greeter.binpb
+stubs:
+  - id: hello-missing
+    mock: greeter
+    request:
+      path: /helloworld.Greeter/SayHello
+    response:
+      grpc:
+        status: NOT_FOUND
+        details:
+          - "@type": type.googleapis.com/google.rpc.ErrorInfo
+            reason: USER_UNKNOWN

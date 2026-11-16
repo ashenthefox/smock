@@ -1,8 +1,12 @@
 // The `check` warnings: problems that do not make a definition set invalid.
-// There are two: a shadowed Stub, which can never match because an earlier
-// Stub of the same Mock always matches first; and a Stub that requires a
-// state of a Scenario that no Stub in the files moves to. A warning is only
-// reported when it can be proven, so it is never a false positive.
+// There are four: a shadowed Stub, which can never match because an
+// earlier Stub of the same Mock and of the same kind, gRPC or HTTP, always
+// matches first; a Stub that requires a state of a Scenario that no Stub in
+// the files moves to; an HTTP Stub whose path looks like a gRPC method's
+// but names no method of its Mock's Descriptor set, which gRPC calls never
+// reach; and a gRPC Stub's static reply with a block of metadata over
+// 8 KiB, which a gRPC client may refuse. A warning is only reported when it
+// can be proven, so it is never a false positive.
 
 ///|
 /// A warning about a valid definition set: the file it is in, a JSON
@@ -33,6 +37,13 @@ pub fn Warning::to_string(self : Warning) -> String {
 ///
 /// - if an earlier Stub of its Mock shadows it, a warning at the Stub that
 ///   names the first one that does;
+/// - if its Mock has a Descriptor set, and it is an HTTP Stub whose exact
+///   path has the form of a gRPC method's, `/package.Service/Method`
+///   (`has_method_form`), but names no method of the set, a warning at its
+///   path: it may be a gRPC Stub with a typo, which gRPC calls never reach;
+/// - if it is a gRPC Stub, a warning at each static reply of it with a
+///   block of metadata over `grpc_client_metadata_size`, 8 KiB, counted as
+///   `metadata_blocks` counts it: gRPC lets a client refuse such a block;
 /// - if it requires a state other than `initial_state` that no Stub of its
 ///   Mock moves its Scenario to, a warning at its `requires`. The state is
 ///   not proven unreachable, since the Admin API or an Ephemeral Stub can
@@ -58,6 +69,44 @@ pub fn Snapshot::warnings(self : Snapshot) -> Array[Warning] {
           message: "the Stub \{stub.id.escape()} can never match: the Stub \{earlier.id.escape()} at \{earlier_at} is tried first and matches every request this one would",
         })
       }
+      if mock.descriptor_set is Some(set) &&
+        stub.serves
+        is Ordinary(
+          {
+            grpc_method: None,
+            request: { path: Some(Has(Exact(path))), .. },
+            ..
+          }
+        ) &&
+        has_method_form(path) &&
+        set.find_method(path) is None {
+        out.push({
+          file,
+          pointer: "\{pointer}/request/path",
+          message: "the Stub \{stub.id.escape()} is an HTTP Stub that gRPC calls never reach: its path has the form of a gRPC method, /package.Service/Method, but the Mock's Descriptor set has no method \{path[1:]}",
+        })
+      }
+      if stub.serves
+        is Ordinary({ grpc_method: Some(_), responses, total_weight, .. }) {
+        for j, weighted in responses {
+          let at = match total_weight {
+            Some(_) => "\{pointer}/responses/\{j}"
+            None => "\{pointer}/response"
+          }
+          guard metadata_blocks(weighted.response) is Some(blocks) else {
+            continue
+          }
+          for block in blocks {
+            if block.size > grpc_client_metadata_size {
+              out.push({
+                file,
+                pointer: at,
+                message: "the reply's \{block.name} would take \{block.size} bytes, over \{grpc_client_metadata_size}, the size gRPC lets a client limit each block of a reply's metadata to: such a client fails the call",
+              })
+            }
+          }
+        }
+      }
       guard stub.scenario() is Some({ name, requires: Some(state), .. }) &&
         state != initial_state &&
         !(moves.get(name) is Some(states) && states.contains(state)) else {
@@ -71,6 +120,34 @@ pub fn Snapshot::warnings(self : Snapshot) -> Array[Warning] {
     }
   }
   out
+}
+
+///|
+/// Whether `path` has the form of the path of a gRPC call,
+/// `/package.Service/Method`: `/`, the full name of a service in a package,
+/// `/` and the name of a method. The full name is two or more names joined
+/// by `.`, and each name is a protobuf identifier (`is_identifier`). So
+/// `/users/1` and `/v1.2/items` do not have it.
+fn has_method_form(path : String) -> Bool {
+  guard path.has_prefix("/") else { return false }
+  let names = path[1:].split("/").collect()
+  guard names is [service, rpc] else { return false }
+  let parts = service.split(".").collect()
+  parts.length() >= 2 && parts.all(is_identifier) && is_identifier(rpc)
+}
+
+///|
+/// Whether `name` is a protobuf identifier: a letter or `_`, then letters,
+/// digits and `_`.
+fn is_identifier(name : StringView) -> Bool {
+  let mut first = true
+  for c in name {
+    guard c is ('a'..<='z' | 'A'..<='Z' | '_') || (!first && c is ('0'..<='9')) else {
+      return false
+    }
+    first = false
+  }
+  !first
 }
 
 ///|
@@ -108,7 +185,14 @@ fn moves_of(stubs : ReadOnlyArray[Stub]) -> Map[String, Set[String]] {
 /// A partial overlap is not reported: an ordinary Stub with no method
 /// condition after a CRUD Stub still matches the methods the CRUD Stub
 /// does not serve.
+///
+/// Only Stubs of one kind shadow each other: a gRPC Stub and an HTTP Stub
+/// never do, since gRPC calls match only gRPC Stubs, and HTTP requests
+/// only HTTP Stubs.
 fn shadows(t : Stub, s : Stub) -> Bool {
+  if t.is_grpc() != s.is_grpc() {
+    return false
+  }
   match (t.serves, s.serves) {
     (Ordinary(t), Ordinary(s)) =>
       in_states_of(t, s) && request_shadows(t.request, s.request)

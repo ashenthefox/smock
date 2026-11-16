@@ -1,0 +1,11 @@
+# What a reply's null sets: null_value in a Value and in a Struct's and a
+# ListValue's values, and a NullValue field with presence. A NullValue
+# field without presence holds its default, which protoc leaves out.
+labels { fields { key: "gone" value { null_value: NULL_VALUE } } }
+value { null_value: NULL_VALUE }
+list { values { null_value: NULL_VALUE } }
+values { null_value: NULL_VALUE }
+by_name { key: "gone" value { null_value: NULL_VALUE } }
+none: NULL_VALUE
+maybe: NULL_VALUE
+nothings: [NULL_VALUE]

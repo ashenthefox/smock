@@ -96,13 +96,35 @@ pub struct Mock {
   /// Whether the Journal records the requests the Mock answers: the Mock's
   /// `journal`, true by default.
   journal : Bool
+  /// The Descriptor set that the Mock's `grpc.descriptorSet` names,
+  /// decoded, or `None` when it names none.
+  descriptor_set : @protobuf.DescriptorSet?
+  /// Whether the Mock's built-in health service, `grpc.health.v1.Health`,
+  /// answers the gRPC calls to it that no Stub is on: the Mock's
+  /// `grpc.health`, false by default.
+  health : Bool
+  /// When the Mock's `grpc.reflection` turns its built-in reflection
+  /// service on, `grpc.reflection.v1` and `v1alpha`, the files of its
+  /// Descriptor set that the service answers with: each file, in the order
+  /// of the set's `files`, as the set encodes it but without its
+  /// SourceCodeInfo, none for a Mock without a set. `None` when reflection
+  /// is off, as by default: such a Mock keeps nothing more than its set's
+  /// model.
+  reflection : ReadOnlyArray[Bytes]?
   /// The Stubs of this Mock, in the order they are tried: by priority,
   /// lower numbers first and Stubs without a priority last; Stubs of equal
   /// priority in declaration order, that is file-name order, then position
   /// in the file.
   stubs : ReadOnlyArray[Stub]
-  /// The match index of `stubs`, which `candidates` looks up.
+  /// The Stubs that HTTP requests are matched against: `stubs` without the
+  /// gRPC Stubs, in the same order. It is `stubs` itself when the Mock has
+  /// no gRPC Stub.
+  http_stubs : ReadOnlyArray[Stub]
+  /// The match index of `http_stubs`, which `candidates` looks up.
   priv index : MatchIndex
+  /// The gRPC Stubs of the Mock by their exact path, each list in matching
+  /// order, which `grpc_candidates` looks up.
+  priv grpc_stubs : Map[String, ReadOnlyArray[Stub]]
   /// The Scenarios that the Mock's Stubs name, each with its file states,
   /// in byte-wise order of their names. A Scenario has no declaration: it
   /// exists because Stubs name it.
@@ -175,6 +197,25 @@ pub enum Serves {
 }
 
 ///|
+/// Whether the Stub is a gRPC Stub: an ordinary Stub whose exact path names
+/// a method of its Mock's Descriptor set. Every other Stub, CRUD Stubs
+/// included, is an HTTP Stub.
+pub fn Stub::is_grpc(self : Stub) -> Bool {
+  self.serves is Ordinary({ grpc_method: Some(_), .. })
+}
+
+///|
+/// The path of the method that the Stub is on, when it is a gRPC Stub, such
+/// as `/helloworld.Greeter/SayHello`: a gRPC call reaches it by that
+/// `:path` alone. `None` for an HTTP Stub.
+pub fn Stub::grpc_path(self : Stub) -> String? {
+  match self.serves {
+    Ordinary(ordinary) => ordinary.grpc_path()
+    Crud(_) => None
+  }
+}
+
+///|
 /// The Stub's Scenario clause, if it has one: an ordinary Stub's
 /// `scenario`, and none for a CRUD Stub, which has no Scenario clause.
 pub fn Stub::scenario(self : Stub) -> ScenarioClause? {
@@ -208,6 +249,22 @@ pub struct Ordinary {
   /// The writes to Data buckets the Stub makes when it matches, in the
   /// order written, `dataWrites`: none when it has no `dataWrites`.
   data_writes : ReadOnlyArray[DataWrite]
+  /// The method of its Mock's Descriptor set that the Stub's exact path
+  /// names, when it is a gRPC Stub. HTTP requests never match a gRPC Stub.
+  /// `None` for an HTTP Stub.
+  grpc_method : @protobuf.MethodDescriptor?
+}
+
+///|
+/// The path of the method that the Stub is on, when what it serves is a
+/// gRPC Stub's: its exact path, which names `grpc_method`. `None` for an
+/// HTTP Stub's.
+pub fn Ordinary::grpc_path(self : Ordinary) -> String? {
+  guard self.grpc_method is Some(_) &&
+    self.request.path is Some(Has(Exact(path))) else {
+    return None
+  }
+  Some(path)
 }
 
 ///|
@@ -771,7 +828,10 @@ pub struct Response {
   /// The header fields, in the order written, their values as written or
   /// text templates. A header given an array has one field per value, in
   /// array order. A `json` body adds `Content-Type: application/json` at
-  /// the end unless one is given.
+  /// the end unless one is given. A gRPC Stub's are its reply's initial
+  /// metadata: their names are in lower case, a `json` reply adds none, and
+  /// a value of a `-bin` field as written is held without its base64
+  /// padding.
   headers : ResponseHeaders
   /// What the response sends, as one kind that says how it is made: as
   /// written, or rendered for each request.
@@ -788,6 +848,132 @@ pub struct Response {
   /// `data.NAME`: only then does its rendering look up the Session's copies
   /// of them.
   reads_data : Bool
+  /// The reply message of a gRPC Stub's response without templates: its
+  /// `json`, or an empty message without one, encoded with the method's
+  /// output type when the files were loaded. `None` for an HTTP Stub's
+  /// response, for a templated one, whose message is encoded once rendered,
+  /// and for an error, whose reply has no message.
+  encoded : EncodedMessage?
+  /// A gRPC Stub's `grpc`: the status its reply ends with, and its status
+  /// message. `None` without one, so for every HTTP Stub's response: a
+  /// gRPC Stub's reply then ends with `OK` and no message.
+  grpc : GrpcReply?
+}
+
+///|
+/// What a gRPC Stub's response gives in `grpc`: how its reply ends.
+#derive(Debug, Eq)
+pub struct GrpcReply {
+  /// The status, `OK` unless `status` names another. Never a template.
+  status : @grpc.Status
+  /// The status message, which the server percent-encodes into
+  /// `grpc-message`; `None` without `message`.
+  message : GrpcMessage?
+  /// The trailing metadata, from `trailers`, sent after the status and the
+  /// message: fields in the order written, with their names in lower case,
+  /// one per value of a name given an array. A value of a `-bin` field as
+  /// written is held without its base64 padding. With `template` on, the
+  /// values are text templates, rendered as header values are, after the
+  /// message.
+  trailers : ResponseHeaders
+  /// The error details, from `details`, which an error's reply sends in
+  /// google.rpc.Status, in `grpc-status-details-bin`. None without
+  /// `details`.
+  details : GrpcDetails
+}
+
+///|
+/// The error details of a gRPC Stub's reply: each an Any in ProtoJSON, an
+/// object whose `@type` names a type of the Mock's set beside the fields of
+/// its message.
+#derive(Debug, Eq)
+pub enum GrpcDetails {
+  /// As written, in the order written, with google.rpc.Status built from
+  /// the reply's status, its message and the details, encoded when the
+  /// files were loaded. `None` without details.
+  Written(ReadOnlyArray[Json], EncodedStatus?)
+  /// With `template` on: each detail a structured template, parsed when
+  /// the definition set was loaded or the Stub was added, and rendered for
+  /// each call after the trailing metadata, then encoded.
+  Templated(ReadOnlyArray[@template.Structured])
+}
+
+///|
+/// No error details: those of a reply without `details`.
+pub let no_grpc_details : GrpcDetails = Written(
+  ReadOnlyArray::from_array([]),
+  None,
+)
+
+///|
+/// google.rpc.Status of a gRPC reply with error details as written, built
+/// when the files were loaded.
+pub struct EncodedStatus {
+  /// The set it was encoded with, whose types the details' are. The reply
+  /// sends it only while that set is served.
+  set : @protobuf.DescriptorSet
+  /// The value of `grpc-status-details-bin`: the status, in protobuf's
+  /// binary encoding, in standard base64 without padding, as the octets of
+  /// its ASCII.
+  value : Bytes
+}
+
+///|
+/// Encoded statuses are equal when they are encoded with the same set, not
+/// merely an equal one, into the same value.
+pub impl Eq for EncodedStatus with fn equal(self, other) {
+  physical_equal(self.set, other.set) && self.value == other.value
+}
+
+///|
+/// Shows the value.
+pub impl Debug for EncodedStatus with fn to_repr(self) {
+  Repr::ctor("EncodedStatus", [(Some("value"), Debug::to_repr(self.value))])
+}
+
+///|
+/// The status message of a gRPC Stub's reply.
+#derive(Debug, Eq)
+pub enum GrpcMessage {
+  /// As written.
+  Written(String)
+  /// With `template` on: a text template, parsed when the definition set
+  /// was loaded or the Stub was added, and rendered for each call after the
+  /// reply message. The control characters it renders are kept.
+  Templated(@template.Text)
+}
+
+///|
+/// Whether the reply ends with a status other than `OK`: an error, which
+/// has no reply message.
+pub fn Response::is_grpc_error(self : Response) -> Bool {
+  self.grpc is Some({ status, .. }) && !(status is Ok)
+}
+
+///|
+/// A gRPC reply message, encoded when the files were loaded.
+pub struct EncodedMessage {
+  /// The output type it was encoded with. The message is one of the method
+  /// it answers only while the set that defines this type is served.
+  output : @protobuf.MessageDescriptor
+  /// The message, in protobuf's binary encoding.
+  message : Bytes
+}
+
+///|
+/// Encoded messages are equal when they are encoded with the same output
+/// type, not merely an equal one, into the same octets.
+pub impl Eq for EncodedMessage with fn equal(self, other) {
+  physical_equal(self.output, other.output) && self.message == other.message
+}
+
+///|
+/// Shows the output type by its full name, and the message.
+pub impl Debug for EncodedMessage with fn to_repr(self) {
+  Repr::ctor("EncodedMessage", [
+    (Some("output"), Repr::string(self.output.full_name)),
+    (Some("message"), Debug::to_repr(self.message)),
+  ])
 }
 
 ///|
@@ -1142,9 +1328,10 @@ pub fn load(
   set : DefinitionSet,
   read_problems~ : Array[Diagnostic] = [],
   env~ : @template.Env = @template.no_env,
+  header_size_limit~ : Int32 = default_header_size_limit,
   digest? : String,
 ) -> Result[Snapshot, Array[Diagnostic]] {
-  match validate(set, read_problems~, env~) {
+  match validate(set, read_problems~, env~, header_size_limit~) {
     Ok(valid) => {
       let digest = match digest {
         Some(digest) => digest
@@ -1171,19 +1358,27 @@ pub fn load(
 /// `--template-env` lists them, with the values the caller read: by
 /// default, none. A template that reads another name is a problem. The
 /// values are not part of the digest.
+///
+/// `header_size_limit` is `--header-size-limit`, the most octets each
+/// block of a gRPC reply's metadata may take: a static reply with a larger
+/// block is a problem.
 pub fn validate(
   set : DefinitionSet,
   read_problems~ : Array[Diagnostic] = [],
   env~ : @template.Env = @template.no_env,
+  header_size_limit~ : Int32 = default_header_size_limit,
 ) -> Result[ValidSet, Array[Diagnostic]] {
   let files = sorted_by_name(set.files).map(file => {
     (file.0, parse_file(file.0, file.1))
   })
+  let body_files = Map::from_array(set.body_files)
   let reader = Reader::new(
     declared=declared_mocks(files),
     buckets=declared_buckets(files),
-    body_files=Map::from_array(set.body_files),
+    body_files~,
     env~,
+    sets=declared_sets(files, body_files),
+    header_size_limit~,
   )
   for file in files {
     reader.read_file(file.0, file.1)
@@ -1216,8 +1411,13 @@ pub fn ValidSet::snapshot(self : ValidSet, digest~ : String) -> Snapshot {
           no_match_status: 404,
           no_match_headers: ReadOnlyArray::from_array([]),
           journal: true,
+          descriptor_set: None,
+          health: false,
+          reflection: None,
           stubs: ReadOnlyArray::from_array([]),
+          http_stubs: ReadOnlyArray::from_array([]),
           index: MatchIndex::new(ReadOnlyArray::from_array([])),
+          grpc_stubs: no_grpc_stubs,
           scenarios: ReadOnlyArray::from_array([]),
           buckets: ReadOnlyArray::from_array([]),
           initial_data: Map([]),
@@ -1235,6 +1435,13 @@ pub fn ValidSet::snapshot(self : ValidSet, digest~ : String) -> Snapshot {
         reader.stubs.iter().filter(stub => stub.mock == mock.name).collect(),
       ),
     )
+    // HTTP requests never match a gRPC Stub, so they are split off here,
+    // and an HTTP request pays nothing for them.
+    let http_stubs = if stubs.iter().any(stub => stub.is_grpc()) {
+      ReadOnlyArray::from_iter(stubs.iter().filter(stub => !stub.is_grpc()))
+    } else {
+      stubs
+    }
     let buckets = []
     let initial_data = Map([])
     for declared in reader.buckets {
@@ -1249,8 +1456,17 @@ pub fn ValidSet::snapshot(self : ValidSet, digest~ : String) -> Snapshot {
       no_match_status: mock.no_match_status,
       no_match_headers: ReadOnlyArray::from_array(mock.no_match_headers),
       journal: mock.journal,
+      descriptor_set: mock.descriptor_set,
+      health: mock.health,
+      reflection: mock.reflection,
       stubs,
-      index: MatchIndex::new(stubs),
+      http_stubs,
+      index: MatchIndex::new(http_stubs),
+      grpc_stubs: if http_stubs.length() == stubs.length() {
+        no_grpc_stubs
+      } else {
+        grpc_stubs_by_path(stubs)
+      },
       scenarios: scenarios_of(stubs),
       buckets: ReadOnlyArray::from_array(buckets),
       initial_data,

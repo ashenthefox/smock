@@ -88,15 +88,20 @@ async fn Smock::presented_certificate(self : Smock, dir : String) -> Presented {
   let name = "presented-\{@fs.readdir(dir).length()}.pem"
   write(dir, name, output[start:stop + end.length()].to_owned() + "\n")
   let file = "\{dir}/\{name}"
+  // The fingerprint has a call of its own: OpenSSL 4.1.0 prints a wrong one
+  // when `-ext` is in the same call.
+  let (_, digest) = run_openssl([
+    "x509", "-in", file, "-noout", "-fingerprint", "-sha256",
+  ])
   // RFC 2253 prints names the same in every OpenSSL version: OpenSSL 3.0's
   // default writes `CN = name`, later versions `CN=name`.
   let (_, text) = run_openssl([
-    "x509", "-in", file, "-noout", "-fingerprint", "-sha256", "-subject", "-issuer",
-    "-nameopt", "RFC2253", "-ext", "subjectAltName",
+    "x509", "-in", file, "-noout", "-subject", "-issuer", "-nameopt", "RFC2253",
+    "-ext", "subjectAltName",
   ])
   {
     file,
-    fingerprint: line_after(text, "sha256 Fingerprint="),
+    fingerprint: line_after(digest, "sha256 Fingerprint="),
     names: line_following(text, "X509v3 Subject Alternative Name"),
     subject: line_after(text, "subject="),
     issuer: line_after(text, "issuer="),

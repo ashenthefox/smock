@@ -1,0 +1,4 @@
+# The ticket's example: a Timestamp 1.5 s after the epoch, and a Duration
+# of 1.5 s.
+created_at { seconds: 1 nanos: 500000000 }
+ttl { seconds: 1 nanos: 500000000 }

@@ -1,0 +1,3 @@
+# A Duration of -0.5 s, as a method's whole request: no seconds, and
+# negative nanos.
+nanos: -500000000
