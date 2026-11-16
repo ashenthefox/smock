@@ -143,3 +143,24 @@ test "the text may pass the limit by one octet after `wrapped` and never by two,
     content="11 octets in a buffer of 11, and the next: error: the decoded message passes the limit of 10 octets",
   )
 }
+
+///|
+test "an object with a member keeps every octet it has when its braces come off, so a text that it leaves one octet past the limit is refused then, by `unwrap` itself: no octet need follow the object to be refused in its place" {
+  let out = Output::new(size_hint=0, limit=10)
+  out.write_bytes(b"0123")
+  // An object whose braces are to come off, with a member: its `}` is the
+  // octet past the limit, and its `{` becomes a comma. Through
+  // `decode_json` only an Any that is the whole message ends so
+  // (limits_test.mbt): anywhere else an octet follows the object.
+  let at = out.wrapped()
+  out.write_bytes(b"{\"a\":1}")
+  let unwrapped = try out.unwrap(at) catch {
+    err => "error: \{err}"
+  } noraise {
+    _ => "kept"
+  }
+  inspect(
+    "\{out.length} octets, and when the braces come off: \{unwrapped}",
+    content="11 octets, and when the braces come off: error: the decoded message passes the limit of 10 octets",
+  )
+}

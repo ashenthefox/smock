@@ -610,7 +610,7 @@ fn swept(set : @protobuf.DescriptorSet, name : String, input : Bytes) -> String 
 }
 
 ///|
-test "the JSON is held to every limit wherever an Any is printed: last, first and in the middle of its message, in a list, in a map and in another Any, with a message of no field, one with a field and a well-known type, in the first room made for the text or past it" {
+test "the JSON is held to every limit wherever an Any is printed: as the whole message, last, first and in the middle of its message, in a list, in a map and in another Any, with a message of no field, one with a field and a well-known type, in the first room made for the text or past it" {
   let set = any_holders()
   let url = (name : String) => "type.googleapis.com/\{name}"
   // An F whose name is `name`.
@@ -670,6 +670,10 @@ test "the JSON is held to every limit wherever an Any is printed: last, first an
     })
   }
   let cases : Array[(String, Bytes)] = [
+    // The Any as the whole message, holding a message with a field: the
+    // text ends with that message's brace, so nothing is printed after
+    // the Any's object that a limit one octet short could refuse instead.
+    ("google.protobuf.Any", filled),
     // The Any alone, last, first and in the middle of its message.
     ("e.Only", only(empty)),
     ("e.Only", only(filled)),
@@ -719,6 +723,7 @@ test "the JSON is held to every limit wherever an Any is printed: last, first an
   inspect(
     out.join("\n"),
     content=(
+      #|held: {"@type":"type.googleapis.com/e.F","name":"Tom"}
       #|held: {"a":{"@type":"type.googleapis.com/e.E"}}
       #|held: {"a":{"@type":"type.googleapis.com/e.F","name":"Tom"}}
       #|held: {"pad":"p","a":{"@type":"type.googleapis.com/e.E"}}
