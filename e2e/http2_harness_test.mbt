@@ -979,8 +979,11 @@ async fn RawH2::frames_until_ping_acked(self : RawH2, since : Int64) -> Frames {
 /// `due`, what came on it, a line each: its HEADERS with their fields, each
 /// DATA with its octets as text, as `data` shows them, and how it ended.
 /// `due` gives, for each stream, when its HEADERS are due and then when
-/// each DATA is, in milliseconds after `start`, and each line says whether
-/// it came then (`arrival`).
+/// each DATA is, in milliseconds after `start`. A frame due later says
+/// whether it came then (`arrival`). A frame due at once, at 0, says `at
+/// once` when it came before every frame due later, on any stream of the
+/// connection: smock sends a connection's frames in one order, so that
+/// order, not the runner's speed, shows that it did not wait.
 async fn H2Client::timeline(
   self : H2Client,
   start~ : Int64,
@@ -992,13 +995,21 @@ async fn H2Client::timeline(
     seen[stream.0] = []
   }
   let mut open = due.length()
+  // Whether a frame due later than at once has come, on any stream.
+  let later = Ref(false)
   let when = (stream : Int32, ms : Int64) => {
     let lines = seen.get(stream).unwrap()
     let times = due.filter(entry => entry.0 == stream)[0].1
-    if lines.length() < times.length() {
-      arrival(ms, times[lines.length()])
-    } else {
+    if lines.length() >= times.length() {
+      later.val = true
       "at \{ms} ms, after the frames due"
+    } else if times[lines.length()] > 0 {
+      later.val = true
+      arrival(ms, times[lines.length()])
+    } else if later.val {
+      "at \{ms} ms, after a frame due later"
+    } else {
+      "at once"
     }
   }
   while open > 0 {

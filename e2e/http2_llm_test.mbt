@@ -161,7 +161,12 @@ async test "h2c: an llm stream with fixed waits sends its HEADERS and opening ch
       // The HEADERS go out at once, so the waits, counted from them, count
       // from the request too: the opening chunk at once, the pieces "Hi t",
       // "here" and "!" 400, 700 and 1000 ms after the HEADERS, then the
-      // closing chunk and [DONE] right after the last piece.
+      // closing chunk and [DONE] right after the last piece
+      // (docs/definition-files/llm-responses.md, Timing: "`first` is the
+      // wait before the first piece, and `interval` the wait before each
+      // later one"). What is due at once comes before the first piece, the
+      // fast stream's too, which is answered meanwhile (docs/http2.md,
+      // Streams that wait).
       let shown = client.timeline(
         start~,
         due=[(stream, [0, 0, 400, 700, 1000, 1000, 1000]), (hello, [0, 0])],
@@ -172,8 +177,8 @@ async test "h2c: an llm stream with fixed waits sends its HEADERS and opening ch
         [shown, "---", ..entries].join("\n"),
         content=(
           #|stream 1:
-          #|  HEADERS at 0 ms: :status: 200, content-type: text/event-stream, x-request-id: req_TZp9I060Mzd0w4SDwiWTe2c8, smock-mock: openai; via=default, date: <now>
-          #|  DATA at 0 ms: opening chunk
+          #|  HEADERS at once: :status: 200, content-type: text/event-stream, x-request-id: req_TZp9I060Mzd0w4SDwiWTe2c8, smock-mock: openai; via=default, date: <now>
+          #|  DATA at once: opening chunk
           #|  DATA at 400 ms: piece "Hi t"
           #|  DATA at 700 ms: piece "here"
           #|  DATA at 1000 ms: piece "!"
@@ -181,8 +186,8 @@ async test "h2c: an llm stream with fixed waits sends its HEADERS and opening ch
           #|  DATA at 1000 ms: [DONE]
           #|  end
           #|stream 3:
-          #|  HEADERS at 0 ms: :status: 200, smock-mock: openai; via=default, date: <now>, content-length: 5
-          #|  DATA at 0 ms: "hello"
+          #|  HEADERS at once: :status: 200, smock-mock: openai; via=default, date: <now>, content-length: 5
+          #|  DATA at once: "hello"
           #|  end
           #|---
           #|/hello: stub "hello", status 200

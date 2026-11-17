@@ -126,6 +126,10 @@ async test "h2c: several event streams on one connection each stream their event
       let second = client.send("GET", "/events", authority="localhost")
       let late = client.send("GET", "/late", authority="localhost")
       let hello = client.send("GET", "/hello", authority="localhost")
+      // The event streams' HEADERS "go out at once", and the connection's
+      // "other HTTP/2 streams are answered meanwhile" (docs/http2.md,
+      // Server-Sent Events): before any frame due later. Each event goes
+      // out "after its delay".
       let shown = client.timeline(start~, due=[
         (first, [0, ..news_due]),
         (second, [0, ..news_due]),
@@ -137,13 +141,13 @@ async test "h2c: several event streams on one connection each stream their event
         [shown, "---", ..entries].join("\n"),
         content=(
           #|stream 1:
-          #|  HEADERS at 0 ms: :status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>
+          #|  HEADERS at once: :status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>
           #|  DATA at 400 ms: "data: first\n\n"
           #|  DATA at 700 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
           #|  DATA at 700 ms: "data: last\n\n"
           #|  end
           #|stream 3:
-          #|  HEADERS at 0 ms: :status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>
+          #|  HEADERS at once: :status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>
           #|  DATA at 400 ms: "data: first\n\n"
           #|  DATA at 700 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
           #|  DATA at 700 ms: "data: last\n\n"
@@ -154,8 +158,8 @@ async test "h2c: several event streams on one connection each stream their event
           #|  DATA at 500 ms: "data: b\n\n"
           #|  end
           #|stream 7:
-          #|  HEADERS at 0 ms: :status: 200, date: <now>, content-length: 5
-          #|  DATA at 0 ms: "hello"
+          #|  HEADERS at once: :status: 200, date: <now>, content-length: 5
+          #|  DATA at once: "hello"
           #|  end
           #|---
           #|/hello: stub "hello", status 200
@@ -333,6 +337,10 @@ async test "h2c: an events response with no body, to HEAD, with status 204 or wi
       let late = client.send("HEAD", "/late", authority="localhost")
       let gone = client.send("GET", "/gone", authority="localhost")
       let empty = client.send("GET", "/empty", authority="localhost")
+      // The HEADERS "go out at once, or after the Stub's delay", and such a
+      // response is its HEADERS alone, "which end the HTTP/2 stream at
+      // once" (docs/http2.md, Server-Sent Events): those due at once come
+      // before the delayed stream's.
       let shown = client.timeline(start~, due=[
         (head, [0]),
         (late, [300]),
@@ -344,16 +352,16 @@ async test "h2c: an events response with no body, to HEAD, with status 204 or wi
         [shown, "---", ..entries].join("\n"),
         content=(
           #|stream 1:
-          #|  HEADERS at 0 ms: :status: 200, content-type: text/event-stream, date: <now>
+          #|  HEADERS at once: :status: 200, content-type: text/event-stream, date: <now>
           #|  end
           #|stream 3:
           #|  HEADERS at 300 ms: :status: 200, content-type: text/event-stream, date: <now>
           #|  end
           #|stream 5:
-          #|  HEADERS at 0 ms: :status: 204, content-type: text/event-stream, date: <now>
+          #|  HEADERS at once: :status: 204, content-type: text/event-stream, date: <now>
           #|  end
           #|stream 7:
-          #|  HEADERS at 0 ms: :status: 200, content-type: text/event-stream, date: <now>
+          #|  HEADERS at once: :status: 200, content-type: text/event-stream, date: <now>
           #|  end
           #|---
           #|/events: stub "stream", status 200
