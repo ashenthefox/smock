@@ -185,6 +185,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-check-schema.sh
 
+      # build-test.yml runs the user documents' examples with the release
+      # binary (scripts/check-doc-examples.py). This tests that check
+      # with a smock and a jsonnet that answer as the test tells them.
+      - name: Test the check of the documents' examples
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-doc-examples.sh
+
       # --- The tools that judge the tests -----------------------------------
 
       # scripts/coverage.sh runs the in-process tests under coverage and

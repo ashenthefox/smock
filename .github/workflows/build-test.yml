@@ -344,6 +344,19 @@ jobs:
       - name: Cross-check the JSON Schema with smock
         run: scripts/check-schema.sh dist/smock
 
+      # The examples of the user documents, run with this binary on every
+      # push, so that one that stops working fails the push that broke
+      # it: smock check on every whole Definition file, with the context
+      # that scripts/doc-examples/ keeps for it; the Mockoon guide's smock
+      # check and smock render commands, whose output must be what the
+      # guide prints; and the Jsonnet example, exported with the pinned
+      # jsonnet, which is checked against its SHA-256.
+      - name: Install jsonnet
+        run: scripts/install-jsonnet.sh "$RUNNER_TEMP/bin"
+
+      - name: Run the documents' examples with smock
+        run: python3 scripts/check-doc-examples.py dist/smock
+
       # The binary that scripts/build-release.sh made above and the image
       # packs, handed to the SDK job and to ci.yml's job keep, which keeps
       # it as smock-linux-<arch> once every job passed and removes this

@@ -464,6 +464,15 @@ message bench shop.proto bench.shop.v1.GetOrderRequest get-order
 message bench shop.proto bench.shop.v1.QuoteRequest quote-order
 message bench shop.proto bench.shop.v1.TrackOrderRequest track-order
 
+# The set that the health example of docs/grpc/services-and-connections.md
+# says to build, of gRPC's helloworld.proto and health.proto, with the
+# command it shows, but for the include directories. scripts/doc-examples/
+# holds it for that example (scripts/check-doc-examples.py).
+"$protoc" -I "$fixtures/helloworld" -I "$fixtures/health" --include_imports \
+  --descriptor_set_out="$(target scripts/doc-examples/greeter-health.binpb)" \
+  helloworld.proto grpc/health/v1/health.proto
+wrote scripts/doc-examples/greeter-health.binpb
+
 # The end of the list of fixtures. With --check: every file the script
 # wrote, compared with the committed one.
 if [ -n "$check" ]; then

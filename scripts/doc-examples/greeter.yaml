@@ -1,0 +1,8 @@
+# The Mock greeter as docs/definition-files/grpc.md declares it first, for
+# the examples that use it without declaring it. Its set is the gRPC quick
+# start's (docs/grpc.md), which context.txt gives as files/greeter.binpb.
+mocks:
+  - name: greeter
+    hosts: [greeter.svc]
+    grpc:
+      descriptorSet: greeter.binpb

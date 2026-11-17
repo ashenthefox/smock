@@ -1,0 +1,89 @@
+# The context that whole Definition files of the user documents leave out,
+# which scripts/check-doc-examples.py gives each of them before it runs
+# smock check. Each line gives one file to one example:
+#
+#   <document> <example> <path> <source>
+#
+# <example> is the example's number among the whole Definition files of
+# <document>, counted from 1, as the check prints it beside the line of
+# its fence. <path> is where the file goes in the example's definitions
+# directory, and <source> the file of the tree it is a copy of. An example
+# that its document shows whole needs no line.
+
+# The gRPC quick start's set, of helloworld.proto and error_details.proto
+# (docs/grpc.md, Quick start), for examples that declare a Mock with
+# greeter.binpb.
+docs/grpc.md 1 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/grpc.md 2 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/grpc.md 4 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/definition-files/grpc.md 1 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/definition-files/grpc.md 2 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/definition-files/grpc.md 3 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/grpc/services-and-connections.md 1 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/grpc/services-and-connections.md 2 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/grpc/services-and-connections.md 4 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/grpc/unmatched-and-refused-calls.md 1 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+
+# Two versions of one package, for the two Mocks of "One set per Mock" and
+# "The call's Mock" (docs/grpc.md): helloworld.proto, and the same with one
+# more field in each message.
+docs/grpc.md 3 files/v1/greeter.binpb fixtures/protobuf/helloworld/greeter.binpb
+docs/grpc.md 3 files/v2/greeter.binpb fixtures/protobuf/helloworld-v2/greeter.binpb
+docs/grpc.md 5 files/v1/greeter.binpb fixtures/protobuf/helloworld/greeter.binpb
+docs/grpc.md 5 files/v2/greeter.binpb fixtures/protobuf/helloworld-v2/greeter.binpb
+
+# The set that "A Stub wins" (docs/grpc/services-and-connections.md) says
+# to build, with health.proto, which its Stubs on the health service need.
+# scripts/gen-protobuf-fixtures.sh builds it.
+docs/grpc/services-and-connections.md 3 files/greeter.binpb scripts/doc-examples/greeter-health.binpb
+
+# gRPC Stubs of the Mock greeter, which an earlier example declares.
+docs/grpc.md 6 greeter.yaml scripts/doc-examples/greeter.yaml
+docs/grpc.md 6 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/definition-files/grpc.md 4 greeter.yaml scripts/doc-examples/greeter.yaml
+docs/definition-files/grpc.md 4 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/definition-files/grpc.md 5 greeter.yaml scripts/doc-examples/greeter.yaml
+docs/definition-files/grpc.md 5 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/definition-files/grpc.md 6 greeter.yaml scripts/doc-examples/greeter.yaml
+docs/definition-files/grpc.md 6 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/definition-files/grpc.md 7 greeter.yaml scripts/doc-examples/greeter.yaml
+docs/definition-files/grpc.md 7 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/grpc/metadata-and-status.md 1 greeter.yaml scripts/doc-examples/greeter.yaml
+docs/grpc/metadata-and-status.md 1 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/grpc/metadata-and-status.md 2 greeter.yaml scripts/doc-examples/greeter.yaml
+docs/grpc/metadata-and-status.md 2 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/grpc/state-and-faults.md 1 greeter.yaml scripts/doc-examples/greeter.yaml
+docs/grpc/state-and-faults.md 1 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/grpc/state-and-faults.md 2 greeter.yaml scripts/doc-examples/greeter.yaml
+docs/grpc/state-and-faults.md 2 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/grpc/state-and-faults.md 3 greeter.yaml scripts/doc-examples/greeter.yaml
+docs/grpc/state-and-faults.md 3 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+docs/grpc/state-and-faults.md 4 greeter.yaml scripts/doc-examples/greeter.yaml
+docs/grpc/state-and-faults.md 4 files/greeter.binpb scripts/grpcurl/definitions/files/greeter.binpb
+
+# Stubs of the Mock petstore, which the generated file declares.
+docs/importing-openapi.md 4 petstore.yaml scripts/doc-examples/petstore.yaml
+docs/importing-openapi.md 5 petstore.yaml scripts/doc-examples/petstore.yaml
+docs/importing-openapi.md 6 petstore.yaml scripts/doc-examples/petstore.yaml
+docs/openapi/what-is-generated.md 1 petstore.yaml scripts/doc-examples/petstore.yaml
+docs/openapi/what-is-generated.md 2 petstore.yaml scripts/doc-examples/petstore.yaml
+
+# The worked example's Mock, and the body files of its whole Definition
+# file, which are in docs/examples/from-mockoon/defs/files/.
+docs/mockoon/worked-example.md 3 users-api.yaml scripts/doc-examples/users-api.yaml
+docs/mockoon/worked-example-state.md 1 users-api.yaml scripts/doc-examples/users-api.yaml
+docs/mockoon/worked-example-state.md 2 users-api.yaml scripts/doc-examples/users-api.yaml
+docs/mockoon/worked-example-result.md 1 files/users.json docs/examples/from-mockoon/defs/files/users.json
+docs/mockoon/worked-example-result.md 1 files/inactive-users.json docs/examples/from-mockoon/defs/files/inactive-users.json
+
+# Buckets and CRUD Stubs of the Mock shop, with "files/orders.json holding
+# orders 1001 to 1003".
+docs/definition-files/crud-stubs.md 1 shop.yaml scripts/doc-examples/shop.yaml
+docs/definition-files/crud-stubs.md 1 files/orders.json scripts/doc-examples/orders.json
+docs/definition-files/data-buckets.md 1 shop.yaml scripts/doc-examples/shop.yaml
+docs/definition-files/data-buckets.md 1 files/orders.json scripts/doc-examples/orders.json
+docs/definition-files/data-buckets.md 2 shop.yaml scripts/doc-examples/shop.yaml
+
+# Stubs of Mocks that their documents use and do not declare.
+docs/definition-files/matching.md 1 llm.yaml scripts/doc-examples/llm.yaml
+docs/definition-files/scenarios.md 2 orders.yaml scripts/doc-examples/orders.yaml

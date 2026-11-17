@@ -306,6 +306,8 @@ scripts/test-openssl-asan.sh   # the OpenSSL bindings under AddressSanitizer and
 scripts/build-release.sh       # dist/smock
 dist/smock --version
 scripts/check-schema.sh dist/smock   # the JSON Schema and smock agree
+scripts/install-jsonnet.sh     # the pinned jsonnet, into ~/.local/bin
+python3 scripts/check-doc-examples.py dist/smock   # every whole Definition file in the user documents passes smock check, and the Mockoon guide's and the Jsonnet example's commands do what the documents say (needs jsonnet and jq)
 scripts/install-h2spec.sh      # the pinned h2spec, into ~/.local/bin
 scripts/check-h2spec.sh dist/smock   # h2spec's conformance cases against the plain and TLS ports (needs h2spec, python3 and jq)
 scripts/install-grpcurl.sh     # the pinned grpcurl, into ~/.local/bin
@@ -339,6 +341,7 @@ scripts/test-sbom.sh                 # the SBOM scripts, and the check that the 
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
 scripts/test-yaml-test-suite-verdict.sh   # how a run of yaml-test-suite is judged against its lists of cases
 scripts/test-check-schema.sh         # the JSON Schema cross-check, with a fake validator and a fake smock (needs jq)
+scripts/test-check-doc-examples.sh   # the check of the documents' examples, with a fake smock and a fake jsonnet (needs python3 and jq)
 scripts/test-coverage-report.sh      # the coverage report, on small bisect reports (needs python3)
 scripts/test-random-seeds.sh         # the script that writes random seeds into the properties, on a copy of re2's property and on small trees (needs python3)
 python3 scripts/check-doc-links.py   # the documents' links into the repository lead to a file, and to a heading when they name one (needs git)
@@ -408,6 +411,36 @@ one rule for each difference decided on purpose; any other difference
 fails the test. Adding a fixture file under
 `schema/v1/fixtures/` adds it to the cross-check; the README there says
 which directory a fixture belongs in.
+
+`scripts/check-doc-examples.py` runs the examples of the user documents,
+those that [docs/README.md](docs/README.md) lists before "Contributing to
+smock", with a smock binary. A fenced block in YAML or JSON whose
+top-level keys are all fields of a Definition file (`version`, `mocks`,
+`stubs` and `data`) is a whole Definition file; every other block is a
+fragment, and is set aside. `smock check` must pass on each whole file
+alone, and the check prints how many it found and how many blocks it set
+aside. An example that leaves something out, such as a Mock that another
+block declares or a body file whose content it does not show, gets it
+from `scripts/doc-examples/context.txt`. A line there names the example
+by its document and its number among the document's whole Definition
+files, as the check prints it, so a change that adds an example that
+needs context, or moves one, changes the file in the same commit. The
+check also runs the [Mockoon guide](docs/migrating-from-mockoon.md)'s
+`smock check` and `smock render` commands as the guide writes them, in a
+copy of `docs/examples/from-mockoon/`, and their output must be what the
+guide shows after them. Last, it exports the
+[Jsonnet example](docs/definition-files.md#writing-definition-files-in-another-configuration-language)
+with the jsonnet that `scripts/install-jsonnet.sh` pins, checked against
+its SHA-256, runs `smock check` on the export, and compares the export
+with the fixture `schema/v1/fixtures/valid/users-from-jsonnet.json`. CI
+runs it in the job `release`, on the binary that job builds, on both
+architectures. To run it locally:
+
+```sh
+scripts/install-jsonnet.sh
+scripts/build-release.sh
+python3 scripts/check-doc-examples.py dist/smock
+```
 
 `mutation/kept-tests.toml` is the keep list of the test review
 ([Removing a test](#removing-a-test)): the tests that
@@ -755,9 +788,12 @@ never gated. Each baseline below was measured at d953f320.
    recorded manual check with its reason. Every Definition-file example
    in the documents passes `smock check` in CI. Every message a user can
    see is asserted at least once. Baseline: of 99 documented features, 93
-   covered, 2 partly and 4 not, as the survey counted them; 70 of the 71
-   whole Definition files in the documents pass once given the context
-   they leave out; 22 messages and the top-level help asserted by no test.
+   covered, 2 partly and 4 not, as the survey counted them; 76 of the 77
+   whole Definition files in the user documents pass once given the
+   context they leave out, and the 77th once given the Descriptor set its
+   text says to build (the survey counted 70 of 71, since it did not read
+   the 6 in list items); 22 messages and the top-level help asserted by no
+   test.
    A user can see 17 of the 22 messages: no input reaches 2 of the others,
    and only a package's interface shows 3 (the survey counted 20 that a
    user can see). The [use-case ledger](docs/ledgers/use-cases.md) lists

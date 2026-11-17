@@ -1,0 +1,6 @@
+# The Mock of the Mockoon guide's worked example, as
+# docs/mockoon/worked-example.md declares it first, for the examples that
+# use it without declaring it.
+mocks:
+  - name: users-api
+    hosts: [localhost, users-api]
