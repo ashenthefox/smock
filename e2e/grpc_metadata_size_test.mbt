@@ -177,17 +177,25 @@ async fn H2Client::padded_case(
 }
 
 ///|
-async test "the ticket's example: a templated reply that renders 4 KiB of trailers, to a client that advertised a SETTINGS_MAX_HEADER_LIST_SIZE of 1024, gets Trailers-Only INTERNAL reply metadata too large, and templateError says why" {
+async test "the ticket's example: a templated reply that renders 4 KiB of trailers, to a client that advertised a SETTINGS_MAX_HEADER_LIST_SIZE of 1024, gets Trailers-Only INTERNAL reply metadata too large, and templateError says why, while trailers that take the 1024 exactly are sent whole and one octet more gets INTERNAL" {
   with_greeter_set([("greeter.yaml", pad_stubs())], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let client = smock.h2c(
         settings=@http2.Settings::new(max_header_list_size=Some(1024)),
       )
       defer client.close()
+      // Trailers of grpc-status: 0, 11 + 1 + 32 octets, and an x-trace of
+      // 7 + 941 + 32 take 1024, the client's size exactly: not over it, so
+      // sent whole (docs/grpc/metadata-and-status.md, Metadata size). An
+      // x-trace of 941 octets shows as p...p.
       let replies = [
         client.padded_case("trailers", pad=4096),
         client.padded_case("trailers", pad=3),
         client.padded_case("static"),
+        client
+        .padded_case("trailers", pad=941)
+        .replace_all(old="p".repeat(941), new="p...p"),
+        client.padded_case("trailers", pad=942),
       ]
       inspect(
         replies.join("\n"),
@@ -218,10 +226,29 @@ async test "the ticket's example: a templated reply that renders 4 KiB of traile
           #|  grpc-message: reply metadata too large
           #|  date: <now>
           #|(end)
+          #|trailers, x-pad of 941:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  date: <now>
+          #|DATA 000000000b0a0948656c6c6f20546f6d
+          #|TRAILERS
+          #|  grpc-status: 0
+          #|  x-trace: p...p
+          #|(end)
+          #|trailers, x-pad of 942:
+          #|HEADERS
+          #|  :status: 200
+          #|  content-type: application/grpc
+          #|  grpc-status: 13
+          #|  grpc-message: reply metadata too large
+          #|  date: <now>
+          #|(end)
         ),
       )
       // grpc-status: 0, 11 + 1 + 32; x-trace, 7 + 4096 + 32. The static
-      // reply's Trailers-Only block takes 250 + 2000.
+      // reply's Trailers-Only block takes 250 + 2000. An x-trace of 942
+      // takes the trailers to 1025.
       let (_, page) = smock.journal()
       inspect(
         answers(page),
@@ -229,6 +256,8 @@ async test "the ticket's example: a templated reply that renders 4 KiB of traile
           #|"trailers" 200 "INTERNAL" templateError={"at":"/response","message":"the reply's trailers would take 4179 bytes, over the 1024 that the client allows in its SETTINGS_MAX_HEADER_LIST_SIZE"}
           #|"trailers" 200 "OK"
           #|"static" 200 "INTERNAL" templateError={"at":"/response","message":"the reply's Trailers-Only block would take 2250 bytes, over the 1024 that the client allows in its SETTINGS_MAX_HEADER_LIST_SIZE"}
+          #|"trailers" 200 "OK"
+          #|"trailers" 200 "INTERNAL" templateError={"at":"/response","message":"the reply's trailers would take 1025 bytes, over the 1024 that the client allows in its SETTINGS_MAX_HEADER_LIST_SIZE"}
         ),
       )
     })
