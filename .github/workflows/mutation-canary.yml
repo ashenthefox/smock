@@ -1,0 +1,55 @@
+# Replays the mutation runner's canary (CONTRIBUTING.md, "Mutation runner",
+# "The canary"): the 250 mutants that the prototype of #275 sampled at
+# d953f320, run again on that commit with the toolchain it pins, each
+# verdict compared with the recorded one. A difference that
+# mutation/canary/explained.toml does not explain fails the run. It keeps
+# the runner's output and the canary's report (canary.md) as the artifact
+# mutation-canary, also when the replay fails.
+#
+# It runs only when started by hand from the Actions tab or with
+# `gh workflow run mutation-canary.yml`, never on a schedule, on pull
+# requests or on pushes (scripts/check-mutation-canary-workflow.sh checks
+# that); the weekly mutation run repeats the canary. It installs the
+# toolchain that the canary's commit pins, which may not be this commit's,
+# so it is a job of its own. Its verdicts are taken on wasm-gc, which needs
+# no C compiler, so any runner will do.
+name: Mutation canary
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: canary (the sample's 250 mutants on d953f320)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      # The whole history: the canary's commit is checked out from it.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The commit's own scripts/install-moonbit.sh, which puts the
+      # toolchain on PATH for the steps after it.
+      - name: Install the toolchain that the canary's commit pins
+        run: python3 scripts/mutation/canary.py install
+
+      - name: Update the mooncakes registry index
+        run: moon update
+
+      - run: moon version --all
+
+      - name: Replay the canary and compare its verdicts
+        run: python3 scripts/mutation/canary.py run --out "$RUNNER_TEMP/mutation-canary"
+
+      - name: Keep the replay's output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-canary
+          path: ${{ runner.temp }}/mutation-canary
+          retention-days: 90
+          if-no-files-found: ignore

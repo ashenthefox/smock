@@ -347,6 +347,8 @@ scripts/check-branch-checks-workflow.sh   # the branch checks workflow writes th
 scripts/test-check-branch-checks-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 python3 scripts/weakening-report.py --base origin/main   # what this branch weakens, against its merge base with main (needs git)
 scripts/test-weakening-report.sh     # the weakening report, on small git histories (needs python3 and git)
+scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs only by hand, and installs its commit's toolchain before the replay (needs yq and jq)
+scripts/test-check-mutation-canary-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
 scripts/test-yaml-test-suite-verdict.sh   # how a run of yaml-test-suite is judged against its lists of cases
