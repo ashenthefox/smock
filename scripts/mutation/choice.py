@@ -35,6 +35,7 @@ import hashlib
 import json
 import posixpath
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -47,6 +48,13 @@ SHARD = re.compile(r"^(\d+)/(\d+)$")
 OTHER = "OTHER"
 BY_OFFSET = {"file": str, "offset": int, "original": str, "replacement": str, "commit": str}
 BY_KEY = {"file": str, "definition": str, "operator": str, "original": str, "replacement": str, "ordinal": int}
+# What a run with --totals-only prints when it stops, in place of the
+# reason, which may name a mutant.
+HIDDEN = ("run: the run stopped. With --totals-only the reason is not printed, since it may name a mutant:"
+          " run the list without it, where nobody else reads the output, to see the reason.")
+# The files of a run's output that name mutants, which a run with
+# --totals-only removes from its output directory.
+NAMING = ("mutants.jsonl", "chosen.jsonl", "unapplied.jsonl")
 
 
 class ChoiceError(Exception):
@@ -353,3 +361,44 @@ def listed_report(directories, records, unapplied):
         out += [f"- `{key_name(entry)}`: {why}" for _, entry, why in gone]
         out += [""]
     return out
+
+
+def drop_builds(work):
+    """Removes the workers' target directories from the runner's work
+    directory: they hold the build of the last mutant each worker ran."""
+    for target in sorted(Path(work).glob("target-*")):
+        shutil.rmtree(target, ignore_errors=True)
+
+
+def write_totals(out, operator_set, chosen_by, directories, summaries, records, unapplied, count):
+    """Writes what a listed run with --totals-only keeps, into out: a
+    summary and a report of counts per package and in total, and no file
+    that names a mutant. count gives the counts of a list of records'
+    outcomes. Returns the report."""
+    out.mkdir(parents=True, exist_ok=True)
+    for name in NAMING:
+        (out / name).unlink(missing_ok=True)
+    names = {s["directory"]: s["package"] for s in summaries}
+    rows = []
+    for directory in directories:
+        mine = [r for r in records if posixpath.dirname(r["file"]) == directory]
+        gone = len(unapplied.get(directory, []))
+        if mine or gone:
+            rows.append({"package": names.get(directory), "directory": directory, "listed": len(mine) + gone,
+                         **count(mine), "no_longer_apply": gone})
+    gone = sum(r["no_longer_apply"] for r in rows)
+    total = {"listed": len(records) + gone, **count(records), "no_longer_apply": gone}
+    (out / "summary.json").write_text(json.dumps(
+        {"operator_set": operator_set, "set": "listed", "totals_only": True, "selection": chosen_by,
+         "packages": rows, "total": total}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    lines = ["# Mutation report", "", f"Operator set {operator_set}, a listed set, totals only: no mutant is named.",
+             "", "| package | listed | killed | timed out | survived | unviable | no longer apply | score |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|"]
+    for label, row in [(r["directory"], r) for r in rows] + [("total", total)]:
+        score = "none" if row["score"] is None else f"{row['score']:.1%}"
+        cells = [row["listed"], row["killed"], row["timed_out"], row["survived"], row["unviable"],
+                 row["no_longer_apply"], score]
+        lines += ["| " + " | ".join([label] + [str(c) for c in cells]) + " |"]
+    text = "\n".join(lines + [""])
+    (out / "report.md").write_text(text, encoding="utf-8")
+    return text

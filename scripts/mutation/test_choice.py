@@ -482,5 +482,86 @@ class ListedByKeyTest(unittest.TestCase):
         self.assertIn("| log | 1 | 1 | 0 | 0 |\n\n", (out / "report.md").read_text())
 
 
+class TotalsOnlyTest(unittest.TestCase):
+    """A listed run that writes totals only, on the later commit of the
+    fixture's history: among its mutants, one that does not build and one
+    that a test fails on."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-choice-totals-"))
+        cls.root = cls.tmp / "root"
+        fixture_history(cls.root)
+        later_commit(cls.root)
+
+        def key(definition, operator, original, replacement, ordinal=0, file="calc/calc.mbt"):
+            return {"file": file, "definition": definition, "operator": operator, "original": original,
+                    "replacement": replacement, "ordinal": ordinal}
+
+        # The outcomes are those calc.mbt's and lines.mbt's comments give.
+        cls.entries = [
+            key("halve_until", "DEL", "x = x / 2", ""),  # unviable
+            key("in_range", "ROR", "<=", "<"),  # killed: "a number at the low end is in range" fails
+            key("in_range", "ROR", "<=", "<", 1),  # survived
+            key("halve_until", "SWAP", "x / 2", "2 / x"),  # outside v1, survived
+            key("is_odd", "EQ", "n % 2 == 0", "n % 2 != 0"),  # no longer applies
+            key("is_comment", "STR", '"#"', '"_"', file="log/lines.mbt"),  # killed
+        ]
+        cls.list = write_list(cls.tmp / "held-back.jsonl", cls.entries)
+        cls.out = cls.tmp / "out"
+        cls.out.mkdir()
+        # What an earlier run left there, which names a mutant.
+        (cls.out / "mutants.jsonl").write_text('{"id": "calc/calc.mbt,in_range,ROR,<=,<,0"}\n')
+        cls.work = cls.tmp / "work"
+        cls.result = run_runner(cls.root, cls.out, "--list", str(cls.list), "--totals-only", work=cls.work)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_a_totals_only_run_writes_per_package_and_total_counts(self):
+        # #305: "a listed-set run writes only per-package and total counts
+        # (killed, survived, no longer applying)".
+        self.assertEqual(self.result.returncode, 0, self.result.stderr)
+        summary = json.loads((self.out / "summary.json").read_text())
+        fields = ("listed", "killed", "timed_out", "survived", "unviable", "no_longer_apply")
+        self.assertEqual([(p["directory"], *[p[f] for f in fields]) for p in summary["packages"]],
+                         [("calc", 5, 1, 0, 2, 1, 1), ("log", 1, 1, 0, 0, 0, 0)])
+        self.assertEqual([summary["total"][f] for f in fields], [6, 2, 0, 2, 1, 1])
+        self.assertEqual(summary["total"]["score"], 0.5)
+        self.assertTrue(summary["totals_only"])
+        self.assertEqual(sorted(p.name for p in self.out.iterdir()), ["report.md", "summary.json"])
+        self.assertIn("| total | 6 | 2 | 0 | 2 | 1 | 1 | 50.0% |", (self.out / "report.md").read_text())
+
+    def test_nothing_a_totals_only_run_prints_or_keeps_names_a_mutant(self):
+        # #305: "no record, log line or artifact names a mutant. Nor does the
+        # output of the build or of the tests, which can quote a mutated
+        # line or value: it is not printed or kept."
+        self.assertEqual(self.result.returncode, 0, self.result.stderr)
+        kept = [self.result.stdout, self.result.stderr]
+        kept += [p.read_text(errors="replace") for p in self.out.rglob("*") if p.is_file()]
+        kept += [p.read_text(errors="replace") for p in self.work.rglob("*")
+                 if p.is_file() and ".mutation-files" not in p.name and p.suffix in (".json", ".jsonl", ".log", ".txt")]
+        names = ["calc/calc.mbt", "log/lines.mbt", "in_range", "halve_until", "is_odd", "is_comment",
+                 "x = x / 2", "2 / x", "n % 2", '"_"',
+                 # The compiler's message on the mutant that does not build,
+                 # and the failing test with its snapshot.
+                 "never used", "a number at the low end is in range", "content=", "failed"]
+        for text in kept:
+            for name in names:
+                self.assertNotIn(name, text)
+        # The work directory keeps no build of a mutant, and its tree holds
+        # the source as it is.
+        self.assertEqual(sorted(p.name for p in self.work.iterdir() if p.name.startswith("target-")), [])
+        self.assertEqual((self.work / "tree-0" / "calc" / "calc.mbt").read_text(),
+                         (self.root / "calc" / "calc.mbt").read_text())
+
+    def test_totals_only_needs_a_listed_set_and_a_run_of_its_own(self):
+        for args in (["calc"], ["--list", str(self.list), "--sites-only"], ["--list", str(self.list), "--shard", "1/2"]):
+            result = run_runner(self.root, self.tmp / "refused", "--totals-only", *args, work=self.work)
+            self.assertEqual(result.returncode, 2, args)
+            self.assertIn("--totals-only", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

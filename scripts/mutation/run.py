@@ -523,6 +523,8 @@ def main():
                         help="count the sites of each package in both sets, and run no mutant")
     parser.add_argument("--list", metavar="FILE",
                         help="run the mutants that FILE lists, by offset on a commit or by key")
+    parser.add_argument("--totals-only", action="store_true",
+                        help="with --list, write only per-package and total counts, naming no mutant")
     parser.add_argument("--sample", type=int, metavar="N",
                         help="run a sample of N of the mutants, stratified by package")
     parser.add_argument("--seed", default="0", help="the seed of --sample (0 unless given)")
@@ -543,13 +545,16 @@ def main():
         parser.error("--list and --mutant choose the mutants each: give one of them")
     if not args.packages and not args.list:
         parser.error("give at least one package directory")
+    if args.totals_only and (not args.list or args.sites_only or args.shard):
+        parser.error("--totals-only takes --list, and neither --sites-only nor --shard")
     root = Path(args.root).resolve()
     work = Path(args.work).resolve() if args.work else root / "_build" / "mutation"
     out = Path(args.out).resolve() if args.out else work / "out"
     finder = shlex.split(args.finder) if args.finder else [sys.executable, str(HERE / "sites.py")]
 
     def log(message):
-        print(message, file=sys.stderr, flush=True)
+        if not args.totals_only:
+            print(message, file=sys.stderr, flush=True)
 
     try:
         entries = choice.read_list(args.list) if args.list else None
@@ -598,8 +603,20 @@ def main():
                 records += package_records
             summaries.append(summary)
     except (RunnerError, choice.ChoiceError) as error:
-        print(f"run: {error}", file=sys.stderr)
+        print(choice.HIDDEN if args.totals_only else f"run: {error}", file=sys.stderr)
         sys.exit(1)
+    except Exception:
+        if not args.totals_only:
+            raise
+        print(choice.HIDDEN, file=sys.stderr)
+        sys.exit(1)
+    finally:
+        if args.totals_only:
+            choice.drop_builds(work)
+    if args.totals_only:
+        print(choice.write_totals(out, operator_set, choice.selection(args), args.packages, summaries, records,
+                                  unapplied, outcome_counts))
+        return
     out.mkdir(parents=True, exist_ok=True)
     with open(out / "mutants.jsonl", "w", encoding="utf-8") as f:
         for record in records:
