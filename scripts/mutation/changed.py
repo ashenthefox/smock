@@ -163,9 +163,10 @@ def directories(lines):
     return sorted({posixpath.dirname(f) for f in lines})
 
 
-def header(info, chosen_set, ran):
+def header(info, chosen_set, ran, sharded=False):
     """The diff mode's lines at the top of the report: the base, the lines
-    and how many mutants ran of those on them."""
+    and how many mutants ran of those on them, in the run or, sharded, in
+    the shard."""
     out = ["# Mutants on changed lines", ""]
     where = f"Against `{info['base']}`, merge base `{info['merge_base'][:12]}`"
     count = sum(len(n) for n in info["lines"].values())
@@ -180,5 +181,6 @@ def header(info, chosen_set, ran):
         ran_text = f"The run ran the {total} mutants of the {chosen_set} set on them." if total > 1 else \
             f"The run ran the one mutant of the {chosen_set} set on them."
     else:
-        ran_text = f"The run ran {ran} of the {total} mutants of the {chosen_set} set on them."
+        ran_text = f"{'This shard' if sharded else 'The run'} ran {ran} of the {total} mutants of the" \
+            f" {chosen_set} set on them."
     return out + [f"{where}: {count} changed non-test {noun} in the pure packages ({packages}). {ran_text}", ""]

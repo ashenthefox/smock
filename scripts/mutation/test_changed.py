@@ -16,6 +16,7 @@ usage: python3 -m unittest discover -s scripts/mutation -v
 """
 
 import json
+import re
 import shutil
 import stat
 import subprocess
@@ -163,6 +164,26 @@ class ChangedLinesTest(unittest.TestCase):
             "calc/calc.mbt,in_range,LCR,&&,||,0", "calc/calc.mbt,in_range,ROR,<=,<,0"])
         self.assertIn(f"Against `{self.commits['odd']}`, merge base `{self.commits['odd'][:12]}`: 1 changed"
                       " non-test line in the pure packages (calc).", (out / "report.md").read_text())
+
+    def test_the_shards_of_a_run_on_changed_lines_merge_into_its_report(self):
+        # #275: the changed-lines job runs "on at most about 3 shards"; the
+        # merge gives the report of the run without them (#305).
+        shards = [self.tmp / f"shard-{k}" for k in (1, 2, 3)]
+        for k, shard in enumerate(shards, 1):
+            result = self.run_runner(shard, "--changed", "--shard", f"{k}/3")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("This shard ran 3 of the 9 mutants of the pinned set on them.",
+                      (shards[1] / "report.md").read_text())
+        merged = self.tmp / "merged"
+        result = subprocess.run([sys.executable, str(HERE / "merge.py"), "--out", str(merged), *map(str, shards)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        def without_timings(text):
+            return re.sub(r"\d+\.\d+ s\b", "N s", text)
+
+        self.assertEqual(without_timings((merged / "report.md").read_text()),
+                         without_timings((self.out / "report.md").read_text()))
 
     def test_a_change_with_no_non_test_source_line_runs_nothing_and_says_so(self):
         # #304: "A change with no non-test source line runs nothing and
