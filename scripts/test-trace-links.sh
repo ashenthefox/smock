@@ -327,6 +327,40 @@ links renamed
 value renamed 'test("a/a_test.mbt", "a total counts each request once")["commit"]' "\"$renamed\""
 value renamed 'test("a/a_test.mbt", "a total counts each request once")["issue"]' '51'
 
+# --- The ticket a subject names ---------------------------------------------
+
+# subject <n> <subject>: commits a test file of its own, s/s<n>_test.mbt,
+# whose one test is named after <n>.
+subject() {
+  file "s/s$1_test.mbt" <<EOF
+///|
+test "subject $1" {
+  inspect(@s.subject_number_$1(), content="$1")
+}
+EOF
+  commit "$2"
+}
+
+tree
+subject 1 "Count requests in totals (#12)"
+subject 2 "Say how far one binary's CPU differed between nodes in #39"
+subject 3 "Merge integration/grpc: gRPC unary calls with Descriptor sets (spec #134)"
+subject 4 "Read the watched files at a poll only when their metadata changed"
+subject 5 "Raise moonc and the async runtime (#258, #43)"
+subject 6 "Work around moonbitlang/async#725 until it is released"
+subject 7 "Mention #12 in a fix that names its own ticket (#40)"
+subject 8 "Name an issue that GitHub does not know (#999)"
+issue 12 "Count requests in totals" closed </dev/null
+issue 39 "CPU between nodes" closed </dev/null
+issue 40 "A fix" closed </dev/null
+issue 134 "Spec: gRPC unary calls" closed </dev/null
+links subjects
+exits subjects 0
+value subjects '[t["issue"] for t in out["tests"]]' '[12,39,134,null,null,null,40,999]'
+value subjects 'sorted(out["issues"])' '["12","134","39","40","999"]'
+value subjects 'out["issues"]["999"]' '{"found":false}'
+value subjects 'out["issues"]["134"]["title"]' '"Spec: gRPC unary calls"'
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" = 0 ]
