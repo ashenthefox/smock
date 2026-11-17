@@ -127,6 +127,18 @@ count the equivalent mutants, the duplicates and the mutants not
 compared per package, apart from the other outcomes, and report.md lists
 the equivalent mutants and the duplicates.
 
+A mutant at a site that the finder marks as one whose definition uses an
+unchecked array access (unchecked_access), whose tests ran, runs again
+natively, the same way, with the same tests (native.py): wasm-gc traps
+on an access out of bounds where the native binary reads on. Its record
+gives both verdicts (verdicts), and the native verdict decides on amd64
+alone. A package that builds only natively runs wholly natively, with
+its own tests, and its compiler output is not compared. Before the first
+native build, the runner unsets moon's variables for another C compiler
+(MOON_CC, MOON_AR, MOON_CC_WRAPPER), and native runs dump no core.
+summary.json and report.md give, per package, what ran natively, where,
+and the mutants whose verdicts differ between the backends (native).
+
 It writes into <out> (<work>/out unless it is given):
 
   mutants.jsonl  one record per mutant: the site's fields (its operator
@@ -583,8 +595,9 @@ def run_tests(workers, what, packages, mutants, log, header, own=None, with_self
     # run (compare.py), and runs the self-test; the importers' pass reruns
     # only survivors, which it compared already. The self-test comes after
     # the comparison has linked the package without a mutant, since its
-    # build replaces that one in the first worker's target directory.
-    comparison = compare.Comparison(packages[0], own, workers, log) if own and first.backend == BACKEND else None
+    # build replaces that one in the first worker's target directory. A
+    # native run compares nothing: the output compared is wasm-gc's.
+    comparison =compare.Comparison(packages[0], own, workers, log) if own and first.backend == BACKEND else None
     self_test = run_self_test(first, packages[0], own, limit, log) if own and with_self_test else None
 
     # A record names its package; the records of the importers' run are

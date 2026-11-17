@@ -1355,7 +1355,8 @@ joins:
   one [site](#terms) per line, as JSON: the mutant's id, its file, its
   enclosing definition, its operator, its original text, its replacement
   text, its ordinal, its position (line and column), whether the pinned
-  set takes it, and the operator set's version. It finds the places in the
+  set takes it, the operator set's version, and whether its definition
+  uses an unchecked array access (below). It finds the places in the
   parse tree, and `scripts/mutation/operators.py`, operator set v1, says
   what each place becomes.
 - `scripts/mutation/run.py`, the runner, makes one mutant of each site
@@ -1692,6 +1693,72 @@ costs: the names in `moonc link-core`'s output, like the finder's
 functions, their mutants are not compared, which is safe, and the
 fixture's tests fail in the weekly run with the latest MoonBit.
 
+**Native verdicts.** The verdicts for pure packages are taken on
+wasm-gc, but wasm-gc traps on an unchecked array access out of bounds,
+where the native binary reads on without a sign: a mutant there can be
+killed on wasm-gc by the trap alone and survive natively
+([Outcomes and kill credit](#outcomes-and-kill-credit), "Backend"). So
+the finder marks each site whose enclosing definition calls an unchecked
+array access, with `"unchecked_access": true` on its line. These are
+core's methods that read or write the elements of an array, a string or
+bytes, or make a view of them, without a bounds check, told by their
+names, since the parse tree has no types: `unsafe_get`, `unsafe_set`,
+`unsafe_view`, `unsafe_mut_view`, `unsafe_char_at`, `unsafe_charcode_at`,
+`unsafe_substring`, `unsafe_range_equal`, `unsafe_pop`, `unsafe_pop_back`,
+and those whose names start with `unsafe_blit`, `unsafe_read_`,
+`unsafe_write_` or `unsafe_extract_`. `unsafe_to_char`,
+`unsafe_reinterpret_as_bytes` and `unsafe_make` read no element, and mark
+nothing. At d88929b2, 20 definitions in `http1`, `importopenapi`, `log`,
+`protobuf` and `yaml` hold such a call, with 693 sites of the pinned set
+(1,039 of the full set), 414 of them in `protobuf`.
+
+A marked mutant whose tests ran on wasm-gc (it built, and the compiler's
+output did not show it equivalent or a duplicate) runs again natively
+(`scripts/mutation/native.py`), the same way: two runs without a mutant
+first, then the package's own tests and, if it survives them, the tests
+of the importers whose tests ran it on wasm-gc, with kill confirmation.
+Its record gives both verdicts under `verdicts`: `wasm-gc` and `native`,
+each with its outcome, the tests that killed it, its timings and its
+confirmation, and the machine that took the native one. `backend` names
+the verdict that counts. **The native verdict decides on amd64**: a
+mutant killed on wasm-gc that survives natively is then a survivor, with
+its diff, until a test kills it natively or an exclusion covers it
+(UB-NATIVE). On arm64, whose builds may behave otherwise on undefined
+behaviour, the native verdict is recorded and the wasm-gc verdict
+counts. Each package's summary (`native`) gives the machine, whether its
+verdict decides, the marked mutants, how many ran natively, their native
+outcomes and how many verdicts differ, and the report lists the mutants
+whose verdicts differ between the backends.
+
+A package that builds only natively, which moon refuses to test on
+wasm-gc, runs wholly natively: the two runs without a mutant, the
+self-test and every mutant, with the package's own in-process tests. Its
+compiler output is not compared, since the output compared is wasm-gc's,
+and e2e's tests give it no credit in this run; the runs through e2e
+([#344](https://github.com/hirunefu/smock/issues/344),
+[#346](https://github.com/hirunefu/smock/issues/346)) give that.
+
+Native runs build with no C flags. Before the first native build, the
+runner unsets `MOON_CC`, `MOON_AR` and `MOON_CC_WRAPPER`, the variables
+by which moon takes another C compiler, archiver or compiler wrapper, and
+the summary and the report name those it unset. The runner sets none, and
+its copy of the workspace is the workspace as it is. Natively, an abort
+or a read out of bounds often stops the test program, so native runs
+dump no core.
+
+Each native mutant is built on its own, as on wasm-gc, not in one schema
+build. On amd64, #276's run on CI's runners rebuilt `engine`'s native
+tests after one mutant in 5.3 s and ran them in 3.8 s; `engine` is the
+largest package. At that cost, with about four in five mutants killed,
+as in the prototype's sample, and each kill confirmed by two more builds
+and runs, the 693 marked mutants of the pinned set take at most about
+4.6 hours of runner time, about 14 minutes on 20 jobs. A schema build
+would save at most the rebuilds, about half of that, and would need a
+read of an environment variable inside the pure packages, which do no
+I/O, and a type check of each mutant before it enters. On arm64 the same
+rebuild took 41.1 s, so the native verdicts are taken on amd64 runners in
+CI. A laptop can still run one marked mutant natively, with `--mutant`.
+
 To see the sites of a package, and to run one mutant, or the few mutants
 of a small package (they need python3, git, moon and moonc):
 
@@ -1732,7 +1799,13 @@ shards; `scripts/mutation/test_changed.py` runs `--changed` on a small
 git history of the fixture, with a branch, a later change on `main` and
 a package that builds natively only. `moon fmt --check`
 at the root does not read the fixture: run `moon fmt` inside it after a
-change.
+change. In the fixture's package `bounds`, `dot_after` reads a character
+with `unsafe_get`, and each mutant of the pinned set has a known outcome
+on each backend, given beside the site: one is killed on wasm-gc by the
+trap alone and survives natively. The package `host` builds only
+natively. `scripts/mutation/test_native.py` runs both, with moon's
+variables for another C compiler set to ones that do not exist, and the
+shards of `bounds`, whose native verdicts merge.
 
 In the fixture's package `same`, each mutant of the pinned set has a
 known outcome and a known result of the comparison of the compiler's
