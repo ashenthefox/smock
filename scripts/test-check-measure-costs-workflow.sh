@@ -148,6 +148,42 @@ refuses no-measurement \
   'del(.jobs.measure.steps[] | select((.run // "") | test("measure-costs")))' \
   "it should measure on amd64 on x86_64 and on arm64 on aarch64, not on: nothing"
 
+# --- Every measurement, each also after a failed one -----------------------------
+
+refuses no-coverage-measurement \
+  'del(.jobs.measure.steps[] | select((.run // "") | test("measure-costs.py coverage")))' \
+  "job measure should measure e2e alone rebuild coverage, not: e2e alone rebuild"
+
+refuses a-measurement-skipped-after-a-failure \
+  'del(.jobs.measure.steps[] | select((.run // "") | test("measure-costs.py rebuild")) | .if)' \
+  'job measure should run each measurement after the first also when one before it failed (if: ${{ !cancelled() }}), but "Rebuild natively after one mutant in engine" has none'
+
+refuses a-measurement-only-on-success \
+  '(.jobs.measure.steps[] | select((.run // "") | test("measure-costs.py alone")) | .if) = "success()"' \
+  'job measure should run each measurement after the first also when one before it failed (if: ${{ !cancelled() }}), but "Run each e2e test alone" has success()'
+
+# --- No C flags ---------------------------------------------------------------------
+
+refuses moon-cc-for-the-workflow \
+  '.env = {"MOON_CC": "gcc"}' \
+  "it should set no variable that chooses moon's C compiler or its flags, but sets MOON_CC"
+
+refuses cflags-for-the-job \
+  '.jobs.measure.env = {"CFLAGS": "-O0"}' \
+  "it should set no variable that chooses moon's C compiler or its flags, but sets CFLAGS"
+
+refuses a-wrapper-for-a-step \
+  '(.jobs.measure.steps[] | select((.run // "") | test("measure-costs.py coverage")) | .env) = {"MOON_CC_WRAPPER": "ccache"}' \
+  "it should set no variable that chooses moon's C compiler or its flags, but sets MOON_CC_WRAPPER"
+
+refuses an-export-in-a-command \
+  '(.jobs.measure.steps[] | select((.run // "") | test("measure-costs.py e2e")) | .run) |= "export MOON_CC=clang\n" + .' \
+  "it should set no variable that chooses moon's C compiler or its flags, but sets MOON_CC"
+
+refuses a-variable-for-later-steps \
+  '.jobs.measure.steps[0].run += "\necho CC=clang >>\"$GITHUB_ENV\""' \
+  "it should set no variable that chooses moon's C compiler or its flags, but sets CC"
+
 echo
 echo "test-check-measure-costs-workflow: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
