@@ -600,16 +600,17 @@ def main():
         if len(versions) > 1:
             raise RunnerError(f"the packages' sites name several operator sets: {sorted(versions)}")
         operator_set = versions.pop() if versions else None
-        sites, whole = choose(found, args.set, args.mutant, args.packages)
+        sites, chosen = choose(found, args.set, args.mutant, args.packages)
         unapplied = {directory: [] for directory in args.packages}
         if entries is not None:
-            whole, unapplied = choice.resolve(root, args.list, entries, found, args.packages)
+            chosen, unapplied = choice.resolve(root, args.list, entries, found, args.packages)
             if args.shard and args.shard[0] != 1:
                 # The first shard counts the keys that no longer apply.
                 unapplied = {directory: [] for directory in args.packages}
         if args.sample is not None:
-            whole = choice.sample(whole, args.packages, args.sample, args.seed)
-        chosen = choice.shard(whole, args.packages, *args.shard) if args.shard else whole
+            chosen = choice.sample(chosen, args.packages, args.sample, args.seed)
+        # The run's mutants, and the shard's.
+        whole, chosen = chosen, choice.shard(chosen, args.packages, *args.shard) if args.shard else chosen
         selected = bool(args.mutant) or args.sample is not None or entries is not None
         run_set = "listed" if entries is not None else args.set
         runs = choice.running(args.packages, whole, chosen, selected, args.shard and args.shard[0])
