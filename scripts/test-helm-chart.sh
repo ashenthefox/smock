@@ -306,6 +306,23 @@ check body-file-dir "the body-file subdirectory follows definitions.bodyFileDir"
   "$layout"' == {"users.json": "{\"stubs\":[]}", "bodies/users/1.json": "{\"id\":1}", "bodies/README.txt": "not a Definition file"}
    and env("SMOCK_BODY_FILE_DIR").value == "bodies"'
 
+# A file whose content in a values file is a number of a million or more,
+# such as a JSON body of 1000000, keeps the digits of the values file in
+# the ConfigMap (#377).
+cat >"$tmp/values-number-files.yaml" <<'YAML'
+definitions:
+  configMap:
+    files:
+      count.json: 1000000
+    bodyFiles:
+      total.json: 1234567
+YAML
+render number-files --values "$tmp/values-token.yaml" --values "$tmp/values-number-files.yaml"
+check_text number-files "a Definition file and a body file of a million or more keep their digits" \
+  "$layout"' == {"count.json": $count, "files/total.json": $total}' \
+  --arg count "$(yq '.definitions.configMap.files["count.json"]' "$tmp/values-number-files.yaml")" \
+  --arg total "$(yq '.definitions.configMap.bodyFiles["total.json"]' "$tmp/values-number-files.yaml")"
+
 for path in ../escape.json /etc/passwd users/../../x .hidden/1.json users/.1.json users//1.json; do
   printf 'definitions:\n  configMap:\n    bodyFiles:\n      "%s": x\n' "$path" >"$tmp/values-bad.yaml"
   refuse body-file-path "a body file path $path that leaves the subdirectory or that smock skips" \
