@@ -1222,7 +1222,9 @@ A test may go only under (A) or (B), and never when (C) holds.
     checker's own tests, the goldens, the in-process codec tests on
     protoc's fixtures, the settings boundary pairs, and the reload tests
     with symlinks;
-  - a test of a constant that a spec fixes;
+  - a test of a constant that a spec fixes, a vendor's published API
+    reference included, such as the stop reasons of OpenAI's and
+    Anthropic's APIs;
   - a test that the backends agree, or a test in a release build, such as
     the engine's tests of seeded floating-point results;
   - a test of behaviour that a dependency provides;
