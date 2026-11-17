@@ -162,10 +162,13 @@ async test "h2 on the TLS port: requests on one connection are answered, a delay
         let slow = client.send("GET", "/slow", authority="localhost")
         let fast = client.send("GET", "/fast?after=slow", authority="localhost")
         let fast_response = client.response(fast)
-        let fast_ms = @async.now() - start
+        // A delay "delays only its own stream" (docs/http2.md, Streams that
+        // wait): events of the delayed stream read meanwhile would be kept
+        // for later.
+        let early = client.kept_for(slow)
         let slow_response = client.response(slow)
         let slow_ms = @async.now() - start
-        out.push("fast answered during the delay: \{fast_ms < 1000}")
+        out.push("nothing of the delayed stream came before: \{early == 0}")
         out.push("delayed answered after at least 1000 ms: \{slow_ms >= 1000}")
         out.push(fast_response.render())
         out.push(slow_response.render())
@@ -192,7 +195,7 @@ async test "h2 on the TLS port: requests on one connection are answered, a delay
             #|
             #|fast
             #|---
-            #|fast answered during the delay: true
+            #|nothing of the delayed stream came before: true
             #|---
             #|delayed answered after at least 1000 ms: true
             #|---
