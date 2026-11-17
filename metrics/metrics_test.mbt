@@ -230,7 +230,10 @@ test "a metric name is a Prometheus metric name: one with a colon, a capital Z o
   // allows them") and the maintainer confirmed on 2026-11-17 (#275). The
   // data model's note is known, and smock does not follow it: "Colons (':')
   // are reserved for user-defined recording rules. They SHOULD NOT be used
-  // by exporters or direct instrumentation."
+  // by exporters or direct instrumentation." Each gauge renders a sample of
+  // 0 at once, as Prometheus's guidelines for client libraries ask: "Gauges
+  // MUST start at 0" and "Metrics without labels MUST always be
+  // initialized".
   let registry = @metrics.Registry()
   for name in ["job:smock_requests:sum", "smock_A_Z", "smock_0_9"] {
     let _ = registry.gauge(name, help="A name.")

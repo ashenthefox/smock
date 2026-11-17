@@ -43,6 +43,11 @@ test "process RSS: the VmRSS line of /proc/<pid>/status, from KiB to bytes" {
       // and the bytes are a signed 64-bit count, at most 2^63 - 1 =
       // 9223372036854775807. 9007199254740991 kB is the most whose bytes it
       // holds, 9223372036854774784; one kB more is 2^63 bytes, past it.
+      // #278's acceptance criterion fixes both values, and with them the
+      // 1024 bytes of a kB, which the kernel's documents do not define: "a
+      // `VmRSS` line of 9,007,199,254,740,991 kB, the largest whose count of
+      // bytes a signed 64-bit count holds, is read, and one kB more gives
+      // nothing".
       @usage.resident_bytes("VmRSS:\t9007199254740991 kB\n"),
       @usage.resident_bytes("VmRSS:\t9007199254740992 kB\n"),
     ],
