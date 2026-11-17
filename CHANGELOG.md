@@ -468,8 +468,14 @@ of each GitHub release include its section
     health service too, from the descriptor smock embeds unless the set
     defines `grpc.health.v1`. It answers one request per call, once the
     request's message is whole, then resets the stream with NO_ERROR if
-    the client still sends. A Mock with reflection on keeps its set's
-    files as encoded, beside the set's model. See
+    the client still sends. It reads the request as protobuf's parsers
+    read a message. A field it knows that comes with another wire type
+    than its type's, such as `file_by_filename` sent as a varint, is
+    skipped, as an unknown field is. `file_containing_extension` records
+    in a row merge, as the records of a message field do, so the
+    containing type can come in one record and the extension number in
+    the next. A Mock with reflection on keeps its set's files as encoded,
+    beside the set's model. See
     [Reflection](docs/grpc/services-and-connections.md#reflection).
   - **Health.** With `grpc: { health: true }`, a Mock answers gRPC's
     `grpc.health.v1.Health` as gRPC's health servers do: `Check` says
@@ -706,17 +712,6 @@ of each GitHub release include its section
   file that started with an `ATTRIBUTE CERTIFICATE` got a metric of 0 and
   an `expiry` of null, and one that started with an `X.509 CERTIFICATE`,
   which OpenSSL skips, got that block's notAfter.
-- gRPC reflection no longer refuses a request in which a field it knows
-  comes with another wire type than its type's, such as
-  `file_by_filename` sent as a varint. It answered INTERNAL, "the request
-  message cannot be decoded". It now skips such a field, as protobuf's
-  parsers and smock's message decoder do, and answers the rest of the
-  request.
-- gRPC reflection now merges a request's `file_containing_extension`
-  records, as protobuf's parsers merge the records of a message field. It
-  kept only the last, so a request that gave the containing type in one
-  record and the extension number in the next got NOT_FOUND. No known
-  client sends a request that way.
 - A YAML Definition file or OpenAPI document that starts with two `---`
   markers with nothing but comments between them is now rejected as
   multiple documents, as the documents say: the first `---` starts an empty
