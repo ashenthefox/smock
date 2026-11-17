@@ -1,7 +1,7 @@
 """Finds the lines a branch changes, for the mutation runner's diff mode
 (--changed; CONTRIBUTING.md, "Mutation runner"): the non-test lines of the
 pure packages that the working tree adds or changes against the merge
-base of HEAD with a base, main unless another is given. Its runs nothing
+base of HEAD with a base, main unless another is given. It runs nothing
 but git.
 
 A changed line is a line of the working tree's file that git's diff with
@@ -64,7 +64,8 @@ def changed_lines(root, commit):
     against a commit, from 1, and those of the files git does not track
     but does not ignore."""
     lines, file = {}, None
-    for line in git(root, "diff", "--no-renames", "--relative", "--no-color", "-U0", commit, "--", "*.mbt").splitlines():
+    diff = git(root, "diff", "--no-renames", "--relative", "--no-color", "-U0", commit, "--", "*.mbt")
+    for line in diff.splitlines():
         if line.startswith("+++ "):
             file = None if line[4:] == "/dev/null" else line[6:]
         elif line.startswith("@@") and file is not None:

@@ -6,6 +6,7 @@ report (CONTRIBUTING.md, "Mutation runner").
 usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir>]
            [--set pinned|full] [--mutant <id>]... [--sites-only] [--workers <n>]
            [--list <file> [--totals-only]] [--sample <n> [--seed <s>]] [--shard <k>/<n>]
+           [--changed [--base <ref>]]
            [--moon <moon>] [--finder <command>] [<package directory>...]
 
 <package directory> is relative to <root>, the workspace or module to
@@ -23,7 +24,8 @@ once; a package given that holds none of the ids is not run.
 skipped sites of each package, in both sets, and the mutants a run would
 make, in chosen.jsonl.
 
-Three more options choose the mutants, for bulk runs (choice.py says how):
+Four more options choose the mutants: three for bulk runs (choice.py
+says how), and one for a contributor's branch (changed.py says how):
 
   --list <file>    runs the mutants a file lists, in its order, in place
                    of a set: by offset on a commit, or by key on any
@@ -45,8 +47,18 @@ Three more options choose the mutants, for bulk runs (choice.py says how):
                    order, whose sizes differ by one at most;
                    scripts/mutation/merge.py merges the outputs of a
                    run's shards into the output of the run without them.
+  --changed        runs the mutants whose original text holds a non-test
+                   line that the working tree adds or changes in a pure
+                   package, against the merge base of HEAD with main
+                   (origin/main where there is no main), or with the ref
+                   --base gives. The packages are those of the changed
+                   files, unless given. The report starts with the base,
+                   the merge base, the count of changed lines and of the
+                   mutants that ran; with no changed line, the run runs
+                   nothing and says so. The summary gives the lines
+                   (changed).
 
-Without --mutant, --list or --sample, every package given runs, one that
+Without --mutant, --list, --sample or --changed, every package given runs, one that
 has no mutant at all in the first shard; with one of them, only the
 packages that hold one of the shard's mutants run.
 
