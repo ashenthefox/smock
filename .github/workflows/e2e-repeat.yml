@@ -1,0 +1,66 @@
+# Runs the e2e tests a given number of times on one runner of a chosen
+# architecture, one run after another, and keeps what each run printed as a
+# workflow artifact (scripts/repeat-e2e.sh). A timing test that fails once
+# in ten runs passes most single runs of CI, so a change to one is shown to
+# hold by many runs here. It runs only when started by hand, from the
+# Actions tab or with `gh workflow run e2e-repeat.yml -f arch=amd64 -f
+# runs=30`, never on a schedule, on pull requests or on pushes
+# (scripts/check-e2e-repeat-workflow.sh checks that).
+name: Repeat the e2e tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "The architecture of the runner"
+        type: choice
+        options: [amd64, arm64]
+        default: amd64
+      runs:
+        description: "How many times to run the e2e tests; a run takes one to two minutes, and the job stops after six hours"
+        type: number
+        default: 10
+
+permissions:
+  contents: read
+
+jobs:
+  repeat:
+    name: e2e tests, ${{ inputs.runs }} runs (linux/${{ inputs.arch }})
+    runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+
+      # The runner check, OpenSSL, the pinned MoonBit and moon update.
+      - uses: ./.github/actions/native-setup
+        with:
+          machine: ${{ inputs.arch == 'arm64' && 'aarch64' || 'x86_64' }}
+
+      - run: moon version --all
+
+      # Built once, so that every run tests the same build and none spends
+      # its time compiling. The e2e harness builds cmd/smock as the tests
+      # start; built here, that build finds nothing to do.
+      - name: Build the e2e tests and smock
+        run: |
+          moon test --target native -p smock/smock/e2e --build-only
+          moon build --target native cmd/smock
+
+      - name: Run the e2e tests ${{ inputs.runs }} times
+        env:
+          RUNS: ${{ inputs.runs }}
+        run: scripts/repeat-e2e.sh "$RUNS" "$RUNNER_TEMP/e2e-repeat"
+
+      - name: Show the summary
+        if: always()
+        run: |
+          summary=$RUNNER_TEMP/e2e-repeat/summary.md
+          if [ -f "$summary" ]; then cat "$summary" >>"$GITHUB_STEP_SUMMARY"; fi
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-repeat-linux-${{ inputs.arch }}
+          path: ${{ runner.temp }}/e2e-repeat
+          if-no-files-found: warn

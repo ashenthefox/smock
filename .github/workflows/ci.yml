@@ -70,6 +70,21 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/check-benchmark-workflow.sh
 
+      # The e2e tests run again and again only by hand (e2e-repeat.yml).
+      # This checks when that workflow runs and how it runs the tests, and
+      # tests the script that repeats them, with a fake moon.
+      - name: Check the e2e repeat workflow
+        if: ${{ !cancelled() }}
+        run: scripts/check-e2e-repeat-workflow.sh
+
+      - name: Test the check of the e2e repeat workflow
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-e2e-repeat-workflow.sh
+
+      - name: Test the script that repeats the e2e tests
+        if: ${{ !cancelled() }}
+        run: scripts/test-repeat-e2e.sh
+
       # The GKE run of the benchmark of another architecture than its
       # machine's takes the release binary that the job keep below keeps.
       # This checks the conditions under which the jobs of build-test.yml
