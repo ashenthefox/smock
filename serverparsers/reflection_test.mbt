@@ -324,7 +324,7 @@ let field_options : Bytes = len(1, b"google.protobuf.FieldOptions")
 let number_50000 : Bytes = tag(2, 0) + varint(50000)
 
 ///|
-test "the request is read as protobuf's parsers read a proto3 message: unknown fields of each wire type are skipped, and so are known fields sent with another wire type, which leave the oneof's member as it was; fields come in any order, the last member of the oneof wins, and the request's host is read but not used; the reply echoes the request as received, with the call's Host, or none (protobuf's proto3 guide, Unknown Fields and Oneof; its encoding guide, Message Structure and Field Order; gRPC's reflection.proto; docs/grpc/services-and-connections.md, Reflection)" {
+test "the request is read as protobuf's parsers read a proto3 message: unknown fields of each wire type are skipped, and so are known fields sent with another wire type, which leave the oneof's member as it was; fields come in any order, the last member of the oneof wins, records of file_containing_extension in a row merge as an embedded message's do, and the request's host is read but not used; the reply echoes the request as received, with the call's Host, or none (protobuf's proto3 guide, Unknown Fields and Oneof; its encoding guide, Message Structure, Last One Wins and Field Order; gRPC's reflection.proto; docs/grpc/services-and-connections.md, Reflection)" {
   let annotated = octets(annotated_file) + octets(descriptor_file)
   let list_reply = octets(reflection_list_reply)
   let by_extension_reply = with_files(
@@ -416,6 +416,27 @@ test "the request is read as protobuf's parsers read a proto3 message: unknown f
       len(5, number_50000 + field_options),
       by_extension_reply,
     ),
+    // The encoding guide, Last One Wins: "For embedded message fields, the
+    // parser merges multiple instances of the same field", the scalars of
+    // the latter replacing those of the former; the proto3 guide, Oneof: "A
+    // message will merge into any value already set". `protoc --decode`
+    // reads each of these three requests as by-extension.txtpb's.
+    (
+      "file_containing_extension in two records, its type, then its number",
+      len(5, field_options) + len(5, number_50000),
+      by_extension_reply,
+    ),
+    (
+      "file_containing_extension in two records, its number, then its type",
+      len(5, number_50000) + len(5, field_options),
+      by_extension_reply,
+    ),
+    // 50009, the number of missing-extension.txtpb, replaced by 50000.
+    (
+      "file_containing_extension in two records, the second number replacing the first",
+      len(5, field_options + tag(2, 0) + varint(50009)) + len(5, number_50000),
+      by_extension_reply,
+    ),
     (
       "a host of its own in the request",
       len(1, b"other.svc") + octets(reflection_list),
@@ -441,6 +462,20 @@ test "the request is read as protobuf's parsers read a proto3 message: unknown f
   out.push(
     "a call without a Host: \{compared(reply(request, host=""), echoing(list_reply, request, host=false))}",
   )
+  // The proto3 guide, Oneof: a parser first clears "a different field in
+  // the same oneof" that is set, so records of file_containing_extension
+  // with another member between them do not merge. `protoc --decode` reads
+  // this request as its last record alone, `file_containing_extension {
+  // extension_number: 50000 }`, so it gets that request's reply.
+  let last = len(5, number_50000)
+  let request = len(5, field_options) + octets(reflection_by_symbol) + last
+  let same = match (reply(request), reply(last)) {
+    (Some(got), Some(alone)) if got == echoing(alone, request) => "yes"
+    (got, _) => compared(got, b"")
+  }
+  out.push(
+    "file_containing_extension in two records with file_containing_symbol between them, answered as the last record alone: \{same}",
+  )
   inspect(
     out.join("\n"),
     content=(
@@ -452,10 +487,14 @@ test "the request is read as protobuf's parsers read a proto3 message: unknown f
       #|an unknown field in file_containing_extension: as protoc encodes it
       #|known fields of other wire types in file_containing_extension: as protoc encodes it
       #|file_containing_extension, its number first: as protoc encodes it
+      #|file_containing_extension in two records, its type, then its number: as protoc encodes it
+      #|file_containing_extension in two records, its number, then its type: as protoc encodes it
+      #|file_containing_extension in two records, the second number replacing the first: as protoc encodes it
       #|a host of its own in the request: as protoc encodes it
       #|file_containing_symbol, then file_by_filename: as protoc encodes it
       #|file_by_filename, then file_containing_symbol: as protoc encodes it
       #|a call without a Host: as protoc encodes it
+      #|file_containing_extension in two records with file_containing_symbol between them, answered as the last record alone: yes
     ),
   )
 }

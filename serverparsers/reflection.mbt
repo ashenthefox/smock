@@ -86,8 +86,10 @@ priv enum Asked {
 /// Reads `message`, a ServerReflectionRequest of reflection.proto, as
 /// protobuf's parsers read a proto3 message: unknown fields, and known
 /// fields sent with another wire type than their type's, are skipped, of
-/// the members of the oneof `message_request` the last one wins, and a
-/// string that is not UTF-8 is an error. Its `host` is read, and not used.
+/// the members of the oneof `message_request` the last one wins, records of
+/// `file_containing_extension` in a row merge, as the records of an
+/// embedded message do, and a string that is not UTF-8 is an error. Its
+/// `host` is read, and not used.
 fn read_reflection_request(message : BytesView) -> Asked raise {
   let reader = @protobuf.Reader(message)
   let mut asked = Nothing
@@ -101,6 +103,12 @@ fn read_reflection_request(message : BytesView) -> Asked raise {
         let extension = @protobuf.Reader(reader.length_delimited())
         let mut containing_type = ""
         let mut number = 0
+        // A record right after one of the same member merges into it: its
+        // fields replace those that it holds, and the others stay.
+        if asked is Extension(type_name, value) {
+          containing_type = type_name
+          number = value
+        }
         while !extension.at_end() {
           let field = extension.tag()
           match (field, extension.wire_type()) {

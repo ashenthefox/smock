@@ -712,6 +712,11 @@ of each GitHub release include its section
   message cannot be decoded". It now skips such a field, as protobuf's
   parsers and smock's message decoder do, and answers the rest of the
   request.
+- gRPC reflection now merges a request's `file_containing_extension`
+  records, as protobuf's parsers merge the records of a message field. It
+  kept only the last, so a request that gave the containing type in one
+  record and the extension number in the next got NOT_FOUND. No known
+  client sends a request that way.
 
 ## [0.4.0] - 2026-11-01
 
