@@ -442,6 +442,7 @@ test "the list applies the filters, then $sort, then $offset and $limit, whereve
 
 ///|
 test "numbers order by value as json conditions compare them: exactly when a Double cannot hold them, as large integers and numbers beyond a Double's range" {
+  let zeros = (n : Int32) => "0".repeat(n)
   let h = harness(
     [
       (
@@ -451,10 +452,14 @@ test "numbers order by value as json conditions compare them: exactly when a Dou
           #|  - name: numbers
           #|data:
           #|  - { mock: numbers, name: numbers, key: id, jsonFile: numbers.json }
+          #|  - { mock: numbers, name: notations, key: id, jsonFile: notations.json }
           #|stubs:
           #|  - id: numbers
           #|    mock: numbers
           #|    crud: { bucket: numbers, path: /numbers }
+          #|  - id: notations
+          #|    mock: numbers
+          #|    crud: { bucket: notations, path: /notations }
         ),
       ),
     ],
@@ -486,6 +491,12 @@ test "numbers order by value as json conditions compare them: exactly when a Dou
           ),
         ),
       ),
+      (
+        "notations.json",
+        @utf8.encode(
+          "[{ \"id\": 1, \"v\": 1e400 }, { \"id\": 2, \"v\": 1\{zeros(400)} }, { \"id\": 3, \"v\": 9\{zeros(399)} }]",
+        ),
+      ),
     ],
   )
   inspect(
@@ -493,6 +504,18 @@ test "numbers order by value as json conditions compare them: exactly when a Dou
     content=(
       #|?$sort=v: 200 18/18 [9,8,4,3,12,13,14,11,10,2,1,17,5,7,18,15,6,16]
       #|?$sort=-v: 200 18/18 [16,6,15,5,7,18,17,1,2,10,11,14,12,13,3,4,8,9]
+    ),
+  )
+  // One value beyond a Double's range in two notations, 1e400 (item 1) and
+  // a 1 followed by 400 zeros (item 2), ties, and both order after a 9
+  // followed by 399 zeros (item 3), as #281's acceptance criteria state and
+  // "Numbers order by value" (crud-stubs.md) gives. Ties keep the bucket's
+  // order, in either direction.
+  inspect(
+    h.lists("/notations", ["$sort=v", "$sort=-v"]),
+    content=(
+      #|?$sort=v: 200 3/3 [3,1,2]
+      #|?$sort=-v: 200 3/3 [1,2,3]
     ),
   )
 }
