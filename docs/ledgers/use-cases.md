@@ -43,9 +43,9 @@ be2b8e0b, against the code and the tests there.
 | Messages asserted by no test | 22, 20 of which a user can see | none of the 22: 20 asserted, 2 deleted |
 | The top-level help | never asserted | still open (#370) |
 
-The survey's own rows give 92 features covered, not 93: six are marked as
-having no test (F12, F15, F39, F63, F98 and F99) and one as partly tested
-(F96). Its summary counted two of the six as partly tested.
+The survey's rows give 92 features covered, not the 93 of its summary: six
+rows have no test (F12, F15, F39, F63, F98 and F99), and one is partly
+tested (F96).
 
 Of the survey's 22 messages, a corrected count at d953f320 is: 2 that no
 input reaches (M07 and M08, since deleted), 3 that only a package's
@@ -142,7 +142,7 @@ it has its number, its row names #286, the ticket that files it.
 | F36 | The `Date` header | [The Date header](../running.md#the-date-header) | tested | `e2e/date_test.mbt` "every response on the plain and the TLS port carries one Date, the current time: a Stub's, a body file's, the head of an event stream, the no-match 404 and a 400 that smock sends itself"<br>`e2e/date_test.mbt` "a Stub, a CRUD Stub or noMatch.headers that gives its own Date, in any case, gets exactly that one, and smock adds none" |
 | F37 | Delays: fixed, uniform and log-normal, with a probability | [Delays](../definition-files/faults.md#delays) | tested | `e2e/faults_test.mbt` "a delay holds back the status line, while smock keeps answering other connections"<br>`engine/faults_test.mbt` "a uniform delay is a whole number of milliseconds from min to max, both included"<br>`engine/faults_test.mbt` "a log-normal delay is a whole number of milliseconds around its median, with a long tail"<br>`engine/faults_test.mbt` "a delay or a connection Fault with a probability applies to that share of matched requests" |
 | F38 | Connection Faults: reset, close and partial, over HTTP/1.1, HTTP/2 and gRPC | [Connection Faults](../definition-files/faults.md#connection-faults) | tested | `e2e/faults_test.mbt` "a close Fault ends the connection with a FIN, without a byte of response"<br>`e2e/faults_test.mbt` "a reset Fault reads the whole request, body included, then ends the connection with an RST, without a byte of response"<br>`e2e/faults_test.mbt` "a partial Fault sends the status line, the headers and the first half of the body, then a FIN"<br>`e2e/http2_faults_test.mbt` "h2c: a partial Fault sends HEADERS with the whole content-length and half the body, or half the events, then RST_STREAM INTERNAL_ERROR; a response with no body sends its HEADERS without ending the stream, then the reset; the Journal entry keeps its status"<br>`e2e/grpc_faults_test.mbt` "a reset Fault reads the whole call, its message split over DATA frames included, then resets its stream alone with RST_STREAM INTERNAL_ERROR, while another call on the connection is answered" |
-| F39 | When the operating system refuses a reset, smock logs `cannot reset the connection` and closes with a FIN | [Connection Faults](../definition-files/faults.md#connection-faults) | manual | Manual: only an operating-system failure shows it, and no C seam is added to inject one ([ADR 0001](../adr/0001-moonbit-with-c-only-for-tls.md)); the coverage ledger accepts its code as FAULT |
+| F39 | When the operating system refuses a reset, smock logs `cannot reset the connection` and closes with a FIN | [Connection Faults](../definition-files/faults.md#connection-faults) | manual | Manual: only an operating-system failure shows it, and no C seam is added to inject one ([ADR 0001](../adr/0001-moonbit-with-c-only-for-tls.md)); its code falls under the coverage ledger's FAULT category |
 | F40 | Seeds, and `--seed` to replay a run's Fault decisions | [Seeds](../definition-files/faults.md#seeds) | tested | `e2e/faults_test.mbt` "the process generator's seed is logged, and --seed or SMOCK_SEED replays its Fault decisions"<br>`engine/weighted_test.mbt` "with fault.seed, a Stub's picks are pinned and the same on every run, whatever other requests draw" |
 
 ### Templates and state
@@ -227,7 +227,7 @@ it has its number, its row names #286, the ticket that files it.
 | F96 | The Helm chart's git-sync and OCI-image delivery modes, served | [From a Git repository (git-sync)](../../charts/smock/README.md#from-a-git-repository-git-sync), [From an OCI image](../../charts/smock/README.md#from-an-oci-image) | partly | `scripts/test-helm-chart-on-kind.sh` admits their Pods through Pod Security admission on kind<br>`e2e/reload_test.mbt` "a git-sync update, which points the symlink that --dir goes through at a new worktree and removes the old one, reloads the definitions"<br>#286 files gap G2: serving both modes on kind is out of scope for now (#275, decision 5) |
 | F97 | Verifying the image's and the chart's signatures | [Verify the image](../installing.md#verify-the-image), [Verify the Helm chart](../installing.md#verify-the-helm-chart) | tested | `scripts/verify-image.sh` runs in the release, after it publishes<br>`scripts/verify-chart.sh` runs in the release, after it publishes |
 | F98 | The Mockoon migration guide's worked example | [A worked example](../migrating-from-mockoon.md#a-worked-example) | open | #287 runs the guide's `smock check` and `smock render` commands against what it prints |
-| F99 | Getting started on GKE | [Getting started on GKE](../getting-started-on-gke.md#getting-started-on-gke) | manual | Manual: checked by hand on a real GKE Autopilot cluster. CI has no GKE cluster, and nothing in this repository's automation runs on Google Cloud |
+| F99 | Getting started on GKE | [Getting started on GKE](../getting-started-on-gke.md#getting-started-on-gke) | manual | Manual: checked by hand on a real GKE Autopilot cluster, which CI does not have |
 
 ## Messages
 
@@ -235,7 +235,7 @@ Each message a user can see is asserted at least once. Seen by says who
 can see it: `user` for a user of smock, `package` when only a package's
 public interface shows it, and `nobody` when no input reaches it. The
 survey's count also left out the messages that only an OpenSSL failure
-gives; the coverage ledger accepts their code as FAULT.
+gives: their code falls under the coverage ledger's FAULT category.
 
 | ID | Message | Source | Seen by | Status | Checked by |
 |---|---|---|---|---|---|
