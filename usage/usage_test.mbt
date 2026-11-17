@@ -39,9 +39,23 @@ test "process RSS: the VmRSS line of /proc/<pid>/status, from KiB to bytes" {
       @usage.resident_bytes("VmRSS:\t    6896 MB\n"),
       @usage.resident_bytes("VmRSS:\t\n"),
       @usage.resident_bytes(""),
+      // The range of a 64-bit count: Linux writes VmRSS in kB of 1024 bytes,
+      // and the bytes are a signed 64-bit count, at most 2^63 - 1 =
+      // 9223372036854775807. 9007199254740991 kB is the most whose bytes it
+      // holds, 9223372036854774784; one kB more is 2^63 bytes, past it.
+      @usage.resident_bytes("VmRSS:\t9007199254740991 kB\n"),
+      @usage.resident_bytes("VmRSS:\t9007199254740992 kB\n"),
     ],
     content=(
-      #|[Some(7061504), None, None, None, None]
+      #|[
+      #|  Some(7061504),
+      #|  None,
+      #|  None,
+      #|  None,
+      #|  None,
+      #|  Some(9223372036854774784),
+      #|  None,
+      #|]
     ),
   )
 }
