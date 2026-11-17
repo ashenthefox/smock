@@ -159,11 +159,15 @@ def sites_only(root, options, out):
 def shard_count(mutants, width, seconds_per_mutant):
     """How many shards a run of so many mutants takes: the width, or more
     when a shard would take longer than BUDGET_S, and never more than the
-    mutants (one shard for none)."""
+    mutants (one shard for none). More shards than the width run in waves,
+    as jobs come free, so their count is a multiple of the width, which
+    fills each wave: a last shard alone would double the run's time."""
     if seconds_per_mutant > BUDGET_S:
         raise BulkError(f"a mutant planned at {seconds_per_mutant} s does not fit in a shard's {BUDGET_S} s")
     per_shard = BUDGET_S // seconds_per_mutant
     count = max(min(width, mutants), math.ceil(mutants / per_shard), 1)
+    if count > width:
+        count = min(math.ceil(count / width) * width, mutants)
     if count > MAX_JOBS:
         raise BulkError(f"{mutants} mutants at {seconds_per_mutant} s each need {count} shards of at most"
                         f" {per_shard}, more than the {MAX_JOBS} jobs a matrix holds: choose fewer mutants")
