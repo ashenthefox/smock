@@ -250,7 +250,7 @@ def check(root, report, base, summary_file=None):
     the floors against the base: whether it passed."""
     packages = report_module.read_packages(report, root)
     merge_base = git(root, "merge-base", "HEAD", base).strip()
-    problems, notes = [], []
+    problems, notes, at_floor = [], [], []
     floors = read_floors(read_file(root, FLOORS), problems)
     for name in sorted(set(floors) - set(packages)):
         problems.append(f"{name}: a floor of {floors[name]}, but the report has no such package: remove its line"
@@ -264,12 +264,12 @@ def check(root, report, base, summary_file=None):
         elif count > floor:
             problems.append(above(root, merge_base, name, package, floor))
         elif count == floor:
-            notes.append(f"{name}: {points(count)}, at its floor of {floor}")
+            at_floor.append(f"{name}: {points(count)}, at its floor of {floor}")
         else:
             notes.append(f"{name}: {points(count)}, below its floor of {floor}: lower it to {count} in this"
                          f" change (python3 scripts/coverage-ratchet.py write {report})")
     compare_with_base(root, base, merge_base, floors, problems, notes)
-    for note in notes:
+    for note in at_floor + notes:
         print(f"coverage-ratchet: {note}")
     for problem in problems:
         print(f"coverage-ratchet: {problem}", file=sys.stderr)
