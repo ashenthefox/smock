@@ -40,15 +40,20 @@ async test "h2c: a partial Fault sends HEADERS with the whole content-length and
       defer raw.close()
       let out = []
       let mut stream = 1
+      // Each request, and when its next event would be due, for those whose
+      // reset comes in place of an event: `partial` sends half the events,
+      // "each after its delay. Then RST_STREAM", and an event stream of a
+      // single event "sends its HEADERS without ending the HTTP/2 stream,
+      // then the reset" (docs/http2.md, Faults).
       for
         request in [
-          ("GET", "/partial"),
-          ("HEAD", "/partial"),
-          ("GET", "/empty"),
-          ("GET", "/no-content"),
-          ("GET", "/ticks"),
-          ("GET", "/tick"),
-          ("HEAD", "/ticks"),
+          ("GET", "/partial", None),
+          ("HEAD", "/partial", None),
+          ("GET", "/empty", None),
+          ("GET", "/no-content", None),
+          ("GET", "/ticks", Some(2200L)),
+          ("GET", "/tick", Some(2000L)),
+          ("HEAD", "/ticks", None),
         ] {
         let start = @async.now()
         raw.send([
@@ -60,7 +65,11 @@ async test "h2c: a partial Fault sends HEADERS with the whole content-length and
         out.push("\{request.0} \{request.1}:")
         out.push(raw.frames_until_stream_ends(stream))
         let ms = @async.now() - start
-        out.push("reset before 1000 ms: \{ms < 1000}")
+        match request.2 {
+          Some(next) =>
+            out.push("reset before the next event was due: \{ms < next}")
+          None => out.push("reset before 1000 ms: \{ms < 1000}")
+        }
         stream += 2
       }
       inspect(
@@ -90,11 +99,11 @@ async test "h2c: a partial Fault sends HEADERS with the whole content-length and
           #|DATA 9 11 octets
           #|DATA 9 11 octets
           #|RST_STREAM 9 INTERNAL_ERROR
-          #|reset before 1000 ms: true
+          #|reset before the next event was due: true
           #|GET /tick:
           #|HEADERS 11 END_HEADERS [:status: 200, content-type: text/event-stream, smock-mock: m; via=default, date: <now>]
           #|RST_STREAM 11 INTERNAL_ERROR
-          #|reset before 1000 ms: true
+          #|reset before the next event was due: true
           #|HEAD /ticks:
           #|HEADERS 13 END_HEADERS [:status: 200, content-type: text/event-stream, smock-mock: m; via=default, date: <now>]
           #|RST_STREAM 13 INTERNAL_ERROR
@@ -167,7 +176,7 @@ async test "h2c: a close Fault sends GOAWAY NO_ERROR naming the highest stream t
           "---",
           ..goaway.shown,
           "GOAWAY at once: \{goaway.end_ms < 400}",
-          "then: \{after.shown.length()} frames, \{after.how}, about a second after the GOAWAY: \{after.end_ms - goaway.end_ms >= 800 && after.end_ms - goaway.end_ms < 2000}",
+          "then: \{after.shown.length()} frames, \{after.how}, about a second after the GOAWAY: \{about_a_second(after.end_ms - goaway.end_ms)}",
           "a fresh connection: \{next.brief()}",
           "---",
           fault_journal(smock),
