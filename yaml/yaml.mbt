@@ -103,6 +103,10 @@ pub impl Show for ParseError with fn output(self, logger) {
 ///   "duplicate key". Keys are compared as the strings they read as, so
 ///   `a:` and `"a":` repeat each other.
 /// - The members of a mapping are read in the order they are written.
+/// - A block scalar whose last line ends the text without a line break
+///   gets no line break added, as YAML 1.2.2 says (section 8.1.1.2), with
+///   each chomping indicator: a text that ends with `a: |` and then `  x`,
+///   with no line break after it, reads `a` as `"x"`.
 /// - In the mode for OpenAPI documents, a plain scalar that JSON cannot
 ///   hold, such as `.inf`, `.NaN` or a hexadecimal or octal integer above
 ///   2^53 - 1, is rejected with a message that ends in "quote this value".

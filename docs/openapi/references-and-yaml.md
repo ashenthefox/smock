@@ -243,6 +243,11 @@ The YAML parser also holds to these rules:
   hexadecimal or octal integer above 2^53 - 1, is an error whose message
   ends in "quote this value". Quoted, it is a string.
 - The members of a mapping are read in the order they are written.
+- A block scalar whose last line ends the file without a line break gets
+  no line break added, as YAML 1.2.2 says (section 8.1.1.2), with each
+  chomping indicator: a file that ends with `description: |` and then
+  `  A pet`, with no line break after it, reads `description` as
+  `"A pet"`.
 
 Each of these is an error at its pointer, with a message that names it,
 and nothing is written:

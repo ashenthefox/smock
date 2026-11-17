@@ -306,6 +306,48 @@ test "a literal block scalar keeps its lines; chomping decides the final line br
       #|{"literal":"line 1\n  indented # not a comment\nline 3\n","clip":"a\n\nb\n","strip":"a","keep":"a\n\n\n","empty":"","list":["item\n","item"],"last":"no line break at the end"}
     ),
   )
+  // "A block scalar whose last line ends the text without a line break
+  // gets no line break added, as YAML 1.2.2 says (section 8.1.1.2), with
+  // each chomping indicator" (`parse`): the last line break of a clipped or
+  // kept scalar may be the end of the input (`b-chomped-last`, production
+  // 165). Each input comes without and then with a final line break, which
+  // a clipped or kept scalar keeps (Example 8.4). The first pair holds a
+  // last line of one space, after the indentation; the last, a tab there,
+  // which is text. yaml-test-suite reads a line break at the end of the
+  // first input, L24T/01, which its lists keep as a known difference.
+  inspect(
+    each([
+      "foo: |\n  x\n   ", "foo: |\n  x\n   \n", "a: |\n  x", "a: |\n  x\n", "a: |-\n  x",
+      "a: |-\n  x\n", "a: |+\n  x", "a: |+\n  x\n", "a: >\n  x\n  y", "a: >\n  x\n  y\n",
+      "a: |\n \t", "a: |\n \t\n",
+    ]),
+    content=(
+      #|"foo: |\n  x\n   " -> {"foo":"x\n "}
+      #|"foo: |\n  x\n   \n" -> {"foo":"x\n \n"}
+      #|"a: |\n  x" -> {"a":"x"}
+      #|"a: |\n  x\n" -> {"a":"x\n"}
+      #|"a: |-\n  x" -> {"a":"x"}
+      #|"a: |-\n  x\n" -> {"a":"x"}
+      #|"a: |+\n  x" -> {"a":"x"}
+      #|"a: |+\n  x\n" -> {"a":"x\n"}
+      #|"a: >\n  x\n  y" -> {"a":"x y"}
+      #|"a: >\n  x\n  y\n" -> {"a":"x y\n"}
+      #|"a: |\n \t" -> {"a":"\t"}
+      #|"a: |\n \t\n" -> {"a":"\t\n"}
+    ),
+  )
+  // The same rule for a scalar of empty lines only, kept: with no line
+  // break after its last line of spaces, that line is no empty line
+  // (`l-empty` ends with a line break, section 6.4), so the scalar is
+  // empty. yaml-test-suite reads a line break for the first input, JEF9/02,
+  // which its lists keep as a known difference.
+  inspect(
+    each(["- |+\n   ", "- |+\n   \n"]),
+    content=(
+      #|"- |+\n   " -> [""]
+      #|"- |+\n   \n" -> ["\n"]
+    ),
+  )
 }
 
 ///|

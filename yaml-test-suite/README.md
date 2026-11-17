@@ -94,7 +94,11 @@ and the reason:
   a file with no document, a key that is a collection, a `key: value`
   pair in a flow sequence without braces, a key of a flow mapping written
   over several lines, and a tab in the white space at the start of a
-  line. Each entry quotes and cites the sentence.
+  line. One more is a reading, not a refusal: a block scalar whose last
+  line ends the input without a line break gets no line break added, as
+  YAML 1.2.2's grammar says, where the suite reads one; the documents
+  state it among the rules the parser holds to, and the maintainer kept
+  it on 2026-11-18 (#368). Each entry quotes and cites the sentence.
 - `skipped`: the testee skips the case.
 - `#<issue>`: a bug, which fails until the issue is done.
 
@@ -112,7 +116,7 @@ listed case with its outcome and reason.
 Unlike h2spec's lists, these may keep entries marked as bugs, each with
 its issue, when a branch merges into `main`, until yaml's L4 ticket (#323)
 fixes them ([Before merging into main](../docs/merging-into-main.md)).
-Each bug has an issue of its own, which its entries name: #368.
+None is listed now.
 
 ## How it runs
 

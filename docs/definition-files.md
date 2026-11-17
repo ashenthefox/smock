@@ -646,6 +646,10 @@ The YAML parser also holds to these rules:
 - A key that repeats in a mapping is rejected at the later key, with
   "duplicate key". `id:` and `"id":` are the same key.
 - The members of a mapping are read in the order they are written.
+- A block scalar whose last line ends the file without a line break gets
+  no line break added, as YAML 1.2.2 says (section 8.1.1.2), with each
+  chomping indicator: a file that ends with `body: |` and then `  hello`,
+  with no line break after it, reads `body` as `"hello"`.
 
 Every problem is reported with the file and the JSON Pointer of the value,
 such as `users.yaml: /stubs/0/request/method: "on" may be read as a boolean;
