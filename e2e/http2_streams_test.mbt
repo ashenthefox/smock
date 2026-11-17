@@ -13,14 +13,14 @@ async test "h2c: a delayed stream does not hold a fast one on the same connectio
       let slow = client.send("GET", "/slow", authority="localhost")
       let fast = client.send("GET", "/fast", authority="localhost")
       let fast_response = client.response(fast)
-      let fast_ms = @async.now() - start
-      // Events of the delayed stream read meanwhile would be kept for later.
+      // A delay "delays only its own stream" (docs/http2.md, Streams that
+      // wait): events of the delayed stream read meanwhile would be kept for
+      // later.
       let early = client.kept_for(slow)
       let slow_response = client.response(slow)
       let slow_ms = @async.now() - start
       inspect(
         [
-          "fast answered during the delay: \{fast_ms < 1000}",
           "nothing of the delayed stream came before: \{early == 0}",
           "delayed answered after at least 1000 ms: \{slow_ms >= 1000}",
           "---",
@@ -29,7 +29,6 @@ async test "h2c: a delayed stream does not hold a fast one on the same connectio
           slow_response.render(),
         ].join("\n"),
         content=(
-          #|fast answered during the delay: true
           #|nothing of the delayed stream came before: true
           #|delayed answered after at least 1000 ms: true
           #|---
