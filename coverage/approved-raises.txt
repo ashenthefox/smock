@@ -18,3 +18,4 @@
 # acknowledgment of that report at the merge is the approval. The lines
 # stay, as the record of what was approved.
 cmd/smock 3 exit's coverage dump (#341): it writes the counters only when the e2e tests' smock exits, and no in-process test runs cmd/smock; e2e's coverage counts it (#342)
+server 10 the wait for window begun as a body is held back (#381), in queue, queue_reply, begin_wait and trickle: only the e2e tests reach an HTTP/2 connection's flow control; e2e's coverage counts it (#342)
