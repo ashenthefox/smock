@@ -690,6 +690,14 @@ of each GitHub release include its section
   gRPC in its description of smock, as the README's opening line does: "A
   mock server for HTTP/1.1, HTTP/2, HTTPS, Server-Sent Events and gRPC
   unary calls." It left gRPC out.
+- The certificate expiry metric, and the `expiry` of a reload's log entry,
+  now give the notAfter of the certificate that the TLS port presents:
+  the first block of the certificate file labelled `CERTIFICATE`,
+  `X509 CERTIFICATE` or `TRUSTED CERTIFICATE`, the block OpenSSL loads.
+  smock read the first block whose label ended with `CERTIFICATE`, so a
+  file that started with an `ATTRIBUTE CERTIFICATE` got a metric of 0 and
+  an `expiry` of null, and one that started with an `X.509 CERTIFICATE`,
+  which OpenSSL skips, got that block's notAfter.
 
 ## [0.4.0] - 2026-11-01
 
