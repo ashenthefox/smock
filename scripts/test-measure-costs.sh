@@ -370,6 +370,7 @@ build --target native<cov> cmd/smock --target-dir <bin>"
 # of the coverage mode and the report, each mode in target directories of
 # its own, outside the tree and gone afterwards.
 covered() {
+  name=$1
   dirs=$(sed -n 's/.*--target-dir \([^ ]*\).*/\1/p' "$FAKE_LOG" | awk '!seen[$0]++')
   set -- "$1" $dirs
   if [ $# != 9 ]; then
@@ -389,11 +390,11 @@ moonrun $tmp/bin/moon_cove.wasm -- $8/native/debug/test/p/p.trace.source $counte
   shift
   for dir in "$@"; do
     if [ -e "$dir" ] || [ "${dir#"$tree"}" != "$dir" ]; then
-      fail "$1: leaves a target directory, or uses one in the tree: $dir"
+      fail "$name: leaves a target directory, or uses one in the tree: $dir"
       return
     fi
   done
-  pass "coverage: uses target directories of its own, and removes them"
+  pass "$name: uses target directories of its own, and removes them"
 }
 
 measure coverage coverage
@@ -422,6 +423,24 @@ FAKE_COVERAGE_FAILS=1 measure coverage-fails coverage
 exits coverage-fails 1
 holds coverage-fails coverage.json '.ok == false and .coverage.native_only.run.tests.failed == 1
   and .plain.native_only.run.exit_status == 0' "not ok, with both modes"
+
+# --- summary: what the parts wrote, as Markdown ----------------------------------------------
+
+# The parts above wrote to directories of their own; the summary reads one
+# that holds them all, and says which part is missing or failed.
+mkdir -p "$tmp/all"
+cp "$tmp/e2e/e2e.json" "$tmp/alone-fails/alone.json" "$tmp/rebuild/rebuild.json" "$tmp/all/"
+measure all summary
+exits all 0
+says all "| Every e2e test in one process, median of 3 runs | "
+says all "| Each e2e test alone: tests, runs, runs that failed, runs past the limit | 3, 6, 2, 0 |"
+says all "The part alone failed."
+says all "| engine's native tests after the mutant: rebuild | "
+says all "The part coverage did not run."
+
+measure nothing summary
+exits nothing 1
+says nothing "no part wrote to"
 
 echo
 echo "test-measure-costs: $passed passed, $failed failed"

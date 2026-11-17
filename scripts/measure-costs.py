@@ -40,6 +40,9 @@ its start to its exit, measured here.
         that run tcc: on amd64, moon's debug builds skip the system's C
         compiler. With coverage, moon_cove reports the points covered, which
         tells that the coverage build works.
+  summary
+        Prints what the parts wrote, as Markdown, and writes it to
+        summary.md; it says which part failed or did not run.
 
 It refuses to run when a variable that gives moon another C compiler, a
 wrapper of it or flags is set (MOON_CC, MOON_AR, MOON_CC_WRAPPER): on amd64,
@@ -457,7 +460,100 @@ def part_coverage(out, args):
     return 0 if result["ok"] else 1
 
 
-PARTS = {"e2e": part_e2e, "alone": part_alone, "rebuild": part_rebuild, "coverage": part_coverage}
+def seconds(step):
+    """A step's time for the summary, or what kept it from having one."""
+    if not step:
+        return "did not run"
+    if step["timed_out"]:
+        return f"{step['seconds']:.1f} (timed out)"
+    shown = f"{step['seconds']:.1f}"
+    if "tests" in step:
+        shown += f" ({step['tests']['passed']} of {step['tests']['total']} tests passed)"
+    if step["exit_status"] != 0:
+        shown += f" (exit status {step['exit_status']})"
+    return shown
+
+
+def part_summary(out, args):
+    found = {part: json.loads((out / f"{part}.json").read_text()) for part in MEASURED if (out / f"{part}.json").exists()}
+    if not found:
+        print(f"measure-costs: no part wrote to {out}", file=sys.stderr)
+        return 1
+    first = next(iter(found.values()))["machine"]
+    lines = [f"## Measured on {first['machine']}, {first['cpus']} CPUs", ""]
+    lines.append(first["moon"].splitlines()[0] if first["moon"] else "moon: unknown")
+    started = found.get("e2e", {}).get("machine", {}).get("seconds_since_job_start")
+    if started is not None:
+        lines.append(f"The checkout and the setup took {started:.0f} s before the first measurement.")
+    lines += ["", "| What | Seconds |", "|---|---:|"]
+
+    def row(label, value):
+        lines.append(f"| {label} | {value} |")
+
+    if "e2e" in found:
+        e2e = found["e2e"]
+        row("cmd/smock, built in _build", seconds(e2e["cmd_build"]))
+        row("The e2e package, built after it", seconds(e2e["e2e_build"]))
+        row("The e2e package, built with nothing to do", seconds(e2e["noop"]))
+        times = [run["seconds"] for run in e2e["runs"] if not run["timed_out"]]
+        if times:
+            row(f"Every e2e test in one process, median of {len(times)} runs",
+                f"{median(times):.1f} ({min(times):.1f} to {max(times):.1f})")
+        for number, run in enumerate(e2e["runs"], 1):
+            row(f"Every e2e test in one process, run {number}", seconds(run))
+    if "alone" in found and "summary" in found["alone"]:
+        alone = found["alone"]["summary"]
+        row("Each e2e test alone: tests, runs, runs that failed, runs past the limit",
+            f"{alone['tests']}, {alone['test_runs']}, {alone['failed_runs']}, {alone['timed_out_runs']}")
+        row("Each e2e test alone: total, median, 90th percentile, slowest",
+            f"{alone['total_seconds']:.1f}, {alone['median_seconds']:.2f}, {alone['p90_seconds']:.2f}, {alone['max_seconds']:.2f}")
+    if "rebuild" in found:
+        rebuild = found["rebuild"]
+        clean, mutated = rebuild.get("clean", {}), rebuild.get("mutated", {})
+        row("cmd/smock, built from clean", seconds(clean.get("cmd")))
+        row("engine's native tests, built from clean", seconds(clean.get("engine_native")))
+        row("engine's wasm-gc tests, built from clean", seconds(clean.get("engine_wasm_gc")))
+        row("engine's native tests after the mutant: rebuild", seconds(mutated.get("engine_native_build")))
+        row("engine's native tests after the mutant: run", seconds(mutated.get("engine_native_run")))
+        row("cmd/smock after the mutant: rebuild", seconds(mutated.get("cmd")))
+        row("engine's wasm-gc tests after the mutant: rebuild and run", seconds(mutated.get("engine_wasm_gc")))
+    if "coverage" in found:
+        for mode in ("plain", "coverage"):
+            result = found["coverage"][mode]
+            for name, label in (("native_only", "the native-only packages' tests"),
+                                ("wasm_gc", "the pure packages' tests on wasm-gc, but yaml's"),
+                                ("yaml_native", "yaml's tests, natively")):
+                row(f"{mode.capitalize()}: {label}, build", seconds(result[name]["build"]))
+                row(f"{mode.capitalize()}: {label}, run", seconds(result[name]["run"]))
+            row(f"{mode.capitalize()}: the binary, build", seconds(result["binary"]))
+            for name, plan in result["plans"].items():
+                row(f"{mode.capitalize()}: C compiler commands planned for {name.replace('_', ' ')}: the system's, tcc's",
+                    f"{plan['system_cc']}, {plan['tcc']}")
+            if "report" in result:
+                report = result["report"]
+                row("Coverage: the report, and the points it counts covered",
+                    f"{seconds(report)}, {report['covered']} of {report['points']}")
+    if "alone" in found and found["alone"].get("tests"):
+        slowest = sorted(found["alone"]["tests"], key=lambda test: -median(test["seconds"]))[:10]
+        lines += ["", "The slowest e2e tests alone:", ""]
+        lines += [f"- {median(test['seconds']):.2f} s: {test['file']}:{test['line']} {test['name']}" for test in slowest]
+    lines.append("")
+    for part in MEASURED:
+        if part not in found:
+            lines.append(f"The part {part} did not run.")
+        elif not found[part]["ok"]:
+            lines.append(f"The part {part} failed.")
+    text = "\n".join(lines) + "\n"
+    (out / "summary.md").write_text(text)
+    print(text, end="")
+    return 0
+
+
+MEASURED = ("e2e", "alone", "rebuild", "coverage")
+PARTS = {
+    "e2e": part_e2e, "alone": part_alone, "rebuild": part_rebuild, "coverage": part_coverage,
+    "summary": part_summary,
+}
 
 
 def main():
