@@ -704,7 +704,9 @@ test "empty values, empty documents and stray indicators give an error" {
   )
   // A `-` item indicator inside a flow collection: YAML embeds flow nodes
   // in block collections, "but not vice-versa" (YAML 1.2.2, section
-  // 8.2.3). The message is the one #280's acceptance criteria name.
+  // 8.2.3). The message is the one #280's acceptance criteria name; the
+  // pointer is the deepest node reached, the flow sequence's first item, as
+  // `parse` documents.
   inspect(
     each(["[- a]"]),
     content=(
