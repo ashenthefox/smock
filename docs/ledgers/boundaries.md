@@ -106,7 +106,9 @@ Rows that the survey had wrong at d953f320, and that are unchanged since:
 - **L37e to L37h**: the survey had the ranges of the other numeric
   settings tested on both sides. Their ends are refused just past them,
   some of them, but no document states these ranges: they are findings,
-  which #320 takes to the maintainer.
+  which #320 takes to the maintainer. Since then, #320 tests each end and
+  the value just past it, in-process and as the code has them, so the
+  rows are tested; the ranges wait for the maintainer.
 
 ## The search for documented limits
 
