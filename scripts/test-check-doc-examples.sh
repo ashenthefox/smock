@@ -255,6 +255,92 @@ says broken "    example.yaml: /stubs/0: a fake problem"
 says broken "docs/a.md:22: passes smock check"
 says broken "check-doc-examples: 2 whole Definition files, 1 of which fails smock check; 2 other fenced blocks set aside as fragments"
 
+# --- The rule that tells a whole file from a fragment -----------------------------
+
+# A user document is one the index links to before its section for
+# contributors, also by a link with a fragment. A block is a whole file by
+# its language and its top-level keys, wherever its fence is: in a list
+# item, of tildes, or longer than a fence inside it. Its comments and
+# document markers are no keys; a key that is no field of a Definition
+# file, a line that is no key, and a language that is neither YAML nor
+# JSON make it a fragment, and so does a JSON object whose members are no
+# fields, though deeper members are.
+tree
+sed -i 's|^- \[a.md\](a.md) shows examples.$|&\n\n## Operating smock\n\n- [b.md](b.md#rules) and [examples/](examples/) show more.|' \
+  "$root/docs/README.md"
+file docs/b.md <<'MD'
+# Rules
+
+- In a list item:
+
+  ```yaml
+  # a comment
+  version: 1
+  mocks:
+    - name: a
+  ```
+
+~~~
+---
+stubs: []
+...
+~~~
+
+```yml
+"data":
+  - { mock: shop, name: orders, json: [] }
+```
+
+````yaml
+stubs:
+  - id: x
+  ```
+````
+
+```json
+{"stubs": [{"id": "x{[", "data": 1}], "version": 1}
+```
+
+```yaml
+mocks: []
+request: { path: / }
+```
+
+```yaml
+stubs:
+…
+```
+
+```json
+{"method": "GET", "data": {"stubs": []}}
+```
+
+```text
+data: {"stubs": []}
+```
+
+```yaml
+# only a comment
+```
+MD
+check rule
+exits rule 0
+says rule "docs/b.md:5: passes smock check"
+says rule "docs/b.md:12: passes smock check"
+says rule "docs/b.md:18: passes smock check"
+says rule "docs/b.md:23: passes smock check"
+says rule "docs/b.md:29: passes smock check"
+says rule "check-doc-examples: 7 whole Definition files pass smock check; 7 other fenced blocks set aside as fragments"
+ran rule example.yaml example.json example.yaml example.yaml example.yaml example.yaml example.json
+
+# A document that the index links to and that cannot be read stops the
+# check.
+tree
+sed -i 's|^- \[a.md\](a.md) shows examples.$|&\n- [gone.md](gone.md) is gone.|' "$root/docs/README.md"
+check unreadable
+exits unreadable 2
+says unreadable "check-doc-examples: cannot read docs/gone.md: No such file or directory"
+
 echo
 echo "test-check-doc-examples: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
