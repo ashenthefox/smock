@@ -26,7 +26,7 @@ grpc 0
 http1 10
 importopenapi 39
 llm 21
-log 13
+log 12
 metrics 1
 openssl 24
 prng 0
