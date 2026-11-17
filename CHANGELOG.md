@@ -690,6 +690,12 @@ of each GitHub release include its section
   gRPC in its description of smock, as the README's opening line does: "A
   mock server for HTTP/1.1, HTTP/2, HTTPS, Server-Sent Events and gRPC
   unary calls." It left gRPC out.
+- gRPC reflection no longer refuses a request in which a field it knows
+  comes with another wire type than its type's, such as
+  `file_by_filename` sent as a varint. It answered INTERNAL, "the request
+  message cannot be decoded". It now skips such a field, as protobuf's
+  parsers and smock's message decoder do, and answers the rest of the
+  request.
 
 ## [0.4.0] - 2026-11-01
 
