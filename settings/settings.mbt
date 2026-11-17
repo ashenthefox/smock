@@ -327,7 +327,7 @@ let serve_settings : Array[Setting] = [
   },
   {
     name: "replicas",
-    about: "How many replicas the deployment runs. Above 1, every Admin API response warns that state is per replica.",
+    about: "How many replicas the deployment runs, from 1 to \{max_replicas}. Above 1, every Admin API response warns that state is per replica.",
     default: Some("1"),
   },
   {
@@ -350,7 +350,7 @@ let serve_settings : Array[Setting] = [
   header_size_limit_setting,
   {
     name: "header-count-limit",
-    about: "The most header fields a request may have. More get 431.",
+    about: "The most header fields a request may have, from 1 to \{max_size}. More get 431.",
     default: Some("100"),
   },
   {
@@ -395,7 +395,7 @@ let serve_settings : Array[Setting] = [
   },
   {
     name: "journal-max-entries",
-    about: "The most entries the Journal holds. Beyond it, the oldest entries are evicted.",
+    about: "The most entries the Journal holds, from 1 to \{max_size}. Beyond it, the oldest entries are evicted.",
     default: Some(journal_defaults.max_entries.to_string()),
   },
   {
