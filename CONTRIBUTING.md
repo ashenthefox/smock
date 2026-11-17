@@ -848,9 +848,10 @@ maintainer's approval, and shows in the weekly report.
 - **INT**: an integer literal, with both n+1 and n-1 where it is an
   operand of a comparison or an index, and one replacement elsewhere.
 - **STR**: a string literal replaced by the empty string or with one
-  character changed, in the protocol packages, in `server` and in `log`'s
-  line writers. A mock server's behaviour is mostly strings: header
-  names, content types, JSON keys, status texts and log lines.
+  character changed, in the protocol packages, in `server` and the parsers
+  moved out of it (`serverparsers`), and in `log`'s line writers. A mock
+  server's behaviour is mostly strings: header names, content types, JSON
+  keys, status texts and log lines.
 
 The pinned set holds one mutant per position, two for INT in a comparison
 or an index, and a fixed rule chooses the alternative, so that a runner
@@ -916,8 +917,8 @@ details, and the maintainer approved them as part of v1;
   escape, such as `\t`, is one character. A literal that writes no
   character outside its interpolations gets `_` at the start of its text,
   as the empty literal does. STR's scope is the protocol packages,
-  `server` and `log`, but `log/target.mbt`, the reader of request
-  targets.
+  `server`, `serverparsers` and `log`, but `log/target.mbt`, the reader
+  of request targets.
 - **Not sites**: literals in patterns, ranges (`..<` and `..=`), and
   `not(...)` calls.
 - **Skipped sites.** A rule skips a site that cannot be a mutant, and the

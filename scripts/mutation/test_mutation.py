@@ -430,6 +430,23 @@ class StringsTest(unittest.TestCase):
             self.assertEqual(scoped.get(file), {None}, file)
         self.assertEqual(scoped.get("usage/usage.mbt"), {"outside scope"})
 
+    def test_strs_scope_holds_the_parsers_moved_out_of_server(self):
+        # serverparsers holds server's pure parsers (#317, #318, #319), whose
+        # strings STR's scope covered while they were in server, so it holds
+        # them there too: each string of the forms is a site in both.
+        with tempfile.TemporaryDirectory() as tmp:
+            for package in ("server", "serverparsers"):
+                (Path(tmp) / package).mkdir()
+                shutil.copy(FIXTURE / "forms" / "strings.mbt", Path(tmp) / package / "strings.mbt")
+            found = [s for s in find_sites(tmp, "server", "serverparsers", chosen="full") if s["operator"] == "STR"]
+        sites = {}
+        for s in found:
+            package = s["file"].split("/")[0]
+            sites.setdefault(package, set()).add((s["line"], s["original"], s["replacement"], s.get("skipped")))
+        self.assertEqual({p: {skipped for *_, skipped in held} for p, held in sites.items()},
+                         {"server": {None}, "serverparsers": {None}})
+        self.assertEqual(sites["serverparsers"], sites["server"])
+
 
 def logging_moon(directory, fail_build_when=None):
     """A moon that logs each of its command lines and runs the real one."""
