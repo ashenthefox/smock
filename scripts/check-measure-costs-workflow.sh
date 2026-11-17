@@ -104,4 +104,4 @@ set_flags=$(printf '%s\n' "$json" | jq -r '
 if [ "$failed" -ne 0 ]; then
   exit 1
 fi
-echo "check-measure-costs-workflow: $workflow runs only by hand"
+echo "check-measure-costs-workflow: $workflow runs only by hand, on amd64 and arm64, with no C flags, and keeps what it measures"

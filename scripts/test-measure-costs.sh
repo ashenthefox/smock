@@ -251,7 +251,7 @@ holds alone-fails alone.json '.ok == false and .summary.failed_runs == 2
   and ([.tests[] | select(.failures > 0) | [.file, .index, .failures]] == [["b_test.mbt", 1, 2]])' \
   "not ok, with the test that failed and how often"
 says alone-fails "2 of 6 runs of an e2e test alone failed"
-if ls "$tmp/alone-fails/logs/alone/" | grep -q "b_test.mbt-1"; then
+if [ -n "$(find "$tmp/alone-fails/logs/alone" -name "b_test.mbt-1-run-*.log")" ]; then
   pass "alone-fails: keeps moon's output of the test that failed"
 else
   fail "alone-fails: keeps no output of the test that failed: $(ls -R "$tmp/alone-fails/logs" 2>&1)"
@@ -372,6 +372,7 @@ build --target native<cov> cmd/smock --target-dir <bin>"
 covered() {
   name=$1
   dirs=$(sed -n 's/.*--target-dir \([^ ]*\).*/\1/p' "$FAKE_LOG" | awk '!seen[$0]++')
+  # shellcheck disable=SC2086 # one word for each directory
   set -- "$1" $dirs
   if [ $# != 9 ]; then
     fail "$1: uses $(($# - 1)) target directories, not 8: $dirs"
