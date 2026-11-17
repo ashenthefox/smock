@@ -155,15 +155,19 @@ async test "on SIGTERM, a drain waits for a stream in progress to send its waits
         smock.terminate()
         let (last, _, events) = until_end(stream, start)
         let status = smock.exited()
+        // "A drain on SIGTERM waits for a stream in progress, its waits
+        // included" (docs/definition-files/llm-responses.md, Streams), and
+        // ends once it is over, before the drain timeout.
+        let drain = 10000L
         inspect(
           [
             "the stream ended with [DONE] and its last chunk: \{events.has_suffix("data: [DONE]\n\n\n0\n\n")}",
-            "its last piece came after its waits, well before the drain timeout: \{last >= 1500L && last < 3000L}",
+            "its last piece came after its waits, before the drain timeout: \{last >= 1500L && last < drain}",
             "exit status \{status}",
           ].join("\n"),
           content=(
             #|the stream ended with [DONE] and its last chunk: true
-            #|its last piece came after its waits, well before the drain timeout: true
+            #|its last piece came after its waits, before the drain timeout: true
             #|exit status 0
           ),
         )
