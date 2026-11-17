@@ -566,6 +566,9 @@ def main():
         unapplied = {directory: [] for directory in args.packages}
         if entries is not None:
             whole, unapplied = choice.resolve(root, args.list, entries, found, args.packages)
+            if args.shard and args.shard[0] != 1:
+                # The first shard counts the keys that no longer apply.
+                unapplied = {directory: [] for directory in args.packages}
         if args.sample is not None:
             whole = choice.sample(whole, args.packages, args.sample, args.seed)
         chosen = choice.shard(whole, args.packages, *args.shard) if args.shard else whole
@@ -601,6 +604,11 @@ def main():
     with open(out / "mutants.jsonl", "w", encoding="utf-8") as f:
         for record in records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    if entries is not None:
+        with open(out / "unapplied.jsonl", "w", encoding="utf-8") as f:
+            for directory in args.packages:
+                for entry, why in unapplied[directory]:
+                    f.write(json.dumps({"directory": directory, "listed": entry, "why": why}, ensure_ascii=False) + "\n")
     if args.sites_only:
         with open(out / "chosen.jsonl", "w", encoding="utf-8") as f:
             for directory in args.packages:

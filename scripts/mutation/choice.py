@@ -278,6 +278,30 @@ def by_offset(files, where, entry, sites):
     raise ChoiceError(f"{where}: offset {offset} of {file} is in no definition but a test")
 
 
+def by_key(files, entry, sites):
+    """The mutant an entry by key names, or None and why it no longer
+    applies."""
+    file = entry["file"]
+    source = files.source(file)
+    if source is None:
+        return None, "its file is gone"
+    if entry["operator"] in ops.OPERATORS:
+        name = key_name(entry)
+        for site in sites:
+            if site["id"] == name:
+                return dict(site, in_operator_set=True), None
+        return None, "no site of operator set v1 has its id"
+    mine = [lines for name, lines in files.definitions(file) if name == entry["definition"]]
+    if not mine:
+        return None, "its definition is gone"
+    found = [(lines, at) for lines in mine for at in places(source, lines, entry["original"])]
+    if entry["ordinal"] >= len(found):
+        return None, "its text is gone"
+    lines, at = found[entry["ordinal"]]
+    return outside(source, file, entry["definition"], lines, entry["operator"], entry["original"],
+                   entry["replacement"], at), None
+
+
 def resolve(root, path, entries, found, directories, moonc="moonc"):
     """The listed mutants of each package given, in the list's order, and
     the keys that no longer apply there, each with why."""
@@ -288,9 +312,14 @@ def resolve(root, path, entries, found, directories, moonc="moonc"):
         directory = posixpath.dirname(entry["file"])
         if directory not in chosen:
             continue
-        where = f"{path}:{number}"
-        mutant = by_offset(files, where, entry, found[directory][0])
-        chosen[directory].append(dict(mutant, listed=entry))
+        if "offset" in entry:
+            mutant, why = by_offset(files, f"{path}:{number}", entry, found[directory][0]), None
+        else:
+            mutant, why = by_key(files, entry, found[directory][0])
+        if mutant is None:
+            unapplied[directory].append((entry, why))
+        else:
+            chosen[directory].append(dict(mutant, listed=entry))
     return chosen, unapplied
 
 

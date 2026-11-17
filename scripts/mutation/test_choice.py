@@ -348,5 +348,139 @@ class ListedByOffsetTest(unittest.TestCase):
         self.assertIn(f"{listed}:1: calc/calc.mbt does not hold \"<=\" at offset {offset_of(self.text, 17, 16)}", result.stderr)
 
 
+NEXT = "///|\n/// The number after `n`.\npub fn next(n : Int32) -> Int32 {\n  n + 1\n}\n\n"
+
+
+def later_commit(root):
+    """A second commit on the fixture's history: calc.mbt gains a function
+    before in_range, six lines, and is_odd's body becomes `n % 2 != 0`."""
+    calc = root / "calc" / "calc.mbt"
+    text = calc.read_text(encoding="utf-8")
+    first = text.index("///|")
+    text = text[:first] + NEXT + text[first:]
+    calc.write_text(text.replace("  !(n % 2 == 0)\n", "  n % 2 != 0\n"), encoding="utf-8")
+    git(root, "commit", "-q", "-am", "a later commit")
+    return git(root, "rev-parse", "HEAD").strip()
+
+
+class ListedByKeyTest(unittest.TestCase):
+    """A list of mutants by key, written for the fixture's first commit,
+    on a later one."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-choice-keys-"))
+        cls.root = cls.tmp / "root"
+        fixture_history(cls.root)
+        later_commit(cls.root)
+
+        def key(definition, operator, original, replacement, ordinal=0, file="calc/calc.mbt"):
+            return {"file": file, "definition": definition, "operator": operator, "original": original,
+                    "replacement": replacement, "ordinal": ordinal}
+
+        cls.entries = [
+            # Two sites of operator set v1, by their ids: in_range's `n <=
+            # high` to `n < high`, which survives, and its `&&` to `||`,
+            # which 0 kills (calc.mbt's comments).
+            key("in_range", "ROR", "<=", "<", 1),
+            key("in_range", "LCR", "&&", "||"),
+            # Outside v1, with an operator of its own: halve_until's `x /
+            # 2` to `2 / x`, which still halves 100 to 0, so it survives.
+            key("halve_until", "SWAP", "x / 2", "2 / x"),
+            # Four keys that the later commit leaves without their text: a
+            # site of v1 that is gone (is_odd has no `!` any more), a text
+            # that is gone, a definition that is gone, a file that is gone.
+            key("is_odd", "NOT", "!", ""),
+            key("is_odd", "EQ", "n % 2 == 0", "n % 2 != 0"),
+            key("is_even", "EQ", "n % 2 == 0", "n % 2 != 0"),
+            key("old", "EQ", "1", "2", file="old/old.mbt"),
+        ]
+        cls.list = write_list(cls.tmp / "keys.jsonl", cls.entries)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_each_key_applies_to_a_later_commit_where_it_still_finds_its_text(self):
+        # #305: "applies each to any later commit where that key still
+        # finds its text".
+        out = self.tmp / "chosen"
+        result = run_runner(self.root, out, "--sites-only", "--list", str(self.list))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        chosen = read_lines(out / "chosen.jsonl")
+        # Six lines later than on the first commit.
+        self.assertEqual([(m["id"], m["line"], m["column"], m["in_operator_set"]) for m in chosen], [
+            ("calc/calc.mbt,in_range,ROR,<=,<,1", 23, 17, True),
+            ("calc/calc.mbt,in_range,LCR,&&,||,0", 23, 12, True),
+            ("calc/calc.mbt,halve_until,SWAP,x / 2,2 / x,0", 42, 9, False),
+        ])
+        self.assertEqual([m["listed"] for m in chosen], self.entries[:3])
+        # CONTRIBUTING, "Mutation runner": why each other key no longer
+        # applies.
+        self.assertEqual([(u["directory"], u["listed"], u["why"]) for u in read_lines(out / "unapplied.jsonl")], [
+            ("calc", self.entries[3], "no site of operator set v1 has its id"),
+            ("calc", self.entries[4], "its text is gone"),
+            ("calc", self.entries[5], "its definition is gone"),
+            ("old", self.entries[6], "its file is gone"),
+        ])
+
+    def test_the_report_counts_the_keys_that_no_longer_apply_beside_the_outcomes_of_the_others(self):
+        # #305: "The report counts the mutants that no longer apply, beside
+        # the outcomes of the others."
+        out = self.tmp / "run"
+        result = run_runner(self.root, out, "--list", str(self.list))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([(r["id"], r["outcome"]) for r in read_lines(out / "mutants.jsonl")], [
+            ("calc/calc.mbt,in_range,ROR,<=,<,1", "survived"),
+            ("calc/calc.mbt,in_range,LCR,&&,||,0", "killed"),
+            ("calc/calc.mbt,halve_until,SWAP,x / 2,2 / x,0", "survived"),
+        ])
+        report = (out / "report.md").read_text()
+        self.assertIn("| package | listed | run | no longer apply | outside operator set v1 |\n"
+                      "|---|---:|---:|---:|---:|\n"
+                      "| calc | 6 | 3 | 3 | 1 |\n"
+                      "| old | 1 | 0 | 1 | 0 |\n", report)
+        self.assertIn("### No longer apply (4)\n\n"
+                      "- `calc/calc.mbt,is_odd,NOT,!,,0`: no site of operator set v1 has its id\n"
+                      "- `calc/calc.mbt,is_odd,EQ,n % 2 == 0,n % 2 != 0,0`: its text is gone\n"
+                      "- `calc/calc.mbt,is_even,EQ,n % 2 == 0,n % 2 != 0,0`: its definition is gone\n"
+                      "- `old/old.mbt,old,EQ,1,2,0`: its file is gone\n", report)
+
+    def test_the_shards_of_a_listed_run_merge_into_its_report(self):
+        whole = self.tmp / "whole"
+        self.assertEqual(run_runner(self.root, whole, "--list", str(self.list)).returncode, 0)
+        shards = [self.tmp / f"shard-{k}" for k in (1, 2)]
+        for k, shard in enumerate(shards, 1):
+            result = run_runner(self.root, shard, "--list", str(self.list), "--shard", f"{k}/2")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        # The first shard counts the keys that no longer apply.
+        self.assertEqual([len(read_lines(s / "unapplied.jsonl")) for s in shards], [4, 0])
+        merged = self.tmp / "merged"
+        result = subprocess.run([sys.executable, str(MERGE), "--out", str(merged), *map(str, shards)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ("unapplied.jsonl", "report.md"):
+            self.assertEqual(without_timings((merged / name).read_text()), without_timings((whole / name).read_text()),
+                             name)
+
+    def test_a_run_is_limited_to_the_packages_given(self):
+        # #305: "A run can be limited to chosen packages": the list's
+        # mutants of other packages are left out, and not counted.
+        listed = write_list(self.tmp / "two.jsonl", [
+            self.entries[0],
+            {"file": "log/lines.mbt", "definition": "cut_mark", "operator": "STR", "original": '"~"',
+             "replacement": '"_"', "ordinal": 0},
+        ])
+        out = self.tmp / "log-only"
+        result = run_runner(self.root, out, "--list", str(listed), "log")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # cut_mark's mark changed survives (lines.mbt's comment beside it).
+        self.assertEqual([(r["id"], r["outcome"]) for r in read_lines(out / "mutants.jsonl")],
+                         [('log/lines.mbt,cut_mark,STR,"~","_",0', "survived")])
+        summary = json.loads((out / "summary.json").read_text())
+        self.assertEqual([p["directory"] for p in summary["packages"]], ["log"])
+        self.assertIn("| log | 1 | 1 | 0 | 0 |\n\n", (out / "report.md").read_text())
+
+
 if __name__ == "__main__":
     unittest.main()
