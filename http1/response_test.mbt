@@ -45,6 +45,76 @@ test "a status without a known reason phrase gets an empty one" {
 }
 
 ///|
+test "the status line carries the reason phrase RFC 9110 gives each status it defines, and RFC 6585 gives 429 and 431" {
+  // Each phrase is the heading of the status's section: RFC 9110, sections
+  // 15.2 to 15.6, and RFC 6585, sections 4 and 5, for 429 and 431, which
+  // RFC 9110 does not define.
+  let statuses = [
+    100, 101, 200, 201, 202, 203, 204, 205, 206, 300, 301, 302, 303, 304, 305, 307,
+    308, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414,
+    415, 416, 417, 421, 422, 426, 429, 431, 500, 501, 502, 503, 504, 505,
+  ]
+  let lines = statuses.map(status => {
+    let response = encoded(status, [], "")
+    guard response.find("\r\n") is Some(end) else {
+      abort("no status line: \{response}")
+    }
+    response[:end].to_owned()
+  })
+  inspect(
+    lines.join("\n"),
+    content=(
+      #|HTTP/1.1 100 Continue
+      #|HTTP/1.1 101 Switching Protocols
+      #|HTTP/1.1 200 OK
+      #|HTTP/1.1 201 Created
+      #|HTTP/1.1 202 Accepted
+      #|HTTP/1.1 203 Non-Authoritative Information
+      #|HTTP/1.1 204 No Content
+      #|HTTP/1.1 205 Reset Content
+      #|HTTP/1.1 206 Partial Content
+      #|HTTP/1.1 300 Multiple Choices
+      #|HTTP/1.1 301 Moved Permanently
+      #|HTTP/1.1 302 Found
+      #|HTTP/1.1 303 See Other
+      #|HTTP/1.1 304 Not Modified
+      #|HTTP/1.1 305 Use Proxy
+      #|HTTP/1.1 307 Temporary Redirect
+      #|HTTP/1.1 308 Permanent Redirect
+      #|HTTP/1.1 400 Bad Request
+      #|HTTP/1.1 401 Unauthorized
+      #|HTTP/1.1 402 Payment Required
+      #|HTTP/1.1 403 Forbidden
+      #|HTTP/1.1 404 Not Found
+      #|HTTP/1.1 405 Method Not Allowed
+      #|HTTP/1.1 406 Not Acceptable
+      #|HTTP/1.1 407 Proxy Authentication Required
+      #|HTTP/1.1 408 Request Timeout
+      #|HTTP/1.1 409 Conflict
+      #|HTTP/1.1 410 Gone
+      #|HTTP/1.1 411 Length Required
+      #|HTTP/1.1 412 Precondition Failed
+      #|HTTP/1.1 413 Content Too Large
+      #|HTTP/1.1 414 URI Too Long
+      #|HTTP/1.1 415 Unsupported Media Type
+      #|HTTP/1.1 416 Range Not Satisfiable
+      #|HTTP/1.1 417 Expectation Failed
+      #|HTTP/1.1 421 Misdirected Request
+      #|HTTP/1.1 422 Unprocessable Content
+      #|HTTP/1.1 426 Upgrade Required
+      #|HTTP/1.1 429 Too Many Requests
+      #|HTTP/1.1 431 Request Header Fields Too Large
+      #|HTTP/1.1 500 Internal Server Error
+      #|HTTP/1.1 501 Not Implemented
+      #|HTTP/1.1 502 Bad Gateway
+      #|HTTP/1.1 503 Service Unavailable
+      #|HTTP/1.1 504 Gateway Timeout
+      #|HTTP/1.1 505 HTTP Version Not Supported
+    ),
+  )
+}
+
+///|
 test "204 and 304 responses have neither Content-Length nor a body" {
   inspect(
     encoded(204, [("X-A", "1")], "ignored") + encoded(304, [], "ignored"),

@@ -70,6 +70,26 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/check-benchmark-workflow.sh
 
+      # The measurement of the tests' costs on CI's runners runs only by hand
+      # (measure-costs.yml). This checks the workflow, and tests the check,
+      # the measurement against a fake moon, and the recomputed cost model
+      # on made-up numbers.
+      - name: Check the measurement workflow
+        if: ${{ !cancelled() }}
+        run: scripts/check-measure-costs-workflow.sh
+
+      - name: Test the check of the measurement workflow
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-measure-costs-workflow.sh
+
+      - name: Test the measurement against a fake moon
+        if: ${{ !cancelled() }}
+        run: scripts/test-measure-costs.sh
+
+      - name: Test the recomputed cost model
+        if: ${{ !cancelled() }}
+        run: scripts/test-estimate-costs.sh
+
       # The GKE run of the benchmark of another architecture than its
       # machine's takes the release binary that the job keep below keeps.
       # This checks the conditions under which the jobs of build-test.yml
