@@ -11,9 +11,8 @@
 # scripts/estimate-costs.py recomputes the cost model from the artifacts of
 # both architectures. CONTRIBUTING.md says how to start it and read it.
 #
-# It sets no variable that chooses moon's C compiler or its flags: on
-# amd64, moon's native debug builds skip the system C compiler, and the
-# measurement is of the builds as CI's test job makes them.
+# It sets no variable that chooses moon's C compiler or its flags, so that
+# it measures the builds as CI's test job makes them.
 name: Measure test costs
 
 on:
