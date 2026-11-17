@@ -875,7 +875,10 @@ The pinned set takes these alternatives, for the reasons that
 - **ROR** swaps only `<` and `<=`, and `>` and `>=`. It does not swap `==`
   and `!=`, in either set.
 
-Where an operator needs more detail, v1 has this:
+Where an operator needs more detail, v1 has this. The mutation runner's
+ticket ([#299](https://github.com/hirunefu/smock/issues/299)) settled these
+details, and the maintainer approved them as part of v1;
+[ADR 0006](docs/adr/0006-tests-are-judged-by-four-ledgers.md) records why:
 
 - **BODY** replaces the body of a top-level function or method, trait
   implementations included, not of `init`, `main`, a local function or a
@@ -928,7 +931,8 @@ Where an operator needs more detail, v1 has this:
 
 Sites come from a parser, not from a lexer. For each package, each report
 gives the number of sites that each rule skipped (no default value for
-BODY, a string outside STR's scope, FFI) beside the number of survivors,
+BODY, a string outside STR's scope, FFI, a name that a condition binds, a
+string operand) beside the number of survivors,
 so that a "zero" always says what it is zero of. Each mutant has a stable
 id: its file, its enclosing definition, its operator, its original text,
 its replacement text and its ordinal. A report, an exclusion and a commit
