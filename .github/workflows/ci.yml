@@ -167,6 +167,19 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-check-mutation-canary-workflow.sh
 
+      # The bulk mutation runs run only by hand (mutation-runs.yml), in
+      # shards. This checks when that workflow runs, that its shards fit
+      # the width and a job's time on amd64 runners, and that it keeps the
+      # merged report. bulk.py's own tests need moonc, so they run in
+      # build-test.yml with the runner's.
+      - name: Check the mutation runs workflow
+        if: ${{ !cancelled() }}
+        run: scripts/check-mutation-runs-workflow.sh
+
+      - name: Test the check of the mutation runs workflow
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-mutation-runs-workflow.sh
+
       # --- The scripts that build-test.yml runs --------------------------------
 
       # build-test.yml makes and checks the SBOM of the image it builds.
