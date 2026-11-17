@@ -375,12 +375,16 @@ async test "read timeout: a request that has begun but has not all arrived withi
         "body cut short: \{rest.escape()}, ended after at least 300 ms: \{elapsed >= 300}",
       )
       // A request sent one byte every 50 ms would take over 2 s to arrive:
-      // bytes keep coming, but the timeout runs from the first one.
+      // bytes keep coming, but the timeout runs "from its first byte to its
+      // last" (`smock serve --help`, --read-timeout-ms). So the connection
+      // ends before the test has sent the last byte, however slowly the
+      // test runs.
       let slow = smock.connect(over~)
       defer slow.close()
       let request = @utf8.encode(
         "GET /users/1 HTTP/1.1\r\nHost: localhost\r\n\r\n",
       )
+      let sent = Ref(0)
       let since = @async.now()
       @async.with_task_group(group => {
         group.spawn_bg(no_wait=true, () => {
@@ -388,12 +392,13 @@ async test "read timeout: a request that has begun but has not all arrived withi
             slow.write(request[i:i + 1]) catch {
               _ => return
             }
+            sent.val = i + 1
             @async.sleep(50)
           }
         })
         let (elapsed, rest) = ended(slow, since)
         out.push(
-          "trickled: \{rest.escape()}, ended after at least 300 ms: \{elapsed >= 300}, before the request could arrive: \{elapsed < 2000}",
+          "trickled: \{rest.escape()}, ended after at least 300 ms: \{elapsed >= 300}, before the request's last byte was sent: \{sent.val < request.length()}",
         )
       })
       // A request that arrives in time is answered.
@@ -408,7 +413,7 @@ async test "read timeout: a request that has begun but has not all arrived withi
         content=(
           #|head cut short: "", ended after at least 300 ms: true
           #|body cut short: "", ended after at least 300 ms: true
-          #|trickled: "", ended after at least 300 ms: true, before the request could arrive: true
+          #|trickled: "", ended after at least 300 ms: true, before the request's last byte was sent: true
           #|in time: HTTP/1.1 200 OK
         ),
       )
