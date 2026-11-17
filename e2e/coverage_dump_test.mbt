@@ -38,7 +38,9 @@ async test "with SMOCK_COVERAGE_DUMP set, smock check writes its coverage counte
   // #341: "With the variable set, it writes its counters to stdout as it
   // exits; with it unset, its output and behaviour are unchanged, byte for
   // byte." An invalid definition set, so that smock check writes problems
-  // to stdout and exits with 1 (docs/commands.md).
+  // to stdout and exits with 1 (docs/commands.md). The first run is as
+  // every test sees smock: without the variable, or, when the tests collect
+  // coverage, with it and with the counters taken out by the harness.
   with_definitions(
     [
       (
@@ -62,17 +64,17 @@ async test "with SMOCK_COVERAGE_DUMP set, smock check writes its coverage counte
       let before = lines[:begin].iter().map(line => "\{line}\n").join("")
       inspect(
         (
-          $|exit status \{status}, and \{dumped_status} with the variable
-          $|stdout without the variable is empty: \{stdout == ""}
-          $|stdout with it, before the counters, the same: \{before == stdout}
+          $|exit status \{status}, and \{dumped_status} with the counters
+          $|stdout as tests see it is empty: \{stdout == ""}
+          $|stdout with the counters, before them, the same: \{before == stdout}
           $|then: \{counters_shape(lines[begin:lines.length() - 1])}
           $|then the end of stdout: \{lines[lines.length() - 1] == ""}
           $|stderr the same: \{dumped_stderr == stderr}
         ),
         content=(
-          #|exit status 1, and 1 with the variable
-          #|stdout without the variable is empty: false
-          #|stdout with it, before the counters, the same: true
+          #|exit status 1, and 1 with the counters
+          #|stdout as tests see it is empty: false
+          #|stdout with the counters, before them, the same: true
           #|then: the coverage counters
           #|then the end of stdout: true
           #|stderr the same: true
@@ -87,7 +89,8 @@ async test "with SMOCK_COVERAGE_DUMP set, smock serve writes its coverage counte
   // #341, as above. docs/running.md: on SIGTERM, smock drains and exits
   // with 0, and the mockoon format "also writes `Server stopped` for each
   // Mock served, right after `drain ended`": here only the Default Mock,
-  // with no definitions directory.
+  // with no definitions directory. The first run is as every test sees
+  // smock, as above.
   let env = { "SMOCK_LOG_FORMAT": "mockoon" }
   let stopped = with_smock(["--port", "0"], env~, _ => ())
   let dumped = with_smock(["--port", "0"], env~, dump=true, _ => ())
@@ -95,17 +98,23 @@ async test "with SMOCK_COVERAGE_DUMP set, smock serve writes its coverage counte
     is Some(begin) else {
     fail("no coverage counters on stdout:\n\{dumped.stdout.join("\n")}")
   }
+  let last = (lines : ArrayView[String]) => {
+    match lines {
+      [.., line] => message_of(line)
+      [] => "none"
+    }
+  }
   inspect(
     (
-      $|exit status \{stopped.status}, and \{dumped.status} with the variable
-      $|log lines without the variable: \{stopped.stdout.length() > 0}, the last: \{message_of(stopped.stdout[stopped.stdout.length() - 1])}
-      $|log lines with it, before the counters, as many: \{begin == stopped.stdout.length()}, the last: \{message_of(dumped.stdout[begin - 1])}
+      $|exit status \{stopped.status}, and \{dumped.status} with the counters
+      $|the last log line as tests see them: \{last(stopped.stdout)}
+      $|with the counters, before them, as many log lines: \{begin == stopped.stdout.length()}, the last: \{last(dumped.stdout[:begin])}
       $|then: \{counters_shape(dumped.stdout[begin:])}
     ),
     content=(
-      #|exit status 0, and 0 with the variable
-      #|log lines without the variable: true, the last: Server stopped
-      #|log lines with it, before the counters, as many: true, the last: Server stopped
+      #|exit status 0, and 0 with the counters
+      #|the last log line as tests see them: Server stopped
+      #|with the counters, before them, as many log lines: true, the last: Server stopped
       #|then: the coverage counters
     ),
   )
