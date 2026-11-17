@@ -139,6 +139,16 @@ jobs:
       - name: Test the mutation runner on its fixture
         run: python3 -m unittest discover -s scripts/mutation -v
 
+      # What several e2e test files share lives in the harness files, so
+      # that removing a test file breaks no other. The check runs the
+      # compiler's front end on the harness files with each test file
+      # alone, and its test does the same on small modules.
+      - name: Check that no e2e test file uses what another test file defines
+        run: python3 scripts/check-e2e-helpers.py
+
+      - name: Test the check of the e2e test files
+        run: scripts/test-check-e2e-helpers.sh
+
   test:
     name: test (linux/${{ matrix.arch }})
     needs: plan

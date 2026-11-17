@@ -345,6 +345,8 @@ scripts/fetch-yaml-test-suite.sh     # the pinned release of the YAML test suite
 scripts/check-yaml-test-suite.sh     # the YAML test suite against smock/yaml in both modes, judged by yaml-test-suite/safe.txt and openapi.txt (fetches the suite first)
 scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, read smock's LLM responses (needs python3 and PyPI)
 python3 -m unittest discover -s scripts/mutation -v   # the mutation runner and its site finder, on a module whose mutants are known (needs git, moon and moonc)
+python3 scripts/check-e2e-helpers.py   # no e2e test file uses what another test file defines (needs moon and moonc)
+scripts/test-check-e2e-helpers.sh    # that check, on small modules (needs python3, moon and moonc)
 ```
 
 `scripts/test-helm-chart.sh` renders `charts/smock` for each delivery mode
@@ -583,6 +585,14 @@ trust only the root CA of `testcerts`, and the HTTP/1.1 tests run on both
 the plain and the TLS port. The HTTP/2 tests use moonhttp's client side
 over TCP to the plain port, or over TLS to the TLS port through the OpenSSL
 bindings' client side, which offers ALPN (`e2e/http2_harness_test.mbt`).
+What several test files share, a helper, a value or a type, lives in a
+harness file, whose name ends in `harness_test.mbt`: `e2e/harness_test.mbt`
+for any test, the HTTP/2 and gRPC harness files, and those of the Admin
+API's contract checker, the Prometheus reader, the TLS tests and the
+`mockoon` log format. A test file holds only its own tests and what no
+other file uses, so that removing it breaks no other.
+`scripts/check-e2e-helpers.py` checks this with the compiler: it checks
+the harness files with each test file alone.
 The tests of the generated certificate (`e2e/self_signed_test.mbt`) read it
 from the handshake with `openssl s_client` and then trust only it.
 The test of the Journal's byte bound under a memory limit
@@ -1079,7 +1089,9 @@ An e2e test goes only when operator-level mutants of the `server` code on
 its path are killed by the tests that remain, or when a named test at a
 lower seam, together with one remaining e2e test, checks each of its
 claims about the wire. Without a run at operator level, only the second
-way is open.
+way is open. A batch that removes e2e tests runs
+`scripts/check-e2e-helpers.py` first: no test file uses what another
+defines, so a test file can go whole without breaking another.
 
 Each removal batch comes with its proof: the kill matrix, the point sets
 and the trace links before and after, as CI artifacts, with an empty
