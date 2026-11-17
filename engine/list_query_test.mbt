@@ -520,6 +520,10 @@ test "numbers order by value as json conditions compare them: exactly when a Dou
       ),
     ],
   )
+  // By value, exactly for the integers that keep their digits and for the
+  // numbers beyond a 64-bit float's range, as crud-stubs.md's sentence
+  // below says. Items that tie, 5, 7 and 18 (each 10^400) and 12 and 13
+  // (each 0), keep the bucket's order in either direction.
   inspect(
     h.lists("/numbers", ["$sort=v", "$sort=-v"]),
     content=(
@@ -530,8 +534,11 @@ test "numbers order by value as json conditions compare them: exactly when a Dou
   // One value beyond a Double's range in two notations, 1e400 (item 1) and
   // a 1 followed by 400 zeros (item 2), ties, and both order after a 9
   // followed by 399 zeros (item 3), as #281's acceptance criteria state and
-  // "Numbers order by value" (crud-stubs.md) gives. Ties keep the bucket's
-  // order, in either direction.
+  // crud-stubs.md gives: "Numbers order by value, compared as `json`
+  // conditions compare them, so large integers and numbers beyond a 64-bit
+  // float's range order exactly: `1e400` and a `1` followed by 400 zeros
+  // tie, and both come after a `9` followed by 399 zeros." Ties keep the
+  // bucket's order, in either direction ("The sort is stable").
   inspect(
     h.lists("/notations", ["$sort=v", "$sort=-v"]),
     content=(

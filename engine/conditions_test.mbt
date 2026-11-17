@@ -575,6 +575,10 @@ test "a json condition compares numbers by their exact value, even integers abov
       #|  "response": { "status": 200 } }
     ),
   ])
+  // matching.md: "Integers are compared exactly however many digits they
+  // have, so a 64-bit ID such as `9007199254740993` matches only itself. A
+  // number beyond a 64-bit float's range is compared exactly too, by its
+  // value".
   inspect(
     winners(h, [
       ("POST", "/", [], "{\"id\":9007199254740993}"),
@@ -595,12 +599,14 @@ test "a json condition compares numbers by their exact value, even integers abov
       #|POST / "{\"v\":-1e400}" -> none
     ),
   )
-  // The value 10^400 in other notations, each a number the parser keeps as
-  // text, so that both sides of each comparison are compared exactly. The
-  // values come from #281's acceptance criteria: a `1` followed by 400
-  // zeros, `1e0000000000000000000400` and a `1` followed by 500 zeros and
-  // `e-100` each equal `1e400`; the near misses are 9 * 10^399, 10^401 and
-  // 10^399, which differ in value ("numbers by their value", matching.md).
+  // The value 10^400 in other notations, each beyond a 64-bit float's
+  // range, which matching.md compares exactly: "A number beyond a 64-bit
+  // float's range is compared exactly too, by its value: `1e400` matches
+  // `10e399` and a `1` followed by 400 zeros, but not `1e401` or a `9`
+  // followed by 399 zeros." The values come from #281's acceptance
+  // criteria: a `1` followed by 400 zeros, `1e0000000000000000000400` and a
+  // `1` followed by 500 zeros and `e-100` each equal `1e400`; the near
+  // misses are 9 * 10^399, 10^401 and 10^399, which differ in value.
   let zeros = (n : Int32) => "0".repeat(n)
   let notations = [
     ("1 and 400 zeros", "1\{zeros(400)}"),

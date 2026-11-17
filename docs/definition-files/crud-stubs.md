@@ -154,7 +154,9 @@ then, among items that tie, by `total`, descending.
   member whose name starts with `-` or holds `,` cannot be a sort key.
 - Ascending, values order by type first: null, false, true, numbers,
   strings. Numbers order by value, compared as `json` conditions compare
-  them, so large integers order exactly. Strings order by Unicode code
+  them, so large integers and numbers beyond a 64-bit float's range order
+  exactly: `1e400` and a `1` followed by 400 zeros tie, and both come after
+  a `9` followed by 399 zeros. Strings order by Unicode code
   point, case-sensitive, with no locale rules: `B` comes before `a`.
   Descending reverses that whole order.
 - Items whose member is absent, an object or an array go last, in either
