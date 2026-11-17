@@ -730,6 +730,31 @@ the exclusion list, with a category, a reason and the maintainer's
 approval. Its sites still appear in the site counts and in the counts of
 sites skipped.
 
+### Keeping the ledgers current
+
+The use-case and boundary ledgers, in
+[`docs/ledgers/`](docs/ledgers/use-cases.md), are kept current by each
+change, not surveyed again before each release:
+
+- A change that documents a feature, a limit or a message adds its row,
+  with its source and the tests that check it, or the ticket or issue that
+  adds them.
+- A change that renames, moves or removes a test that a row names, or
+  that adds a test for what a row still lacks, updates the row in the same
+  commit, and its status with it.
+- A gap that no ticket closes is filed as an issue, and its row names the
+  issue.
+
+`scripts/check-ledgers.py`, in CI's job `scripts`, fails a push on which a
+ledger names a test that is no longer there, or a row whose status does
+not agree with what it names. The weakening report lists every change to
+the ledgers, for the maintainer to read before the merge into `main`. A
+removal batch keeps the only test of a row unless it names another
+([Removing a test](#removing-a-test)). No check sees a feature, a limit or
+a message documented without a row: whoever reviews the change looks for
+one. Step 3's close checks the ledgers against the documents once more
+([#340](https://github.com/hirunefu/smock/issues/340)).
+
 ### The ladder
 
 A package climbs four levels:

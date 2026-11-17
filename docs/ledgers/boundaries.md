@@ -11,6 +11,8 @@ names the tests on each side of it, or the ticket that adds what is
 missing. The [use-case ledger](use-cases.md) does the same for features and
 messages.
 
+[Keeping the ledgers current](../../CONTRIBUTING.md#keeping-the-ledgers-current)
+in CONTRIBUTING says how each change keeps them up to date.
 `scripts/check-ledgers.py` checks every row on every push, as it checks
 the use-case ledger.
 

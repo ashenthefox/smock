@@ -10,6 +10,8 @@ checks that cover it, the ticket that adds what is missing, or the manual
 check and why it is manual. The [boundary ledger](boundaries.md) does the
 same for limits.
 
+[Keeping the ledgers current](../../CONTRIBUTING.md#keeping-the-ledgers-current)
+in CONTRIBUTING says how each change keeps them up to date.
 `scripts/check-ledgers.py` checks every row on every push: each test a
 row names must still be there, under that name and in that file, and each
 status must agree with what the row names. Its docstring states the
