@@ -1,6 +1,12 @@
+{"file":"serverparsers/admin_paths.mbt","definition":"path_params","text":"d7008d2c92b6af62","pinned":{"BODY":1,"IFC":3,"LCR":2,"AOR":1,"INT":4,"STR":5},"full":{"BODY":1,"IFC":6,"LCR":2,"AOR":1,"INT":4,"STR":9}}
+{"file":"serverparsers/bearer_token.mbt","definition":"bearer_token","text":"1490180b7fbad494","pinned":{"BODY":1,"ROR":4,"IFC":5,"LCR":3,"DEL":1,"AOR":2,"INT":2,"STR":2},"full":{"BODY":1,"ROR":4,"IFC":11,"LCR":3,"DEL":1,"AOR":2,"INT":5,"STR":4}}
+{"file":"serverparsers/bearer_token.mbt","definition":"same_token","text":"f57bd4d7e6f8575a","pinned":{"BODY":1,"IFC":1,"DEL":1,"INT":5},"full":{"BODY":1,"IFC":2,"DEL":1,"INT":6}}
 {"file":"serverparsers/client_hello.mbt","definition":"MAX_CLIENT_HELLO","text":"67ed7fa14d01afdf","pinned":{"INT":1},"full":{"INT":3}}
 {"file":"serverparsers/client_hello.mbt","definition":"read_client_hello","text":"47cf21463a765c75","pinned":{"ROR":6,"IFC":8,"DEL":1,"AOR":6,"INT":15},"full":{"ROR":6,"IFC":16,"DEL":1,"AOR":6,"INT":27}}
 {"file":"serverparsers/client_hello.mbt","definition":"server_name","text":"a151417313cd8a77","pinned":{"BODY":1,"ROR":5,"IFC":7,"DEL":4,"AOR":13,"INT":16},"full":{"BODY":1,"ROR":5,"IFC":14,"DEL":4,"AOR":13,"INT":32}}
 {"file":"serverparsers/client_hello.mbt","definition":"host_name","text":"59f3c89fbd897f5f","pinned":{"BODY":1,"ROR":5,"IFC":5,"LCR":1,"DEL":2,"AOR":7,"INT":11},"full":{"BODY":1,"ROR":5,"IFC":10,"LCR":1,"DEL":2,"AOR":7,"INT":21}}
 {"file":"serverparsers/client_hello.mbt","definition":"uint16","text":"0856a6d565259f1c","pinned":{"BODY":1,"AOR":1,"INT":3},"full":{"BODY":1,"AOR":1,"INT":5}}
 {"file":"serverparsers/client_hello.mbt","definition":"uint24","text":"7893b2c052692c4b","pinned":{"BODY":1,"AOR":1,"INT":2},"full":{"BODY":1,"AOR":1,"INT":5}}
+{"file":"serverparsers/http2_checks.mbt","definition":"too_long","text":"c00140a578ab2a8d","pinned":{"INT":1},"full":{"INT":3}}
+{"file":"serverparsers/http2_checks.mbt","definition":"declared_length","text":"96cf5b104d36beca","pinned":{"BODY":1,"ROR":1,"IFC":1,"DEL":1,"AOR":3,"INT":4},"full":{"BODY":1,"ROR":1,"IFC":2,"DEL":1,"AOR":3,"INT":10}}
+{"file":"serverparsers/http2_checks.mbt","definition":"is_malformed_http2_request","text":"f1a8d6e0caeaf044","pinned":{"BODY":1,"IFC":9,"LCR":3,"NOT":7,"DEL":1,"BOOL":7,"STR":2},"full":{"BODY":1,"IFC":16,"LCR":3,"NOT":7,"DEL":1,"BOOL":7,"STR":4}}

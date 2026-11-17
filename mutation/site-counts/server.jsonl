@@ -5,11 +5,8 @@
 {"file":"server/admin.mbt","definition":"Admin::encode","text":"c96d71ed820ab0ea","pinned":{"BODY":1,"BOOL":1,"STR":1},"full":{"BODY":1,"BOOL":1,"STR":2}}
 {"file":"server/admin.mbt","definition":"Admin::reject","text":"761f097bf5439bb9","pinned":{"BODY":1,"BOOL":1,"STR":10},"full":{"BODY":1,"BOOL":1,"STR":20}}
 {"file":"server/admin.mbt","definition":"Admin::error","text":"3e9b85e2b6b4869b","pinned":{"STR":2},"full":{"STR":4}}
-{"file":"server/admin.mbt","definition":"Admin::handle","text":"f74fdd934eb2cb86","pinned":{"ROR":2,"IFC":9,"LCR":3,"NOT":3,"DEL":5,"INT":7,"STR":15},"full":{"ROR":2,"IFC":16,"LCR":3,"NOT":3,"DEL":5,"INT":13,"STR":30}}
-{"file":"server/admin.mbt","definition":"path_params","text":"53502bd1b5070336","pinned":{"BODY":1,"IFC":3,"LCR":2,"AOR":1,"INT":4,"STR":5},"full":{"BODY":1,"IFC":6,"LCR":2,"AOR":1,"INT":4,"STR":9}}
+{"file":"server/admin.mbt","definition":"Admin::handle","text":"64310b190006c7be","pinned":{"ROR":2,"IFC":9,"LCR":3,"NOT":3,"DEL":5,"INT":7,"STR":15},"full":{"ROR":2,"IFC":16,"LCR":3,"NOT":3,"DEL":5,"INT":13,"STR":30}}
 {"file":"server/admin.mbt","definition":"Admin::unauthorized","text":"a311719850af3843","pinned":{"DEL":1,"INT":1,"STR":3},"full":{"DEL":1,"INT":3,"STR":6}}
-{"file":"server/admin.mbt","definition":"bearer_token","text":"60c09340e621863f","pinned":{"BODY":1,"ROR":4,"IFC":5,"LCR":3,"DEL":1,"AOR":2,"INT":2,"STR":2},"full":{"BODY":1,"ROR":4,"IFC":11,"LCR":3,"DEL":1,"AOR":2,"INT":5,"STR":4}}
-{"file":"server/admin.mbt","definition":"same_token","text":"8991b18313686308","pinned":{"BODY":1,"IFC":1,"DEL":1,"INT":5},"full":{"BODY":1,"IFC":2,"DEL":1,"INT":6}}
 {"file":"server/admin.mbt","definition":"Admin::json","text":"cacc9c40f9ffd824","pinned":{"DEL":1,"STR":3},"full":{"DEL":1,"STR":6}}
 {"file":"server/admin.mbt","definition":"Admin::result","text":"9f78c8706f7b2f1c","pinned":{"INT":1,"STR":1},"full":{"IFC":1,"INT":3,"STR":2}}
 {"file":"server/admin.mbt","definition":"status","text":"d67306f6d2fa44c8","pinned":{"INT":1,"STR":12},"full":{"INT":3,"STR":24}}
@@ -143,7 +140,7 @@
 {"file":"server/http2.mbt","definition":"MockPorts::serve_http2","text":"8e533fe5f8b72dc4","pinned":{"BODY":1,"IFC":3,"NOT":1,"DEL":8,"BOOL":7,"AOR":1,"INT":9},"full":{"BODY":1,"IFC":5,"NOT":1,"DEL":8,"BOOL":7,"AOR":1,"INT":19}}
 {"file":"server/http2.mbt","definition":"H2Connection::serve","text":"92f49ed1a41a4a1b","pinned":{"BODY":1,"IFC":6,"LCR":1,"NOT":3,"DEL":11,"AOR":2},"full":{"BODY":1,"IFC":12,"LCR":1,"NOT":3,"DEL":11,"AOR":2}}
 {"file":"server/http2.mbt","definition":"H2Connection::judge","text":"6bc6cb5e8e5e4016","pinned":{"BODY":1,"IFC":3,"LCR":1,"NOT":2,"DEL":4,"BOOL":3,"AOR":1,"STR":1},"full":{"BODY":1,"IFC":5,"LCR":1,"NOT":2,"DEL":4,"BOOL":3,"AOR":1,"STR":2}}
-{"file":"server/http2.mbt","definition":"H2Connection::hand","text":"67b6731514d63684","pinned":{"BODY":1,"ROR":5,"IFC":38,"LCR":7,"NOT":1,"DEL":41,"BOOL":12,"AOR":2,"INT":31,"STR":1},"full":{"BODY":1,"ROR":5,"IFC":69,"LCR":7,"NOT":1,"DEL":41,"BOOL":12,"AOR":2,"INT":53,"STR":2}}
+{"file":"server/http2.mbt","definition":"H2Connection::hand","text":"b9e25493c56cef16","pinned":{"BODY":1,"ROR":5,"IFC":38,"LCR":7,"NOT":1,"DEL":41,"BOOL":12,"AOR":2,"INT":31,"STR":1},"full":{"BODY":1,"ROR":5,"IFC":69,"LCR":7,"NOT":1,"DEL":41,"BOOL":12,"AOR":2,"INT":53,"STR":2}}
 {"file":"server/http2.mbt","definition":"H2Connection::stop_waiting","text":"ee861c30c8416c5d","pinned":{"BODY":1,"IFC":3,"NOT":1,"DEL":5},"full":{"BODY":1,"IFC":4,"NOT":1,"DEL":5}}
 {"file":"server/http2.mbt","definition":"H2Connection::output_written","text":"a376cdc20724b1a6","pinned":{"BODY":1,"DEL":2,"INT":1},"full":{"BODY":1,"DEL":2,"INT":2}}
 {"file":"server/http2.mbt","definition":"H2Connection::end_stream","text":"79729fc33980dd4d","pinned":{"BODY":1,"IFC":1,"LCR":1,"DEL":1,"BOOL":1},"full":{"BODY":1,"IFC":2,"LCR":1,"DEL":1,"BOOL":1}}
@@ -231,12 +228,9 @@
 {"file":"server/http2_requests.mbt","definition":"DecodedFields::keep","text":"4b0192a8484a6db8","pinned":{"BODY":1,"DEL":2},"full":{"BODY":1,"DEL":2}}
 {"file":"server/http2_requests.mbt","definition":"no_field","text":"ac9d7ed086b2bda1","pinned":{"STR":2},"full":{"STR":2}}
 {"file":"server/http2_requests.mbt","definition":"same_octets","text":"ec23c60678c595eb","pinned":{"BODY":1,"LCR":1},"full":{"BODY":1,"LCR":1}}
-{"file":"server/http2_requests.mbt","definition":"H2Request::new","text":"f6c1873c10c26a59","pinned":{"ROR":3,"IFC":14,"LCR":3,"NOT":1,"DEL":12,"BOOL":6,"INT":11,"STR":13},"full":{"ROR":3,"IFC":25,"LCR":3,"NOT":1,"DEL":12,"BOOL":6,"INT":14,"STR":22}}
+{"file":"server/http2_requests.mbt","definition":"H2Request::new","text":"93a0a53868d211bc","pinned":{"ROR":3,"IFC":14,"LCR":3,"NOT":1,"DEL":12,"BOOL":6,"INT":11,"STR":13},"full":{"ROR":3,"IFC":25,"LCR":3,"NOT":1,"DEL":12,"BOOL":6,"INT":14,"STR":22}}
 {"file":"server/http2_requests.mbt","definition":"unpad_binary_metadata","text":"06759924fb412cd9","pinned":{"BODY":1,"IFC":2,"NOT":1,"DEL":1,"INT":1},"full":{"BODY":1,"IFC":4,"NOT":1,"DEL":1,"INT":2}}
-{"file":"server/http2_requests.mbt","definition":"too_long","text":"c00140a578ab2a8d","pinned":{"INT":1},"full":{"INT":3}}
-{"file":"server/http2_requests.mbt","definition":"declared_length","text":"e6339f8e205f037c","pinned":{"BODY":1,"ROR":1,"IFC":1,"DEL":1,"AOR":3,"INT":4},"full":{"BODY":1,"ROR":1,"IFC":2,"DEL":1,"AOR":3,"INT":10}}
 {"file":"server/http2_requests.mbt","definition":"is_list_over","text":"2d7a5652dcdeb88b","pinned":{"BODY":1,"ROR":1,"IFC":1,"DEL":1,"BOOL":2,"AOR":1,"INT":1},"full":{"BODY":1,"ROR":1,"IFC":2,"DEL":1,"BOOL":2,"AOR":1,"INT":2}}
-{"file":"server/http2_requests.mbt","definition":"H2Request::is_malformed","text":"acca2bc7e32dae30","pinned":{"BODY":1,"IFC":9,"LCR":3,"NOT":7,"DEL":1,"BOOL":7,"STR":2},"full":{"BODY":1,"IFC":16,"LCR":3,"NOT":7,"DEL":1,"BOOL":7,"STR":4}}
 {"file":"server/http2_requests.mbt","definition":"H2Request::received","text":"a9cfeeb5cbc6892a","pinned":{"BODY":1},"full":{"BODY":1}}
 {"file":"server/http2_requests.mbt","definition":"H2Request::receive","text":"4bf052c4f10aeb1b","pinned":{"BODY":1,"IFC":1,"DEL":3,"AOR":1,"INT":2,"STR":1},"full":{"BODY":1,"IFC":2,"DEL":3,"AOR":1,"INT":2,"STR":1}}
 {"file":"server/http2_requests.mbt","definition":"H2Request::without_body","text":"e058e06881417187","pinned":{"STR":2},"full":{"STR":3}}

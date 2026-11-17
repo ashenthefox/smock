@@ -187,7 +187,7 @@ fn H2Request::new(
       }
     } else {
       if name == b"content-length" {
-        let length = declared_length(field.value)
+        let length = @serverparsers.declared_length(field.value)
         if length > declared {
           declared = length
         }
@@ -257,26 +257,6 @@ fn unpad_binary_metadata(headers : Array[(String, String)]) -> Unit {
 }
 
 ///|
-/// A body length longer than any `--body-limit`.
-let too_long : Int64 = 0x1_0000_0000L
-
-///|
-/// The body length the `content-length` value `value` declares, `too_long`
-/// for one longer than that. moonhttp has checked that `value` is digits
-/// alone. smock reads them itself rather than take moonhttp's number, so
-/// that a length too large for 32 bits cannot pass for a short one.
-fn declared_length(value : Bytes) -> Int64 {
-  let mut length = 0L
-  for i in 0..<value.length() {
-    length = length * 10L + (value[i].to_int() - 0x30).to_int64()
-    if length >= too_long {
-      return too_long
-    }
-  }
-  length
-}
-
-///|
 /// Whether the field section `fields`, as moonhttp decoded it, is larger
 /// than `limit` octets, counted as RFC 7541, section 4.1, counts a header
 /// list, and as moonhttp counts it against its own bound: each field's name
@@ -289,63 +269,6 @@ fn is_list_over(fields : Array[@header.Header], limit : Int32) -> Bool {
     if size > limit {
       return true
     }
-  }
-  false
-}
-
-///|
-/// Whether HTTP/1.1's rules refuse the request, so that its stream gets 400
-/// as a malformed request (RFC 9113, section 8.1.1), checked with the
-/// HTTP/1.1 codec's own checks:
-///
-/// - the method is not a token;
-/// - `:path` is not an origin-form target, or `*` for OPTIONS, or holds an
-///   octet outside 0x21 to 0x7E;
-/// - for a CONNECT, which has no `:path`, as moonhttp sees to, its target,
-///   `:authority`, is not in authority-form, a host and a port, as an
-///   HTTP/1.1 CONNECT's target must be (RFC 9113, section 8.5);
-/// - `:authority` is not a valid Host value;
-/// - a field name is not a token, or a field value holds a control
-///   character other than tab, or DEL;
-/// - there is more than one `host` field, or its value is not a valid Host
-///   value, or it names another host than `:authority` (section 8.3.1),
-///   compared as Mock Hosts are: in any case, without the port or a
-///   trailing dot.
-///
-/// moonhttp has already reset the streams that break RFC 9113's own field
-/// rules, so names hold no upper case, and values no NUL, CR or LF.
-fn H2Request::is_malformed(self : H2Request) -> Bool {
-  let meth = self.meth
-  if !@http1.is_token(meth) {
-    return true
-  }
-  if meth == "CONNECT" {
-    if !@http1.is_authority_form(self.target) {
-      return true
-    }
-  } else if !(@http1.is_origin_or_asterisk_form(self.target, meth~) &&
-    @http1.is_visible_ascii(self.target)) {
-    return true
-  }
-  if self.authority is Some(authority) && !@http1.is_host_value(authority) {
-    return true
-  }
-  let mut host : String? = None
-  for header in self.headers {
-    if !@http1.is_token(header.0) || !@http1.is_field_value(header.1) {
-      return true
-    }
-    if header.0 == "host" {
-      if host is Some(_) || !@http1.is_host_value(header.1) {
-        return true
-      }
-      host = Some(header.1)
-    }
-  }
-  // Only a request that names its Host twice pays for the comparison.
-  if self.authority is Some(authority) && host is Some(host) {
-    return @definitions.normalize_host(authority) !=
-      @definitions.normalize_host(host)
   }
   false
 }
