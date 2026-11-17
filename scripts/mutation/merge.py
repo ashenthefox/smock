@@ -12,8 +12,10 @@ The records are those of the shards, in shard order, which is the order
 of the run without shards. Each package's summary is its shards'
 summary, with the counts of the outcomes, of the comparison of the
 compiler's output and with the package's own tests alone taken again
-from all its records, its importers' counts summed (importers.py), and
-with "shards": what each shard that ran the package gave of its run (the
+from all its records, its importers' counts summed (importers.py), the
+counts of its native verdicts taken again from its records, with the
+runs without a mutant of the first shard that ran natively (native.py),
+and with "shards": what each shard that ran the package gave of its run (the
 mutants it ran, the run without a mutant and the time limit, those of
 its importers' tests, and its self-test), since each shard ran the tests
 without a mutant and the self-test on its own. When every shard wrote flake records, they merge as
@@ -36,6 +38,7 @@ import choice
 import compare
 import confirm
 import importers
+import native
 import run
 
 # What a shard's summary of a package gives of its own run, beside the
@@ -128,6 +131,8 @@ def merge(directories):
                 summary["importers"] = importers.merge_credits([p["importers"] for _, p in mine])
             if chosen_set == "full":
                 summary.update(run.alternative_counts(package))
+            if any("native" in p for _, p in mine):
+                summary["native"] = native.merged([p["native"] for _, p in mine if "native" in p], package)
             summary["shards"] = [{"shard": f"{index}/{count}", **{k: p[k] for k in OWN_RUN if k in p},
                                   **importers_run(p)} for index, p in mine]
         summaries.append(summary)

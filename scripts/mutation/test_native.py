@@ -334,3 +334,50 @@ class NativeTest(unittest.TestCase):
         dumps = [p for p in (self.tmp / "work").rglob("core*") if p.is_file() and re.fullmatch(r"core(\.\d+)?", p.name)]
         self.assertEqual(dumps, [])
         self.assertIn("#### `host/host.mbt,is_system,ROR,<,<=,0`", self.report)
+
+
+class NativeShardsTest(unittest.TestCase):
+    """bounds' pinned set in three shards, whose outputs merge (#305): its
+    mutants at sites that use an unchecked array access fall in two of
+    them, and the merged summary counts their native verdicts as the run
+    without shards does (NativeTest)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-native-shards-"))
+        moon, _ = logging_moon(cls.tmp)
+        shards = []
+        for k in (1, 2, 3):
+            out = cls.tmp / f"shard-{k}"
+            result = subprocess.run(
+                [sys.executable, str(RUN), "--root", str(FIXTURE), "--work", str(cls.tmp / "work"), "--out", str(out),
+                 "--moon", str(moon), "--shard", f"{k}/3", "bounds"],
+                capture_output=True, text=True)
+            if result.returncode != 0:
+                raise AssertionError(f"run.py failed ({result.returncode}):\n{result.stderr}")
+            shards.append(out)
+        cls.shards = shards
+        cls.merged = cls.tmp / "merged"
+        cls.result = subprocess.run([sys.executable, str(HERE / "merge.py"), "--out", str(cls.merged), *map(str, shards)],
+                                    capture_output=True, text=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_the_shards_native_verdicts_merge(self):
+        self.assertEqual(self.result.returncode, 0, self.result.stderr)
+        # Two mutants at marked sites in the first shard, one in the second,
+        # none in the third.
+        summaries = [json.loads((s / "summary.json").read_text())["packages"][0] for s in self.shards]
+        self.assertEqual([s.get("native", {}).get("marked") for s in summaries], [2, 1, None])
+        native = json.loads((self.merged / "summary.json").read_text())["packages"][0]["native"]
+        self.assertEqual((native["marked"], native["ran"], native["differ"]), (3, 3, 1))
+        self.assertEqual(native["outcomes"], {"killed": 2, "timed out": 0, "survived": 1, "unconfirmed": 0})
+        self.assertEqual((native["machine"], native["decides"]), (MACHINE, DECIDES))
+        # The runs without a mutant and the limit of the first shard.
+        self.assertEqual(native["baseline"], summaries[0]["native"]["baseline"])
+        report = (self.merged / "report.md").read_text()
+        self.assertIn("- Unchecked array access: 3 mutants at sites whose definition uses one, all of which ran"
+                      f" natively on {MACHINE} as well; 1 has another verdict there.", report)
+        self.assertIn("- `bounds/bounds.mbt,dot_after,ROR,>,>=,0`: wasm-gc killed, native survived", report)
