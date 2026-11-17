@@ -3,8 +3,10 @@
 // user sees. The e2e settings test refuses some of these values through the
 // binary; these run in-process. The message names the flag and its variable,
 // as docs/running.md's Settings table pairs them, in the form
-// `InvalidSetting::message` documents, and the range in the form the e2e
-// settings test pins: `must be an integer from <min> to <max>`.
+// `InvalidSetting::message` documents, and the range in the words `must be
+// an integer from <min> to <max>`. No document gives those words: they are
+// the code's, which the maintainer confirmed on 2026-11-17 (#275), and the
+// e2e settings test pins them too.
 
 ///|
 /// What `smock serve <argv>` makes of its settings: `show` of the settings
