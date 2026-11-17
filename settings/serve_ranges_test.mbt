@@ -417,3 +417,61 @@ test "ranges: --body-limit, by its flag or SMOCK_BODY_LIMIT, takes 0 and 1073741
     ),
   )
 }
+
+///|
+test "ranges: the read, idle and write timeouts, by their flags or variables, take 1 and 2147483647, the drain timeout 0 and 2147483647, and each refuses the value past each end and a value that is not a decimal integer" {
+  // No document gives these ranges: docs/running.md's Settings table and
+  // the help give the defaults alone, and only the refusal names the
+  // ranges. They are the code's, a finding that #320 takes to the
+  // maintainer.
+  inspect(
+    [
+      each_by_flag_and_variable(
+        "--read-timeout-ms",
+        "SMOCK_READ_TIMEOUT_MS",
+        ["1", "2147483647", "0", "2147483648", "30s"],
+        settings => settings.read_timeout_ms.to_string(),
+      ),
+      each_by_flag_and_variable(
+        "--idle-timeout-ms",
+        "SMOCK_IDLE_TIMEOUT_MS",
+        ["1", "2147483647", "0", "2147483648", "1m"],
+        settings => settings.idle_timeout_ms.to_string(),
+      ),
+      each_by_flag_and_variable(
+        "--write-timeout-ms",
+        "SMOCK_WRITE_TIMEOUT_MS",
+        ["1", "2147483647", "0", "2147483648", "30000ms"],
+        settings => settings.write_timeout_ms.to_string(),
+      ),
+      each_by_flag_and_variable(
+        "--drain-timeout-ms",
+        "SMOCK_DRAIN_TIMEOUT_MS",
+        ["0", "2147483647", "-1", "2147483648", "20s"],
+        settings => settings.drain_timeout_ms.to_string(),
+      ),
+    ].join("\n"),
+    content=(
+      #|1: 1
+      #|2147483647: 2147483647
+      #|0: invalid value "0" for --read-timeout-ms (SMOCK_READ_TIMEOUT_MS): must be an integer from 1 to 2147483647
+      #|2147483648: invalid value "2147483648" for --read-timeout-ms (SMOCK_READ_TIMEOUT_MS): must be an integer from 1 to 2147483647
+      #|30s: invalid value "30s" for --read-timeout-ms (SMOCK_READ_TIMEOUT_MS): must be an integer from 1 to 2147483647
+      #|1: 1
+      #|2147483647: 2147483647
+      #|0: invalid value "0" for --idle-timeout-ms (SMOCK_IDLE_TIMEOUT_MS): must be an integer from 1 to 2147483647
+      #|2147483648: invalid value "2147483648" for --idle-timeout-ms (SMOCK_IDLE_TIMEOUT_MS): must be an integer from 1 to 2147483647
+      #|1m: invalid value "1m" for --idle-timeout-ms (SMOCK_IDLE_TIMEOUT_MS): must be an integer from 1 to 2147483647
+      #|1: 1
+      #|2147483647: 2147483647
+      #|0: invalid value "0" for --write-timeout-ms (SMOCK_WRITE_TIMEOUT_MS): must be an integer from 1 to 2147483647
+      #|2147483648: invalid value "2147483648" for --write-timeout-ms (SMOCK_WRITE_TIMEOUT_MS): must be an integer from 1 to 2147483647
+      #|30000ms: invalid value "30000ms" for --write-timeout-ms (SMOCK_WRITE_TIMEOUT_MS): must be an integer from 1 to 2147483647
+      #|0: 0
+      #|2147483647: 2147483647
+      #|-1: invalid value "-1" for --drain-timeout-ms (SMOCK_DRAIN_TIMEOUT_MS): must be an integer from 0 to 2147483647
+      #|2147483648: invalid value "2147483648" for --drain-timeout-ms (SMOCK_DRAIN_TIMEOUT_MS): must be an integer from 0 to 2147483647
+      #|20s: invalid value "20s" for --drain-timeout-ms (SMOCK_DRAIN_TIMEOUT_MS): must be an integer from 0 to 2147483647
+    ),
+  )
+}
