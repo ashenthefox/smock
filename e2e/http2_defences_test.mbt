@@ -5,61 +5,6 @@
 // A fresh connection is served right after.
 
 ///|
-/// `lines`, one per line, with a run of the same line shown once, followed
-/// by ` x<n>` when it comes `n` times in a row.
-fn runs(lines : Array[String]) -> String {
-  let out = []
-  let mut i = 0
-  while i < lines.length() {
-    let mut n = 1
-    while i + n < lines.length() && lines[i + n] == lines[i] {
-      n += 1
-    }
-    out.push(if n == 1 { lines[i] } else { "\{lines[i]} x\{n}" })
-    i += n
-  }
-  out.join("\n")
-}
-
-///|
-/// Reads frames until smock ends the connection, and shows them as `runs`
-/// does, then how it ended: `a FIN`, or `an RST`.
-async fn RawH2::runs_until_closed(self : RawH2) -> String {
-  let frames = self.frames_until(@async.now(), _ => false)
-  "\{runs(frames.shown)}\nthen \{frames.how}"
-}
-
-///|
-/// The PING frame a test floods smock with.
-let ping : @http2.Frame = Ping(
-  payload=b"\x00\x00\x00\x00\x00\x00\x00\x07",
-  ack=false,
-)
-
-///|
-/// `frame`, `n` times.
-fn times(frame : @http2.Frame, n : Int32) -> Array[@http2.Frame] {
-  Array::make(n, frame)
-}
-
-///|
-/// What a fresh connection gets for `GET /fast`, as a test shows it: to the
-/// plain port, or with `tls` to the TLS port.
-async fn Smock::fresh(self : Smock, tls~ : Bool = false) -> String {
-  let client = if tls { self.h2() } else { self.h2c() }
-  defer client.close()
-  let response = client.request("GET", "/fast", authority="localhost")
-  "then a fresh connection: \{response.status} \{@utf8.decode_lossy(response.body)}"
-}
-
-///|
-/// The log lines of the connections a defence closed, as `log_entries`
-/// shows them.
-fn defence_entries(logs : Array[String]) -> String {
-  log_entries(logs.filter(line => line.contains("closed by a defence")))
-}
-
-///|
 /// Sends `n` PINGs on `raw` in one write, and reads smock's answers until
 /// it has acknowledged them all, or sent a GOAWAY.
 async fn RawH2::pings(self : RawH2, n : Int32) -> Frames {
@@ -71,38 +16,6 @@ async fn RawH2::pings(self : RawH2, n : Int32) -> Frames {
     }
     acks == n || is_goaway(frame)
   })
-}
-
-///|
-/// Opens a connection, sends the frames `setup` makes, and reads smock's
-/// answers until `ready` holds for one; then sends the frames `flood`
-/// makes, in one write, and shows, after `label`, what smock sends until
-/// it ends the connection, then what a fresh connection gets. The client's
-/// SETTINGS is one frame that does no work, so a flood that comes to 100
-/// more passes the bound with its last frame. With `tls`, both connections
-/// go to the TLS port.
-async fn Smock::flood(
-  self : Smock,
-  label : String,
-  setup~ : (RawH2) -> Array[@http2.Frame] = _ => [],
-  ready~ : (@http2.Frame) -> Bool = frame => frame is Settings(ack=true, ..),
-  tls~ : Bool = false,
-  flood : (RawH2) -> Array[@http2.Frame],
-) -> String {
-  let raw = self.raw_h2(tls~)
-  defer raw.close()
-  raw.send(setup(raw))
-  let before = raw.frames_until(@async.now(), frame => {
-    ready(frame) || is_goaway(frame)
-  })
-  raw.send(flood(raw))
-  [
-    "\{label}:",
-    runs(before.shown),
-    "flood:",
-    raw.runs_until_closed(),
-    self.fresh(tls~),
-  ].join("\n")
 }
 
 ///|

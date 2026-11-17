@@ -31,36 +31,6 @@ let rapid : String =
   #|      "fault": { "connection": { "kind": "reset", "probability": 1 } } } ] }
 
 ///|
-/// `shown`, a frame as `render_frame` shows it, with the stream ID it
-/// names as `n`, so that the like frames of many streams show alike.
-fn any_stream(shown : String) -> String {
-  let words = shown.split(" ").map(word => word.to_owned()).collect()
-  if words.length() > 1 &&
-    words[1] != "" &&
-    words[1].iter().all(c => c >= '0' && c <= '9') {
-    words[1] = "n"
-  }
-  words.join(" ")
-}
-
-///|
-/// `lines`, each with its stream ID as `n` (`any_stream`), and each such
-/// line once, in the order it first came, followed by ` x<n>` when it came
-/// `n` times in all.
-fn tally(lines : Array[String]) -> String {
-  let counts : Map[String, Int32] = Map([])
-  for line in lines {
-    let key = any_stream(line)
-    counts[key] = counts.get(key).unwrap_or(0) + 1
-  }
-  let out = []
-  for line, n in counts {
-    out.push(if n == 1 { line } else { "\{line} x\{n}" })
-  }
-  out.join("\n")
-}
-
-///|
 /// Sends a PING, and shows what smock sends until it acknowledges it, as
 /// `tally` does, or, when smock ends the connection first, that and how it
 /// ended.
@@ -74,14 +44,6 @@ async fn RawH2::fenced(self : RawH2) -> String {
   } else {
     "\{tally(frames.shown)}\nthen \{frames.how}"
   }
-}
-
-///|
-/// Reads frames until smock ends the connection, and shows them as `tally`
-/// does, then how it ended: `a FIN`, or `an RST`.
-async fn RawH2::tally_until_closed(self : RawH2) -> String {
-  let frames = self.frames_until(@async.now(), _ => false)
-  "\{tally(frames.shown)}\nthen \{frames.how}"
 }
 
 ///|
