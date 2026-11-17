@@ -704,6 +704,7 @@ def report(operator_set, chosen, summaries, records):
         out += [""]
         out += compare.report(mine)
         out += importers.report_lines(summary)
+        out += matrix.report_lines(summary)
         out += confirm.Judge.baseline_lines(summary)
         timed_out = [r for r in mine if r["outcome"] == "timed out"]
         if timed_out:
@@ -890,6 +891,7 @@ def main():
     with open(out / "mutants.jsonl", "w", encoding="utf-8") as f:
         for record in records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    matrix.write(out, operator_set, run_set, summaries, records)
     flakes = {} if judge is None else {"flakes": judge.summary()}
     if judge is not None:
         (out / "flakes.json").write_text(json.dumps(judge.records(), indent=2, ensure_ascii=False) + "\n",

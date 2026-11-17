@@ -126,6 +126,78 @@ class KillMatrixTest(unittest.TestCase):
         # Each record is units' own, whichever package's test killed it.
         self.assertEqual({r["package"] for r in self.records}, {"mutation/fixture/units"})
 
+    def test_a_native_only_importers_tests_never_run(self):
+        # probe's test would kill `n >= high`; moon is only asked whether
+        # probe builds on wasm-gc.
+        runs = [line.split() for line in self.log.read_text().splitlines()
+                if "mutation/fixture/probe" in line.split()]
+        self.assertTrue(runs)
+        for words in runs:
+            self.assertIn("--dry-run", words)
+
+    def test_the_matrix_is_written_per_package(self):
+        matrix = json.loads((self.out / "matrix" / "units.json").read_text())
+        self.assertEqual({k: v for k, v in matrix.items() if k not in ("tests", "mutants")}, {
+            "version": 1,
+            "package": "mutation/fixture/units",
+            "directory": "units",
+            "operator_set": "v1",
+            "set": "pinned",
+            "backend": "wasm-gc",
+            "packages": ["mutation/fixture/units", "mutation/fixture/dial", "mutation/fixture/meter"],
+            "native_only": ["mutation/fixture/probe"],
+        })
+        # Every test that ran, in moon's order, each named by its package
+        # and file and its name, or its index when it has none.
+        self.assertEqual([(t["test"], t["layer"]) for t in matrix["tests"]], [
+            (f"mutation/fixture/dial/dial_test.mbt:{DIAL_HIGH[3]}", "in-process"),
+            (f"mutation/fixture/meter/meter_test.mbt:{METER_LOW[3]}", "in-process"),
+            (f"mutation/fixture/units/units_test.mbt:{INSIDE[3]}", "in-process"),
+            (f"mutation/fixture/units/units_test.mbt:{BELOW[3]}", "in-process"),
+            (f"mutation/fixture/units/units_test.mbt:{PAST[3]}", "in-process"),
+            ("mutation/fixture/units/units_test.mbt#3", "in-process"),
+            ("mutation/fixture/units/units_test.mbt#4", "in-process"),
+        ])
+        self.assertEqual([{k: t[k] for k in ("package", "file", "index", "name")} for t in matrix["tests"]],
+                         [fields(t) for t in (DIAL_HIGH, METER_LOW, INSIDE, BELOW, PAST, FIVE, FOUR)])
+        names = {t["test"]: (t["package"], t["file"], t["index"], t["name"]) for t in matrix["tests"]}
+        self.assertEqual([(m["id"], m["outcome"], [names[t] for t in m["killing_tests"]]) for m in matrix["mutants"]],
+                         MATRIX)
+
+    def test_the_summary_and_the_report_count_the_tests_that_kill_and_those_that_alone_kill(self):
+        package = json.loads((self.out / "summary.json").read_text())["packages"][0]
+        self.assertEqual({k: package[k] for k in ("mutants", "killed", "timed_out", "survived", "unviable")},
+                         {"mutants": 6, "killed": 5, "timed_out": 0, "survived": 1, "unviable": 0})
+        self.assertEqual(package["baseline"]["tests"], 7)
+        found = dict(package["matrix"], tests=len(package["matrix"]["tests"]))
+        # All seven tests kill some mutant; four alone kill one: meter's,
+        # dial's, units' 0 below a range and 5 past 3.
+        self.assertEqual(found, {
+            "packages": ["mutation/fixture/units", "mutation/fixture/dial", "mutation/fixture/meter"],
+            "native_only": ["mutation/fixture/probe"],
+            "tests": 7, "killing": 7, "alone": 4,
+            "killed_by": {"mutation/fixture/dial": 2, "mutation/fixture/meter": 2, "mutation/fixture/units": 3},
+        })
+        # A run in this mode has no run of its own tests alone.
+        self.assertNotIn("own", package)
+        self.assertNotIn("importers", package)
+        report = (self.out / "report.md").read_text()
+        self.assertIn("Kill matrix: each mutant ran against the 7 tests of mutation/fixture/units,"
+                      " mutation/fixture/dial and mutation/fixture/meter at once, with no early stop.\n"
+                      "- 7 of these tests kill some mutant, and 4 of them alone kill some mutant.\n"
+                      "- Mutants killed by the tests of each package: mutation/fixture/dial 2,"
+                      " mutation/fixture/meter 2, mutation/fixture/units 3.\n"
+                      "- Importers that build only natively, whose tests did not run: mutation/fixture/probe.\n",
+                      report)
+        self.assertIn("### Survivors (1)", report)
+
+    def test_a_run_that_is_no_kill_matrix_leaves_none_behind(self):
+        out = self.tmp / "again"
+        shutil.copytree(self.out, out)
+        result = run_runner(FIXTURE, self.tmp / "work", out, self.moon, "--sites-only", "units")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((out / "matrix").exists())
+
 
 # A moon that answers the runs of tests, but not their builds, dry runs or
 # outlines, from a script: a JSON list of answers, taken in turn. "real"

@@ -12,12 +12,16 @@ it fails again with the mutant on and passes with it off. Each record then
 lists every test that kills its mutant, with the test's package and layer.
 """
 
+import json
 import re
+import shutil
 import subprocess
 
 import compare
 
 BACKEND = "wasm-gc"
+# The version of the format of a matrix's file.
+VERSION = 1
 # How long moon may take to list the tests it would run: it builds nothing,
 # so this only stops one that hangs.
 OUTLINE_LIMIT_S = 600
@@ -88,11 +92,140 @@ def key(test):
     return test["package"], test["file"], test["index"], test["name"]
 
 
-def run_package(workers, package, directory, found, native_only, sites, mutants, log, run_tests, counts, error):
+def test_id(test):
+    """A test's name in the matrix: its package, `/`, its file, then `:`
+    and its name, or, for a test that has none, `#` and its index in the
+    file. A name stays when other tests of its file come or go; an index
+    may not, but moon tells a test with no name apart by nothing else."""
+    where = f"{test['package']}/{test['file']}"
+    return f"{where}:{test['name']}" if test["name"] else f"{where}#{test['index']}"
+
+
+def entries(records):
+    """The mutants of a package's matrix, from its records: each one's id,
+    outcome and killing tests, and the mutant it compiles as, for a
+    duplicate."""
+    found = []
+    for record in records:
+        entry = {"id": record["id"], "outcome": record["outcome"],
+                 "killing_tests": [test_id(t) for t in record["killing_tests"]]}
+        if record["outcome"] == "duplicate":
+            entry["duplicate_of"] = record["duplicate_of"]
+        found.append(entry)
+    return found
+
+
+def alone(mutants):
+    """The tests that alone kill some of a matrix's mutants, each with
+    those mutants' ids, in the order of the mutants. A duplicate counts as
+    the mutant it compiles as."""
+    found = {}
+    for mutant in resolved(mutants):
+        if mutant["outcome"] == "killed" and len(mutant["killing_tests"]) == 1:
+            found.setdefault(mutant["killing_tests"][0], []).append(mutant["id"])
+    return found
+
+
+def resolved(mutants):
+    """A matrix's mutants, each duplicate with the outcome and the killing
+    tests of the mutant it compiles as, when the matrix holds that one."""
+    by_id = {m["id"]: m for m in mutants}
+    out = []
+    for mutant in mutants:
+        first = by_id.get(mutant.get("duplicate_of"))
+        out.append(dict(mutant, outcome=first["outcome"], killing_tests=first["killing_tests"]) if first else mutant)
+    return out
+
+
+def counts(found, records):
+    """What a package's summary says of its matrix: the packages whose
+    tests ran and those that build only natively, every test that ran, and
+    how many of them kill some mutant, how many alone kill one, and how
+    many mutants each package's tests kill."""
+    mutants = entries(records)
+    killed = [r for r in records if r["outcome"] == "killed"]
+    by = {}
+    for record in killed:
+        for package in {t["package"] for t in record["killing_tests"]}:
+            by[package] = by.get(package, 0) + 1
+    return {
+        "packages": list(found["packages"]),
+        "native_only": list(found["native_only"]),
+        "tests": list(found["tests"]),
+        "killing": len({t for m in mutants if m["outcome"] == "killed" for t in m["killing_tests"]}),
+        "alone": len(alone(mutants)),
+        "killed_by": dict(sorted(by.items())),
+    }
+
+
+def report_lines(summary):
+    """The lines of the report that give a package's kill matrix: the tests
+    that ran, how many of them kill some mutant and alone kill one, and
+    how many mutants each package's tests kill."""
+    found = summary.get("matrix")
+    if found is None:
+        return []
+    packages = found["packages"]
+    listed = packages[0] if len(packages) == 1 else ", ".join(packages[:-1]) + f" and {packages[-1]}"
+    out = [f"Kill matrix: each mutant ran against the {len(found['tests'])} tests of {listed} at once, with no early"
+           " stop.",
+           f"- {found['killing']} of these tests kill some mutant, and {found['alone']} of them alone kill some"
+           " mutant."]
+    if found["killed_by"]:
+        out += ["- Mutants killed by the tests of each package: "
+                + ", ".join(f"{name} {n}" for name, n in found["killed_by"].items()) + "."]
+    if found["native_only"]:
+        out += ["- Importers that build only natively, whose tests did not run: "
+                + ", ".join(found["native_only"]) + "."]
+    return out + [""]
+
+
+def write(out, operator_set, chosen, summaries, records):
+    """Writes the kill matrix of each package that ran in kill-matrix mode
+    into out/matrix/<package directory>.json, after removing what an
+    earlier run wrote there."""
+    folder = out / "matrix"
+    shutil.rmtree(folder, ignore_errors=True)
+    for summary in summaries:
+        found = summary.get("matrix")
+        if found is None:
+            continue
+        matrix = {
+            "version": VERSION,
+            "package": summary["package"],
+            "directory": summary["directory"],
+            "operator_set": operator_set,
+            "set": chosen,
+            "backend": summary["backend"],
+            "packages": found["packages"],
+            "native_only": found["native_only"],
+            "tests": [dict(test=test_id(t), **t) for t in found["tests"]],
+            "mutants": entries([r for r in records if r["package"] == summary["package"]]),
+        }
+        path = folder / f"{summary['directory']}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(dumps(matrix), encoding="utf-8")
+
+
+def dumps(matrix):
+    """A matrix as JSON, with one test and one mutant on each line."""
+    lines = []
+    for name, value in matrix.items():
+        if name in ("tests", "mutants") and value:
+            items = ",\n".join(f"    {json.dumps(v, ensure_ascii=False)}" for v in value)
+            lines.append(f"  {json.dumps(name)}: [\n{items}\n  ]")
+        else:
+            lines.append(f"  {json.dumps(name)}: {json.dumps(value, ensure_ascii=False)}")
+    return "{\n" + ",\n".join(lines) + "\n}\n"
+
+
+def run_package(workers, package, directory, found, native_only, sites, mutants, log, run_tests, outcome_counts,
+                error):
     """Runs the chosen mutants of one package against the tests of the
     package and of its importers that build on wasm-gc (found) at once:
     its records, each listing every test that kills its mutant, and its
-    summary's counts. run_tests, counts and error are the runner's."""
+    summary's counts. run_tests, outcome_counts and error are the
+    runner's."""
     everyone = [package, *found]
     tests = outline(workers[0], everyone, error)
     records, baseline, limit, self_test = run_tests(
@@ -116,9 +249,9 @@ def run_package(workers, package, directory, found, native_only, sites, mutants,
         "backend": BACKEND,
         "baseline": baseline,
         "limit_s": round(limit, 3),
-        **counts(records),
+        **outcome_counts(records),
         **compare.counts(records),
-        "matrix": {"packages": everyone, "native_only": list(native_only), "tests": tests},
+        "matrix": counts({"packages": everyone, "native_only": native_only, "tests": tests}, records),
         **({"self_test": self_test} if self_test is not None else {}),
     }
     return records, summary
