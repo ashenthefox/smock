@@ -1,7 +1,10 @@
 // The ranges of smock serve's numeric settings, at each end: the largest
 // value a flag takes is accepted, and one more is refused with the message a
 // user sees. The e2e settings test refuses some of these values through the
-// binary; these run in-process.
+// binary; these run in-process. The message names the flag and its variable,
+// as docs/running.md's Settings table pairs them, in the form
+// `InvalidSetting::message` documents, and the range in the form the e2e
+// settings test pins: `must be an integer from <min> to <max>`.
 
 ///|
 /// What `smock serve <argv>` makes of its settings: `show` of the settings
