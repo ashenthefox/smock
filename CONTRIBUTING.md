@@ -1766,11 +1766,13 @@ run: a self-test that survives, times out or does not build stops the
 run, and so does a package with no function to change. The summary and the report give the self-test's record: the
 functions it changed and how many tests failed.
 
-A package whose own tests call none of its functions fails its
-self-test. `cookies` and `unicode` have no tests of their own, so a run of
-their own tests could see no mutant, and their self-test fails: it runs
-with the package's own tests only, and not again with its importers'
-tests as a surviving mutant does.
+A self-test that the package's own tests do not see runs again with the
+tests of its importers that build on wasm-gc, as a mutant that survives
+them does: their tests first run twice without it, which sets the time
+limit, and the record then names those importers. `cookies` and `unicode`
+have no tests of their own, so their self-test passes only so. A package
+whose functions no test of its own or of its importers calls fails its
+self-test, as does one whose only importers build natively.
 
 `--self-test-only` runs, for each package, the runs without a mutant and
 the self-test, and no mutant; it takes no option that chooses mutants. CI's job `checks` runs it on the fixture

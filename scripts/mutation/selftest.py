@@ -132,5 +132,7 @@ def failure(package, record):
 
 def report_line(record):
     """The report's line on a self-test that passed."""
+    # A self-test that only the importers' tests saw names them.
+    by = f" of its importers ({', '.join(record['importers'])})" if record.get("importers") else ""
     return (f"Self-test: `{STATEMENT}` at the start of {len(record['definitions'])} functions,"
-            f" killed by {record['failed_tests']} tests.")
+            f" killed by {record['failed_tests']} tests{by}.")

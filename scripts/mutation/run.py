@@ -79,7 +79,9 @@ credit in this run. Then, when the package has a mutant to run, or with
 (selftest.py): it switches on a mutant that puts an abort at the start of
 every function of the package, builds and runs the tests, switches it
 off, and stops unless a test that gives kill credit failed, so that a
-runner that could see no mutant never reports one. Then, for each
+runner that could see no mutant never reports one. A self-test that the
+package's own tests do not see runs again with its importers' tests, as
+a mutant that survives them does. Then, for each
 mutant, it writes the mutated file into
 the tree, builds the package's tests (moon test --build-only), and runs
 them. It checks the build's exit status, so that a failed build never
@@ -620,11 +622,36 @@ def run_self_test(worker, package, directory, limit, log):
     record = selftest.run(worker, package, directory, limit, credited)
     if record["outcome"] == "killed" and not record["failed_tests"] and uncredited:
         record.update(outcome="survived", no_credit=uncredited)
+    if record["outcome"] == "survived":
+        record = self_test_with_importers(worker, package, directory, record, log, credited, uncredited)
     problem = selftest.failure(package, record)
     if problem:
         raise RunnerError(problem)
     log(f"  self-test killed, by {record['failed_tests']} tests ({len(record['definitions'])} functions changed)")
     return record
+
+
+def self_test_with_importers(worker, package, directory, record, log, credited, uncredited):
+    """A self-test that the package's own tests did not see, run again with
+    the tests of its importers that build on wasm-gc, as a mutant that
+    survives its own tests is: the record of that run, which names them,
+    or the record given when the package has no such importer. So a package
+    without tests of its own, such as cookies, passes when its importers'
+    tests see the self-test. Their tests first run twice without it, which
+    sets the time limit."""
+    try:
+        packages, _ = importers.find(worker.moon, worker.tree, worker.target, package)
+    except importers.ImportersError as error:
+        raise RunnerError(str(error)) from error
+    if not packages:
+        return record
+    names = ", ".join(packages)
+    _, _, limit, _ = run_tests([worker], f"the importers of {package} ({names})", packages, [], log,
+                               f"{package}: its self-test again with the tests of {names}")
+    again = selftest.run(worker, packages, directory, limit, credited)
+    if again["outcome"] == "killed" and not again["failed_tests"] and uncredited:
+        again.update(outcome="survived", no_credit=list(uncredited))
+    return dict(again, importers=packages)
 
 
 def run_mutant(worker, package, site, limit, comparison=None):
