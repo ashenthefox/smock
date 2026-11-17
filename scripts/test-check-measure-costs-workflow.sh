@@ -110,6 +110,44 @@ refuses a-secret \
   '.jobs.measure.steps[0].env = {"TOKEN": "${{ secrets.GITHUB_TOKEN }}"}' \
   "it should use no secrets"
 
+# --- On amd64 and arm64, and the results kept -----------------------------------
+
+refuses one-architecture \
+  'del(.jobs.measure.strategy.matrix.include[] | select(.arch == "arm64"))' \
+  "it should measure on amd64 on x86_64 and on arm64 on aarch64, not on: amd64 on x86_64"
+
+refuses arm64-on-x86_64 \
+  '(.jobs.measure.strategy.matrix.include[] | select(.arch == "arm64") | .machine) = "x86_64"' \
+  "it should measure on amd64 on x86_64 and on arm64 on aarch64, not on: amd64 on x86_64, arm64 on x86_64"
+
+refuses one-runner \
+  '.jobs.measure.runs-on = "ubuntu-24.04"' \
+  'job measure should run on the runner its matrix names (runs-on: ${{ matrix.runner }}), not on ubuntu-24.04'
+
+refuses no-machine-check \
+  'del(.jobs.measure.steps[] | select(.uses == "./.github/actions/native-setup") | .with.machine)' \
+  'job measure should check that its runner is the machine of its matrix (the native setup with machine: ${{ matrix.machine }})'
+
+refuses no-native-setup \
+  'del(.jobs.measure.steps[] | select(.uses == "./.github/actions/native-setup"))' \
+  'job measure should check that its runner is the machine of its matrix (the native setup with machine: ${{ matrix.machine }})'
+
+refuses fail-fast \
+  'del(.jobs.measure.strategy["fail-fast"])' \
+  "job measure should go on measuring on one architecture when the other fails (fail-fast: false)"
+
+refuses upload-only-on-success \
+  'del(.jobs.measure.steps[] | select(.uses == "actions/upload-artifact@v7") | .if)' \
+  "job measure should upload what it measured as artifacts with if: always()"
+
+refuses no-upload \
+  'del(.jobs.measure.steps[] | select(.uses == "actions/upload-artifact@v7"))' \
+  "job measure should upload what it measured as artifacts with if: always()"
+
+refuses no-measurement \
+  'del(.jobs.measure.steps[] | select((.run // "") | test("measure-costs")))' \
+  "it should measure on amd64 on x86_64 and on arm64 on aarch64, not on: nothing"
+
 echo
 echo "test-check-measure-costs-workflow: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
