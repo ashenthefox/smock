@@ -588,6 +588,11 @@ test "is_well_known tells each well-known type the README lists, every wrapper i
   // ListValue, NullValue and Any, each "known by its full name, such as
   // `google.protobuf.Duration`". The nine wrappers are the messages of
   // protobuf's wrappers.proto (fixtures/protobuf/wellknown/google/protobuf/).
+  // The README decides the set, not ProtoJSON's list: Empty is in it
+  // ("Empty prints as `{}`"), as the maintainer confirmed on 2026-11-17
+  // (#275). ProtoJSON's guide is known to say otherwise: "Note that
+  // `google.protobuf.Empty` is not considered to have any special JSON
+  // mapping; it is simply a normal message that has zero fields."
   inspect(
     told_well_known([
       "google.protobuf.Timestamp", "google.protobuf.Duration", "google.protobuf.FieldMask",
