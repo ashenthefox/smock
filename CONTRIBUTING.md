@@ -717,11 +717,14 @@ never gated. Each baseline below was measured at d953f320.
    recorded manual check with its reason. Every Definition-file example
    in the documents passes `smock check` in CI. Every message a user can
    see is asserted at least once. Baseline: of 99 documented features, 93
-   covered, 2 partly and 4 not; 70 of the 71 whole Definition files in the
-   documents pass once given the context they leave out; 22 messages, 20
-   of which a user can see, and the top-level help asserted by no test.
-   The [use-case ledger](docs/ledgers/use-cases.md) lists each feature and
-   each message with its source and its tests.
+   covered, 2 partly and 4 not, as the survey counted them; 70 of the 71
+   whole Definition files in the documents pass once given the context
+   they leave out; 22 messages and the top-level help asserted by no test.
+   A user can see 17 of the 22 messages: no input reaches 2 of the others,
+   and only a package's interface shows 3 (the survey counted 20 that a
+   user can see). The [use-case ledger](docs/ledgers/use-cases.md) lists
+   each feature and each message with its source and its tests, and has
+   the recheck of the survey's rows.
 
 **Scope.** All non-test source of the workspace, except generated files
 (the Unicode data table and the build information) and the test
