@@ -438,7 +438,7 @@ fn pem_of_tbs(tbs : Bytes) -> Bytes {
 }
 
 ///|
-test "no expiry when the PEM holds no certificate, or a certificate whose encoding is malformed or whose notAfter is not a UTCTime or GeneralizedTime of RFC 5280's form, or not a date (RFC 7468; X.690, sections 8.1.2, 8.1.3, 10.1, 11.7 and 11.8; RFC 5280, sections 4.1, 4.1.2.5.1 and 4.1.2.5.2; docs/running.md, Rotating certificates: expiry null)" {
+test "no expiry when the PEM holds no certificate, or a certificate whose encoding is malformed or whose notAfter is not a UTCTime or GeneralizedTime of RFC 5280's form, or not a date (RFC 7468; X.690, sections 8.1.2, 8.1.3, 10.1, 11.7 and 11.8; RFC 5280, sections 4.1, 4.1.2.5.1 and 4.1.2.5.2; docs/running.md, Rotating certificates: expiry null, and Certificate expiry: the series gives 0)" {
   let not_before = utc("000101000000Z")
   let contents = certificate_contents(not_before + utc("491231235959Z"))
   let good = der(0x30, contents)
