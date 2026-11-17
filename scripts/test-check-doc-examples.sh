@@ -238,9 +238,10 @@ ran() {
 tree
 check good
 exits good 0
-says good "docs/a.md:5: passes smock check"
-says good "docs/a.md:22: passes smock check"
-says good "check-doc-examples: 2 whole Definition files pass smock check; 2 other fenced blocks set aside as fragments"
+says good "docs/a.md:5 (example 1): passes smock check"
+says good "docs/a.md:22 (example 2): passes smock check"
+says good "check-doc-examples: found 2 whole Definition files, and set aside 2 other fenced blocks as fragments"
+says good "check-doc-examples: every example passes"
 never good "c.md"
 ran good example.yaml example.json
 
@@ -250,10 +251,11 @@ tree
 sed -i 's/  - id: hello$/  - id: hello # fake-problem/' "$root/docs/a.md"
 check broken
 exits broken 1
-says broken "docs/a.md:5: smock check exits with 1:"
+says broken "docs/a.md:5 (example 1): smock check exits with 1:"
 says broken "    example.yaml: /stubs/0: a fake problem"
-says broken "docs/a.md:22: passes smock check"
-says broken "check-doc-examples: 2 whole Definition files, 1 of which fails smock check; 2 other fenced blocks set aside as fragments"
+says broken "docs/a.md:22 (example 2): passes smock check"
+says broken "check-doc-examples: found 2 whole Definition files, and set aside 2 other fenced blocks as fragments"
+says broken "check-doc-examples: 1 problem"
 
 # --- The rule that tells a whole file from a fragment -----------------------------
 
@@ -325,12 +327,12 @@ data: {"stubs": []}
 MD
 check rule
 exits rule 0
-says rule "docs/b.md:5: passes smock check"
-says rule "docs/b.md:12: passes smock check"
-says rule "docs/b.md:18: passes smock check"
-says rule "docs/b.md:23: passes smock check"
-says rule "docs/b.md:29: passes smock check"
-says rule "check-doc-examples: 7 whole Definition files pass smock check; 7 other fenced blocks set aside as fragments"
+says rule "docs/b.md:5 (example 1): passes smock check"
+says rule "docs/b.md:12 (example 2): passes smock check"
+says rule "docs/b.md:18 (example 3): passes smock check"
+says rule "docs/b.md:23 (example 4): passes smock check"
+says rule "docs/b.md:29 (example 5): passes smock check"
+says rule "check-doc-examples: found 7 whole Definition files, and set aside 7 other fenced blocks as fragments"
 ran rule example.yaml example.json example.yaml example.yaml example.yaml example.yaml example.json
 
 # A document that the index links to and that cannot be read stops the
@@ -340,6 +342,113 @@ sed -i 's|^- \[a.md\](a.md) shows examples.$|&\n- [gone.md](gone.md) is gone.|' 
 check unreadable
 exits unreadable 2
 says unreadable "check-doc-examples: cannot read docs/gone.md: No such file or directory"
+
+# A warning that smock check prints is shown under the example, which
+# passes. Another exit status than 0 or 1 fails it.
+tree
+sed -i 's/  - id: hello$/  - id: hello # fake-warning/' "$root/docs/a.md"
+sed -i 's/{"mocks": \[{"name": "shop"}\]}/{"mocks": [{"name": "shop fake-crash"}]}/' "$root/docs/a.md"
+check warning-and-crash
+exits warning-and-crash 1
+says warning-and-crash "docs/a.md:5 (example 1): passes smock check"
+says warning-and-crash "    example.yaml: a fake warning"
+says warning-and-crash "docs/a.md:22 (example 2): smock check exits with 3:"
+says warning-and-crash "    fake smock: crashed"
+says warning-and-crash "check-doc-examples: 1 problem"
+
+# --- The context an example leaves out ------------------------------------------
+
+# Each line of scripts/doc-examples/context.txt gives one example of a
+# document, by its number among the document's whole Definition files, one
+# file of its definitions directory, copied from a file of the tree.
+tree
+sed -i 's/  - id: hello$/  - id: hello # needs-file: orders.json/' "$root/docs/a.md"
+file scripts/doc-examples/empty.json <<'JSON'
+[]
+JSON
+file scripts/doc-examples/shop.yaml <<'YAML'
+mocks: [{ name: shop }]
+YAML
+file scripts/doc-examples/context.txt <<'TXT'
+# The context of the examples.
+
+docs/a.md 1 files/orders.json scripts/doc-examples/empty.json
+docs/a.md  1  context.yaml  scripts/doc-examples/shop.yaml
+TXT
+check context
+exits context 0
+says context "docs/a.md:5 (example 1): passes smock check, with its context: files/orders.json, context.yaml"
+says context "docs/a.md:22 (example 2): passes smock check"
+ran context "context.yaml example.yaml files/orders.json" example.json
+
+# Without its context, the example fails, as smock check says.
+rm "$root/scripts/doc-examples/context.txt"
+check no-context
+exits no-context 1
+says no-context "docs/a.md:5 (example 1): smock check exits with 1:"
+says no-context '    example.yaml: no body file "orders.json"'
+says no-context "check-doc-examples: 1 problem"
+
+# A line that serves no example, gives a path outside the definitions
+# directory or the example's own file, takes a file the tree does not
+# hold, gives a path twice, or is not written as a line should be is a
+# problem, and gives the example nothing.
+tree
+file scripts/doc-examples/empty.json <<'JSON'
+[]
+JSON
+touch "$tmp/outside.json"
+file scripts/doc-examples/context.txt <<'TXT'
+docs/a.md 3 files/x.json scripts/doc-examples/empty.json
+docs/c.md 1 files/x.json scripts/doc-examples/empty.json
+docs/a.md 1 files/x.json scripts/doc-examples/missing.json
+docs/a.md 1 ../x.json scripts/doc-examples/empty.json
+docs/a.md 1 example.yaml scripts/doc-examples/empty.json
+docs/a.md x files/x.json scripts/doc-examples/empty.json
+docs/a.md 1 files/x.json
+docs/a.md 2 files/y.json scripts/doc-examples/empty.json
+docs/a.md 2 files/y.json scripts/doc-examples/empty.json
+docs/a.md 2 files/z.json ../outside.json
+docs/a.md 0 files/x.json scripts/doc-examples/empty.json
+docs/a.md 1 /x.json scripts/doc-examples/empty.json
+docs/a.md 1 files/x.json /etc/hostname
+TXT
+check context-problems
+exits context-problems 1
+context=scripts/doc-examples/context.txt
+says context-problems "$context:1: docs/a.md has no example 3: it has 2 whole Definition files"
+says context-problems "$context:2: docs/c.md is not a user document"
+says context-problems "$context:3: scripts/doc-examples/missing.json is not a file of the tree"
+says context-problems "$context:4: ../x.json is not a path inside the definitions directory"
+says context-problems "$context:5: example.yaml is the example's own file"
+says context-problems "$context:6: a line gives <document> <example> <path> <source>, the example a number from 1"
+says context-problems "$context:7: a line gives <document> <example> <path> <source>, the example a number from 1"
+says context-problems "$context:9: example 2 of docs/a.md gets files/y.json twice"
+says context-problems "$context:10: ../outside.json is not a file of the tree"
+says context-problems "$context:11: a line gives <document> <example> <path> <source>, the example a number from 1"
+says context-problems "$context:12: /x.json is not a path inside the definitions directory"
+says context-problems "$context:13: /etc/hostname is not a file of the tree"
+says context-problems "docs/a.md:5 (example 1): passes smock check"
+says context-problems "docs/a.md:22 (example 2): passes smock check, with its context: files/y.json"
+says context-problems "check-doc-examples: 12 problems"
+ran context-problems example.yaml "example.json files/y.json"
+
+# --- How the check is run ---------------------------------------------------------
+
+tree
+status=0
+PATH="$fakes:$sys" "$python" scripts/check-doc-examples.py "$fakes/smock" "$root" extra \
+  >"$tmp/usage.out" 2>&1 || status=$?
+echo "$status" >"$tmp/usage.status"
+exits usage 2
+says usage "usage: python3 scripts/check-doc-examples.py <smock> [<tree>]"
+
+status=0
+PATH="$fakes:$sys" "$python" scripts/check-doc-examples.py "$tmp/no-smock" "$root" \
+  >"$tmp/no-smock.out" 2>&1 || status=$?
+echo "$status" >"$tmp/no-smock.status"
+exits no-smock 2
+says no-smock "check-doc-examples: cannot run $tmp/no-smock"
 
 echo
 echo "test-check-doc-examples: $passed passed, $failed failed"

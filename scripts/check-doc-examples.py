@@ -25,14 +25,29 @@ such as a Stub alone, a request or a command, is a fragment, and is set
 aside.
 
 Each whole Definition file is written alone into a definitions directory,
-as example.json when it is JSON and example.yaml otherwise, and passes
-when `smock check` exits with status 0. What smock check prints, such as a
-warning, is shown under the block.
+as example.json when it is JSON and example.yaml otherwise, with its
+context, and passes when `smock check` exits with status 0. What smock
+check prints, such as a warning, is shown under the block.
 
-It prints a line for each whole Definition file, each problem, and then
-how many whole Definition files it found and how many fenced blocks it set
-aside. It exits with 1 when an example fails, and with 2 when it cannot
-run smock or a document cannot be read, or is run wrongly.
+An example's context is what its document leaves out, such as a Mock that
+another block declares or a body file whose content it does not show.
+scripts/doc-examples/context.txt lists it, one file a line:
+
+  <document> <example> <path> <source>
+
+<document> and <example> name the example: <example> is its number among
+the whole Definition files of <document>, counted from 1, as the check
+prints it. <path> is where the file goes in the example's definitions
+directory, and <source> the file of the tree it is a copy of. A line that
+names no example, a path outside the directory or the example's own
+file, a source the tree does not hold, or a path the example already
+gets is a problem. Blank lines and lines that start with # are skipped.
+
+It prints a line for each whole Definition file, each problem, how many
+whole Definition files it found and how many fenced blocks it set aside,
+and then whether every example passed or how many problems it found. It
+exits with 1 when it found a problem, and with 2 when it cannot run smock
+or a file it reads cannot be read, or is run wrongly.
 
 scripts/test-check-doc-examples.sh tests it, with a fake smock. It needs
 Python 3.9 or later.
@@ -40,6 +55,7 @@ Python 3.9 or later.
 import os
 import posixpath
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -67,6 +83,9 @@ LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^)\s#>]*)")
 # A key of a YAML mapping at the start of a line, and the colon after it:
 # a quoted scalar, or a plain one, which does not start with an indicator.
 YAML_KEY = re.compile(r"""("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s\-?:,\[\]{}#&*!|>'"%@`][^:#]*?)[ \t]*:(?:[ \t]|$)""")
+
+# The context that examples leave out (read_context).
+CONTEXT = "scripts/doc-examples/context.txt"
 
 # How long smock check may take on one Definition file, in seconds.
 TIMEOUT = 60
@@ -216,38 +235,113 @@ def run(command, cwd=None):
     return result.returncode, result.stdout.decode("utf-8", "replace")
 
 
-def check_definition_files(tree, smock, scratch):
-    """Runs smock check on each whole Definition file of the user
-    documents. Gives the number of whole files, of those that fail, and of
-    the blocks set aside."""
-    whole = failing = aside = 0
-    for document in user_documents(tree):
+class Example:
+    """A whole Definition file of a user document: its document, the line
+    of its opening fence, its number among the document's whole Definition
+    files, counted from 1, its block, and its context, the files its
+    definitions directory gets, each as (path, source)."""
+
+    def __init__(self, document, number, block):
+        self.document = document
+        self.number = number
+        self.block = block
+        self.context = []
+
+    def where(self):
+        return f"{self.document}:{self.block.line} (example {self.number})"
+
+    def file_name(self):
+        return "example.json" if is_json(self.block) else "example.yaml"
+
+
+def find_examples(tree, documents):
+    """The whole Definition files of the documents, and the number of the
+    other fenced blocks, which are set aside."""
+    examples = []
+    aside = 0
+    for document in documents:
+        number = 0
         for block in fenced_blocks(read(tree, document)):
-            if not is_whole_file(block):
-                aside += 1
-                continue
-            whole += 1
-            where = f"{document}:{block.line}"
-            directory = os.path.join(scratch, f"example-{whole}")
-            os.makedirs(directory)
-            name = "example.json" if is_json(block) else "example.yaml"
-            with open(os.path.join(directory, name), "w", encoding="utf-8") as handle:
-                handle.write(block.text + "\n")
-            try:
-                status, output = run([smock, "check", directory])
-            except subprocess.TimeoutExpired:
-                status, output = None, ""
-            if status == 0:
-                print(f"{where}: passes smock check")
-            elif status is None:
-                failing += 1
-                print(f"{where}: smock check takes longer than {TIMEOUT} s")
+            if is_whole_file(block):
+                number += 1
+                examples.append(Example(document, number, block))
             else:
-                failing += 1
-                print(f"{where}: smock check exits with {status}:")
-            if output.strip():
-                print(indented(output))
-    return whole, failing, aside
+                aside += 1
+    return examples, aside
+
+
+def inside(path):
+    """Whether a relative path stays where it starts, in normal form. An
+    absolute path starts with an empty part."""
+    return all(part not in ("", ".", "..") for part in path.split("/"))
+
+
+def read_context(tree, documents, examples, problem):
+    """Gives each example the context that the context file lists for it,
+    and reports each line of the file that is wrong. A tree without the
+    file gives no example any context."""
+    try:
+        text = read(tree, CONTEXT)
+    except Unreadable:
+        if os.path.exists(os.path.join(tree, CONTEXT)):
+            raise
+        return
+    by_number = {(example.document, example.number): example for example in examples}
+    counts = {}
+    for example in examples:
+        counts[example.document] = counts.get(example.document, 0) + 1
+    given = set()
+    for count, line in enumerate(text.split("\n"), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        at = f"{CONTEXT}:{count}"
+        fields = line.split()
+        if len(fields) != 4 or not re.fullmatch(r"[1-9][0-9]*", fields[1]):
+            problem(f"{at}: a line gives <document> <example> <path> <source>, the example a number from 1")
+            continue
+        document, number, path, source = fields[0], int(fields[1]), fields[2], fields[3]
+        if document not in documents:
+            problem(f"{at}: {document} is not a user document")
+        elif (document, number) not in by_number:
+            files = plural(counts.get(document, 0), "whole Definition file", "whole Definition files")
+            problem(f"{at}: {document} has no example {number}: it has {files}")
+        elif not inside(path):
+            problem(f"{at}: {path} is not a path inside the definitions directory")
+        elif path in ("example.yaml", "example.json"):
+            problem(f"{at}: {path} is the example's own file")
+        elif not inside(source) or not os.path.isfile(os.path.join(tree, source)):
+            problem(f"{at}: {source} is not a file of the tree")
+        elif (document, number, path) in given:
+            problem(f"{at}: example {number} of {document} gets {path} twice")
+        else:
+            given.add((document, number, path))
+            by_number[(document, number)].context.append((path, source))
+
+
+def check_example(tree, smock, scratch, example, problem):
+    """Runs smock check on an example, alone in a definitions directory
+    with its context."""
+    directory = os.path.join(scratch, f"{example.document}-{example.number}")
+    os.makedirs(directory)
+    with open(os.path.join(directory, example.file_name()), "w", encoding="utf-8") as handle:
+        handle.write(example.block.text + "\n")
+    for path, source in example.context:
+        os.makedirs(os.path.dirname(os.path.join(directory, path)), exist_ok=True)
+        shutil.copyfile(os.path.join(tree, source), os.path.join(directory, path))
+    with_context = ""
+    if example.context:
+        with_context = ", with its context: " + ", ".join(path for path, _ in example.context)
+    try:
+        status, output = run([smock, "check", directory])
+    except subprocess.TimeoutExpired:
+        problem(f"{example.where()}: smock check takes longer than {TIMEOUT} s{with_context}")
+        return
+    if status == 0:
+        print(f"{example.where()}: passes smock check{with_context}")
+    else:
+        problem(f"{example.where()}: smock check exits with {status}{with_context}:")
+    if output.strip():
+        print(indented(output))
 
 
 def plural(count, singular, many):
@@ -263,18 +357,29 @@ def main(arguments):
     if not os.access(smock, os.X_OK):
         print(f"check-doc-examples: cannot run {arguments[0]}", file=sys.stderr)
         return 2
+    problems = []
+
+    def problem(message):
+        problems.append(message)
+        print(message)
+
     try:
+        documents = user_documents(tree)
+        examples, aside = find_examples(tree, documents)
+        read_context(tree, documents, examples, problem)
         with tempfile.TemporaryDirectory() as scratch:
-            whole, failing, aside = check_definition_files(tree, smock, scratch)
+            for example in examples:
+                check_example(tree, smock, scratch, example, problem)
     except Unreadable as error:
         print(f"check-doc-examples: {error}", file=sys.stderr)
         return 2
-    files = plural(whole, "whole Definition file", "whole Definition files")
+    files = plural(len(examples), "whole Definition file", "whole Definition files")
     blocks = plural(aside, "other fenced block", "other fenced blocks")
-    if failing:
-        print(f"check-doc-examples: {files}, {failing} of which fails smock check; {blocks} set aside as fragments")
+    print(f"check-doc-examples: found {files}, and set aside {blocks} as fragments")
+    if problems:
+        print(f"check-doc-examples: {plural(len(problems), 'problem', 'problems')}")
         return 1
-    print(f"check-doc-examples: {files} pass smock check; {blocks} set aside as fragments")
+    print("check-doc-examples: every example passes")
     return 0
 
 
