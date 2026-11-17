@@ -3,13 +3,15 @@
 Bug reports and proposals are welcome as
 [issues](https://github.com/hirunefu/smock/issues). Before a pull request
 that changes code, open an issue and talk the approach over there, so that
-the work fits where smock is going. Report a vulnerability privately, as
-[SECURITY.md](SECURITY.md) says.
+the work fits where smock is going. Before merging a contributor's pull
+request, the maintainer pushes its branch here, so that the
+[weakening report](#the-weakening-report) runs on it. Report a
+vulnerability privately, as [SECURITY.md](SECURITY.md) says.
 
 This document is for people who work on smock itself. It describes the
 repository's layout, the pinned MoonBit toolchain, how to build and test
-smock, and the release benchmark, and says where making a release is
-described. The
+smock, the release benchmark and the weakening report, and says where
+making a release is described. The
 [Contributing to smock](docs/README.md#contributing-to-smock) list in
 docs/README.md names the other documents for contributors: the
 architecture decisions (ADRs), the glossary and the maintainer's
@@ -21,6 +23,7 @@ checklists.
 - [Toolchain](#toolchain)
 - [Build and test](#build-and-test)
 - [Benchmark](#benchmark)
+- [The weakening report](#the-weakening-report)
 - [Making a release](#making-a-release)
 
 ## Layout
@@ -275,6 +278,10 @@ scripts/check-ci-artifacts.sh        # when CI's jobs and steps run, and that it
 scripts/test-check-ci-artifacts.sh   # that check, on copies of the workflows changed one thing at a time (needs yq and jq)
 scripts/test-ci-plan.sh              # the plan that skips the tests on main of a tree that already passed (needs git and jq)
 scripts/test-latest-toolchain-plan.sh   # the plan that skips the weekly run with the latest MoonBit when it would repeat CI (needs jq)
+scripts/check-branch-checks-workflow.sh   # the branch checks workflow writes the weakening report on each push to a branch but main (needs yq and jq)
+scripts/test-check-branch-checks-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
+python3 scripts/weakening-report.py --base origin/main   # what this branch weakens, against its merge base with main (needs git)
+scripts/test-weakening-report.sh     # the weakening report, on small git histories (needs python3 and git)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
 scripts/test-check-schema.sh         # the JSON Schema cross-check, with a fake validator and a fake smock (needs jq)
@@ -527,6 +534,75 @@ measures gRPC unary calls over h2c in a run of its own, held to no target
 [bench/README.md](bench/README.md) says how to run it on a machine, on GKE
 Autopilot and in CI, what a run writes and how to compare runs. The
 [chart's sizing table](charts/smock/README.md#sizing) has what it measured.
+
+## The weakening report
+
+Before the maintainer merges a branch into `main`, they read what it
+weakens. On each push to a branch other than `main` and Dependabot's, the
+branch checks workflow (`.github/workflows/branch-checks.yml`) runs
+`scripts/weakening-report.py` against the branch's merge base with
+`main`. The job takes seconds. It writes the report to the job summary
+and keeps it as the artifact `weakening-report` for 90 days. It only
+reports: it passes whatever the report lists, and fails only when the
+report cannot be written or kept. The workflow is not part of `ci.yml`,
+so `keep` never waits for it.
+
+The report lists:
+
+- **Tests deleted**: each test block of the base that its package no
+  longer has. A test whose name changed is followed to the new test of
+  its package that holds most of its body, or whose name is much like its
+  own, as when a test is extended.
+- **Assertions removed or changed in tests that stay**: in each test, and
+  in each function or constant of a test file, that the head still has,
+  the lines it removes or changes that assert something. Those are a call
+  of `inspect`, `debug_inspect`, `json_inspect`, an `assert_` function,
+  `fail`, `abort` or `panic`, a `guard`, an `if` whose block fails, and a
+  line that compares two values. So an exact comparison made weaker and
+  an upper bound raised show here. A line added inside an assertion is
+  not listed, since extending a test adds such lines.
+- **Snapshot lines changed**: the lines a test removes from, changes in or
+  adds to a snapshot. A snapshot is the `content=` of `inspect`,
+  `debug_inspect` or `json_inspect`, a constant or a variable that a
+  `content=` names, or a file in `__snapshot__`.
+- **Skip attributes and target settings added**: a `#skip` or `#cfg`
+  attribute that a test gains, a package whose supported targets no
+  longer let its tests run on wasm-gc, and a test file that its package's
+  `targets` no longer build for wasm-gc.
+- **Files that decide a verdict changed**: each change to a file that
+  `scripts/verdict-files.txt` names, with its diff, and each change to
+  that list.
+
+`scripts/verdict-files.txt` names, by path, every file that decides a
+verdict: the mutation runner and its data, the exclusion list, the
+coverage wrapper with its floors and scope, the canary's verdicts, the
+lists of packages at L4 and of tests kept, the merge and release checks,
+the mutation and coverage workflows, and the lists of cases that
+protobuf's conformance suite and h2spec may fail. Most of these files do
+not exist yet: the list fixes the paths they will have, and each line
+names the issue that creates them. A change that adds a file that decides
+a verdict puts it at a path the list names, or adds its path to the list
+in the same change. The report reads the base's list and the head's, so
+a file still shows when the same change takes its path off the list.
+
+The report reads MoonBit by its lines and by `moon fmt`'s layout, not as
+the compiler does. So it may list a line that weakens nothing, such as a
+comparison in a helper's loop. A changed call of a helper that asserts is
+not listed, unless the call is an assertion itself; a change to the
+helper's own lines is. It reads only the MoonBit tests: the tests of the
+scripts are not in it.
+
+To read it for a branch before pushing it:
+
+```sh
+python3 scripts/weakening-report.py --base origin/main
+```
+
+An outside contributor's pull request goes the same way as the project's
+own branches: before merging it, the maintainer pushes its branch to a
+branch here, so that the branch checks run on it. Dependabot's pull
+requests keep their own path
+([Before merging into main](docs/merging-into-main.md)).
 
 ## Making a release
 
