@@ -188,6 +188,7 @@ async test "a client that closes the connection mid-stream ends that stream, and
   with_definitions([("clock.json", defs)], dir => {
     let stopped = with_smock(["--dir", dir, "--port", "0"], smock => {
       let conn = smock.connect()
+      let start = @async.now()
       conn.write("GET /ticks HTTP/1.1\r\nHost: localhost\r\n\r\n")
       let _ = read_head(conn)
       guard conn.read_until("\n\n") is Some(_) else {
@@ -195,18 +196,21 @@ async test "a client that closes the connection mid-stream ends that stream, and
       }
       let streaming = open_files(smock.pid)
       conn.close()
-      // smock notices when it next writes to the closed connection, and
-      // then closes its end of it.
-      let ended = @async.with_timeout_opt(3000, () => {
+      // smock notices "when it next writes an event"
+      // (docs/definition-files/responses.md, Server-Sent Events), 50 ms
+      // later, and then closes its end of it: well before the stream's own
+      // end, 10 s after the request.
+      let ended = @async.with_timeout_opt(patience_ms, () => {
         while open_files(smock.pid) >= streaming {
           @async.sleep(20)
         }
       })
+      let ended_ms = @async.now() - start
       let out = [
-        if ended is Some(_) {
+        if ended is Some(_) && ended_ms < 200 * 50 {
           "the stream ended"
         } else {
-          "the stream still runs 3 s after the client closed"
+          "the stream still ran \{ended_ms} ms after the request, as long as its events last"
         },
         smock.send("GET", "/hello"),
       ]

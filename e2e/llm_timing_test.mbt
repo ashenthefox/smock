@@ -78,6 +78,7 @@ async test "a client that leaves mid-stream ends the stream at smock's next writ
   with_definitions([("openai.json", paced_openai)], dir => {
     let stopped = with_smock(["--dir", dir, "--port", "0"], smock => {
       let conn = smock.connect()
+      let start = @async.now()
       ask_stream(conn, "/v1/ticks", session="left-mid-stream")
       let _ = read_head(conn)
       // The opening chunk, then the first piece.
@@ -88,22 +89,25 @@ async test "a client that leaves mid-stream ends the stream at smock's next writ
       }
       let streaming = open_files(smock.pid)
       conn.close()
-      // smock notices when it next writes to the closed connection, 50 ms
-      // later, and then closes its end of it.
-      let ended = @async.with_timeout_opt(3000, () => {
+      // smock "notices when it next writes an event"
+      // (docs/definition-files/llm-responses.md, Streams), 50 ms later, and
+      // then closes its end of the connection: well before the stream's own
+      // end, 200 pieces 50 ms apart, 10 s after the request.
+      let ended = @async.with_timeout_opt(patience_ms, () => {
         while open_files(smock.pid) >= streaming {
           @async.sleep(20)
         }
       })
+      let ended_ms = @async.now() - start
       let recorded = smock.journal_count(
         "left-mid-stream", "{ \"filter\": { \"path\": \"/v1/ticks\" } }",
       )
       inspect(
         [
-          if ended is Some(_) {
+          if ended is Some(_) && ended_ms < 200 * 50 {
             "the stream ended"
           } else {
-            "the stream still runs 3 s after the client closed"
+            "the stream still ran \{ended_ms} ms after the request, as long as its pieces last"
           },
           "in the Journal: \{recorded}",
           smock.send("GET", "/hello"),
@@ -151,14 +155,14 @@ async test "on SIGTERM, a drain waits for a stream in progress to send its waits
         defer stream.close()
         ask_stream(stream, "/v1/chat/completions")
         let _ = read_head(stream)
-        let start = @async.now()
-        smock.terminate()
-        let (last, _, events) = until_end(stream, start)
-        let status = smock.exited()
         // "A drain on SIGTERM waits for a stream in progress, its waits
         // included" (docs/definition-files/llm-responses.md, Streams), and
         // ends once it is over, before the drain timeout.
         let drain = 10000L
+        let start = @async.now()
+        smock.terminate()
+        let (last, _, events) = until_end(stream, start)
+        let status = smock.exited()
         inspect(
           [
             "the stream ended with [DONE] and its last chunk: \{events.has_suffix("data: [DONE]\n\n\n0\n\n")}",
