@@ -88,8 +88,8 @@ def is_generated(text):
 
 
 def source_files(root, paths):
-    """The .mbt files that the paths name, relative to root, without tests
-    and generated files, sorted."""
+    """The .mbt files that the paths name, relative to root, without test
+    files, sorted."""
     files = set()
     for given in paths:
         path = (root / given).resolve()
@@ -221,6 +221,7 @@ class Item:
         return None
 
     def is_test(self):
+        """Whether the definition is a test block."""
         kind = self.node[0]
         if kind == "Ptop_test":
             return True
@@ -298,6 +299,7 @@ class Item:
                 yield self.checked("BOOL", node[1], BOOL[node[1]], span)
 
     def checked(self, operator, original, replacement, span):
+        """A site, once its original text is found where the tree puts it."""
         if span is None:
             raise FinderError(f"{self.source.path}: a {operator} node of the parse tree has no position")
         start = span[0]

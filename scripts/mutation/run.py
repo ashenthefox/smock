@@ -203,11 +203,13 @@ class Worker:
         self.moon = moon
 
     def moon_test(self, package, limit, build_only):
+        """Builds the package's tests, or runs them, in the worker's tree."""
         command = [*self.moon, "test", "--target", BACKEND, "-p", package, "--target-dir", str(self.target)]
         command += ["--build-only", "--output-json"] if build_only else ["--test-failure-json"]
         return run(command, self.tree, limit)
 
     def build(self, package, limit=FIRST_RUN_LIMIT_S):
+        """Builds the package's tests: (exit status, output, seconds)."""
         status, output, seconds, timed_out = self.moon_test(package, limit, build_only=True)
         if timed_out:
             raise RunnerError(f"the build of {package} in {self.tree} took over {limit} s")
@@ -245,6 +247,7 @@ def definition_diff(site, text, mutated):
 
 
 def find_sites(finder, root, directory):
+    """The sites the finder prints for a package's directory."""
     command = [*finder, "--root", str(root), directory]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
