@@ -648,7 +648,8 @@ the rules for writing and removing tests apply already.
   `settings`, `template`, `unicode`, `usage`, `xml` and `yaml`.
   `testcerts` builds there too, but it is data only, so it is not one.
   The native-only packages are `server`, `cmd/smock`, `defdir`, `watch`,
-  `openssl`, `protobuf-conformance`, `schema` and `e2e`.
+  `openssl`, `protobuf-conformance`, `yaml-test-suite`, `schema` and
+  `e2e`.
 - **Protocol packages**: `http1`, `grpc`, `yaml`, `re2`, `xml` and
   `protobuf`.
 - **Site**: one change that one operator can make at one place.
@@ -722,10 +723,10 @@ A package climbs four levels:
 
 - **L1, coverage**: no uncovered point outside exclusions, in the pure
   packages and in the small native-only ones (`defdir`, `watch`,
-  `openssl`, `protobuf-conformance`). `server` and `cmd/smock` get no
-  percentage: the pure parsers that move out of `server`, into a package
-  without I/O, are covered in full in-process, and the rest is reported
-  from e2e coverage.
+  `openssl`, `protobuf-conformance`, `yaml-test-suite`). `server` and
+  `cmd/smock` get no percentage: the pure parsers that move out of
+  `server`, into a package without I/O, are covered in full in-process,
+  and the rest is reported from e2e coverage.
 - **L2, no pseudo-tested function**: every BODY mutant is killed or
   excluded.
 - **L3, changed lines**: no unexplained survivor on the lines a branch
