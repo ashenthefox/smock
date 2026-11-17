@@ -207,11 +207,14 @@ class RunnerTest(unittest.TestCase):
                          (FIXTURE / "calc" / "calc_test.mbt").read_text())
 
     def test_one_mutant_runs_alone_by_its_id(self):
+        # Among two packages: shapes holds none of the ids, so it is not run.
         out = self.tmp / "one"
-        result = self.run_runner(out, "--mutant", "calc/calc.mbt,is_odd,NOT,!,,0", "calc")
+        result = self.run_runner(out, "--mutant", "calc/calc.mbt,is_odd,NOT,!,,0", "calc", "shapes")
         self.assertEqual(result.returncode, 0, result.stderr)
         records = [json.loads(line) for line in (out / "mutants.jsonl").read_text().splitlines()]
         self.assertEqual([(r["id"], r["outcome"]) for r in records], [("calc/calc.mbt,is_odd,NOT,!,,0", "killed")])
+        summary = json.loads((out / "summary.json").read_text())
+        self.assertEqual([(p["package"], p["mutants"]) for p in summary["packages"]], [("mutation/fixture/calc", 1)])
 
     def test_an_unknown_id_fails(self):
         result = self.run_runner(self.tmp / "unknown", "--mutant", "calc/calc.mbt,is_odd,NOT,!,,9", "calc")

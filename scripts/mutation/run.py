@@ -11,7 +11,8 @@ usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir
 mutate: the current directory unless it is given. The site finder
 (scripts/mutation/sites.py, or --finder) gives the sites, one per line,
 and the runner makes one mutant of each. --mutant runs only the mutant
-with that id, and may be given more than once.
+with that id, and may be given more than once; a package given that holds
+none of the ids is not run.
 
 For each worker, the runner copies <root> into <work>/tree-<n>, the files
 that git tracks and the untracked ones it does not ignore, and builds
@@ -255,19 +256,10 @@ def find_sites(finder, root, directory):
     return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
 
 
-def run_package(root, directory, finder, workers, chosen, log):
-    """Runs the mutants of one package: its records and its summary."""
+def run_package(root, directory, sites, mutants, workers, log):
+    """Runs the chosen mutants of one package, whose sites are given: its
+    records and its summary."""
     package = package_name(root, directory)
-    sites = find_sites(finder, root, directory)
-    if chosen is not None:
-        known = {s["id"] for s in sites}
-        unknown = [i for i in chosen if i not in known]
-        if unknown:
-            raise RunnerError("".join(f"no site of {directory} has the id {i}\n" for i in unknown).rstrip())
-        mutants = [s for s in sites if s["id"] in chosen]
-    else:
-        mutants = sites
-
     first = workers[0]
     status, output, _ = first.build(package)
     if status != 0:
@@ -412,13 +404,24 @@ def main():
         print(message, file=sys.stderr, flush=True)
 
     try:
+        sites = {directory: find_sites(finder, root, directory) for directory in args.packages}
+        chosen = {directory: list(found) for directory, found in sites.items()}
+        if args.mutant:
+            known = {s["id"] for found in sites.values() for s in found}
+            unknown = [i for i in args.mutant if i not in known]
+            if unknown:
+                where = ", ".join(args.packages)
+                raise RunnerError("".join(f"no site of {where} has the id {i}\n" for i in unknown).rstrip())
+            chosen = {d: [s for s in found if s["id"] in args.mutant] for d, found in sites.items()}
         files = listed_files(root)
         workers = [Worker(n, work, shlex.split(args.moon)) for n in range(args.workers)]
         for worker in workers:
             sync(root, worker.tree, files)
         records, summaries = [], []
         for directory in args.packages:
-            package_records, summary = run_package(root, directory, finder, workers, args.mutant, log)
+            if args.mutant and not chosen[directory]:
+                continue
+            package_records, summary = run_package(root, directory, sites[directory], chosen[directory], workers, log)
             records += package_records
             summaries.append(summary)
     except RunnerError as error:
