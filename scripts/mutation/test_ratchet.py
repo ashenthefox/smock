@@ -139,10 +139,11 @@ class RatchetTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         # The fixture's packages that hold a site: meter and units came
         # with the importers' credit (#300), same with the comparison of
-        # the compiler's output (#303); dial and probe hold tests alone.
+        # the compiler's output (#303), bounds and host with the native
+        # verdicts (#307); dial and probe hold tests alone.
         self.assertEqual(sorted(p.name for p in (self.history.root / "mutation" / "site-counts").iterdir()),
-                         ["calc.jsonl", "forms.jsonl", "log.jsonl", "meter.jsonl", "same.jsonl", "shapes.jsonl",
-                          "units.jsonl"])
+                         ["bounds.jsonl", "calc.jsonl", "forms.jsonl", "host.jsonl", "log.jsonl", "meter.jsonl",
+                          "same.jsonl", "shapes.jsonl", "units.jsonl"])
         counts = self.history.counts("calc")
         self.assertEqual([(c["definition"], c["pinned"], c["full"]) for c in counts], CALC)
         self.assertEqual({c["file"] for c in counts}, {"calc/calc.mbt"})
@@ -166,8 +167,8 @@ class RatchetTest(unittest.TestCase):
         self.history.commit("counts")
         result = self.history.ratchet("check", "--base", "main")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        # calc, forms, log, meter, same, shapes and units.
-        self.assertIn("the committed site counts of 7 packages are the tree's", result.stdout)
+        # bounds, calc, forms, host, log, meter, same, shapes and units.
+        self.assertIn("the committed site counts of 9 packages are the tree's", result.stdout)
 
     def test_the_check_fails_when_a_change_alters_sites_and_not_their_counts(self):
         self.history.ratchet("write")

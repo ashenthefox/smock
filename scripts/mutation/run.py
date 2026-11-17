@@ -136,6 +136,18 @@ count the equivalent mutants, the duplicates and the mutants not
 compared per package, apart from the other outcomes, and report.md lists
 the equivalent mutants and the duplicates.
 
+A mutant at a site that the finder marks as one whose definition uses an
+unchecked array access (unchecked_access), whose tests ran, runs again
+natively, the same way, with the same tests (native.py): wasm-gc traps
+on an access out of bounds where the native binary reads on. Its record
+gives both verdicts (verdicts), and the native verdict decides on amd64
+alone. A package that builds only natively runs wholly natively, with
+its own tests, and its compiler output is not compared. Before the first
+native build, the runner unsets moon's variables for another C compiler
+(MOON_CC, MOON_AR, MOON_CC_WRAPPER), and native runs dump no core.
+summary.json and report.md give, per package, what ran natively, where,
+and the mutants whose verdicts differ between the backends (native).
+
 It writes into <out> (<work>/out unless it is given):
 
   mutants.jsonl  one record per mutant: the site's fields (its operator
@@ -239,6 +251,7 @@ import confirm
 import exclusions
 import importers
 import matrix
+import native
 import selftest
 
 HERE = Path(__file__).resolve().parent
@@ -376,6 +389,8 @@ class Worker:
         self.tree = work / f"tree-{number}"
         self.target = work / f"target-{number}"
         self.moon = moon
+        # The backend it builds and tests on (native.py makes native twins).
+        self.backend = BACKEND
         # The run's Judge (scripts/mutation/confirm.py), which confirms
         # kills and time-outs.
         self.judge = None
@@ -385,7 +400,7 @@ class Worker:
         them, in the worker's tree."""
         packages = [package] if isinstance(package, str) else package
         selected = [option for name in packages for option in ("-p", name)]
-        command = [*self.moon, "test", "--target", BACKEND, *selected, "--target-dir", str(self.target)]
+        command = [*self.moon, "test", "--target", self.backend, *selected, "--target-dir", str(self.target)]
         command += ["--build-only", "--output-json"] if build_only else ["--test-failure-json"]
         return run(command, self.tree, limit)
 
@@ -539,6 +554,7 @@ def run_package(root, directory, sites, mutants, workers, log, self_test_only=Fa
     package = package_name(root, directory)
     first = workers[0]
     try:
+        workers = native.workers_for(workers, package)
         packages, native_only = importers.find(first.moon, first.tree, first.target, package)
     except importers.ImportersError as error:
         raise RunnerError(str(error)) from error
@@ -560,9 +576,10 @@ def run_package(root, directory, sites, mutants, workers, log, self_test_only=Fa
         credit.update(baseline=again_baseline, limit_s=round(again_limit, 3))
         for index, record in zip(survivors, again):
             importers.merge(records[index], record, packages, credit)
+    natively = native.judge(workers, run_tests, package, packages, mutants, records, log)
 
     summary = {
-        "backend": BACKEND,
+        "backend": workers[0].backend,
         "baseline": baseline,
         "limit_s": round(limit, 3),
         **outcome_counts(records),
@@ -570,6 +587,7 @@ def run_package(root, directory, sites, mutants, workers, log, self_test_only=Fa
         "own": own,
         "importers": credit,
         **({"self_test": self_test} if self_test is not None else {}),
+        **natively,
     }
     return records, summary
 
@@ -614,8 +632,9 @@ def run_tests(workers, what, packages, mutants, log, header, own=None, with_self
     # run (compare.py), and runs the self-test; the importers' pass reruns
     # only survivors, which it compared already. The self-test comes after
     # the comparison has linked the package without a mutant, since its
-    # build replaces that one in the first worker's target directory.
-    comparison = compare.Comparison(packages[0], own, workers, log) if own else None
+    # build replaces that one in the first worker's target directory. A
+    # native run compares nothing: the output compared is wasm-gc's.
+    comparison =compare.Comparison(packages[0], own, workers, log) if own and first.backend == BACKEND else None
     self_test = run_self_test(first, packages[0], own, limit, log) if own and with_self_test else None
 
     # A record names its package; the records of the importers' run are
@@ -671,7 +690,7 @@ def run_mutant(worker, package, site, limit, comparison=None):
     path = worker.tree / site["file"]
     text = path.read_text(encoding="utf-8")
     mutated = apply(text, site)
-    record = dict(site, package=package, backend=BACKEND)
+    record = dict(site, package=package, backend=worker.backend)
     try:
         path.write_text(mutated, encoding="utf-8")
         status, output, build_s = worker.build(package)
@@ -740,6 +759,7 @@ def report(operator_set, chosen, summaries, records):
         out += compare.report(mine)
         out += importers.report_lines(summary)
         out += matrix.report_lines(summary)
+        out += native.report_lines(summary, mine)
         out += confirm.Judge.baseline_lines(summary)
         timed_out = [r for r in mine if r["outcome"] == "timed out"]
         if timed_out:

@@ -131,6 +131,10 @@ def failure(package, record):
 
 
 def report_line(record):
-    """The report's line on a self-test that passed."""
-    return (f"Self-test: `{STATEMENT}` at the start of {len(record['definitions'])} functions,"
-            f" killed by {record['failed_tests']} tests.")
+    """The report's line on a self-test that passed. Natively, the abort
+    stops the test program, as it does on wasm-gc when a package's
+    initialisation calls a changed function, so moon names no failed
+    test."""
+    killed = (f"killed by {record['failed_tests']} tests" if record["failed_tests"] else
+              "killed: the test program stopped before it named a failed test")
+    return f"Self-test: `{STATEMENT}` at the start of {len(record['definitions'])} functions, {killed}."
