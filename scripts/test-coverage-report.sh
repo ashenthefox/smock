@@ -71,5 +71,16 @@ report covered covered.bisect
 exits covered 0
 says covered "prng 4 of 4 100.0% 0 2 of 2"
 
+# --- A partly covered line -------------------------------------------------
+
+# Line 16 of prng.mbt holds three points, counted 3, 0 and 3: two of them
+# are covered, but the line is not. The uncovered point, the then arm's
+# abort, is listed with its file, line and column, and its definition.
+report partly partly.bisect
+exits partly 0
+says partly "prng 3 of 4 75.0% 1 1 of 2"
+says partly "prng: 1 of 4 points uncovered"
+says partly "  prng/prng.mbt:16:19 Generator::below"
+
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]
