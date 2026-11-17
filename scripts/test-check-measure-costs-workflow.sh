@@ -92,6 +92,24 @@ refuses on-pull-requests-only \
   '.on = "pull_request"' \
   "it should run only when started by hand (workflow_dispatch), not on: pull_request"
 
+# --- Read-only, and no secrets ---------------------------------------------------
+
+refuses write-permission \
+  '.permissions.contents = "write"' \
+  "its permissions should be read-only"
+
+refuses no-permissions \
+  'del(.permissions)' \
+  "its permissions should be read-only"
+
+refuses a-job-that-writes \
+  '.jobs.measure.permissions = {"contents": "read", "actions": "write"}' \
+  "its permissions should be read-only"
+
+refuses a-secret \
+  '.jobs.measure.steps[0].env = {"TOKEN": "${{ secrets.GITHUB_TOKEN }}"}' \
+  "it should use no secrets"
+
 echo
 echo "test-check-measure-costs-workflow: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

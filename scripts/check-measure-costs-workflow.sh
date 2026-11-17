@@ -4,6 +4,7 @@
 #
 # - it runs only when started by hand (workflow_dispatch), so never on a
 #   schedule, on pull requests or on pushes;
+# - its permissions are read-only, and it uses no secrets;
 #
 # scripts/test-check-measure-costs-workflow.sh tests this check. It needs yq
 # (mikefarah/yq v4, on GitHub's Ubuntu runners) and jq.
@@ -29,6 +30,14 @@ json=$(yq --output-format=json "$workflow")
 triggers=$(printf '%s\n' "$json" | jq -r '.on | if type == "object" then keys | join(" ") else tostring end')
 [ "$triggers" = workflow_dispatch ] ||
   fail "it should run only when started by hand (workflow_dispatch), not on: $triggers"
+
+printf '%s\n' "$json" | jq -e '
+  (.permissions | type == "object" and all(.[]; . != "write"))
+  and all(.jobs[]; (.permissions // {}) | type == "object" and all(.[]; . != "write"))' >/dev/null ||
+  fail "its permissions should be read-only"
+if grep -q 'secrets\.' "$workflow"; then
+  fail "it should use no secrets"
+fi
 
 if [ "$failed" -ne 0 ]; then
   exit 1
