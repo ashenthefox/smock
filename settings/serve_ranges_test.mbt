@@ -373,3 +373,25 @@ test "ranges: --journal-max-bytes and --state-max-bytes, by their flags or varia
     ),
   )
 }
+
+///|
+test "ranges: --header-size-limit, by its flag or SMOCK_HEADER_SIZE_LIMIT, takes 1 and 1073741824, and refuses 0, 1073741825 and a value that is not a decimal integer" {
+  // No document gives this range: docs/running.md's Settings table and the
+  // help give the default alone, and only the refusal names the range. It
+  // is the code's, a finding that #320 takes to the maintainer.
+  inspect(
+    each_by_flag_and_variable(
+      "--header-size-limit",
+      "SMOCK_HEADER_SIZE_LIMIT",
+      ["1", "1073741824", "0", "1073741825", "16KiB"],
+      settings => settings.header_size_limit.to_string(),
+    ),
+    content=(
+      #|1: 1
+      #|1073741824: 1073741824
+      #|0: invalid value "0" for --header-size-limit (SMOCK_HEADER_SIZE_LIMIT): must be an integer from 1 to 1073741824
+      #|1073741825: invalid value "1073741825" for --header-size-limit (SMOCK_HEADER_SIZE_LIMIT): must be an integer from 1 to 1073741824
+      #|16KiB: invalid value "16KiB" for --header-size-limit (SMOCK_HEADER_SIZE_LIMIT): must be an integer from 1 to 1073741824
+    ),
+  )
+}
