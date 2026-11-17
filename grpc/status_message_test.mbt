@@ -81,4 +81,12 @@ test "a lone surrogate, which UTF-8 cannot hold, is encoded as U+FFFD" {
   )
   // A high surrogate at the end, with nothing after it.
   inspect(ascii(@grpc.percent_encode("a\{high}")), content="a%EF%BF%BD")
+  // U+DFFF, the last low surrogate, is one too; U+E000, the first code
+  // point after the low surrogates, is a character UTF-8 holds in three
+  // octets, EE 80 80 (RFC 3629, section 3; Python's UTF-8 encoder gives the
+  // same), each of them percent-encoded as PROTOCOL-HTTP2's
+  // Percent-Byte-Encoded says.
+  let last_low = (0xDFFF).unsafe_to_char()
+  inspect(ascii(@grpc.percent_encode("a\{last_low}")), content="a%EF%BF%BD")
+  inspect(ascii(@grpc.percent_encode("a\u{E000}")), content="a%EE%80%80")
 }
