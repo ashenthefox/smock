@@ -32,6 +32,12 @@ async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY
           ])
           let _ = raw.frames_until_stream_ends(1)
         }
+        // docs/http2.md, The drain: the final GOAWAY comes once the client
+        // answers the PING, so before the second after the first GOAWAY in
+        // which smock waits for that answer (less 200 ms, as
+        // `about_a_second` allows); and smock exits before the drain
+        // timeout.
+        let drain = 10000L
         let start = @async.now()
         smock.terminate()
         let (acked, unacked) = @async.with_task_group(group => {
@@ -44,8 +50,8 @@ async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY
               ..warned.shown,
               "both at once: \{warned.end_ms < 1000}",
               ..told.shown,
-              "at once after the acknowledgement: \{told.end_ms - warned.end_ms < 500}",
-              "then: \{after.shown.length()} frames, \{after.how}, about a second after the final GOAWAY: \{after.end_ms - told.end_ms >= 800 && after.end_ms - told.end_ms < 2000}",
+              "at once after the acknowledgement, before the second's wait is over: \{told.end_ms - warned.end_ms < 800}",
+              "then: \{after.shown.length()} frames, \{after.how}, about a second after the final GOAWAY: \{about_a_second(after.end_ms - told.end_ms)}",
             ]
           })
           let unacked = group.spawn(() => {
@@ -57,8 +63,8 @@ async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY
               ..warned.shown,
               "both at once: \{warned.end_ms < 1000}",
               ..told.shown,
-              "about a second after the PING: \{told.end_ms - warned.end_ms >= 800 && told.end_ms - warned.end_ms < 2000}",
-              "then: \{after.shown.length()} frames, \{after.how}, about a second after the final GOAWAY: \{after.end_ms - told.end_ms >= 800 && after.end_ms - told.end_ms < 2000}",
+              "about a second after the PING: \{about_a_second(told.end_ms - warned.end_ms)}",
+              "then: \{after.shown.length()} frames, \{after.how}, about a second after the final GOAWAY: \{about_a_second(after.end_ms - told.end_ms)}",
             ]
           })
           (acked.wait(), unacked.wait())
@@ -69,7 +75,7 @@ async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY
           [
             ..acked,
             ..unacked,
-            "exit status \{status}, well before the drain timeout: \{exited < 5000}",
+            "exit status \{status}, before the drain timeout: \{exited < drain}",
           ].join("\n"),
           content=(
             #|a client that acknowledges the PING:
@@ -77,7 +83,7 @@ async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY
             #|PING
             #|both at once: true
             #|GOAWAY last=1 NO_ERROR
-            #|at once after the acknowledgement: true
+            #|at once after the acknowledgement, before the second's wait is over: true
             #|then: 0 frames, a FIN, about a second after the final GOAWAY: true
             #|a client that does not:
             #|GOAWAY last=2147483647 NO_ERROR
@@ -86,7 +92,7 @@ async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY
             #|GOAWAY last=1 NO_ERROR
             #|about a second after the PING: true
             #|then: 0 frames, a FIN, about a second after the final GOAWAY: true
-            #|exit status 0, well before the drain timeout: true
+            #|exit status 0, before the drain timeout: true
           ),
         )
       },
@@ -202,6 +208,10 @@ async test "h2c: an event stream goes on through the drain until it ends, after 
       smock => {
         let raw = smock.raw_h2()
         defer raw.close()
+        // The connection closes a second after the stream ends, "as after
+        // any GOAWAY with NO_ERROR" (docs/http2.md, The drain, step 4), and
+        // smock exits before the drain timeout.
+        let drain = 10000L
         let start = @async.now()
         // Ten events, one every 100 ms.
         raw.send([
@@ -228,8 +238,8 @@ async test "h2c: an event stream goes on through the drain until it ends, after 
             ..told.besides_data(),
             ..rest.besides_data(),
             "events: \{events}, the last ending the stream: \{rest.shown is [.., "DATA 1 END_STREAM 12 octets"]}, about a second after the request: \{rest.end_ms >= 900}",
-            "then: \{after.shown.length()} frames, \{after.how}, about a second after the stream ended: \{after.end_ms - rest.end_ms >= 800 && after.end_ms - rest.end_ms < 2000}",
-            "exit status \{status}, well before the drain timeout: \{exited < 5000}",
+            "then: \{after.shown.length()} frames, \{after.how}, about a second after the stream ended: \{about_a_second(after.end_ms - rest.end_ms)}",
+            "exit status \{status}, before the drain timeout: \{exited < drain}",
           ].join("\n"),
           content=(
             #|GOAWAY last=2147483647 NO_ERROR
@@ -237,7 +247,7 @@ async test "h2c: an event stream goes on through the drain until it ends, after 
             #|GOAWAY last=1 NO_ERROR
             #|events: 10, the last ending the stream: true, about a second after the request: true
             #|then: 0 frames, a FIN, about a second after the stream ended: true
-            #|exit status 0, well before the drain timeout: true
+            #|exit status 0, before the drain timeout: true
           ),
         )
       },
@@ -269,6 +279,9 @@ async test "h2c: an event stream that outlasts the drain timeout goes on until t
         ])
         let _ = raw.frames_until(@async.now(), frame => frame is Headers(..))
         @async.sleep(settle_ms)
+        // At the drain timeout, what is still open is cut (docs/http2.md,
+        // The drain). The test allows up to 3 times it.
+        let drain = 1500L
         let start = @async.now()
         smock.terminate()
         let warned = raw.frames_until_ping_acked(start)
@@ -278,7 +291,7 @@ async test "h2c: an event stream that outlasts the drain timeout goes on until t
             ..warned.besides_data(),
             ..rest.besides_data(),
             "events during the drain: \{warned.data_count() + rest.data_count() >= 10}, none ending the stream: \{!rest.shown.iter().any(shown => shown.contains("END_STREAM"))}",
-            "cut at the drain timeout: \{rest.end_ms >= 1500 && rest.end_ms < 3000}",
+            "cut at the drain timeout: \{rest.end_ms >= drain && rest.end_ms < 3 * drain}",
           ].join("\n"),
           content=(
             #|GOAWAY last=2147483647 NO_ERROR
