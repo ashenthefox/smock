@@ -130,6 +130,40 @@ ratchet at partly.bisect
 exits at 0
 says at "prng: 1 uncovered point, at its floor of 1"
 
+# --- Below a floor, and as it falls ----------------------------------------------
+
+# covered.bisect covers all of prng's points: the floor of 1 can be
+# lowered, and the ratchet says how.
+tree
+floors "prng 1"
+branch
+ratchet below covered.bisect
+exits below 0
+says below "prng: 0 uncovered points, below its floor of 1: lower it to 0 in this change"
+says below "python3 scripts/coverage-ratchet.py write"
+
+# The change that covers the point lowers the floor with it.
+tree
+floors "prng 1"
+branch
+floors "prng 0"
+ratchet falls covered.bisect
+exits falls 0
+says falls "prng: 0 uncovered points, at its floor of 0"
+
+# write sets each package's floor to its uncovered points, in the order of
+# the packages' names, and keeps the comments at the start of the file.
+tree
+floors "prng 3" "gone 7"
+python3 "$script" --root "$repo" write "$fixtures/packages.bisect" >"$tmp/write.out" 2>&1
+printf '%s\n' "# The floors of a test." "" "cmd/smock 4" "prng 1" "server 4" >"$tmp/write.expected"
+if cmp -s "$tmp/write.expected" "$repo/coverage/floors.txt"; then
+  pass "write: writes the floors of packages.bisect"
+else
+  fail "write: writes other floors than those of packages.bisect"
+  diff "$tmp/write.expected" "$repo/coverage/floors.txt" | sed 's/^/     /'
+fi
+
 echo
 echo "test-coverage-ratchet: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

@@ -16,7 +16,11 @@ The floors are in <root>/coverage/floors.txt, a line for each package:
 
 check  fails, with 1, when a package's uncovered points are above its
        floor, naming the package and its new uncovered points, and passes
-       when they are at or below it.
+       when they are at or below it. Below it, it says that the floor can
+       be lowered, as the change that lowers the count does.
+
+write  writes each package's uncovered points as its floor, keeping the
+       comments at the start of the file.
 """
 
 import argparse
@@ -79,11 +83,33 @@ def check(root, report):
             problems.append(f"{name}: {points(count)}, above its floor of {floor}. Its uncovered points:{listed}")
         elif count == floor:
             notes.append(f"{name}: {points(count)}, at its floor of {floor}")
+        else:
+            notes.append(f"{name}: {points(count)}, below its floor of {floor}: lower it to {count} in this"
+                         f" change (python3 scripts/coverage-ratchet.py write {report})")
     for note in notes:
         print(f"coverage-ratchet: {note}")
     for problem in problems:
         print(f"coverage-ratchet: {problem}", file=sys.stderr)
     return not problems
+
+
+def write(root, report):
+    """Writes each package's uncovered points as its floor."""
+    packages = report_module.read_packages(report, root)
+    path = root / FLOORS
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    header = []
+    for line in text.splitlines():
+        if line.strip() and not line.lstrip().startswith("#"):
+            break
+        header.append(line)
+    while header and not header[-1].strip():
+        header.pop()
+    lines = header + ([""] if header else [])
+    lines += [f"{name} {len(packages[name].uncovered)}" for name in sorted(packages)]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
+    print(f"coverage-ratchet: wrote the floors of {len(packages)} packages into {FLOORS.as_posix()}")
 
 
 def main():
@@ -93,9 +119,14 @@ def main():
     checking = commands.add_parser("check", help="check the uncovered points against the floors")
     checking.add_argument("--base", default="origin/main", help="compare the floors with the merge base of HEAD and this")
     checking.add_argument("report", help="the bisect report")
+    writing = commands.add_parser("write", help="write each package's uncovered points as its floor")
+    writing.add_argument("report", help="the bisect report")
     args = parser.parse_args()
     root = Path(args.root)
     try:
+        if args.command == "write":
+            write(root, args.report)
+            return
         passed = check(root, args.report)
     except report_module.ReportError as error:
         print(f"coverage-ratchet: {args.report}: {error}", file=sys.stderr)
