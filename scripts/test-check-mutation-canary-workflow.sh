@@ -78,19 +78,23 @@ else
   fail "missing: exits with $status: $(cat "$tmp/missing.out")"
 fi
 
-# --- Only by hand ---------------------------------------------------------------
+# --- Only by hand, or from the weekly run --------------------------------------------
 
 refuses on-push \
   '.on.push = {}' \
-  "it should run only when started by hand (workflow_dispatch), not on: push workflow_dispatch"
+  "it should run only when started by hand (workflow_dispatch) or called by the weekly mutation run (workflow_call), not on: push workflow_call workflow_dispatch"
 
 refuses on-a-schedule \
   '.on.schedule = [{"cron": "0 3 * * 1"}]' \
-  "it should run only when started by hand (workflow_dispatch), not on: schedule workflow_dispatch"
+  "it should run only when started by hand (workflow_dispatch) or called by the weekly mutation run (workflow_call), not on: schedule workflow_call workflow_dispatch"
 
 refuses on-pull-requests-only \
   '.on = "pull_request"' \
-  "it should run only when started by hand (workflow_dispatch), not on: pull_request"
+  "it should run only when started by hand (workflow_dispatch) or called by the weekly mutation run (workflow_call), not on: pull_request"
+
+refuses not-callable-by-the-weekly-run \
+  'del(.on.workflow_call)' \
+  "it should run only when started by hand (workflow_dispatch) or called by the weekly mutation run (workflow_call), not on: workflow_dispatch"
 
 # --- Read-only, and no secrets ---------------------------------------------------
 

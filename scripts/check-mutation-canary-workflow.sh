@@ -2,8 +2,10 @@
 # Checks the rules of the mutation canary's workflow
 # (.github/workflows/mutation-canary.yml, CONTRIBUTING.md, "The canary"):
 #
-# - it runs only when started by hand (workflow_dispatch), so never on a
-#   schedule, on pull requests or on pushes: the replay is a bulk run;
+# - it runs only when started by hand (workflow_dispatch) or when the
+#   weekly mutation run calls it (workflow_call; mutation-runs.yml), so
+#   never on a schedule of its own, on pull requests or on pushes: the
+#   replay is a bulk run;
 # - its permissions are read-only, and it uses no secrets;
 # - each job that replays the canary (scripts/mutation/canary.py run)
 #   checks out the whole history, where the canary's commit is; installs
@@ -34,8 +36,8 @@ fi
 json=$(yq --output-format=json "$workflow")
 
 triggers=$(printf '%s\n' "$json" | jq -r '.on | if type == "object" then keys | join(" ") else tostring end')
-[ "$triggers" = workflow_dispatch ] ||
-  fail "it should run only when started by hand (workflow_dispatch), not on: $triggers"
+[ "$triggers" = "workflow_call workflow_dispatch" ] ||
+  fail "it should run only when started by hand (workflow_dispatch) or called by the weekly mutation run (workflow_call), not on: $triggers"
 
 printf '%s\n' "$json" | jq -e '
   (.permissions | type == "object" and all(.[]; . != "write"))
@@ -80,4 +82,4 @@ fi
 if [ "$failed" -ne 0 ]; then
   exit 1
 fi
-echo "check-mutation-canary-workflow: $workflow runs only by hand, installs the canary commit's toolchain before the replay, and keeps its output"
+echo "check-mutation-canary-workflow: $workflow runs only by hand or from the weekly run, installs the canary commit's toolchain before the replay, and keeps its output"
