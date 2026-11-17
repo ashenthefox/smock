@@ -43,19 +43,43 @@ pub fn total(xs : Array[Int32], trace : Array[String]) -> Int32 {
 }
 
 ///|
-/// Adds `n` to `xs` when it is positive.
-pub fn keep_positive(xs : Array[Int32], n : Int32) -> Unit {
-  // BODY `{ () }`: killed, since 2 is not kept.
-  // IFC `n > 0` to `false`: compiles to what BODY's mutant compiles to, so
+/// How many of the letters of `text` are `a`. Its loop keeps the compiler
+/// from putting it into its caller, so the package's output holds it as a
+/// function of its own.
+fn count_a(text : String) -> Int32 {
+  // BODY `{ 0 }`: killed, by the 3 of banana. Not compared: the compiler
+  // puts that 0 into the caller, so the mutant's output has no function of
+  // its own for `count_a`.
+  // INT `0` to `1`: killed, since banana then has 4. The full set adds
+  // `-1`.
+  let mut n = 0
+  for c in text {
+    // IFC `c == 'a'` to `false`: killed, since banana then has none. The
+    // full set adds `true`.
+    if c == 'a' {
+      // DEL: unviable, since `n` is then never changed.
+      // AOR `+=` to `-=`: killed, since banana then has -3.
+      // INT `1` to `2`: killed, since banana then has 6. The full set adds
+      // `0`.
+      n += 1
+    }
+  }
+  n
+}
+
+///|
+/// How many of the letters of `text` are `a` when `wanted` is true, and 0
+/// when it is not.
+pub fn count_a_if(text : String, wanted : Bool) -> Int32 {
+  // BODY `{ 0 }`: killed, by the 3 of banana.
+  // IFC `wanted` to `false`: compiles to what BODY's mutant compiles to, so
   // it is a duplicate of that one, and runs no tests. The full set adds
   // `true`.
-  // ROR `n > 0` to `n >= 0`: killed, since 0 is kept.
-  // INT `0` to `1`: killed, since 1 is not kept.
-  // INT `0` to `-1`: killed, since 0 is kept.
-  if n > 0 {
-    // DEL: killed, since 2 is not kept. The compiler still tests `n > 0`,
-    // so this mutant compiles unlike BODY's.
-    xs.push(n)
+  if wanted {
+    count_a(text)
+  } else {
+    // INT `0` to `1`: killed, by banana when it is not wanted.
+    0
   }
 }
 

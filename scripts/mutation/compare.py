@@ -23,15 +23,16 @@ only on the mutant's own line.
 
 The linker leaves out what the exports do not reach, inlines small
 functions into their callers, and compiles a generic function once for
-each type it is used with. So a mutant is compared only where the output
-holds a function of its own, by its name, for the definition that holds
-the site: compiled once for every caller, so that the same output means
-the same function for any argument. A definition that the exports do not
-reach, such as an implementation of a trait that no function of the
-package uses, would otherwise look equivalent, and a function inlined into
-each of its callers could hide a mutant behind the callers' arguments.
-Such a mutant, one in a generic function, and one in a constant or another
-value, is not compared, and runs its tests.
+each type it is used with. So a mutant is compared only where both the
+output without it and its own output hold a function of its own, by its
+name, for the definition that holds the site: compiled once for every
+caller, so that the same output means the same function for any argument.
+A definition that the exports do not reach, such as an implementation of
+a trait that no function of the package uses, would otherwise look
+equivalent, and a function inlined into each of its callers could hide a
+mutant behind the callers' arguments. Such a mutant, one in a generic
+function, and one in a constant or another value, is not compared, and
+runs its tests.
 """
 
 import hashlib
@@ -208,9 +209,13 @@ class Comparison:
             return {"result": "not compared",
                     "reason": f"the output has no function of its own for {site['definition']}"}
         try:
-            mine = digest(self.link(worker))
+            wat = self.link(worker)
         except ComparisonError as error:
             return {"result": "not compared", "reason": str(error)}
+        if not any(re.fullmatch(pattern, f[1:]) for f in FUNCTION.findall(wat)):
+            return {"result": "not compared",
+                    "reason": f"the mutant's output has no function of its own for {site['definition']}"}
+        mine = digest(wat)
         with self.lock:
             if mine == self.baseline:
                 return {"result": "identical", "digest": mine}

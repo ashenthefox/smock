@@ -8,12 +8,9 @@ test "the total of 1 and 2 is 3, and traces nothing" {
 }
 
 ///|
-test "2 and 1 are kept, and 0 is not" {
-  let kept = []
-  @same.keep_positive(kept, 2)
-  @same.keep_positive(kept, 1)
-  @same.keep_positive(kept, 0)
-  debug_inspect(kept, content="[2, 1]")
+test "banana has 3 a's when they are wanted, and none when they are not" {
+  inspect(@same.count_a_if("banana", true), content="3")
+  inspect(@same.count_a_if("banana", false), content="0")
 }
 
 ///|

@@ -1413,15 +1413,15 @@ over the others for where it holds source positions:
 
 The link leaves out what the exports do not reach, inlines small
 functions into their callers, and compiles a generic function once for
-each type it is used with. So a mutant is compared only where the output
-holds a function of its own, by its name, for the definition that holds
-the site. Such a function is compiled once for every caller, so the same
-output means the same function for any argument. Otherwise an
-implementation of a trait that no function of the package uses would
-look equivalent, since the output lacks it with the mutant and without
-it. A mutant in such a definition, in a function inlined into each of its
-callers, in a generic function, or in a constant or another value is
-**not compared**, and runs its tests.
+each type it is used with. So a mutant is compared only where both the
+output without it and its own output hold a function of its own, by its
+name, for the definition that holds the site. Such a function is compiled
+once for every caller, so the same output means the same function for
+any argument. Otherwise an implementation of a trait that no function of
+the package uses would look equivalent, since the output lacks it with
+the mutant and without it. A mutant in such a definition, in a function
+inlined into each of its callers, in a generic function, or in a
+constant or another value is **not compared**, and runs its tests.
 
 Each record of a mutant that built says what the comparison found
 (`compiler_output`): `identical`, `duplicate` (the record names the first
@@ -1468,9 +1468,9 @@ In the fixture's package `same`, each mutant of the pinned set has a
 known outcome and a known result of the comparison of the compiler's
 output, given beside the site. Two mutants are equivalent: one makes its
 line shorter, and the other deletes a call over three lines. One compiles
-as another mutant does, and two are not compared: one in a constant, and
-one in an implementation of a trait that no function of the package
-calls.
+as another mutant does. Three are not compared: one in a constant, one in
+an implementation of a trait that no function of the package calls, and
+one that lets the compiler put a function into its caller.
 
 ## The weakening report
 

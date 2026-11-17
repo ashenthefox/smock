@@ -109,12 +109,17 @@ SAME = [
     ("same/same.mbt,total,DEL,trace.push(…),,0", "equivalent", "identical"),
     ("same/same.mbt,total,DEL,sum = sum + x,,0", "unviable", None),
     ("same/same.mbt,total,AOR,+,-,0", "killed", "differs"),
-    ("same/same.mbt,keep_positive,BODY,{…},{ () },0", "killed", "differs"),
-    ("same/same.mbt,keep_positive,IFC,n > 0,false,0", "duplicate", "duplicate"),
-    ("same/same.mbt,keep_positive,ROR,>,>=,0", "killed", "differs"),
-    ("same/same.mbt,keep_positive,INT,0,1,0", "killed", "differs"),
-    ("same/same.mbt,keep_positive,INT,0,-1,0", "killed", "differs"),
-    ("same/same.mbt,keep_positive,DEL,xs.push(n),,0", "killed", "differs"),
+    # Its BODY's 0 goes into the caller: the mutant's output has no
+    # function of its own for count_a.
+    ("same/same.mbt,count_a,BODY,{…},{ 0 },0", "killed", "not compared"),
+    ("same/same.mbt,count_a,INT,0,1,0", "killed", "differs"),
+    ("same/same.mbt,count_a,IFC,c == 'a',false,0", "killed", "differs"),
+    ("same/same.mbt,count_a,DEL,n += 1,,0", "unviable", None),
+    ("same/same.mbt,count_a,AOR,+=,-=,0", "killed", "differs"),
+    ("same/same.mbt,count_a,INT,1,2,0", "killed", "differs"),
+    ("same/same.mbt,count_a_if,BODY,{…},{ 0 },0", "killed", "differs"),
+    ("same/same.mbt,count_a_if,IFC,wanted,false,0", "duplicate", "duplicate"),
+    ("same/same.mbt,count_a_if,INT,0,1,0", "killed", "differs"),
     ("same/same.mbt,refuse,BODY,{…},{ () },0", "killed", "differs"),
     # An implementation that a public function calls, and one that none
     # does, which the output leaves out.
@@ -780,7 +785,7 @@ class CompilerOutputTest(unittest.TestCase):
 
     def test_a_duplicate_names_the_first_mutant_that_compiled_alike(self):
         duplicate = next(r for r in self.records if r["outcome"] == "duplicate")
-        self.assertEqual(duplicate["duplicate_of"], "same/same.mbt,keep_positive,BODY,{…},{ () },0")
+        self.assertEqual(duplicate["duplicate_of"], "same/same.mbt,count_a_if,BODY,{…},{ 0 },0")
         # Both compiled alike, and unlike the package without a mutant.
         first = next(r for r in self.records if r["id"] == duplicate["duplicate_of"])
         self.assertEqual(duplicate["compiler_output"]["digest"], first["compiler_output"]["digest"])
@@ -793,6 +798,8 @@ class CompilerOutputTest(unittest.TestCase):
         self.assertEqual(reasons, {
             "same/same.mbt,TRACING,BOOL,false,true,0":
                 "the output has no function of its own for TRACING",
+            "same/same.mbt,count_a,BODY,{…},{ 0 },0":
+                "the mutant's output has no function of its own for count_a",
             "same/same.mbt,impl Eq for Tally with equal,BODY,{…},{ false },0":
                 "the output has no function of its own for impl Eq for Tally with equal",
         })
@@ -802,21 +809,21 @@ class CompilerOutputTest(unittest.TestCase):
         self.assertEqual(
             {k: package[k] for k in ("mutants", "killed", "timed_out", "survived", "unviable", "equivalent",
                                      "duplicate", "not_compared")},
-            {"mutants": 17, "killed": 13, "timed_out": 0, "survived": 0, "unviable": 1, "equivalent": 2,
-             "duplicate": 1, "not_compared": 2})
+            {"mutants": 20, "killed": 15, "timed_out": 0, "survived": 0, "unviable": 2, "equivalent": 2,
+             "duplicate": 1, "not_compared": 3})
         # Neither counts as killed nor as survived.
         self.assertEqual(package["score"], 1.0)
 
     def test_the_report_counts_and_lists_them(self):
         report = (self.out / "report.md").read_text()
         self.assertIn("By the compiler's output: 2 equivalent and 1 duplicate, which ran no tests;"
-                      " 14 mutants compared, 2 not compared.", report)
+                      " 15 mutants compared, 3 not compared.", report)
         self.assertIn("### Equivalent by the compiler's output (2)\n\n"
                       "- `same/same.mbt,total,IFC,TRACING,false,0`\n"
                       "- `same/same.mbt,total,DEL,trace.push(…),,0`\n", report)
         self.assertIn("### Duplicates by the compiler's output (1)\n\n"
-                      "- `same/same.mbt,keep_positive,IFC,n > 0,false,0`, as"
-                      " `same/same.mbt,keep_positive,BODY,{…},{ () },0` (killed)\n", report)
+                      "- `same/same.mbt,count_a_if,IFC,wanted,false,0`, as"
+                      " `same/same.mbt,count_a_if,BODY,{…},{ 0 },0` (killed)\n", report)
 
 
 if __name__ == "__main__":
