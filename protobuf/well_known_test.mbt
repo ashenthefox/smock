@@ -3,7 +3,8 @@
 // smock's decoded form through the public interface. The set and the
 // messages are protoc's, built from fixtures/protobuf/wellknown/ and
 // protobuf's files beside it (scripts/gen-protobuf-fixtures.sh), so the
-// codec is never checked against itself.
+// codec is never checked against itself. The last test checks
+// `is_well_known`, which tells these types by their full names.
 
 ///|
 test "the ticket's example: a Timestamp 1.5 s after the epoch and a Duration of 1.5 s" {
@@ -569,6 +570,85 @@ test "a condition on a method's whole input of a well-known type is checked in i
       #|google.protobuf.Empty {} -> {}
       #|wellknown.Lease {"ttl":"1.5s"} -> {"ttl":"1.5s"}
       #|wellknown.Lease "x" -> must be an object
+    ),
+  )
+}
+
+///|
+/// Whether `@protobuf.is_well_known` tells each of `names`, one line each.
+fn told_well_known(names : Array[String]) -> String {
+  names.map(name => "\{name} \{@protobuf.is_well_known(name)}").join("\n")
+}
+
+///|
+test "is_well_known tells each well-known type the README lists, every wrapper included, and no other type of google.protobuf or of another package" {
+  // protobuf/README.mbt.md: "`@protobuf.is_well_known(full_name)` tells the
+  // well-known types", which its section "Well-known types" lists:
+  // Timestamp, Duration, FieldMask, the wrappers, Empty, Struct, Value,
+  // ListValue, NullValue and Any, each "known by its full name, such as
+  // `google.protobuf.Duration`". The nine wrappers are the messages of
+  // protobuf's wrappers.proto (fixtures/protobuf/wellknown/google/protobuf/).
+  inspect(
+    told_well_known([
+      "google.protobuf.Timestamp", "google.protobuf.Duration", "google.protobuf.FieldMask",
+      "google.protobuf.DoubleValue", "google.protobuf.FloatValue", "google.protobuf.Int64Value",
+      "google.protobuf.UInt64Value", "google.protobuf.Int32Value", "google.protobuf.UInt32Value",
+      "google.protobuf.BoolValue", "google.protobuf.StringValue", "google.protobuf.BytesValue",
+      "google.protobuf.Empty", "google.protobuf.Struct", "google.protobuf.Value",
+      "google.protobuf.ListValue", "google.protobuf.NullValue", "google.protobuf.Any",
+    ]),
+    content=(
+      #|google.protobuf.Timestamp true
+      #|google.protobuf.Duration true
+      #|google.protobuf.FieldMask true
+      #|google.protobuf.DoubleValue true
+      #|google.protobuf.FloatValue true
+      #|google.protobuf.Int64Value true
+      #|google.protobuf.UInt64Value true
+      #|google.protobuf.Int32Value true
+      #|google.protobuf.UInt32Value true
+      #|google.protobuf.BoolValue true
+      #|google.protobuf.StringValue true
+      #|google.protobuf.BytesValue true
+      #|google.protobuf.Empty true
+      #|google.protobuf.Struct true
+      #|google.protobuf.Value true
+      #|google.protobuf.ListValue true
+      #|google.protobuf.NullValue true
+      #|google.protobuf.Any true
+    ),
+  )
+  // The other types of the package google.protobuf, as protobuf's reference
+  // indexes them (https://protobuf.dev/reference/protobuf/google.protobuf/),
+  // are printed by ProtoJSON as ordinary messages and enums: its list of
+  // "message types with special JSON encodings" holds none of them
+  // (https://protobuf.dev/programming-guides/json/). Nor does a type of
+  // another package with a well-known type's name: "No message type outside
+  // of the `google.protobuf` package has a special ProtoJSON handling". Nor
+  // does a name without its package, since a type is known by its full name.
+  inspect(
+    told_well_known([
+      "google.protobuf.Type", "google.protobuf.Api", "google.protobuf.Enum", "google.protobuf.EnumValue",
+      "google.protobuf.Field", "google.protobuf.Field.Cardinality", "google.protobuf.Field.Kind",
+      "google.protobuf.Method", "google.protobuf.Mixin", "google.protobuf.Option",
+      "google.protobuf.SourceContext", "google.protobuf.Syntax", "shop.Duration",
+      "Timestamp",
+    ]),
+    content=(
+      #|google.protobuf.Type false
+      #|google.protobuf.Api false
+      #|google.protobuf.Enum false
+      #|google.protobuf.EnumValue false
+      #|google.protobuf.Field false
+      #|google.protobuf.Field.Cardinality false
+      #|google.protobuf.Field.Kind false
+      #|google.protobuf.Method false
+      #|google.protobuf.Mixin false
+      #|google.protobuf.Option false
+      #|google.protobuf.SourceContext false
+      #|google.protobuf.Syntax false
+      #|shop.Duration false
+      #|Timestamp false
     ),
   )
 }
