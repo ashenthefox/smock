@@ -319,3 +319,82 @@ test "a ClientHello with a length field one octet past what holds it, or below t
     ),
   )
 }
+
+///|
+/// The most octets a TLS record's fragment holds: 2^14 (RFC 8446, section
+/// 5.1).
+const MAX_FRAGMENT = 16384
+
+///|
+/// `message`, a ClientHello whose extensions end it and whose extensions
+/// length is at the offset `extensions`, grown with a padding extension
+/// (RFC 7685: type 21, its data all zero octets) after its last one, and
+/// sent in as few records as section 5.1 of RFC 8446 lets it, so that the
+/// records take `received` octets in all.
+fn grown(message : Bytes, extensions~ : Int32, received~ : Int32) -> Bytes {
+  // Each record is a 5-octet header and at most MAX_FRAGMENT octets.
+  let count = (received + MAX_FRAGMENT + 4) / (MAX_FRAGMENT + 5)
+  let size = received - 5 * count
+  let padding_length = size - message.length() - 4
+  let padding = Buffer()
+  padding.write_bytes(b"\x00\x15")
+  padding.write_byte((padding_length >> 8).to_byte())
+  padding.write_byte((padding_length & 0xff).to_byte())
+  padding.write_bytes(Bytes::make(padding_length, b'\x00'))
+  let grown = resized(
+    message,
+    message.length(),
+    message.length(),
+    padding.to_bytes(),
+    lengths=[(1, 3), (extensions, 2)],
+  )
+  let ends = []
+  for end = MAX_FRAGMENT; end < size; end = end + MAX_FRAGMENT {
+    ends.push(end)
+  }
+  records(grown, ends~)
+}
+
+///|
+test "the cap, a finding for the maintainer (#289): a whole ClientHello that ends at the 65,535th octet received reads as its name, and one that ends at the 65,536th as no name, which no document states and RFC 8446 does not ask for" {
+  // No document of smock states a cap, and RFC 8446 lets a ClientHello
+  // reach 2^24 - 1 octets (section 4): the values past 65,535 octets
+  // received are the code's today, until the maintainer states which is
+  // intended. The TLS 1.3 capture is grown with a padding extension and
+  // sent in four records of at most 2^14 octets each.
+  let message = message(tls13_sni)
+  let at_cap = grown(message, extensions=135, received=65535)
+  let over_cap = grown(message, extensions=135, received=65536)
+  // A client in middlebox compatibility mode that offers early data sends
+  // a change_cipher_spec record right after its ClientHello (RFC 8446,
+  // appendix D.4), so a read may bring it with the ClientHello's last
+  // octets.
+  let change_cipher_spec = b"\x14\x03\x03\x00\x01\x01"
+  let shown = (what : String, data : Bytes) => {
+    "\{what}, \{data.length()} octets: \{read(data[:])}"
+  }
+  inspect(
+    [
+      shown("grown to end at the 65,535th octet", at_cap),
+      shown("its first octets but the last", at_cap[:65534].to_owned()),
+      shown("grown to end at the 65,536th octet", over_cap),
+      shown("its first octets but the last", over_cap[:65535].to_owned()),
+      shown(
+        "grown to end at the 65,535th octet, then change_cipher_spec",
+        at_cap + change_cipher_spec,
+      ),
+      shown(
+        "as captured, then change_cipher_spec",
+        tls13_sni + change_cipher_spec,
+      ),
+    ].join("\n"),
+    content=(
+      #|grown to end at the 65,535th octet, 65535 octets: ServerName(Some("users.example.test"))
+      #|its first octets but the last, 65534 octets: Incomplete
+      #|grown to end at the 65,536th octet, 65536 octets: ServerName(None)
+      #|its first octets but the last, 65535 octets: Incomplete
+      #|grown to end at the 65,535th octet, then change_cipher_spec, 65541 octets: ServerName(None)
+      #|as captured, then change_cipher_spec, 1616 octets: ServerName(Some("users.example.test"))
+    ),
+  )
+}
