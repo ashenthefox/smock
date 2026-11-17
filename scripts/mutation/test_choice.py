@@ -236,5 +236,117 @@ class SampleTest(unittest.TestCase):
         self.assertEqual(self.chosen("all", "--set", "full", "--sample", str(len(whole) + 5)), whole)
 
 
+def offset_of(text, line, column):
+    """The offset, in characters, of a line and a column, both from 1."""
+    return sum(len(t) + 1 for t in text.split("\n")[: line - 1]) + column - 1
+
+
+def write_list(path, entries):
+    """A list of mutants, one JSON object per line."""
+    path.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
+    return path
+
+
+class ListedByOffsetTest(unittest.TestCase):
+    """A list of mutants by offset, on the commit of a copy of the fixture
+    in git."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-choice-offsets-"))
+        cls.root = cls.tmp / "root"
+        cls.commit = fixture_history(cls.root)
+        cls.text = text = (cls.root / "calc" / "calc.mbt").read_text(encoding="utf-8")
+
+        def at(line, column):
+            return offset_of(text, line, column)
+        cls.entries = [
+            # In operator set v1: in_range's `n <= high` to `n < high`,
+            # which survives (calc.mbt's comment beside it).
+            {"file": "calc/calc.mbt", "offset": at(17, 17), "original": "<=", "replacement": "<",
+             "commit": cls.commit},
+            # Outside it, with an operator of v1's name: `==` to `!=` in
+            # is_odd, which v1's ROR never makes (ADR 0006); 3 is then
+            # not odd, so "3 is odd" fails.
+            {"file": "calc/calc.mbt", "offset": at(75, 11), "original": "==", "replacement": "!=",
+             "commit": cls.commit, "operator": "ROR"},
+            # Outside it, without an operator: halve_until's `x / 2` to
+            # `2 / x`, which still halves 100 to 0, so it survives.
+            {"file": "calc/calc.mbt", "offset": at(36, 9), "original": "x / 2", "replacement": "2 / x",
+             "commit": cls.commit},
+        ]
+        cls.list = write_list(cls.tmp / "offsets.jsonl", cls.entries)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_each_listed_mutant_is_found_and_marked_in_or_outside_operator_set_v1(self):
+        # #305: "A run can take a list of mutants by file, offset and
+        # replacement, on a given commit, ...; a replacement outside v1 is
+        # allowed and is marked as such."
+        out = self.tmp / "chosen"
+        result = run_runner(self.root, out, "--sites-only", "--list", str(self.list))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        chosen = read_lines(out / "chosen.jsonl")
+        self.assertEqual([(m["id"], m["line"], m["column"], m["in_operator_set"], m["pinned"]) for m in chosen], [
+            # The site of v1 that makes the same mutant: its id.
+            ("calc/calc.mbt,in_range,ROR,<=,<,1", 17, 17, True, True),
+            # CONTRIBUTING, "Mutation runner": a mutant outside v1 is named
+            # as a site is, with the operator it gives (OTHER when it gives
+            # none), and an ordinal that counts the same original text
+            # outside comments before it in its definition.
+            ("calc/calc.mbt,is_odd,ROR,==,!=,0", 75, 11, False, False),
+            ("calc/calc.mbt,halve_until,OTHER,x / 2,2 / x,0", 36, 9, False, False),
+        ])
+        self.assertEqual([m["listed"] for m in chosen], self.entries)
+        self.assertEqual(chosen[2]["definition_lines"], [22, 39])
+        # The packages run are those of the listed files.
+        summary = json.loads((out / "summary.json").read_text())
+        self.assertEqual([p["directory"] for p in summary["packages"]], ["calc"])
+        self.assertEqual(summary["set"], "listed")
+
+    def test_a_listed_run_reports_each_mutant_with_its_outcome(self):
+        out = self.tmp / "run"
+        result = run_runner(self.root, out, "--list", str(self.list))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        records = read_lines(out / "mutants.jsonl")
+        self.assertEqual([(r["id"], r["outcome"], r["in_operator_set"], r["set"]) for r in records], [
+            ("calc/calc.mbt,in_range,ROR,<=,<,1", "survived", True, "listed"),
+            ("calc/calc.mbt,is_odd,ROR,==,!=,0", "killed", False, "listed"),
+            ("calc/calc.mbt,halve_until,OTHER,x / 2,2 / x,0", "survived", False, "listed"),
+        ])
+        self.assertEqual([t["name"] for t in records[1]["killing_tests"]], ["3 is odd"])
+        report = (out / "report.md").read_text()
+        self.assertIn("Operator set v1, a listed set.", report)
+        self.assertIn("## Listed mutants\n\n"
+                      "| package | listed | run | no longer apply | outside operator set v1 |\n"
+                      "|---|---:|---:|---:|---:|\n"
+                      "| calc | 3 | 3 | 0 | 2 |\n\n"
+                      "| mutant | operator set v1 | outcome |\n"
+                      "|---|---|---|\n"
+                      "| `calc/calc.mbt,in_range,ROR,<=,<,1` | in it | survived |\n"
+                      "| `calc/calc.mbt,is_odd,ROR,==,!=,0` | outside it | killed |\n"
+                      "| `calc/calc.mbt,halve_until,OTHER,x / 2,2 / x,0` | outside it | survived |\n", report)
+        # The survivor outside v1 is shown with its diff, as every survivor.
+        self.assertIn("-    x = x / 2\n+    x = 2 / x\n", report)
+
+    def test_a_listed_file_that_differs_from_its_commit_stops_the_run(self):
+        # The offsets hold on the commit the list gives.
+        root = self.tmp / "later"
+        fixture_history(root)
+        calc = root / "calc" / "calc.mbt"
+        calc.write_text("// A line more.\n" + calc.read_text(encoding="utf-8"), encoding="utf-8")
+        result = run_runner(root, self.tmp / "later-out", "--sites-only", "--list", str(self.list))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"calc/calc.mbt differs from its text at {self.commit}", result.stderr)
+
+    def test_an_offset_that_does_not_hold_the_original_text_stops_the_run(self):
+        listed = write_list(self.tmp / "wrong.jsonl", [dict(self.entries[0], offset=offset_of(self.text, 17, 16))])
+        result = run_runner(self.root, self.tmp / "wrong-out", "--sites-only", "--list", str(listed))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"{listed}:1: calc/calc.mbt does not hold \"<=\" at offset {offset_of(self.text, 17, 16)}", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

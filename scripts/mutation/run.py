@@ -451,7 +451,7 @@ def report(operator_set, chosen, summaries, records):
     package, the sites each rule skipped, its time-outs, and its survivors
     with their diffs, those at the other alternatives of the full set
     apart."""
-    which = "the pinned set" if chosen == "pinned" else "the full set"
+    which = {"pinned": "the pinned set", "full": "the full set"}.get(chosen, f"a {chosen} set")
     out = ["# Mutation report", "", f"Operator set {operator_set}, {which}.", ""]
     for summary in summaries:
         package = summary["package"]
@@ -521,6 +521,8 @@ def main():
     parser.add_argument("--mutant", action="append", help="run only the mutant with this id")
     parser.add_argument("--sites-only", action="store_true",
                         help="count the sites of each package in both sets, and run no mutant")
+    parser.add_argument("--list", metavar="FILE",
+                        help="run the mutants that FILE lists, by offset on a commit or by key")
     parser.add_argument("--sample", type=int, metavar="N",
                         help="run a sample of N of the mutants, stratified by package")
     parser.add_argument("--seed", default="0", help="the seed of --sample (0 unless given)")
@@ -529,12 +531,18 @@ def main():
     parser.add_argument("--workers", type=int, default=1, help="how many mutants build and run at once")
     parser.add_argument("--moon", default="moon", help="the moon command")
     parser.add_argument("--finder", help="the site finder's command (default: sites.py beside this script)")
-    parser.add_argument("packages", nargs="+", help="package directories, relative to <root>")
+    parser.add_argument("packages", nargs="*",
+                        help="package directories, relative to <root> (with --list, those of its files"
+                             " unless given)")
     args = parser.parse_args()
     if args.workers < 1:
         parser.error("--workers must be at least 1")
-    if args.sample is not None and (args.sample < 1 or args.mutant):
-        parser.error("--sample takes a number from 1, and no --mutant")
+    if args.sample is not None and (args.sample < 1 or args.mutant or args.list):
+        parser.error("--sample takes a number from 1, and no --mutant or --list")
+    if args.list and args.mutant:
+        parser.error("--list and --mutant choose the mutants each: give one of them")
+    if not args.packages and not args.list:
+        parser.error("give at least one package directory")
     root = Path(args.root).resolve()
     work = Path(args.work).resolve() if args.work else root / "_build" / "mutation"
     out = Path(args.out).resolve() if args.out else work / "out"
@@ -544,16 +552,25 @@ def main():
         print(message, file=sys.stderr, flush=True)
 
     try:
-        found = {directory: find_sites(finder, root, directory) for directory in args.packages}
+        entries = choice.read_list(args.list) if args.list else None
+        if entries is not None and not args.packages:
+            args.packages = choice.list_directories(entries)
+        found = {directory: find_sites(finder, root, directory) for directory in args.packages
+                 if entries is None or (root / directory).is_dir()}
+        found.update({directory: ([], []) for directory in args.packages if directory not in found})
         versions = {s["operator_set"] for sites, skipped in found.values() for s in sites + skipped}
         if len(versions) > 1:
             raise RunnerError(f"the packages' sites name several operator sets: {sorted(versions)}")
         operator_set = versions.pop() if versions else None
         sites, whole = choose(found, args.set, args.mutant, args.packages)
+        unapplied = {directory: [] for directory in args.packages}
+        if entries is not None:
+            whole, unapplied = choice.resolve(root, args.list, entries, found, args.packages)
         if args.sample is not None:
             whole = choice.sample(whole, args.packages, args.sample, args.seed)
         chosen = choice.shard(whole, args.packages, *args.shard) if args.shard else whole
-        selected = bool(args.mutant) or args.sample is not None
+        selected = bool(args.mutant) or args.sample is not None or entries is not None
+        run_set = "listed" if entries is not None else args.set
         runs = choice.running(args.packages, whole, chosen, selected, args.shard and args.shard[0])
         records, summaries = [], []
         if not args.sites_only:
@@ -566,17 +583,18 @@ def main():
                 continue
             summary = package_summary(root, directory, found[directory][0], found[directory][1], args.set,
                                       operator_set)
+            summary["set"] = run_set
             if not args.sites_only:
                 package_records, counts = run_package(root, directory, sites[directory], chosen[directory],
                                                       workers, log)
                 for record in package_records:
-                    record.update(set=args.set)
+                    record.update(set=run_set)
                 summary.update(counts)
-                if args.set == "full":
+                if run_set == "full":
                     summary.update(alternative_counts(package_records))
                 records += package_records
             summaries.append(summary)
-    except RunnerError as error:
+    except (RunnerError, choice.ChoiceError) as error:
         print(f"run: {error}", file=sys.stderr)
         sys.exit(1)
     out.mkdir(parents=True, exist_ok=True)
@@ -589,10 +607,12 @@ def main():
                 for site in chosen[directory] if directory in runs else []:
                     f.write(json.dumps(site, ensure_ascii=False) + "\n")
     (out / "summary.json").write_text(
-        json.dumps({"operator_set": operator_set, "set": args.set, "selection": choice.selection(args),
+        json.dumps({"operator_set": operator_set, "set": run_set, "selection": choice.selection(args),
                     "packages": summaries},
                    indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    text = report(operator_set, args.set, summaries, records)
+    text = report(operator_set, run_set, summaries, records)
+    if entries is not None and not args.sites_only:
+        text += "\n".join(["", *choice.listed_report(args.packages, records, unapplied)])
     (out / "report.md").write_text(text, encoding="utf-8")
     print(text)
 
