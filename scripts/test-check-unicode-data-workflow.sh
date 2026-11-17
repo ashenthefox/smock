@@ -197,6 +197,25 @@ refuses job-continues-on-error \
   '.jobs.check.continue-on-error = true' \
   "the job that runs the check should not continue on error: a failed check would pass"
 
+# --- What it may do --------------------------------------------------------------
+
+# It runs on pull requests, and needs only to read the repository.
+refuses no-permissions \
+  'del(.permissions)' \
+  "its permissions should be read-only"
+
+refuses workflow-writes \
+  '.permissions.contents = "write"' \
+  "its permissions should be read-only"
+
+refuses job-writes \
+  '.jobs.check.permissions = {"issues": "write"}' \
+  "its permissions should be read-only"
+
+refuses uses-a-secret \
+  "($step).env.TOKEN = \"\${{ secrets.UNICODE_TOKEN }}\"" \
+  "it should use no secrets"
+
 echo
 echo "test-check-unicode-data-workflow: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

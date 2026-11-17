@@ -17,6 +17,8 @@
 #   directory, so that it downloads the files, and with nothing after it
 #   that could hide a failure. That step and its job run in every run of
 #   the workflow (no condition), and neither continues on error.
+# - Its permissions are read-only, and it uses no secrets: it runs on pull
+#   requests, and needs only to read the repository.
 #
 # scripts/test-check-unicode-data-workflow.sh tests this check. It needs yq
 # (mikefarah/yq v4, on GitHub's Ubuntu runners) and jq.
@@ -86,6 +88,14 @@ if [ -n "$problems" ]; then
     echo "check-unicode-data-workflow: $workflow: $problem" >&2
   done
   failed=1
+fi
+
+printf '%s\n' "$json" | jq -e '
+  (.permissions | type == "object" and all(.[]; . != "write"))
+  and all(.jobs[]; (.permissions // {}) | type == "object" and all(.[]; . != "write"))' >/dev/null ||
+  fail "its permissions should be read-only"
+if grep -q 'secrets\.' "$workflow"; then
+  fail "it should use no secrets"
 fi
 
 if [ "$failed" -ne 0 ]; then
