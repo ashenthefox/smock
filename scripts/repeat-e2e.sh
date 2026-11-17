@@ -64,6 +64,9 @@ cd "$(dirname "$0")/.."
 summary=$out/summary.md
 # Each failure of a test, one line each: <file:line>, tab, <run>, tab, <name>.
 failures=$out/.failures
+# Removed when the script ends, also on an error, so that only the logs and
+# the summary are kept.
+trap 'rm -f "$failures" "$out/.run"' EXIT
 : >"$failures"
 {
   echo "# e2e tests, $runs runs"
@@ -98,7 +101,6 @@ while [ "$n" -le "$runs" ]; do
   echo "repeat-e2e: run $run of $runs: $line"
   n=$((n + 1))
 done
-rm -f "$out/.run"
 
 {
   echo
@@ -117,6 +119,5 @@ rm -f "$out/.run"
     fi
   fi
 } >>"$summary"
-rm -f "$failures"
 
 [ "$failed_runs" -eq 0 ]
