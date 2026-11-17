@@ -34,6 +34,10 @@ async test "write timeout: a client that stops reading is closed once smock's wr
     files=big_files(),
     args=["--write-timeout-ms", "500"],
     (smock, over) => {
+      // A connection whose write makes no progress for the write timeout
+      // closes (docs/running.md, The write timeout). The test allows up to
+      // 6 times it, as it always has.
+      let write = 500L
       let out = []
       for path in ["/big", "/delayed", "/half", "/events"] {
         let conn = smock.connect(over~)
@@ -45,16 +49,16 @@ async test "write timeout: a client that stops reading is closed once smock's wr
           since,
         )
         out.push(
-          "\{path}: closed after at least 500 ms: \{elapsed >= 500}, within 3000 ms: \{elapsed < 3000}",
+          "\{path}: closed after at least 500 ms: \{elapsed >= write}, within 6 times the write timeout: \{elapsed < 6 * write}",
         )
       }
       inspect(
         out.join("\n"),
         content=(
-          #|/big: closed after at least 500 ms: true, within 3000 ms: true
-          #|/delayed: closed after at least 500 ms: true, within 3000 ms: true
-          #|/half: closed after at least 500 ms: true, within 3000 ms: true
-          #|/events: closed after at least 500 ms: true, within 3000 ms: true
+          #|/big: closed after at least 500 ms: true, within 6 times the write timeout: true
+          #|/delayed: closed after at least 500 ms: true, within 6 times the write timeout: true
+          #|/half: closed after at least 500 ms: true, within 6 times the write timeout: true
+          #|/events: closed after at least 500 ms: true, within 6 times the write timeout: true
         ),
       )
     },
@@ -77,14 +81,18 @@ async test "write timeout: an Admin API client that stops reading is closed too,
         )
         defer conn.close()
         // The metrics, asked for again and again: each response is a few
-        // KiB, so that they fill the socket buffers.
+        // KiB, so that they fill the socket buffers. The write timeout runs
+        // "on every port and for every write", an Admin API reply included
+        // (docs/running.md, The write timeout); the test allows up to 6
+        // times it, as it always has.
+        let write = 500L
         let since = @async.now()
         let elapsed = send_until_closed(
           conn, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n", since,
         )
         inspect(
-          "closed after at least 500 ms: \{elapsed >= 500}, within 3000 ms: \{elapsed < 3000}",
-          content="closed after at least 500 ms: true, within 3000 ms: true",
+          "closed after at least 500 ms: \{elapsed >= write}, within 6 times the write timeout: \{elapsed < 6 * write}",
+          content="closed after at least 500 ms: true, within 6 times the write timeout: true",
         )
       },
     )
