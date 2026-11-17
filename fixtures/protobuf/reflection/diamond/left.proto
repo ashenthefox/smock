@@ -1,0 +1,11 @@
+// Written for smock's tests of the reflection service: one of the two
+// files that top.proto imports, which imports base.proto.
+syntax = "proto3";
+
+package diamond;
+
+import "diamond/base.proto";
+
+message Left {
+  Base base = 1;
+}

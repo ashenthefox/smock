@@ -1,9 +1,14 @@
 import {
+  "smock/grpc",
   "smock/http1",
+  "smock/protobuf",
   "smock/smock/definitions",
+  "smock/smock/log",
+  "moonbitlang/core/encoding/base64",
   "moonbitlang/core/encoding/utf8",
 }
 
 import {
+  "moonbitlang/core/buffer",
   "moonbitlang/core/encoding/hex",
 } for "test"
