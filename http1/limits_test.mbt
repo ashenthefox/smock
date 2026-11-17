@@ -165,6 +165,9 @@ fn post(fields : String) -> String {
 
 ///|
 test "a declared Content-Length over the body limit gets 413 once the head has arrived, before any of the body" {
+  // The last two take a body limit of -1. Parser::Parser's documentation:
+  // "A negative limit is taken as 0, so that only an empty body fits." The
+  // maintainer confirmed it on 2026-11-17 (#375).
   inspect(
     [
       limited(@http1.Parser(), post("Content-Length: 10485760\r\n")),
@@ -177,6 +180,8 @@ test "a declared Content-Length over the body limit gets 413 once the head has a
       limited(@http1.Parser(body_limit=16), post("Content-Length: 17, 17\r\n")),
       limited(@http1.Parser(body_limit=0), post("Content-Length: 0\r\n")),
       limited(@http1.Parser(body_limit=0), post("Content-Length: 1\r\n")),
+      limited(@http1.Parser(body_limit=-1), post("Content-Length: 0\r\n")),
+      limited(@http1.Parser(body_limit=-1), post("Content-Length: 1\r\n")),
     ].join("\n"),
     content=(
       #|need more
@@ -186,12 +191,17 @@ test "a declared Content-Length over the body limit gets 413 once the head has a
       #|invalid 413
       #|POST /p body=0, need more
       #|invalid 413
+      #|POST /p body=0, need more
+      #|invalid 413
     ),
   )
 }
 
 ///|
 test "a chunked body gets 413 as soon as a chunk size takes it past the body limit, before that chunk's data" {
+  // The last four take body limits of 0 and -1. Parser::Parser's
+  // documentation: "A negative limit is taken as 0, so that only an empty
+  // body fits." The maintainer confirmed it on 2026-11-17 (#375).
   let chunked = post("Transfer-Encoding: chunked\r\n")
   inspect(
     [
@@ -214,6 +224,10 @@ test "a chunked body gets 413 as soon as a chunk size takes it past the body lim
       ),
       limited(@http1.Parser(), chunked + "a00000\r\n"),
       limited(@http1.Parser(), chunked + "a00001\r\n"),
+      limited(@http1.Parser(body_limit=0), chunked + "0\r\n\r\n"),
+      limited(@http1.Parser(body_limit=0), chunked + "1\r\n"),
+      limited(@http1.Parser(body_limit=-1), chunked + "0\r\n\r\n"),
+      limited(@http1.Parser(body_limit=-1), chunked + "1\r\n"),
     ].join("\n"),
     content=(
       #|POST /p body=16, need more
@@ -222,6 +236,10 @@ test "a chunked body gets 413 as soon as a chunk size takes it past the body lim
       #|invalid 413
       #|need more
       #|need more
+      #|invalid 413
+      #|POST /p body=0, need more
+      #|invalid 413
+      #|POST /p body=0, need more
       #|invalid 413
     ),
   )
