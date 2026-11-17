@@ -46,12 +46,17 @@ METER_LOW = ("mutation/fixture/meter", "meter_test.mbt", 0, "a reading at the lo
 INSIDE = ("mutation/fixture/units", "units_test.mbt", 0, "a number inside the range is in it")
 BELOW = ("mutation/fixture/units", "units_test.mbt", 1, "a number below the range is not in it")
 PAST = ("mutation/fixture/units", "units_test.mbt", 2, "a number beyond the end of a range is past it")
+# units' two tests with no name: 5 in 1 to 9, and 4 in 0 to 8.
+FIVE = ("mutation/fixture/units", "units_test.mbt", 3, "")
+FOUR = ("mutation/fixture/units", "units_test.mbt", 4, "")
 
 # units' kill matrix: each mutant of the pinned set, its outcome, and every
-# test that kills it.
+# test that kills it, in moon's order of the tests.
 # - within's BODY `{ false }` fails every test that needs a number in a
-#   range: 2 in 1 to 3 (units), 1 on a scale from 1 to 3 (meter), and 10 on
-#   a scale from 0 to 10 (dial); 0 below 1 to 3 still is not in it.
+#   range: 2 in 1 to 3, 5 in 1 to 9 and 4 in 0 to 8 (units), 1 on a scale
+#   from 1 to 3 (meter), and 10 on a scale from 0 to 10 (dial); 0 below 1
+#   to 3 still is not in it. No other mutant changes whether a number well
+#   inside a range is in it.
 # - `low < n` fails only meter's 1 on a scale from 1.
 # - `||` fails only units' 0 below the range, which `0 <= 3` lets in.
 # - `n < high` fails only dial's 10 on a scale to 10.
@@ -59,7 +64,7 @@ PAST = ("mutation/fixture/units", "units_test.mbt", 2, "a number beyond the end 
 # - `n >= high` survives: only probe's test has a number at the end, and
 #   probe builds only natively.
 MATRIX = [
-    ("units/units.mbt,within,BODY,{…},{ false },0", "killed", [DIAL_HIGH, METER_LOW, INSIDE]),
+    ("units/units.mbt,within,BODY,{…},{ false },0", "killed", [DIAL_HIGH, METER_LOW, INSIDE, FIVE, FOUR]),
     ("units/units.mbt,within,ROR,<=,<,0", "killed", [METER_LOW]),
     ("units/units.mbt,within,LCR,&&,||,0", "killed", [BELOW]),
     ("units/units.mbt,within,ROR,<=,<,1", "killed", [DIAL_HIGH]),
@@ -142,7 +147,7 @@ if args[:1] == ["test"] and not {"--build-only", "--dry-run", "--outline"} & set
             for package, filename, index, name in answer["fail"]:
                 print(json.dumps({"package": package, "filename": filename, "index": str(index),
                                   "test_name": name, "message": "a scripted failure"}))
-            print(f"Total tests: 5, passed: {5 - len(answer['fail'])}, failed: {len(answer['fail'])}.")
+            print(f"Total tests: 7, passed: {7 - len(answer['fail'])}, failed: {len(answer['fail'])}.")
             sys.exit(2)
 os.execv(real, [real, *args])
 '''
@@ -200,9 +205,22 @@ class MatrixConfirmationTest(unittest.TestCase):
     def test_a_test_that_fails_without_the_mutant_too_is_not_credited(self):
         record, flakes = self.run_scripted(["real", "real", "real", "real", "real", {"fail": [list(METER_LOW)]}])
         self.assertEqual((record["outcome"], record["confirmation"]), ("killed", "confirmed"))
-        self.assertEqual(record["killing_tests"], [dict(fields(t), layer="in-process") for t in (DIAL_HIGH, INSIDE)])
+        self.assertEqual(record["killing_tests"],
+                         [dict(fields(t), layer="in-process") for t in (DIAL_HIGH, INSIDE, FIVE, FOUR)])
         self.assertIn({"package": METER_LOW[0], "file": METER_LOW[1], "name": METER_LOW[3], "flaked": 1,
                        "reruns": 1}, flakes["tests"])
+
+    def test_tests_with_no_name_are_confirmed_each_on_its_own(self):
+        # Both fail with the mutant on; run again, only the second does, so
+        # only the second is credited, though neither has a name.
+        record, flakes = self.run_scripted(["real", "real", "real", {"fail": [list(FIVE), list(FOUR)]},
+                                            {"fail": [list(FOUR)]}])
+        self.assertEqual((record["outcome"], record["confirmation"]), ("killed", "confirmed"))
+        self.assertEqual(record["killing_tests"], [dict(fields(FOUR), layer="in-process")])
+        # The flake records name a test with no name by its index.
+        self.assertEqual([t for t in flakes["tests"] if t["package"] == FIVE[0]], [
+            {"package": FIVE[0], "file": FIVE[1], "name": "#3", "flaked": 1, "reruns": 1},
+            {"package": FOUR[0], "file": FOUR[1], "name": "#4", "flaked": 0, "reruns": 1}])
 
 
 if __name__ == "__main__":
