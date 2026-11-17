@@ -1,0 +1,436 @@
+#!/usr/bin/env python3
+"""Runs the mutants of MoonBit packages on wasm-gc with each package's own
+tests, and writes one record per mutant, a summary per package and a
+report (CONTRIBUTING.md, "Mutation runner").
+
+usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir>]
+           [--mutant <id>]... [--workers <n>] [--moon <moon>] [--finder <command>]
+           <package directory>...
+
+<package directory> is relative to <root>, the workspace or module to
+mutate: the current directory unless it is given. The site finder
+(scripts/mutation/sites.py, or --finder) gives the sites, one per line,
+and the runner makes one mutant of each. --mutant runs only the mutant
+with that id, and may be given more than once.
+
+For each worker, the runner copies <root> into <work>/tree-<n>, the files
+that git tracks and the untracked ones it does not ignore, and builds
+there into <work>/target-<n>: a build directory at a stable path, in a
+target directory of the runner's own, so that a plain build and a mutant
+build never rebuild each other, and each mutant is built where the last
+one was. <work> is <root>/_build/mutation unless it is given. For each
+package, the runner first builds and runs the tests without a mutant, and
+stops if they fail. Then, for each mutant, it writes the mutated file into
+the tree, builds the package's tests (moon test --build-only), and runs
+them. It checks the build's exit status, so that a failed build never
+runs the binary of an earlier one, and it never passes -u. The outcome is
+
+  killed      a test failed;
+  timed out   the run took longer than 1.25 times the baseline run plus
+              4 s, and was stopped; listed apart, since a time-out is not
+              yet confirmed as a kill;
+  unviable    the mutant does not build; outside the counts of killed and
+              survived;
+  survived    every test passed.
+
+It writes into <out> (<work>/out unless it is given):
+
+  mutants.jsonl  one record per mutant: the site's fields, the package, the
+                 outcome, the tests that killed it, the backend, the
+                 timings (build_s, run_s and the run's limit_s), the
+                 compiler's message for an unviable one, and a survivor's
+                 diff;
+  summary.json   per package: the baseline, the counts of sites, mutants
+                 and each outcome, and the score: killed / (killed +
+                 survived), which leaves time-outs out until they are
+                 confirmed;
+  report.md      the summaries, the time-outs, and each survivor's diff
+                 with its whole enclosing definition, which it also prints.
+
+It exits with 0 when every mutant has an outcome, survivors or not, and
+with 1 when it cannot run them.
+"""
+
+import argparse
+import difflib
+import json
+import os
+import re
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+BACKEND = "wasm-gc"
+# The build of the package without a mutant, and its tests, may take this
+# long: they have no baseline to scale from.
+FIRST_RUN_LIMIT_S = 1800
+# Directories of a tree that are never copied nor removed: build output,
+# downloaded modules and git's own.
+SKIPPED = {"_build", "target", ".mooncakes", ".git"}
+# The file in a tree that lists what the runner copied there.
+MANIFEST = ".mutation-files"
+NAME = re.compile(r'^\s*"?name"?\s*[=:]\s*"([^"]+)"', re.MULTILINE)
+TOTAL = re.compile(r"Total tests: (\d+), passed: (\d+), failed: (\d+)")
+
+
+class RunnerError(Exception):
+    """What stops the run: a package that fails without a mutant, or a site
+    that does not match the source."""
+
+
+def package_name(root, directory):
+    """The moon package of a directory: its module's name, from the nearest
+    moon.mod or moon.mod.json at or above it within root, and its path
+    within the module."""
+    root = root.resolve()
+    current = (root / directory).resolve()
+    if not current.is_dir():
+        raise RunnerError(f"{directory} is not a directory of {root}")
+    module = current
+    while True:
+        for file in ("moon.mod", "moon.mod.json"):
+            if (module / file).is_file():
+                match = NAME.search((module / file).read_text(encoding="utf-8"))
+                if not match:
+                    raise RunnerError(f"{module / file} names no module")
+                rel = current.relative_to(module).as_posix()
+                return match.group(1) if rel == "." else f"{match.group(1)}/{rel}"
+        if module == root:
+            raise RunnerError(f"no module holds {directory}")
+        module = module.parent
+
+
+def listed_files(root):
+    """The files of root to copy, relative to it: those git tracks, and the
+    untracked ones it does not ignore; every file outside the skipped
+    directories when root is not in a git work tree."""
+    result = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                            capture_output=True)
+    if result.returncode == 0:
+        names = [n for n in result.stdout.decode("utf-8").split("\0") if n]
+        return sorted(n for n in names if (root / n).is_file())
+    files = []
+    for directory, subdirectories, names in os.walk(root):
+        subdirectories[:] = [d for d in subdirectories if d not in SKIPPED]
+        for name in names:
+            files.append((Path(directory) / name).relative_to(root).as_posix())
+    return sorted(files)
+
+
+def sync(root, tree, files):
+    """Makes tree a copy of root's files: copies each one that differs, and
+    removes what an earlier copy left that root no longer has. Files the
+    build writes in the tree stay."""
+    tree.mkdir(parents=True, exist_ok=True)
+    manifest = tree / MANIFEST
+    wanted = set(files)
+    if manifest.is_file():
+        for old in manifest.read_text(encoding="utf-8").splitlines():
+            if old and old not in wanted and (tree / old).is_file():
+                (tree / old).unlink()
+    for name in files:
+        source, target = root / name, tree / name
+        data = source.read_bytes()
+        if not target.is_file() or target.read_bytes() != data:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+        shutil.copymode(source, target)
+    manifest.write_text("".join(f"{n}\n" for n in files), encoding="utf-8")
+
+
+def run(command, cwd, limit):
+    """Runs a command in its own process group, and stops the group after
+    limit seconds: (exit status, output, seconds, whether it timed out)."""
+    start = time.monotonic()
+    process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               start_new_session=True)
+    try:
+        output, _ = process.communicate(timeout=limit)
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        output, _ = process.communicate()
+        timed_out = True
+    elapsed = time.monotonic() - start
+    return process.returncode, output.decode("utf-8", errors="replace"), elapsed, timed_out
+
+
+def diagnostics(output, tree):
+    """The error messages of moon's JSON diagnostics in an output, with
+    paths relative to the tree."""
+    prefix = f"{tree}/"
+    messages = []
+    for line in output.splitlines():
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(item, dict) and item.get("$message_type") == "diagnostic" and item.get("level") == "error":
+            path = str(item.get("path", "")).removeprefix(prefix)
+            messages.append(f"{path}:{item.get('loc', '')}: {item.get('message', '')}")
+    return messages
+
+
+def failed_tests(output):
+    """The tests that failed, from moon test --test-failure-json."""
+    tests = []
+    for line in output.splitlines():
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(item, dict) and "test_name" in item:
+            tests.append({"package": item.get("package"), "file": item.get("filename"),
+                          "index": int(item.get("index", -1)), "name": item.get("test_name")})
+    return tests
+
+
+class Worker:
+    """A tree and a target directory, where mutants are built one at a
+    time."""
+
+    def __init__(self, number, work, moon):
+        self.number = number
+        self.tree = work / f"tree-{number}"
+        self.target = work / f"target-{number}"
+        self.moon = moon
+
+    def moon_test(self, package, limit, build_only):
+        command = [*self.moon, "test", "--target", BACKEND, "-p", package, "--target-dir", str(self.target)]
+        command += ["--build-only", "--output-json"] if build_only else ["--test-failure-json"]
+        return run(command, self.tree, limit)
+
+    def build(self, package, limit=FIRST_RUN_LIMIT_S):
+        status, output, seconds, timed_out = self.moon_test(package, limit, build_only=True)
+        if timed_out:
+            raise RunnerError(f"the build of {package} in {self.tree} took over {limit} s")
+        return status, output, seconds
+
+
+def apply(text, site):
+    """The text with the site's change, after checking that the site's
+    original text is where the site says."""
+    starts = [0]
+    for line in text.split("\n"):
+        starts.append(starts[-1] + len(line) + 1)
+    line, column = site["line"], site["column"]
+    if not 1 <= line < len(starts):
+        raise RunnerError(f"{site['id']}: {site['file']} has no line {line}")
+    offset = starts[line - 1] + column - 1
+    end = offset + len(site["original"])
+    if text[offset:end] != site["original"]:
+        raise RunnerError(f"{site['id']}: {site['file']}:{line}:{column} holds {text[offset:end]!r},"
+                          f" not {site['original']!r}")
+    return text[:offset] + site["replacement"] + text[end:]
+
+
+def definition_diff(site, text, mutated):
+    """The mutant's diff, with its whole enclosing definition as context."""
+    first, last = site["definition_lines"]
+    before = text.split("\n")
+    after = mutated.split("\n")
+    delta = len(after) - len(before)
+    old = before[first - 1 : last]
+    new = after[first - 1 : last + delta]
+    lines = list(difflib.unified_diff(old, new, lineterm="", n=len(old) + len(new)))
+    hunk = [f"@@ -{first},{len(old)} +{first},{len(new)} @@ {site['definition']}"]
+    return "\n".join([f"--- a/{site['file']}", f"+++ b/{site['file']}"] + hunk + lines[3:]) + "\n"
+
+
+def find_sites(finder, root, directory):
+    command = [*finder, "--root", str(root), directory]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RunnerError(f"the site finder failed on {directory}:\n{result.stderr}")
+    return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+
+
+def run_package(root, directory, finder, workers, chosen, log):
+    """Runs the mutants of one package: its records and its summary."""
+    package = package_name(root, directory)
+    sites = find_sites(finder, root, directory)
+    if chosen is not None:
+        known = {s["id"] for s in sites}
+        unknown = [i for i in chosen if i not in known]
+        if unknown:
+            raise RunnerError("".join(f"no site of {directory} has the id {i}\n" for i in unknown).rstrip())
+        mutants = [s for s in sites if s["id"] in chosen]
+    else:
+        mutants = sites
+
+    first = workers[0]
+    status, output, _ = first.build(package)
+    if status != 0:
+        raise RunnerError(f"{package} does not build without a mutant:\n{output}")
+    status, output, baseline_s, timed_out = first.moon_test(package, FIRST_RUN_LIMIT_S, build_only=False)
+    totals = TOTAL.findall(output)
+    if status != 0 or timed_out:
+        raise RunnerError(f"the tests of {package} fail without a mutant:\n{output}")
+    tests = sum(int(t[0]) for t in totals)
+    limit = 1.25 * baseline_s + 4
+    log(f"{package}: {len(sites)} sites, {len(mutants)} mutants, {tests} tests,"
+        f" baseline run {baseline_s:.2f} s, limit {limit:.2f} s")
+    for worker in workers[1:]:
+        status, output, _ = worker.build(package)
+        if status != 0:
+            raise RunnerError(f"{package} does not build without a mutant in {worker.tree}:\n{output}")
+
+    records = [None] * len(mutants)
+    queue = list(enumerate(mutants))
+    lock = threading.Lock()
+
+    def work(worker):
+        while True:
+            with lock:
+                if not queue:
+                    return
+                index, site = queue.pop(0)
+            records[index] = run_mutant(worker, package, site, limit)
+            record = records[index]
+            log(f"  {record['outcome']:9} {site['id']}  (build {record['timings']['build_s']:.2f} s,"
+                f" run {record['timings']['run_s']:.2f} s)")
+
+    with ThreadPoolExecutor(max_workers=len(workers)) as pool:
+        for future in [pool.submit(work, w) for w in workers]:
+            future.result()
+
+    counts = {o: sum(1 for r in records if r["outcome"] == o) for o in ("killed", "timed out", "survived", "unviable")}
+    judged = counts["killed"] + counts["survived"]
+    summary = {
+        "package": package,
+        "directory": directory,
+        "backend": BACKEND,
+        "baseline": {"run_s": round(baseline_s, 3), "tests": tests},
+        "limit_s": round(limit, 3),
+        "sites": len(sites),
+        "mutants": len(mutants),
+        "killed": counts["killed"],
+        "timed_out": counts["timed out"],
+        "survived": counts["survived"],
+        "unviable": counts["unviable"],
+        # Time-outs are left out until they are confirmed as kills.
+        "score": round(counts["killed"] / judged, 4) if judged else None,
+    }
+    return records, summary
+
+
+def run_mutant(worker, package, site, limit):
+    """Builds and tests one mutant in a worker's tree: its record."""
+    path = worker.tree / site["file"]
+    text = path.read_text(encoding="utf-8")
+    mutated = apply(text, site)
+    record = dict(site, package=package, backend=BACKEND)
+    try:
+        path.write_text(mutated, encoding="utf-8")
+        status, output, build_s = worker.build(package)
+        timings = {"build_s": round(build_s, 3), "run_s": 0.0, "limit_s": round(limit, 3)}
+        if status != 0:
+            messages = diagnostics(output, worker.tree)
+            record.update(outcome="unviable", killing_tests=[], timings=timings,
+                          message="\n".join(messages) if messages else output[-2000:])
+        else:
+            status, output, run_s, timed_out = worker.moon_test(package, limit, build_only=False)
+            timings["run_s"] = round(run_s, 3)
+            if timed_out:
+                record.update(outcome="timed out", killing_tests=[], timings=timings)
+            elif status == 0:
+                record.update(outcome="survived", killing_tests=[], timings=timings)
+            else:
+                record.update(outcome="killed", killing_tests=failed_tests(output), timings=timings)
+                if not record["killing_tests"]:
+                    record["message"] = output[-2000:]
+    finally:
+        path.write_text(text, encoding="utf-8")
+    if record["outcome"] == "survived":
+        record["diff"] = definition_diff(site, text, mutated)
+    return record
+
+
+def report(summaries, records):
+    """The report: the summary of each package, its time-outs, and its
+    survivors with their diffs."""
+    out = ["# Mutation report", ""]
+    for summary in summaries:
+        package = summary["package"]
+        mine = [r for r in records if r["package"] == package]
+        score = "none" if summary["score"] is None else f"{summary['score']:.1%}"
+        out += [
+            f"## {package}",
+            "",
+            f"Backend {summary['backend']}, {summary['baseline']['tests']} tests, baseline run"
+            f" {summary['baseline']['run_s']:.2f} s, time limit {summary['limit_s']:.2f} s.",
+            "",
+            "| sites | mutants | killed | timed out | survived | unviable | score |",
+            "|---:|---:|---:|---:|---:|---:|---:|",
+            f"| {summary['sites']} | {summary['mutants']} | {summary['killed']} | {summary['timed_out']}"
+            f" | {summary['survived']} | {summary['unviable']} | {score} |",
+            "",
+        ]
+        timed_out = [r for r in mine if r["outcome"] == "timed out"]
+        if timed_out:
+            out += ["### Timed out, not yet confirmed", ""]
+            out += [f"- `{r['id']}` (run stopped after {r['timings']['run_s']:.2f} s)" for r in timed_out]
+            out += [""]
+        survivors = [r for r in mine if r["outcome"] == "survived"]
+        out += [f"### Survivors ({len(survivors)})", ""]
+        for record in survivors:
+            out += [f"#### `{record['id']}`", "", f"In `{record['definition']}`, {record['file']}"
+                    f" lines {record['definition_lines'][0]} to {record['definition_lines'][1]}:", "",
+                    "```diff", record["diff"].rstrip("\n"), "```", ""]
+    return "\n".join(out)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run the mutants of MoonBit packages and report the survivors.")
+    parser.add_argument("--root", default=".", help="the workspace or module to mutate")
+    parser.add_argument("--work", help="the runner's own directory (default <root>/_build/mutation)")
+    parser.add_argument("--out", help="where the records and the report go (default <work>/out)")
+    parser.add_argument("--mutant", action="append", help="run only the mutant with this id")
+    parser.add_argument("--workers", type=int, default=1, help="how many mutants build and run at once")
+    parser.add_argument("--moon", default="moon", help="the moon command")
+    parser.add_argument("--finder", help="the site finder's command (default: sites.py beside this script)")
+    parser.add_argument("packages", nargs="+", help="package directories, relative to <root>")
+    args = parser.parse_args()
+    if args.workers < 1:
+        parser.error("--workers must be at least 1")
+    root = Path(args.root).resolve()
+    work = Path(args.work).resolve() if args.work else root / "_build" / "mutation"
+    out = Path(args.out).resolve() if args.out else work / "out"
+    finder = shlex.split(args.finder) if args.finder else [sys.executable, str(HERE / "sites.py")]
+
+    def log(message):
+        print(message, file=sys.stderr, flush=True)
+
+    try:
+        files = listed_files(root)
+        workers = [Worker(n, work, shlex.split(args.moon)) for n in range(args.workers)]
+        for worker in workers:
+            sync(root, worker.tree, files)
+        records, summaries = [], []
+        for directory in args.packages:
+            package_records, summary = run_package(root, directory, finder, workers, args.mutant, log)
+            records += package_records
+            summaries.append(summary)
+    except RunnerError as error:
+        print(f"run: {error}", file=sys.stderr)
+        sys.exit(1)
+    out.mkdir(parents=True, exist_ok=True)
+    with open(out / "mutants.jsonl", "w", encoding="utf-8") as f:
+        for record in records:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    (out / "summary.json").write_text(json.dumps({"packages": summaries}, indent=2, ensure_ascii=False) + "\n",
+                                      encoding="utf-8")
+    text = report(summaries, records)
+    (out / "report.md").write_text(text, encoding="utf-8")
+    print(text)
+
+
+if __name__ == "__main__":
+    main()
