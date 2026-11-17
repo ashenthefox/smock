@@ -397,7 +397,14 @@ async test "a query and the unmatched requests page after the last entry of the 
         smock.get_user(target, "paged")
       }
       let out = []
-      for after in ["", "&after=0", "&after=1", "&after=3", "&after=4"] {
+      // 9007199254740991 is the largest after that the Admin API's OpenAPI
+      // document takes (openapi/admin.json, the After schema's maximum),
+      // and a page holds "only entries after the one with this sequence
+      // number" (its After parameter): none here (#376).
+      for
+        after in [
+          "", "&after=0", "&after=1", "&after=3", "&after=4", "&after=9007199254740991",
+        ] {
         let (status, body) = smock.unmatched("paged", limit="2\{after}")
         out.push("unmatched, limit=2\{after}: \{page_of(status, body)}")
       }
@@ -424,6 +431,7 @@ async test "a query and the unmatched requests page after the last entry of the 
           #|unmatched, limit=2&after=1: 3 /nope/2, 4 /nope/3, more: false
           #|unmatched, limit=2&after=3: 4 /nope/3, more: false
           #|unmatched, limit=2&after=4: none, more: false
+          #|unmatched, limit=2&after=9007199254740991: none, more: false
           #|query {"limit":2}: 1 /nope/1, 2 /users/1, more: true
           #|query {"limit":2,"after":2}: 3 /nope/2, 4 /nope/3, more: false
           #|after=-1: 400 {"error":"invalid_request","message":"the after query parameter must be an integer from 0 to 9007199254740991","warnings":[]}
