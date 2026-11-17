@@ -20,10 +20,19 @@ Kill credit for a pure package (#275, "Kill credit, pure packages", and
 #300): the package's own tests run first, and the survivors run again
 with the wasm-gc tests of every package that imports it, directly or
 through another package; e2e tests and the tests of other native-only
-packages give none.
+packages give none. Kill confirmation (#275, "Kill confirmation", and
+#301): the tests run twice without a mutant before any mutant; a kill
+counts only when the tests that failed fail again with the mutant on and
+pass with it off, and a time-out only when it happens again and the run
+without the mutant finishes within the limit; a test that failed without
+a mutant in this run, or whose flake rate is above the flake threshold of
+mutation/flakes.toml, gives no kill credit. A fake moon answers the runs
+of tests from a script, so that a flaky failure and a time-out that does
+not repeat happen every time.
 
 They need python3, git, moon and moonc (the toolchain of .moonbit-version),
-and take about half a minute: one mutant of the fixture times out.
+and take about a minute and a half: one mutant of the fixture times out,
+and the scripted time-outs each take a time limit.
 
 usage: python3 -m unittest discover -s scripts/mutation -v
 """
@@ -34,6 +43,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -110,6 +120,11 @@ UNITS = [
     ("units/units.mbt,past,BODY,{…},{ false },0", "killed", "killed", ["mutation/fixture/units"]),
     ("units/units.mbt,past,ROR,>,>=,0", "survived", "survived", []),
 ]
+
+# calc's tests that the confirmation tests script, as moon names them: the
+# only test that kills `low < n` and the only one that kills `||`.
+LOW = ("mutation/fixture/calc", "calc_test.mbt", 0, "a number at the low end is in range")
+BELOW = ("mutation/fixture/calc", "calc_test.mbt", 1, "a number below the range is not in it")
 
 # The packages of smock that build only natively (CONTRIBUTING.md, "Terms":
 # the native-only packages). None of them gives a pure package credit.
@@ -532,6 +547,28 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(record["outcome"], "unviable")
         self.assertIn("never used", record["message"])
 
+    def test_each_kill_and_the_time_out_are_confirmed(self):
+        # calc's tests are not flaky: each kill fails again with the mutant
+        # on and passes with it off, and the endless loop times out again,
+        # while the run without it finishes within the limit.
+        judged = [r for r in self.records if r["outcome"] in ("killed", "timed out")]
+        self.assertEqual(len(judged), 15)
+        for record in judged:
+            self.assertEqual(record["confirmation"], "confirmed", record["id"])
+            self.assertGreater(record["timings"]["without_s"], 0)
+        timed_out = next(r for r in judged if r["outcome"] == "timed out")
+        self.assertGreaterEqual(timed_out["timings"]["again_s"], timed_out["timings"]["limit_s"])
+        self.assertLess(timed_out["timings"]["without_s"], timed_out["timings"]["limit_s"])
+        killed = {r["id"]: [t["name"] for t in r["killing_tests"]] for r in judged}
+        self.assertEqual(killed["calc/calc.mbt,in_range,ROR,<=,<,0"], [LOW[3]])
+        # The tests ran twice without a mutant; the longer run sets the limit.
+        summary = json.loads((self.out / "summary.json").read_text())["packages"][0]
+        self.assertEqual(len(summary["baseline"]["runs_s"]), 2)
+        self.assertEqual(summary["baseline"]["run_s"], max(summary["baseline"]["runs_s"]))
+        self.assertEqual(summary["baseline"]["failed"], [])
+        # A confirmed time-out counts as killed (#275, "Outcomes").
+        self.assertEqual((summary["unconfirmed"], summary["score"]), (0, round(15 / 24, 4)))
+
     def test_the_summary_counts_each_outcome_of_the_package(self):
         summary = json.loads((self.out / "summary.json").read_text())
         self.assertEqual((summary["operator_set"], summary["set"]), (VERSION, "pinned"))
@@ -849,6 +886,218 @@ class ImportersTest(unittest.TestCase):
                          ([], ["smock/smock/e2e", "smock/smock/openssl"]))
         for line in found.values():
             self.assertEqual(set(line["importers"]) & NATIVE_ONLY, set(), line["package"])
+
+
+# A moon that answers the runs of tests, but not their builds nor the dry
+# runs, from a script: a JSON list of answers, taken in turn. "real" runs
+# the real moon; {"fail": [test, ...]} prints what moon prints when those
+# tests fail, and exits as it does; {"sleep": s} waits s seconds, and the
+# runner stops it at its time limit. Once the script is used up, the real
+# moon answers. Its arguments: the script, a log of the command lines, the
+# real moon, then moon's own.
+SCRIPTED_MOON = '''\
+import json, os, sys, time
+script, log, real, args = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+with open(log, "a") as f:
+    f.write(" ".join(args) + "\\n")
+if args[:1] == ["test"] and "--build-only" not in args and "--dry-run" not in args:
+    with open(script) as f:
+        answers = json.load(f)
+    if answers:
+        answer = answers.pop(0)
+        with open(script, "w") as f:
+            json.dump(answers, f)
+        if isinstance(answer, dict) and "fail" in answer:
+            for package, filename, index, name in answer["fail"]:
+                print(json.dumps({"package": package, "filename": filename, "index": str(index),
+                                  "test_name": name, "message": "a scripted failure"}))
+            print(f"Total tests: 7, passed: {7 - len(answer['fail'])}, failed: {len(answer['fail'])}.")
+            sys.exit(2)
+        if isinstance(answer, dict) and "sleep" in answer:
+            time.sleep(answer["sleep"])
+os.execv(real, [real, *args])
+'''
+
+
+class ConfirmationTest(unittest.TestCase):
+    """Runs of one or two of calc's mutants each, with a moon that answers
+    from a script, so that a flaky failure, a time-out that does not repeat
+    and a slow runner happen every time; and a run that reads flake
+    records."""
+
+    @classmethod
+    def setUpClass(cls):
+        moon = shutil.which("moon")
+        if moon is None:
+            raise unittest.SkipTest("moon is not on PATH")
+        cls.real = moon
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-mutation-confirm-"))
+        cls.fake = cls.tmp / "scripted_moon.py"
+        cls.fake.write_text(SCRIPTED_MOON)
+        cls.runs = 0
+        with open(HERE.parent.parent / "mutation" / "flakes.toml", "rb") as f:
+            cls.policy = tomllib.load(f)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def run_scripted(self, answers, *args):
+        """Runs the runner on calc with the moon that answers from the
+        script: its result, records, package summary and whole summary."""
+        type(self).runs += 1
+        name = f"run-{self.runs}"
+        script = self.tmp / f"{name}.json"
+        script.write_text(json.dumps(answers))
+        moon = f"{sys.executable} {self.fake} {script} {self.tmp / f'{name}.log'} {self.real}"
+        out = self.tmp / name
+        result = subprocess.run(
+            [sys.executable, str(RUN), "--root", str(FIXTURE), "--work", str(self.tmp / "work"), "--out", str(out),
+             "--moon", moon, *args, "calc"],
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        records = [json.loads(line) for line in (out / "mutants.jsonl").read_text().splitlines()]
+        summary = json.loads((out / "summary.json").read_text())
+        return out, records, summary["packages"][0], summary
+
+    # The runs of tests, in turn, for one mutant: the two runs without a
+    # mutant, the mutant's run, its run again with the mutant on, and the
+    # run without it.
+
+    def test_a_kill_that_does_not_repeat_is_not_counted(self):
+        # `n < high` survives calc's tests; a flaky failure says otherwise once.
+        out, records, package, _ = self.run_scripted(["real", "real", {"fail": [LOW]}],
+                                                     "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,1")
+        [record] = records
+        self.assertEqual((record["outcome"], record["first_outcome"], record["confirmation"]),
+                         ("unconfirmed", "killed", "the tests that failed passed when run again with the mutant on"))
+        self.assertEqual([t["name"] for t in record["failed_first"]], [LOW[3]])
+        self.assertEqual(record["killing_tests"], [])
+        self.assertEqual((package["killed"], package["unconfirmed"], package["survived"]), (0, 1, 0))
+        # The test failed once of the one time it ran again with the mutant
+        # on, and passed the two runs without a mutant.
+        flaked = json.loads((out / "flakes.json").read_text())["runs"][-1]
+        self.assertEqual(flaked["suites"], {"mutation/fixture/calc": 2})
+        self.assertEqual(flaked["tests"], [{"package": LOW[0], "file": LOW[1], "name": LOW[3], "flaked": 1,
+                                            "reruns": 1}])
+        report = (out / "report.md").read_text()
+        self.assertIn("### Unconfirmed (1)", report)
+        self.assertIn("the tests that failed passed when run again with the mutant on", report)
+
+    def test_a_kill_whose_tests_fail_without_the_mutant_is_not_counted(self):
+        # `low < n` is killed by LOW, which then fails without it too.
+        out, records, package, _ = self.run_scripted(["real", "real", "real", "real", {"fail": [LOW]}],
+                                                     "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,0")
+        [record] = records
+        self.assertEqual((record["outcome"], record["confirmation"]),
+                         ("unconfirmed", "the tests that failed fail without the mutant too"))
+        self.assertEqual((package["killed"], package["unconfirmed"]), (0, 1))
+        flaked = json.loads((out / "flakes.json").read_text())["runs"][-1]
+        self.assertEqual(flaked["suites"], {"mutation/fixture/calc": 3})
+        self.assertEqual(flaked["tests"], [{"package": LOW[0], "file": LOW[1], "name": LOW[3], "flaked": 1,
+                                            "reruns": 1}])
+
+    def test_a_time_out_that_does_not_repeat_is_unconfirmed(self):
+        out, records, package, _ = self.run_scripted(["real", "real", {"sleep": 120}],
+                                                     "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,1")
+        [record] = records
+        self.assertEqual((record["outcome"], record["first_outcome"], record["confirmation"]),
+                         ("unconfirmed", "timed out", "the mutant did not time out again"))
+        self.assertGreaterEqual(record["timings"]["run_s"], record["timings"]["limit_s"])
+        self.assertLess(record["timings"]["again_s"], record["timings"]["limit_s"])
+        self.assertEqual((package["timed_out"], package["unconfirmed"], package["score"]), (0, 1, None))
+        report = (out / "report.md").read_text()
+        self.assertIn("the mutant did not time out again", report)
+
+    def test_a_time_out_whose_run_without_the_mutant_is_too_slow_is_unconfirmed(self):
+        # A slow runner: everything times out, the run without the mutant too.
+        _, records, package, _ = self.run_scripted(["real", "real", {"sleep": 120}, {"sleep": 120}, {"sleep": 120}],
+                                                   "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,1")
+        [record] = records
+        self.assertEqual((record["outcome"], record["confirmation"]),
+                         ("unconfirmed", "the run without the mutant did not finish within the limit"))
+        self.assertGreaterEqual(record["timings"]["again_s"], record["timings"]["limit_s"])
+        self.assertGreaterEqual(record["timings"]["without_s"], record["timings"]["limit_s"])
+        self.assertEqual((package["timed_out"], package["unconfirmed"]), (0, 1))
+
+    def test_a_test_that_fails_without_a_mutant_gives_no_credit_in_that_run(self):
+        # LOW fails in the second run without a mutant, and then is the only
+        # test that kills `low < n`.
+        out, records, package, summary = self.run_scripted(["real", {"fail": [LOW]}],
+                                                           "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,0")
+        self.assertEqual(package["baseline"]["failed"],
+                         [{"package": LOW[0], "file": LOW[1], "name": LOW[3], "runs": [2]}])
+        [record] = records
+        self.assertEqual((record["outcome"], record["confirmation"]),
+                         ("survived", "only tests that give no kill credit failed"))
+        self.assertEqual([t["name"] for t in record["no_credit"]], [LOW[3]])
+        self.assertEqual(summary["flakes"]["flaked"], [{"package": LOW[0], "file": LOW[1], "name": LOW[3],
+                                                        "flaked": 1, "observed": 2, "rate": 0.5}])
+        report = (out / "report.md").read_text()
+        self.assertIn(f"Tests that failed without a mutant, which give no kill credit in this run: `{LOW[3]}`"
+                      f" ({LOW[0]}, {LOW[1]}, run 2).", report)
+
+    def test_a_test_above_the_flake_threshold_gives_no_credit(self):
+        # Records of an earlier run in which LOW flaked in every run, and
+        # BELOW in exactly the threshold's share of its runs.
+        runs = 1_000_000
+        at = round(self.policy["threshold"] * runs)
+        self.assertEqual(at / runs, self.policy["threshold"])
+        records_file = self.tmp / "earlier-flakes.json"
+        records_file.write_text(json.dumps({"version": 1, "runs": [{
+            "suites": {"mutation/fixture/calc": runs},
+            "tests": [{"package": LOW[0], "file": LOW[1], "name": LOW[3], "flaked": runs, "reruns": 0},
+                      {"package": BELOW[0], "file": BELOW[1], "name": BELOW[3], "flaked": at, "reruns": 0}]}]}))
+        out, records, package, summary = self.run_scripted(
+            [], "--flakes", str(records_file),
+            "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,0", "--mutant", "calc/calc.mbt,in_range,LCR,&&,||,0")
+        outcomes = {r["id"]: (r["outcome"], [t["name"] for t in r["killing_tests"]]) for r in records}
+        self.assertEqual(outcomes, {"calc/calc.mbt,in_range,ROR,<=,<,0": ("survived", []),
+                                    "calc/calc.mbt,in_range,LCR,&&,||,0": ("killed", [BELOW[3]])})
+        self.assertEqual([t["name"] for t in summary["flakes"]["above"]], [LOW[3]])
+        self.assertEqual(summary["flakes"]["runs_read"], 1)
+        report = (out / "report.md").read_text()
+        self.assertIn("Above the threshold, so they give no kill credit in this run: 1.", report)
+        self.assertIn(f"- `{LOW[3]}` ({LOW[0]}, {LOW[1]}): {runs} of {runs} runs, 100.00%", report)
+        # The records kept for the next run: the earlier run, then this one.
+        kept = json.loads((out / "flakes.json").read_text())
+        self.assertEqual(len(kept["runs"]), 2)
+        # The two runs without a mutant, and the run without `||` that
+        # confirms its kill; `low < n`'s only failed test gives no credit,
+        # so it is not run again.
+        self.assertEqual(kept["runs"][-1]["suites"], {"mutation/fixture/calc": 3})
+        self.assertEqual((kept["threshold"], kept["recent_runs"]),
+                         (self.policy["threshold"], self.policy["recent_runs"]))
+
+    def test_a_flaky_test_gives_credit_again_once_its_flaky_runs_are_not_among_the_latest(self):
+        # As many earlier runs as the policy counts: in the oldest, LOW
+        # flaked in every one of its many runs; in the others, never.
+        flaky = {"suites": {"mutation/fixture/calc": 1_000_000},
+                 "tests": [{"package": LOW[0], "file": LOW[1], "name": LOW[3], "flaked": 1_000_000, "reruns": 0}]}
+        clean = {"suites": {"mutation/fixture/calc": 2}, "tests": []}
+        recent = self.policy["recent_runs"]
+        records_file = self.tmp / "older-flakes.json"
+        records_file.write_text(json.dumps({"version": 1, "runs": [flaky] + [clean] * (recent - 1)}))
+        mutant = ("--mutant", "calc/calc.mbt,in_range,ROR,<=,<,0")
+        out, records, _, summary = self.run_scripted([], "--flakes", str(records_file), *mutant)
+        self.assertEqual(summary["flakes"]["runs_read"], recent)
+        self.assertEqual([t["name"] for t in summary["flakes"]["above"]], [LOW[3]])
+        self.assertEqual([r["outcome"] for r in records], ["survived"])
+        # The records this run keeps leave the oldest run out, so the next
+        # run, which reads them, takes LOW's kill.
+        kept = json.loads((out / "flakes.json").read_text())
+        self.assertEqual(len(kept["runs"]), recent)
+        self.assertNotIn(flaky, kept["runs"])
+        self.assertEqual(kept["rates"], [])
+        _, records, _, summary = self.run_scripted([], "--flakes", str(out / "flakes.json"), *mutant)
+        self.assertEqual(summary["flakes"]["above"], [])
+        self.assertEqual([(r["outcome"], r["confirmation"]) for r in records], [("killed", "confirmed")])
+        # Records that hold one run more than the policy counts: the oldest
+        # is not read.
+        records_file.write_text(json.dumps({"version": 1, "runs": [flaky] + [clean] * recent}))
+        _, records, _, summary = self.run_scripted([], "--flakes", str(records_file), *mutant)
+        self.assertEqual((summary["flakes"]["runs_read"], summary["flakes"]["above"]), (recent, []))
+        self.assertEqual([r["outcome"] for r in records], ["killed"])
 
 
 if __name__ == "__main__":
