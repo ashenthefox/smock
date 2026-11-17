@@ -29,6 +29,7 @@ mutation/                              the mutation runner's committed data: the
 scripts/coverage.sh                    the coverage wrapper, which runs the tests with coverage on and reports the uncovered points (#296)
 scripts/coverage-report.py             the coverage report: the bisect parser, which reads the points and their counters (#296)
 scripts/coverage-tests/                the coverage report's committed reports and tree, which its test judges it by (#296)
+scripts/coverage-ratchet.py            the coverage ratchet, which holds each package's uncovered points to its floor and refuses a raised floor that no recorded raise covers (#297)
 coverage/                              the coverage ledger's committed data: the floors and approved raises (#297), and the scope's list of generated files
 scripts/check-merge.*                  the merge check (#312)
 scripts/check-weekly-run.*             the release's check of the latest weekly run (#316)

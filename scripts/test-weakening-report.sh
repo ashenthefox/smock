@@ -737,19 +737,43 @@ else
   fail "committed-list: names $entries paths, fewer than the kinds of file it must name"
 fi
 
+# Under the committed list, a change to the coverage floors and a recorded
+# raise show line by line: the maintainer's acknowledgment of the report at
+# the merge is the approval of each changed floor and recorded raise
+# (#297).
+tree
+package
+mkdir -p "$repo/scripts"
+cp "$list" "$repo/$list"
+printf '%s\n' "# The floors." "engine 103" "prng 0" | file coverage/floors.txt
+printf '%s\n' "# The raises." | file coverage/approved-raises.txt
+branch
+printf '%s\n' "# The floors." "engine 101" "prng 1" | file coverage/floors.txt
+printf '%s\n' "# The raises." "prng 1 the abort arm waits for the exclusion list (#302)" | file coverage/approved-raises.txt
+report floors
+mentions floors '### `coverage/floors.txt` (changed)'
+mentions floors '-engine 103'
+mentions floors '+engine 101'
+mentions floors '-prng 0'
+mentions floors '+prng 1'
+mentions floors '### `coverage/approved-raises.txt` (changed)'
+mentions floors '+prng 1 the abort arm waits for the exclusion list (#302)'
+
 # The committed list names every file of the tools that decide a verdict,
 # where the checkout has them, so that a change to any of them is listed:
 # #310 lists "the runner and its data" and "the coverage wrapper with its
 # floors and scope" among the files that decide a verdict. The mutation
 # runner is scripts/mutation/ (#298, #299), and the coverage wrapper, its
 # bisect parser and the parser's test data are scripts/coverage.sh,
-# scripts/coverage-report.py and scripts/coverage-tests/ (#296).
+# scripts/coverage-report.py and scripts/coverage-tests/ (#296); the
+# ratchet that holds the floors is scripts/coverage-ratchet.py (#297).
 tree
 package
 branch
 mkdir -p "$repo/scripts"
 cp "$list" "$repo/$list"
-git ls-files -- scripts/mutation scripts/coverage.sh scripts/coverage-report.py scripts/coverage-tests >"$tmp/tool-files"
+git ls-files -- scripts/mutation scripts/coverage.sh scripts/coverage-report.py scripts/coverage-tests \
+  scripts/coverage-ratchet.py >"$tmp/tool-files"
 tools=0
 while read -r path; do
   tools=$((tools + 1))
@@ -759,10 +783,10 @@ report tool-files
 while read -r path; do
   mentions tool-files "### \`$path\` (added)"
 done <"$tmp/tool-files"
-if [ "$tools" -ge 4 ]; then
+if [ "$tools" -ge 5 ]; then
   pass "tool-files: the checkout has $tools files of the tools"
 else
-  fail "tool-files: the checkout has $tools files of the tools, fewer than the four it names"
+  fail "tool-files: the checkout has $tools files of the tools, fewer than the five it names"
 fi
 
 echo
