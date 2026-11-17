@@ -119,6 +119,33 @@ def percent(part, whole):
     return f"{100 * part / whole:.1f}%" if whole else "-"
 
 
+# The packages that only the binary runs, and that the e2e tests reach from
+# outside: the summary gives their totals apart from the others'.
+BINARY_ONLY = ("server", "cmd/smock")
+
+
+def summary(title, packages):
+    """One line of totals over some packages."""
+    points = sum(package.points for package in packages)
+    covered = sum(package.covered for package in packages)
+    lines = sum(len(package.lines) for package in packages)
+    lines_covered = sum(package.lines_covered() for package in packages)
+    return (
+        f"{title}: {covered} of {points} points covered ({percent(covered, points)}), "
+        f"{points - covered} uncovered; lines {lines_covered} of {lines}"
+    )
+
+
+def definitions_of(lines):
+    """For each line, the name of the top-level definition that holds it."""
+    current = "(none)"
+    names = []
+    for line in lines:
+        current = definition_name(line) or current
+        names.append(current)
+    return names
+
+
 def main(args):
     root = Path(".")
     if args[:1] == ["--root"]:
@@ -129,15 +156,13 @@ def main(args):
     for name, points in read_report(report):
         data = (root / name).read_bytes()
         starts = [0] + [at + 1 for at, byte in enumerate(data) if byte == 10]
-        lines = data.decode("utf-8").split("\n")
-        package = packages.setdefault(name.rsplit("/", 1)[0], Package(name.rsplit("/", 1)[0]))
+        definitions = definitions_of(data.decode("utf-8").split("\n"))
+        package_name = name.rsplit("/", 1)[0]
+        package = packages.setdefault(package_name, Package(package_name))
         for offset, count in sorted(points):
             line = line_of(starts, offset)
             column = len(data[starts[line - 1] : offset].decode("utf-8")) + 1
-            definition = next(
-                (d for d in map(definition_name, reversed(lines[:line])) if d), "(none)"
-            )
-            package.add(name, line, column, definition, count)
+            package.add(name, line, column, definitions[line - 1], count)
     for name in sorted(packages):
         package = packages[name]
         if package.uncovered:
@@ -153,6 +178,11 @@ def main(args):
             f"{package.points - package.covered}  "
             f"{package.lines_covered()} of {len(package.lines)}"
         )
+    inside = [packages[name] for name in sorted(packages) if name in BINARY_ONLY]
+    outside = [packages[name] for name in sorted(packages) if name not in BINARY_ONLY]
+    print(summary("Outside server and cmd/smock", outside))
+    print(summary("server and cmd/smock", inside))
+    print(summary("All packages", outside + inside))
     return 0
 
 

@@ -82,5 +82,33 @@ says partly "prng 3 of 4 75.0% 1 1 of 2"
 says partly "prng: 1 of 4 points uncovered"
 says partly "  prng/prng.mbt:16:19 Generator::below"
 
+# --- The summary, inside and outside server and cmd/smock --------------------
+
+# prng as above; server with 2 of its 6 points covered, on 1 of its 4
+# lines; cmd/smock with none of its 4, on 2 lines. The report lists
+# cmd/smock first, and its points out of order, as moon_cove may.
+report packages packages.bisect
+exits packages 0
+says packages "cmd/smock 0 of 4 0.0% 4 0 of 2"
+says packages "prng 3 of 4 75.0% 1 1 of 2"
+says packages "server 2 of 6 33.3% 4 1 of 4"
+says packages "Outside server and cmd/smock: 3 of 4 points covered (75.0%), 1 uncovered; lines 1 of 2"
+says packages "server and cmd/smock: 2 of 10 points covered (20.0%), 8 uncovered; lines 1 of 6"
+says packages "All packages: 5 of 14 points covered (35.7%), 9 uncovered; lines 2 of 8"
+
+# Each uncovered point in its definition: a function with type parameters,
+# a method of a trait, and fn main. The column counts characters: the
+# point after « is at character 28 of its line, byte 29.
+says packages "cmd/smock: 4 of 4 points uncovered"
+says packages "  cmd/smock/main.mbt:3:3 main"
+says packages "  cmd/smock/main.mbt:3:14 main"
+says packages "  cmd/smock/main.mbt:3:18 main"
+says packages "  cmd/smock/main.mbt:4:3 main"
+says packages "server: 4 of 6 points uncovered"
+says packages "  server/serve.mbt:7:3 Server::serve"
+says packages "  server/serve.mbt:7:17 Server::serve"
+says packages "  server/serve.mbt:8:3 Server::serve"
+says packages "  server/serve.mbt:13:28 impl Show for Server with output"
+
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]
