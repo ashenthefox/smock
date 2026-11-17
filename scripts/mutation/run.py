@@ -86,6 +86,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import choice
+
 HERE = Path(__file__).resolve().parent
 BACKEND = "wasm-gc"
 # The build of the package without a mutant, and its tests, may take this
@@ -519,6 +521,8 @@ def main():
     parser.add_argument("--mutant", action="append", help="run only the mutant with this id")
     parser.add_argument("--sites-only", action="store_true",
                         help="count the sites of each package in both sets, and run no mutant")
+    parser.add_argument("--shard", type=choice.shard_spec, metavar="K/N",
+                        help="run only shard K of N of the mutants (K from 1)")
     parser.add_argument("--workers", type=int, default=1, help="how many mutants build and run at once")
     parser.add_argument("--moon", default="moon", help="the moon command")
     parser.add_argument("--finder", help="the site finder's command (default: sites.py beside this script)")
@@ -540,7 +544,9 @@ def main():
         if len(versions) > 1:
             raise RunnerError(f"the packages' sites name several operator sets: {sorted(versions)}")
         operator_set = versions.pop() if versions else None
-        sites, chosen = choose(found, args.set, args.mutant, args.packages)
+        sites, whole = choose(found, args.set, args.mutant, args.packages)
+        chosen = choice.shard(whole, args.packages, *args.shard) if args.shard else whole
+        runs = choice.running(args.packages, whole, chosen, bool(args.mutant), args.shard and args.shard[0])
         records, summaries = [], []
         if not args.sites_only:
             files = listed_files(root)
@@ -548,7 +554,7 @@ def main():
             for worker in workers:
                 sync(root, worker.tree, files)
         for directory in args.packages:
-            if args.mutant and not chosen[directory]:
+            if directory not in runs:
                 continue
             summary = package_summary(root, directory, found[directory][0], found[directory][1], args.set,
                                       operator_set)
@@ -569,6 +575,11 @@ def main():
     with open(out / "mutants.jsonl", "w", encoding="utf-8") as f:
         for record in records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    if args.sites_only:
+        with open(out / "chosen.jsonl", "w", encoding="utf-8") as f:
+            for directory in args.packages:
+                for site in chosen[directory] if directory in runs else []:
+                    f.write(json.dumps(site, ensure_ascii=False) + "\n")
     (out / "summary.json").write_text(
         json.dumps({"operator_set": operator_set, "set": args.set, "packages": summaries},
                    indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
