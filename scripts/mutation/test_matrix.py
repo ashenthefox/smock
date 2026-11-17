@@ -38,6 +38,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 FIXTURE = HERE / "fixture"
 RUN = HERE / "run.py"
+MATRIX_TOOL = HERE / "matrix.py"
 
 # The tests of units and of its importers that build on wasm-gc, as moon
 # names them: package, file, index in the file, name.
@@ -94,6 +95,14 @@ def run_runner(root, work, out, moon, *args):
 def read_lines(path):
     """The JSON objects of a file of JSON lines."""
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_id(test):
+    """A test's name in a matrix (CONTRIBUTING.md, "The kill matrix"): its
+    package, `/` and file, then `:` and its name, or `#` and its index when
+    it has no name."""
+    package, file, index, name = test
+    return f"{package}/{file}:{name}" if name else f"{package}/{file}#{index}"
 
 
 def fields(test):
@@ -190,6 +199,51 @@ class KillMatrixTest(unittest.TestCase):
                       "- Importers that build only natively, whose tests did not run: mutation/fixture/probe.\n",
                       report)
         self.assertIn("### Survivors (1)", report)
+
+    def tool(self, *args):
+        """What matrix.py prints for args, as a list of objects."""
+        result = subprocess.run([sys.executable, str(MATRIX_TOOL), *map(str, args)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return [json.loads(line) for line in result.stdout.splitlines()]
+
+    def test_the_tool_lists_the_tests_that_alone_kill_some_mutant(self):
+        # From MATRIX: four tests are each the only one that kills a mutant.
+        self.assertEqual([(t["test"], t["layer"], t["alone"]) for t in self.tool("alone", self.out)], [
+            (test_id(DIAL_HIGH), "in-process", ["units/units.mbt,within,ROR,<=,<,1"]),
+            (test_id(METER_LOW), "in-process", ["units/units.mbt,within,ROR,<=,<,0"]),
+            (test_id(BELOW), "in-process", ["units/units.mbt,within,LCR,&&,||,0"]),
+            (test_id(PAST), "in-process", ["units/units.mbt,past,BODY,{…},{ false },0"]),
+        ])
+        # The others kill only what other tests kill too: candidates for
+        # removal, under removal rule (A).
+        self.assertEqual([(t["test"], t["kills"]) for t in self.tool("alone", "--none", self.out / "matrix" / "units.json")],
+                         [(test_id(t), ["units/units.mbt,within,BODY,{…},{ false },0"]) for t in (INSIDE, FIVE, FOUR)])
+
+    def test_the_tool_gives_the_mutants_that_a_set_of_tests_kills(self):
+        def outcomes(*args):
+            return [(m["id"], m["outcome"], m["matrix"], m["killing_tests"]) for m in self.tool("kills", *args)]
+
+        # With every test but meter's, the mutant that only meter's killed
+        # survives; the rest are as in the matrix.
+        without = [(i, "survived" if tests == [METER_LOW] else outcome, outcome,
+                    [test_id(t) for t in tests if t != METER_LOW]) for i, outcome, tests in MATRIX]
+        self.assertEqual(outcomes("--without", "--test", test_id(METER_LOW), self.out), without)
+        # units' own tests alone kill what ImportersTest finds they kill
+        # without the importers' tests: within's BODY, `||` and past's BODY.
+        own = {"units/units.mbt,within,BODY,{…},{ false },0", "units/units.mbt,within,LCR,&&,||,0",
+               "units/units.mbt,past,BODY,{…},{ false },0"}
+        self.assertEqual([(i, o) for i, o, _, _ in outcomes("--package", "mutation/fixture/units", self.out)],
+                         [(i, "killed" if i in own else "survived") for i, _, _ in MATRIX])
+        # One test alone kills only within's BODY.
+        self.assertEqual([(i, o, tests) for i, o, _, tests in outcomes("--test", test_id(INSIDE), self.out)],
+                         [(i, "killed" if tests == MATRIX[0][2] else "survived",
+                           [test_id(INSIDE)] if tests == MATRIX[0][2] else []) for i, _, tests in MATRIX])
+
+    def test_the_tool_refuses_a_test_the_matrix_does_not_hold(self):
+        result = subprocess.run([sys.executable, str(MATRIX_TOOL), "kills", "--test", "mutation/fixture/units/x.mbt:y",
+                                 str(self.out)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no test of the matrix is mutation/fixture/units/x.mbt:y", result.stderr)
 
     def test_a_run_that_is_no_kill_matrix_leaves_none_behind(self):
         out = self.tmp / "again"

@@ -12,10 +12,13 @@ it fails again with the mutant on and passes with it off. Each record then
 lists every test that kills its mutant, with the test's package and layer.
 """
 
+import argparse
 import json
 import re
 import shutil
 import subprocess
+import sys
+from pathlib import Path
 
 import compare
 
@@ -207,6 +210,122 @@ def write(out, operator_set, chosen, summaries, records):
         path.write_text(dumps(matrix), encoding="utf-8")
 
 
+class MatrixError(Exception):
+    """What stops the tool: a file that is no kill matrix, or a test that
+    the matrices do not hold."""
+
+
+def read(paths):
+    """The kill matrices of paths: each a matrix's file, or a directory, a
+    run's output whose matrix/ holds them or one that holds them itself."""
+    matrices = []
+    for path in map(Path, paths):
+        if path.is_dir():
+            files = sorted((path / "matrix" if (path / "matrix").is_dir() else path).rglob("*.json"))
+            if not files:
+                raise MatrixError(f"{path} holds no kill matrix")
+        else:
+            files = [path]
+        for file in files:
+            try:
+                matrix = json.loads(file.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as problem:
+                raise MatrixError(f"cannot read {file}: {problem}") from problem
+            if not isinstance(matrix, dict) or matrix.get("version") != VERSION or "mutants" not in matrix:
+                raise MatrixError(f"{file} is no kill matrix of version {VERSION}")
+            matrices.append(matrix)
+    return matrices
+
+
+def every_test(matrices):
+    """The tests of the matrices, by name, each once, in their order."""
+    found = {}
+    for matrix in matrices:
+        for test in matrix["tests"]:
+            found.setdefault(test["test"], test)
+    return found
+
+
+def chosen_tests(tests, names, packages, without, lowest):
+    """The names of the tests of a set: those named and the tests of the
+    packages given (every test when neither is given), or, without, every
+    other test; and of those, only the tests in the layer lowest or a lower
+    one, when lowest is given."""
+    unknown = [n for n in names if n not in tests]
+    unknown += [p for p in packages if not any(t["package"] == p for t in tests.values())]
+    if unknown:
+        raise MatrixError("".join(f"no test of the matrix is {n}\n" for n in unknown).rstrip())
+    given = {n for n, t in tests.items() if n in names or t["package"] in packages}
+    if not names and not packages:
+        given = set(tests)
+    kept = set(tests) - given if without else given
+    if lowest:
+        kept = {n for n in kept if LAYERS.index(tests[n]["layer"]) <= LAYERS.index(lowest)}
+    return kept
+
+
+def with_tests(matrix, kept):
+    """Each mutant of a matrix as if only the tests kept had run: a killed
+    one survives unless one of them kills it. Its outcome then, its outcome
+    in the matrix and the tests kept that kill it. A time-out names no test,
+    so it stays one."""
+    out = []
+    for mutant in resolved(matrix["mutants"]):
+        tests = [t for t in mutant["killing_tests"] if t in kept]
+        outcome = mutant["outcome"]
+        if outcome == "killed" and not tests:
+            outcome = "survived"
+        line = {"package": matrix["package"], "id": mutant["id"], "outcome": outcome, "matrix": mutant["outcome"],
+                "killing_tests": tests}
+        if "duplicate_of" in mutant:
+            line["duplicate_of"] = mutant["duplicate_of"]
+        out.append(line)
+    return out
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Read kill matrices that the mutation runner wrote.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    lone = commands.add_parser("alone", help="the tests that alone kill some mutant, each with those mutants")
+    lone.add_argument("--none", action="store_true",
+                      help="the tests that alone kill no mutant instead, each with the mutants it kills")
+    lone.add_argument("matrices", nargs="+", help="matrix files, or runs' output directories")
+    kills = commands.add_parser("kills", help="each mutant's outcome if only a set of tests had run")
+    kills.add_argument("--test", action="append", default=[], help="a test of the set, by its name in the matrix")
+    kills.add_argument("--package", action="append", default=[], help="a package whose tests are in the set")
+    kills.add_argument("--without", action="store_true", help="the set is every test but those given")
+    kills.add_argument("--layer", choices=LAYERS, help="only the set's tests in this layer or a lower one count")
+    kills.add_argument("matrices", nargs="+", help="matrix files, or runs' output directories")
+    args = parser.parse_args()
+    try:
+        matrices = read(args.matrices)
+        tests = every_test(matrices)
+        if args.command == "alone":
+            found = {}
+            for matrix in matrices:
+                for name, mutants in alone(matrix["mutants"]).items():
+                    found.setdefault(name, []).extend(mutants)
+            for name, test in tests.items():
+                if args.none and name not in found:
+                    killing = [m["id"] for x in matrices for m in resolved(x["mutants"])
+                               if m["outcome"] == "killed" and name in m["killing_tests"]]
+                    print(json.dumps(dict(test, kills=killing), ensure_ascii=False))
+                elif not args.none and name in found:
+                    print(json.dumps(dict(test, alone=found[name]), ensure_ascii=False))
+            return
+        kept = chosen_tests(tests, args.test, args.package, args.without, args.layer)
+        lines = [line for matrix in matrices for line in with_tests(matrix, kept)]
+        for line in lines:
+            print(json.dumps(line, ensure_ascii=False))
+        before = sum(1 for line in lines if line["matrix"] == "killed")
+        after = sum(1 for line in lines if line["outcome"] == "killed")
+        print(f"{len(kept)} of {len(tests)} tests kill {after} of the {before} mutants that the matrix holds as"
+              f" killed; {before - after} survive them.", file=sys.stderr)
+    except MatrixError as error:
+        print(f"matrix: {error}", file=sys.stderr)
+        sys.exit(1)
+
+
 def dumps(matrix):
     """A matrix as JSON, with one test and one mutant on each line."""
     lines = []
@@ -255,3 +374,7 @@ def run_package(workers, package, directory, found, native_only, sites, mutants,
         **({"self_test": self_test} if self_test is not None else {}),
     }
     return records, summary
+
+
+if __name__ == "__main__":
+    main()
