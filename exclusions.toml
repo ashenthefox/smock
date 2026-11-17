@@ -60,7 +60,7 @@ position = "30:20"
 text = "1e49cbb55eedb4d2"
 category = "UNREACHABLE"
 reason = "An abort arm, which an invariant guards; its message: \"a list or a read writes nothing\"."
-reviewer = ""
+reviewer = "the maintainer, 2026-11-18, in the sample drawn with seed 20261118"
 
 [[exclusion]]
 file = "engine/crud.mbt"
@@ -114,7 +114,7 @@ position = "11:5"
 text = "f8cd356c2abe7555"
 category = "UNREACHABLE"
 reason = "An abort arm, which an invariant guards; its message: \"a keyed bucket holds an array\"."
-reviewer = ""
+reviewer = "the maintainer, 2026-11-18, in the sample drawn with seed 20261118"
 
 [[exclusion]]
 file = "engine/keyed.mbt"
@@ -150,7 +150,7 @@ position = "9:5"
 text = "5ff5460848faab38"
 category = "UNREACHABLE"
 reason = "An abort arm, which an invariant guards; its message: \"a keyed bucket holds an array\"."
-reviewer = ""
+reviewer = "the maintainer, 2026-11-18, in the sample drawn with seed 20261118"
 
 [[exclusion]]
 file = "engine/keyed.mbt"
@@ -195,7 +195,7 @@ position = "13:5"
 text = "2b1d574ffa2a19a3"
 category = "UNREACHABLE"
 reason = "An abort arm, which an invariant guards; its message: \"every plan of a gRPC Stub has a gRPC part\"."
-reviewer = ""
+reviewer = "the maintainer, 2026-11-18, in the sample drawn with seed 20261118"
 
 [[exclusion]]
 file = "engine/render.mbt"
@@ -222,7 +222,7 @@ position = "48:37"
 text = "8fbd860b41c293c9"
 category = "UNREACHABLE"
 reason = "An abort arm, which an invariant guards; its message: \"a valid request has a check\"."
-reviewer = ""
+reviewer = "the maintainer, 2026-11-18, in the sample drawn with seed 20261118"
 
 [[exclusion]]
 file = "engine/writes.mbt"
@@ -258,7 +258,7 @@ position = "41:9"
 text = "af34eed022fc49c7"
 category = "UNREACHABLE"
 reason = "An abort arm, which an invariant guards; its message: \"own() keeps the value's kind\"."
-reviewer = ""
+reviewer = "the maintainer, 2026-11-18, in the sample drawn with seed 20261118"
 
 [[exclusion]]
 file = "protobuf/printed.mbt"
@@ -267,7 +267,7 @@ position = "3:10"
 text = "aa6fa5137018e310"
 category = "UNREACHABLE"
 reason = "An abort arm, which an invariant guards; its message: \"\\{text} is not a JSON number\"."
-reviewer = ""
+reviewer = "the maintainer, 2026-11-18"
 
 # The abort arm that #280 put in place of a message no input reaches, which
 # the maintainer approved (UNREACHABLE).
@@ -279,4 +279,4 @@ position = "29:12"
 text = "1836af689293fe31"
 category = "UNREACHABLE"
 reason = "An abort arm, which an invariant guards; its message: \"core_decimal gives a number in JSON syntax\"."
-reviewer = ""
+reviewer = "the maintainer, 2026-11-18"
