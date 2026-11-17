@@ -206,6 +206,7 @@ import choice
 import compare
 import confirm
 import importers
+import matrix
 import selftest
 
 HERE = Path(__file__).resolve().parent
@@ -495,19 +496,23 @@ def package_summary(root, directory, sites, skipped, chosen, operator_set):
     }
 
 
-def run_package(root, directory, sites, mutants, workers, log, self_test_only=False):
+def run_package(root, directory, sites, mutants, workers, log, self_test_only=False, kill_matrix=False):
     """Runs the chosen mutants of one package, whose sites are given, with
     its own tests, and those that survive again with the tests of its
     importers that build on wasm-gc: its records, and its summary's counts
     of the run, with its own tests alone and after its importers' tests.
     The package's self-test runs first when it has a mutant to run, or
-    with self_test_only."""
+    with self_test_only. With kill_matrix, each mutant runs with its own
+    and its importers' tests at once instead (matrix.py)."""
     package = package_name(root, directory)
     first = workers[0]
     try:
         packages, native_only = importers.find(first.moon, first.tree, first.target, package)
     except importers.ImportersError as error:
         raise RunnerError(str(error)) from error
+    if kill_matrix:
+        return matrix.run_package(workers, package, directory, packages, native_only, sites, mutants, log,
+                                  run_tests, outcome_counts, RunnerError)
     credit = importers.credit(packages, native_only)
     records, baseline, limit, self_test = run_tests(workers, package, [package], mutants, log,
                                                     f"{package}: {len(sites)} sites", own=directory,
@@ -769,6 +774,9 @@ def main():
                         help="run only shard K of N of the mutants (K from 1)")
     parser.add_argument("--self-test-only", action="store_true",
                         help="run each package's self-test, and no mutant")
+    parser.add_argument("--matrix", action="store_true",
+                        help="run each mutant with its package's and its importers' tests at once, and write the"
+                             " kill matrix")
     parser.add_argument("--workers", type=int, default=1, help="how many mutants build and run at once")
     parser.add_argument("--flakes", help="the flake records of an earlier run (its flakes.json)")
     parser.add_argument("--moon", default="moon", help="the moon command")
@@ -854,7 +862,8 @@ def main():
             summary["set"] = run_set
             if not args.sites_only:
                 package_records, counts = run_package(root, directory, sites[directory], chosen[directory],
-                                                      workers, log, self_test_only=args.self_test_only)
+                                                      workers, log, self_test_only=args.self_test_only,
+                                                      kill_matrix=args.matrix)
                 for record in package_records:
                     record.update(set=run_set)
                 summary.update(counts)
