@@ -659,6 +659,46 @@ class RunnerTest(unittest.TestCase):
         # The run prints the report.
         self.assertIn("-  low <= n && n <= high\n+  low <= n && n < high\n", self.result.stdout)
 
+    def test_each_survivor_has_its_status_after_the_exclusion_list(self):
+        # The fixture's exclusion list (fixture/exclusions.toml) has three
+        # entries for calc's survivors: a current ARID one, which accepts
+        # its survivor; a current DEFERRED one, which still counts as
+        # unexplained; and a stale one, whose survivor is stale-covered
+        # (#302). The other survivors have none: unexplained.
+        status = {r["id"]: r["exclusion"] for r in self.records if r["outcome"] == "survived"}
+        self.assertEqual(status.pop("calc/calc.mbt,is_blank,BOOL,true,false,0"),
+                         {"status": "accepted", "entry": "calc/calc.mbt,is_blank,BOOL,true,false,0",
+                          "category": "ARID"})
+        self.assertEqual(status.pop("calc/calc.mbt,is_odd,INT,0,-1,0"),
+                         {"status": "unexplained", "entry": "calc/calc.mbt,is_odd,INT,0,-1,0",
+                          "category": "DEFERRED", "issue": 1})
+        self.assertEqual(status.pop("calc/calc.mbt,halve_until,INT,2,3,0"),
+                         {"status": "stale-covered", "entry": "calc/calc.mbt,halve_until,INT,2,3,0",
+                          "category": "ARID"})
+        self.assertEqual(len(status), 6)
+        self.assertEqual(status, {i: {"status": "unexplained"} for i in status})
+        # Only a survivor has a status.
+        self.assertFalse(any("exclusion" in r for r in self.records if r["outcome"] != "survived"))
+
+    def test_the_summary_and_the_report_count_the_survivors_after_the_exclusion_list(self):
+        package = json.loads((self.out / "summary.json").read_text())["packages"][0]
+        self.assertEqual(package["exclusions"], {"unexplained": 7, "stale_covered": 1, "accepted": 1,
+                                                 "accepted_by_category": {"ARID": 1}})
+        report = (self.out / "report.md").read_text()
+        self.assertIn("After the exclusion list: 7 unexplained, 1 stale-covered, 1 accepted (ARID 1).", report)
+        self.assertIn("#### `calc/calc.mbt,halve_until,INT,2,3,0`\n\nStale-covered: its only entry,"
+                      " `calc/calc.mbt,halve_until,INT,2,3,0`, is stale.\n", report)
+        self.assertIn("#### `calc/calc.mbt,is_odd,INT,0,-1,0`\n\nUnexplained: DEFERRED to #1.\n", report)
+        self.assertIn("#### `calc/calc.mbt,is_blank,BOOL,true,false,0`\n\nAccepted by the exclusion list: ARID.\n",
+                      report)
+        self.assertIn("#### `calc/calc.mbt,is_blank,NOT,!,,0`\n\nUnexplained.\n", report)
+        # The unexplained survivors come first, then the stale-covered one,
+        # then the accepted one.
+        self.assertLess(report.index("`calc/calc.mbt,is_odd,INT,0,-1,0`\n"),
+                        report.index("`calc/calc.mbt,halve_until,INT,2,3,0`\n"))
+        self.assertLess(report.index("`calc/calc.mbt,halve_until,INT,2,3,0`\n"),
+                        report.index("`calc/calc.mbt,is_blank,BOOL,true,false,0`\n"))
+
     def test_the_runner_never_passes_u(self):
         # in_range's first mutant is killed by a snapshot alone, which -u
         # would rewrite: it would then survive.

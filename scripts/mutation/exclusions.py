@@ -281,6 +281,85 @@ def check(root, moonc):
     return not problems
 
 
+# The order in which a report lists survivors: those that count first.
+STATUSES = ("unexplained", "stale-covered", "accepted")
+
+
+def annotate(root, records, moonc="moonc"):
+    """Gives each survivor among records what the list at root says of it,
+    as its "exclusion": accepted, by a current entry other than DEFERRED;
+    stale-covered, when its only entry is stale; or unexplained, with its
+    DEFERRED entry if it has one. Each names its entry and the category."""
+    survivors = [r for r in records if r.get("outcome") == "survived"]
+    if not survivors:
+        return
+    entries, problems = read_list(root)
+    if problems and not entries:
+        raise ExclusionError("; ".join(problems))
+    by_mutant = {e.mutant: e for e in entries if e.mutant}
+    covering = [by_mutant[r["id"]] for r in survivors if r["id"] in by_mutant]
+    found = definitions(root, {e.file for e in covering if isinstance(e.file, str)}, moonc) if covering else {}
+    for record in survivors:
+        entry = by_mutant.get(record["id"])
+        if entry is None:
+            record["exclusion"] = {"status": "unexplained"}
+            continue
+        named = {"entry": entry.key, "category": entry.category}
+        if stale(entry, found):
+            record["exclusion"] = {"status": "stale-covered", **named}
+        elif entry.category == "DEFERRED":
+            record["exclusion"] = {"status": "unexplained", **named, "issue": entry.fields.get("issue")}
+        elif entry.category in CATEGORIES:
+            record["exclusion"] = {"status": "accepted", **named}
+        else:
+            record["exclusion"] = {"status": "unexplained"}
+
+
+def counts(records):
+    """The survivors among records after the list, for a summary."""
+    found = [r["exclusion"] for r in records if r.get("outcome") == "survived" and "exclusion" in r]
+    if not found:
+        return {}
+    accepted = sorted(f["category"] for f in found if f["status"] == "accepted")
+    return {"exclusions": {
+        "unexplained": sum(1 for f in found if f["status"] == "unexplained"),
+        "stale_covered": sum(1 for f in found if f["status"] == "stale-covered"),
+        "accepted": len(accepted),
+        "accepted_by_category": {c: accepted.count(c) for c in CATEGORIES if c in accepted},
+    }}
+
+
+def summary_line(summary):
+    """The report's line of a package's survivors after the list, or None
+    when it has none."""
+    found = summary.get("exclusions")
+    if not found:
+        return None
+    by_category = ", ".join(f"{c} {n}" for c, n in found["accepted_by_category"].items())
+    return (f"After the exclusion list: {found['unexplained']} unexplained, {found['stale_covered']} stale-covered,"
+            f" {found['accepted']} accepted" + (f" ({by_category})" if by_category else "") + ".")
+
+
+def ordered(survivors):
+    """Survivors in the order a report lists them: unexplained, then
+    stale-covered, then accepted, each in the run's order."""
+    return sorted(survivors, key=lambda r: STATUSES.index(r.get("exclusion", {}).get("status", "unexplained")))
+
+
+def status_line(record):
+    """What the report says of a survivor after the list."""
+    found = record.get("exclusion")
+    if found is None:
+        return None
+    if found["status"] == "accepted":
+        return f"Accepted by the exclusion list: {found['category']}."
+    if found["status"] == "stale-covered":
+        return f"Stale-covered: its only entry, `{found['entry']}`, is stale."
+    if "issue" in found:
+        return f"Unexplained: DEFERRED to #{found['issue']}."
+    return "Unexplained."
+
+
 class Points:
     """What the list says of the uncovered points: the places it accepts,
     each with its category, by (file, line, column); the places of its
