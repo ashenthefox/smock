@@ -5,7 +5,10 @@ each site's mutant in the pinned set has a known outcome, which a comment
 beside the site gives with its reason, and so does each site of the
 package log in both sets; the package shapes holds one site in each kind
 of definition, and look-alikes that are not sites; the package forms holds
-each form of each operator.
+each form of each operator. In the package units, each mutant of the
+pinned set has a known outcome with units' own tests and, for those that
+survive them, with the tests of the packages that import units (meter,
+and dial through meter; probe imports it too, but builds only natively).
 
 The operators, their alternatives and the pinned rule are those of
 operator set v1 (#275, ADR 0006 and CONTRIBUTING.md, "Operator set v1"),
@@ -13,6 +16,11 @@ which #299 completes: BODY, ROR, IFC, LCR, NOT, DEL, BOOL, AOR, INT and
 STR. The expected sites below are v1's, worked out by hand from those
 rules; a change to the rules is a new version, and these tables change
 with it. The time limit, 1.25 times the baseline run plus 4 s, is #298's.
+Kill credit for a pure package (#275, "Kill credit, pure packages", and
+#300): the package's own tests run first, and the survivors run again
+with the wasm-gc tests of every package that imports it, directly or
+through another package; e2e tests and the tests of other native-only
+packages give none.
 
 They need python3, git, moon and moonc (the toolchain of .moonbit-version),
 and take about half a minute: one mutant of the fixture times out.
@@ -89,6 +97,25 @@ LOG = [
     ('log/lines.mbt,cut_mark,BODY,{…},{ "" },0', True, "killed"),
     ('log/lines.mbt,cut_mark,STR,"~","_",0', True, "survived"),
 ]
+
+# The sites of units' pinned set, from units/units.mbt: each one's id, the
+# outcome that the comment beside it gives with units' own tests, the
+# outcome after the importers' tests, and the packages of the tests that
+# killed it.
+UNITS = [
+    ("units/units.mbt,within,BODY,{…},{ false },0", "killed", "killed", ["mutation/fixture/units"]),
+    ("units/units.mbt,within,ROR,<=,<,0", "survived", "killed", ["mutation/fixture/meter"]),
+    ("units/units.mbt,within,LCR,&&,||,0", "killed", "killed", ["mutation/fixture/units"]),
+    ("units/units.mbt,within,ROR,<=,<,1", "survived", "killed", ["mutation/fixture/dial"]),
+    ("units/units.mbt,past,BODY,{…},{ false },0", "killed", "killed", ["mutation/fixture/units"]),
+    ("units/units.mbt,past,ROR,>,>=,0", "survived", "survived", []),
+]
+
+# The packages of smock that build only natively (CONTRIBUTING.md, "Terms":
+# the native-only packages). None of them gives a pure package credit.
+NATIVE_ONLY = {"smock/smock/server", "smock/smock/cmd/smock", "smock/smock/defdir", "smock/smock/watch",
+               "smock/smock/openssl", "smock/smock/protobuf-conformance", "smock/smock/yaml-test-suite",
+               "smock/smock/schema", "smock/smock/e2e"}
 
 
 def find_sites(root, *paths, chosen=None):
@@ -677,6 +704,151 @@ class FullSetTest(unittest.TestCase):
         self.assertIn("## mutation/fixture/forms", report)
         self.assertIn("Sites skipped in this set: AOR string operand 2, BODY FFI 1, BODY no default 3,"
                       " LCR binds a name 1, STR outside scope 15.", report)
+
+
+class ImportersTest(unittest.TestCase):
+    """One run of units' pinned set, whose survivors run again with the
+    tests of the packages that import units, and the importers of smock's
+    own packages."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-mutation-importers-"))
+        cls.moon, cls.log = logging_moon(cls.tmp)
+        cls.out = cls.tmp / "units"
+        cls.result = subprocess.run(
+            [sys.executable, str(RUN), "--root", str(FIXTURE), "--work", str(cls.tmp / "work"), "--out", str(cls.out),
+             "--moon", str(cls.moon), "units"],
+            capture_output=True, text=True)
+        if cls.result.returncode != 0:
+            raise AssertionError(f"run.py failed ({cls.result.returncode}):\n{cls.result.stderr}")
+        cls.records = [json.loads(line) for line in (cls.out / "mutants.jsonl").read_text().splitlines()]
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_an_importers_test_kills_what_the_packages_own_tests_leave(self):
+        self.assertEqual([(r["id"], r["outcome"]) for r in self.records],
+                         [(i, after) for i, _, after, _ in UNITS])
+
+    def test_a_record_names_the_package_of_each_test_that_killed_it(self):
+        self.assertEqual([(r["id"], sorted({t["package"] for t in r["killing_tests"]})) for r in self.records],
+                         [(i, packages) for i, _, _, packages in UNITS])
+        killed = {r["id"]: [t["name"] for t in r["killing_tests"]] for r in self.records}
+        self.assertEqual(killed["units/units.mbt,within,ROR,<=,<,0"],
+                         ["a reading at the low end of the scale is on it"])
+        self.assertEqual(killed["units/units.mbt,within,ROR,<=,<,1"],
+                         ["a reading at the high end of a scale from 0 to 10 is on it"])
+
+    def test_only_the_survivors_of_the_packages_own_tests_run_again(self):
+        # With the tests of meter and of dial, which reaches units through
+        # meter; not with probe's, which builds only natively.
+        importers = ["mutation/fixture/dial", "mutation/fixture/meter"]
+        self.assertEqual([(r["id"], r["importers"]) for r in self.records],
+                         [(i, importers if own == "survived" else []) for i, own, _, _ in UNITS])
+        for record in self.records:
+            if record["importers"]:
+                self.assertGreater(record["timings"]["importers"]["run_s"], 0)
+            else:
+                self.assertNotIn("importers", record["timings"])
+        # Only the last survivor keeps its diff.
+        self.assertEqual([r["id"] for r in self.records if "diff" in r], ["units/units.mbt,past,ROR,>,>=,0"])
+
+    def test_a_native_only_importers_tests_never_run(self):
+        # probe's test would kill `n >= high`, but a pure package's verdict
+        # is taken on wasm-gc. moon is only asked whether probe builds there.
+        runs = [line.split() for line in self.log.read_text().splitlines()
+                if "mutation/fixture/probe" in line.split()]
+        self.assertTrue(runs)
+        for words in runs:
+            self.assertIn("--dry-run", words)
+
+    def test_the_summary_counts_the_outcomes_before_and_after_the_importers_tests(self):
+        package = json.loads((self.out / "summary.json").read_text())["packages"][0]
+        self.assertEqual({k: package["own"][k] for k in ("mutants", "killed", "timed_out", "survived", "unviable")},
+                         {"mutants": 6, "killed": 3, "timed_out": 0, "survived": 3, "unviable": 0})
+        self.assertEqual(package["own"]["score"], 0.5)
+        self.assertEqual({k: package[k] for k in ("mutants", "killed", "timed_out", "survived", "unviable")},
+                         {"mutants": 6, "killed": 5, "timed_out": 0, "survived": 1, "unviable": 0})
+        importers = package["importers"]
+        self.assertEqual(importers["packages"], ["mutation/fixture/dial", "mutation/fixture/meter"])
+        self.assertEqual(importers["native_only"], ["mutation/fixture/probe"])
+        self.assertEqual(importers["baseline"]["tests"], 2)
+        self.assertAlmostEqual(importers["limit_s"], 1.25 * importers["baseline"]["run_s"] + 4, places=2)
+        self.assertEqual((importers["reran"], importers["killed"]), (3, 2))
+        self.assertEqual(importers["killed_by"], {"mutation/fixture/dial": 1, "mutation/fixture/meter": 1})
+
+    def test_the_report_gives_the_importers_and_what_their_tests_killed(self):
+        report = (self.out / "report.md").read_text()
+        self.assertIn("With its own tests alone: 6 mutants, killed 3, timed out 0, survived 3, unviable 0,"
+                      " score 50.0%.", report)
+        self.assertIn("Importers that build on wasm-gc: mutation/fixture/dial, mutation/fixture/meter.", report)
+        self.assertIn("Importers that build only natively, whose tests give no credit: mutation/fixture/probe.",
+                      report)
+        self.assertIn("Their tests ran the 3 survivors of its own tests again and killed 2:"
+                      " mutation/fixture/dial 1, mutation/fixture/meter 1.", report)
+        self.assertIn("### Survivors (1)", report)
+        self.assertIn("units/units.mbt,past,ROR,>,>=,0", report)
+        self.assertNotIn("#### `units/units.mbt,within,ROR,<=,<,0`", report)
+
+    def test_the_importers_tests_never_run_when_nothing_survives(self):
+        # meter's one mutant, BODY's `{ false }`, is killed by meter's own
+        # test, so dial's tests, which import meter, are not even built.
+        before = len(self.log.read_text().splitlines())
+        out = self.tmp / "meter"
+        result = subprocess.run(
+            [sys.executable, str(RUN), "--root", str(FIXTURE), "--work", str(self.tmp / "work"), "--out", str(out),
+             "--moon", str(self.moon), "meter"],
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        records = [json.loads(line) for line in (out / "mutants.jsonl").read_text().splitlines()]
+        self.assertEqual([(r["id"], r["outcome"], r["importers"]) for r in records],
+                         [("meter/meter.mbt,on_scale,BODY,{…},{ false },0", "killed", [])])
+        importers = json.loads((out / "summary.json").read_text())["packages"][0]["importers"]
+        self.assertEqual((importers["packages"], importers["reran"], importers["killed"]),
+                         (["mutation/fixture/dial"], 0, 0))
+        self.assertNotIn("baseline", importers)
+        for line in self.log.read_text().splitlines()[before:]:
+            if "mutation/fixture/dial" in line.split():
+                self.assertIn("--dry-run", line.split())
+
+    def test_smocks_importers_come_from_the_build_and_leave_out_native_only_packages(self):
+        # Worked out by hand from each package's moon.pkg: its imports, for
+        # its source and for its tests, and its supported_targets.
+        result = subprocess.run([sys.executable, str(HERE / "importers.py"), "--root", str(REPO),
+                                 "template", "log", "yaml", "protobuf", "testcerts", "unicode"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        found = {line["package"]: line for line in map(json.loads, result.stdout.splitlines())}
+        # template: llm and definitions import it, engine, importopenapi and
+        # settings through them; defdir, server and cmd/smock build only
+        # natively (#300: engine's tests killed 16 of template's survivors).
+        self.assertEqual(found["smock/smock/template"]["importers"],
+                         ["smock/smock/definitions", "smock/smock/engine", "smock/smock/importopenapi",
+                          "smock/smock/llm", "smock/smock/settings"])
+        self.assertEqual(found["smock/smock/template"]["native_only"],
+                         ["smock/smock/cmd/smock", "smock/smock/defdir", "smock/smock/server"])
+        # Through as many packages as it takes: only template imports
+        # unicode, definitions imports template, and settings imports
+        # definitions, but neither template nor unicode.
+        self.assertIn("smock/smock/settings", found["smock/smock/unicode"]["importers"])
+        # e2e imports log for its tests, and builds only natively: e2e tests
+        # give no credit for a pure package.
+        self.assertIn("smock/smock/e2e", found["smock/smock/log"]["native_only"])
+        self.assertIn("smock/smock/template", found["smock/smock/log"]["importers"])
+        # schema imports yaml for its tests, and yaml-test-suite imports it;
+        # protobuf-conformance imports protobuf; all three build only
+        # natively (#300, "Native-only importers").
+        self.assertTrue({"smock/smock/schema", "smock/smock/yaml-test-suite"}
+                        <= set(found["smock/yaml"]["native_only"]))
+        self.assertIn("smock/smock/protobuf-conformance", found["smock/protobuf"]["native_only"])
+        # A test import reaches no further: server imports openssl, which
+        # imports testcerts only for its tests, so server is no importer.
+        self.assertEqual((found["smock/smock/testcerts"]["importers"], found["smock/smock/testcerts"]["native_only"]),
+                         ([], ["smock/smock/e2e", "smock/smock/openssl"]))
+        for line in found.values():
+            self.assertEqual(set(line["importers"]) & NATIVE_ONLY, set(), line["package"])
 
 
 if __name__ == "__main__":
