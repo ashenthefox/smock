@@ -666,6 +666,28 @@ per line, chosen by operator priority, would not do: of the 24 survivors
 of the sample first read as real, it would have picked another site for
 16.
 
+Which alternative the pinned set takes is *proposed*, and takes effect
+when the maintainer accepts
+[ADR 0006](docs/adr/0006-tests-are-judged-by-four-ledgers.md), which
+gives the reasons:
+
+- **IFC** (*proposed*) takes the alternative under which the code that
+  the condition guards never runs: false for the condition of an `if` or
+  an `else if` (its then-branch never runs), of a loop (its body never
+  runs) and for a match arm's guard (the arm never matches), and true for
+  the condition of a `guard` statement (its `else` never runs). The full
+  set adds the other.
+- **STR** (*proposed*) changes one character: the first character of the
+  literal's text, outside any interpolation, becomes `_`, or `-` when it
+  already is `_`. An empty literal becomes `"_"`. The full set adds the
+  empty string.
+- **INT** (*proposed*) has three alternatives: n+1, n-1, and 0 where n is
+  not 0. Outside comparisons and indexes, the pinned set takes n+1, or n-1
+  where n+1 does not fit the literal's type. The full set adds the others
+  there, and 0 in comparisons and indexes.
+- **ROR** (*proposed*) swaps only `<` and `<=`, and `>` and `>=`. It does
+  not swap `==` and `!=`, in either set.
+
 Sites come from a parser, not from a lexer. For each package, each report
 gives the number of sites that each rule skipped (no default value for
 BODY, a string outside STR's scope, FFI) beside the number of survivors,
