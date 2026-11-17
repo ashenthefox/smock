@@ -572,6 +572,72 @@ def kept_off_wasm_gc(repo, base, head, path):
     return out
 
 
+# --- Files that decide a verdict --------------------------------------------------
+
+LIST = "scripts/verdict-files.txt"
+LIST_ENTRY = (LIST, "the list of the files that decide a verdict")
+STATUS = {"A": "added", "M": "changed", "D": "deleted", "T": "changed in type"}
+DIFF_LINES = 400
+
+
+def watched(text):
+    """The entries of a list of the files that decide a verdict: each a
+    pattern and what it names. A line is a pattern, spaces and words; one
+    that starts with # is a comment."""
+    entries = []
+    for line in (text or "").splitlines():
+        if line.strip() and not line.lstrip().startswith("#"):
+            pattern, *description = line.split(None, 1)
+            entries.append((pattern, " ".join(description).strip()))
+    return entries
+
+
+def matches(pattern, path):
+    """Whether path is a file that pattern names: the path itself; with
+    a final /, every file under that directory; and with *, any text
+    without a / in its place."""
+    if pattern.endswith("/"):
+        return path.startswith(pattern)
+    return re.fullmatch(re.escape(pattern).replace(r"\*", "[^/]*"), path) is not None
+
+
+def verdict_files(repo, base, head, changed):
+    """The changed files that decide a verdict, as Markdown lines: those
+    that the list names in the base or in the head, and the list itself."""
+    entries = [LIST_ENTRY]
+    for rev in (head, base):
+        if exists(repo, rev, LIST):
+            entries += [e for e in watched(show(repo, rev, LIST)) if e[0] not in dict(entries)]
+    out = []
+    for status, path in changed:
+        entry = next((e for e in entries if matches(e[0], path)), None)
+        if entry is None:
+            continue
+        pattern, description = entry
+        diff = git(repo, "diff", base, head, "--", path).splitlines()
+        hunks = diff[next((i for i, line in enumerate(diff) if line.startswith("@@")), len(diff)) :]
+        added = sum(1 for line in hunks if line.startswith("+"))
+        removed = sum(1 for line in hunks if line.startswith("-"))
+        shown = hunks[:DIFF_LINES]
+        if len(hunks) > DIFF_LINES:
+            shown.append(f"... {len(hunks) - DIFF_LINES} more lines: git diff {base[:12]} {head[:12]} -- {path}")
+        out += [
+            f"### `{path}` ({STATUS.get(status[0], status)})",
+            "",
+            f"{description[:1].upper()}{description[1:]} (listed as `{pattern}`).",
+            "",
+            f"<details><summary>{added} lines added, {removed} removed</summary>",
+            "",
+            "```diff",
+            *shown,
+            "```",
+            "",
+            "</details>",
+            "",
+        ]
+    return out
+
+
 # --- The report ----------------------------------------------------------------
 
 
@@ -633,7 +699,10 @@ def report(repo, base_ref, head_ref):
                 out += entry
     if skips:
         out += ["## Skip attributes and target settings added", "", *skips, ""]
-    if not (deleted or assertions or snapshots or skips):
+    verdicts = verdict_files(repo, base, head, changed)
+    if verdicts:
+        out += ["## Files that decide a verdict changed", "", *verdicts]
+    if not (deleted or assertions or snapshots or skips or verdicts):
         out += ["Nothing to report.", ""]
     return out
 

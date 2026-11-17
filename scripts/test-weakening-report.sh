@@ -530,6 +530,98 @@ PKG
 report targets-kept
 empty targets-kept
 
+# --- Files that decide a verdict ----------------------------------------------------
+
+# A list of watched paths: a file, a directory and a pattern.
+watched() {
+  file scripts/verdict-files.txt <<'TXT'
+# A comment, and a blank line.
+
+floors.txt          the coverage floors
+runner/             the mutation runner and its data
+ci/mutation*.yml    the mutation workflows
+TXT
+  file floors.txt <<'TXT'
+add 3
+TXT
+  file runner/data/sites.txt <<'TXT'
+add 12
+TXT
+}
+
+# A floor raised, a file of the runner's data changed and one added, a
+# workflow added; a file beside them that is not listed.
+tree
+package
+watched
+branch
+echo "add 4" | file floors.txt
+echo "add 11" | file runner/data/sites.txt
+echo "operators" | file runner/operators.txt
+echo "on: push" | file ci/mutation-weekly.yml
+echo "on: push" | file ci/other.yml
+echo "not runner" | file runner.txt
+report verdict
+mentions verdict "## Files that decide a verdict changed"
+mentions verdict '### `floors.txt` (changed)'
+mentions verdict 'The coverage floors (listed as `floors.txt`).'
+mentions verdict '-add 3'
+mentions verdict '+add 4'
+mentions verdict '### `runner/data/sites.txt` (changed)'
+mentions verdict 'The mutation runner and its data (listed as `runner/`).'
+mentions verdict '### `runner/operators.txt` (added)'
+mentions verdict '### `ci/mutation-weekly.yml` (added)'
+mentions verdict 'The mutation workflows (listed as `ci/mutation*.yml`).'
+lacks verdict 'ci/other.yml'
+lacks verdict 'runner.txt'
+
+# A file deleted, and a path taken off the list while its file changes:
+# the list of the base and the head's both count, and a change to the list
+# shows whatever it names.
+tree
+package
+watched
+branch
+remove runner
+sed -i '/^floors.txt/d' "$repo/scripts/verdict-files.txt"
+echo "add 2" | file floors.txt
+report verdict-off
+mentions verdict-off '### `runner/data/sites.txt` (deleted)'
+mentions verdict-off '### `floors.txt` (changed)'
+mentions verdict-off '### `scripts/verdict-files.txt` (changed)'
+mentions verdict-off 'The list of the files that decide a verdict (listed as `scripts/verdict-files.txt`).'
+mentions verdict-off '-floors.txt          the coverage floors'
+
+# Each path that the committed list names shows, with what the list says
+# it is. A path with * or ending in / stands for a file it matches.
+list=scripts/verdict-files.txt
+tree
+package
+branch
+mkdir -p "$repo/scripts"
+cp "$list" "$repo/$list"
+entries=0
+while read -r pattern description; do
+  case $pattern in '' | '#'*) continue ;; esac
+  entries=$((entries + 1))
+  path=$(printf '%s\n' "$pattern" | sed 's|\*|x|g; s|/$|/x|')
+  if [ "$path" != "$list" ]; then
+    file "$path" </dev/null
+  fi
+  printf '%s\t%s\t%s\n' "$path" "$pattern" "$description" >>"$tmp/entries"
+done <"$list"
+report committed-list
+while IFS="$(printf '\t')" read -r path pattern description; do
+  first=$(printf '%s' "$description" | cut -c1 | tr '[:lower:]' '[:upper:]')
+  mentions committed-list "### \`$path\` (added)"
+  mentions committed-list "$first$(printf '%s' "$description" | cut -c2-) (listed as \`$pattern\`)."
+done <"$tmp/entries"
+if [ "$entries" -ge 10 ]; then
+  pass "committed-list: names $entries paths"
+else
+  fail "committed-list: names $entries paths, fewer than the kinds of file it must name"
+fi
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]
