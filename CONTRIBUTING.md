@@ -191,6 +191,8 @@ Packages of `smock/smock`:
   each mode's list of the suite's cases that do not pass (native). smock's
   image does not hold it. `scripts/check-yaml-test-suite.sh` runs the
   suite on it ([yaml-test-suite/README.md](yaml-test-suite/README.md)).
+  The repository holds none of the suite: `scripts/fetch-yaml-test-suite.sh`
+  fetches its pinned release and checks it against its SHA-256.
 - `schema`: a test over every Definition-file fixture in
   `schema/v1/fixtures/` that needs no `smock` binary: each, written as YAML
   by `smock/yaml`, reads back as the same tree (native).
