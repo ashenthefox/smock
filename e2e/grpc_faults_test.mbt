@@ -534,12 +534,24 @@ async test "a deadline that cuts a delay short comes before the Fault, which wou
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let client = smock.h2c()
       defer client.close()
+      // smock "counts the call's deadline from the arrival of its HEADERS",
+      // and "the Journal records the call when it ends at its deadline"
+      // (docs/grpc/state-and-faults.md, Deadlines), oldest first
+      // (docs/admin-api.md). So the entries come in the order of the
+      // deadlines, which the calls' timeouts set 300 ms apart: three times
+      // the 100 ms that Deadlines allows a client's reset before a
+      // deadline, the only width it gives one. Equal timeouts would leave
+      // the order to whichever call's task smock ran first.
       let start = @async.now()
       let streams = []
-      for fault in ["cut-reset", "cut-partial", "cut-close"] {
-        streams.push(
-          client.start_call(timeout="500m", headers=[("x-fault", fault)]),
-        )
+      for
+        cut in [
+          ("cut-reset", "500m"),
+          ("cut-partial", "800m"),
+          ("cut-close", "1100m"),
+        ] {
+        let (fault, timeout) = cut
+        streams.push(client.start_call(timeout~, headers=[("x-fault", fault)]))
       }
       let out = []
       for stream in streams {
