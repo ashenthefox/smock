@@ -935,7 +935,9 @@ Step 3's close checks the ledgers against the documents once more
 
 Each package has a floor: the most uncovered points its in-process tests
 may leave, as `scripts/coverage.sh` counts them. `coverage/floors.txt`
-holds them; they were first taken from the report at d88929b2. CI's job
+holds them. They start at the counts committed there, first taken from
+the report at d88929b2, as the maintainer decided on 2026-11-18, and
+each change since lowers or raises them by the rules below. CI's job
 `coverage` runs `scripts/coverage.sh` on every push and pull request, then
 `scripts/coverage-ratchet.py check` on its bisect report, against the
 merge base with `main`:
