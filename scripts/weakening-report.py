@@ -41,6 +41,11 @@ What it lists, each under a heading, or "Nothing to report.":
   Files that decide a verdict changed
       each changed file that scripts/verdict-files.txt names, in the base
       or in the head, with its diff, and each change to that list.
+  Exclusion entries whose reviewer changed
+      each entry of the exclusion list, exclusions.toml, whose reviewer
+      the head fills in, changes or empties, and each entry it adds with a
+      reviewer, by the entry's id: only the maintainer fills in the
+      reviewer (CONTRIBUTING.md, "Exclusions").
 
 It exits with 2 when git cannot answer, such as when <base> or <head> is
 not a commit.
@@ -53,6 +58,7 @@ import posixpath
 import re
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
 
 
@@ -717,6 +723,49 @@ def verdict_files(repo, base, head, changed):
     return out
 
 
+# --- The exclusion list's reviewers ------------------------------------------------
+
+EXCLUSIONS = "exclusions.toml"
+
+
+def reviewers(text):
+    """Each entry of an exclusion list's text, by its id, with its
+    reviewer: a mutant's id, or a point's file, definition and position;
+    None when the text is not TOML."""
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return None
+    found = {}
+    for fields in data.get("exclusion", []):
+        if isinstance(fields, dict):
+            key = fields.get("mutant") or f"{fields.get('file')},{fields.get('definition')},{fields.get('position')}"
+            found[key] = fields.get("reviewer") or ""
+    return found
+
+
+def reviewer_changes(repo, base, head, changed):
+    """The entries of the exclusion list whose reviewer the head changes,
+    and those it adds with a reviewer, as Markdown lines."""
+    if not any(path == EXCLUSIONS for _, path in changed):
+        return []
+    lists = [reviewers(show(repo, rev, EXCLUSIONS)) if exists(repo, rev, EXCLUSIONS) else {} for rev in (base, head)]
+    if None in lists:
+        return [f"- the report cannot read `{EXCLUSIONS}` as TOML: see its diff"]
+
+    def shown(reviewer):
+        return json.dumps(reviewer, ensure_ascii=False) if reviewer else "none"
+
+    before, after = lists
+    out = []
+    for key, reviewer in after.items():
+        if key in before and before[key] != reviewer:
+            out.append(f"- `{key}`: from {shown(before[key])} to {shown(reviewer)}")
+        elif key not in before and reviewer:
+            out.append(f"- `{key}`: a new entry, reviewed by {shown(reviewer)}")
+    return out
+
+
 # --- The report ----------------------------------------------------------------
 
 
@@ -785,7 +834,10 @@ def report(repo, base_ref, head_ref):
     verdicts = verdict_files(repo, base, head, changed)
     if verdicts:
         out += ["## Files that decide a verdict changed", "", *verdicts]
-    if not (deleted or assertions or snapshots or skips or verdicts):
+    reviewed = reviewer_changes(repo, base, head, changed)
+    if reviewed:
+        out += ["## Exclusion entries whose reviewer changed", "", *reviewed, ""]
+    if not (deleted or assertions or snapshots or skips or verdicts or reviewed):
         out += ["Nothing to report.", ""]
     return out
 

@@ -679,6 +679,69 @@ mentions verdict-off '### `scripts/verdict-files.txt` (changed)'
 mentions verdict-off 'The list of the files that decide a verdict (listed as `scripts/verdict-files.txt`).'
 mentions verdict-off '-floors.txt          the coverage floors'
 
+# --- The exclusion list's reviewers --------------------------------------------------
+
+# Only the maintainer fills in an entry's reviewer, in a commit the
+# maintainer makes or acknowledges at the merge: the report lists every
+# entry whose reviewer changed, by its id, and an entry that comes with a
+# reviewer (#302). A change to another field shows only in the list's
+# diff.
+exclusions() {
+  file exclusions.toml <<TOML
+[[exclusion]]
+mutant = "calc/calc.mbt,is_odd,INT,0,-1,0"
+text = "90e6c82aa9560cde"
+category = "ARID"
+reason = "$1"
+reviewer = "$2"
+
+[[exclusion]]
+file = "engine/crud.mbt"
+definition = "crud_call"
+position = "5:13"
+text = "0123456789abcdef"
+category = "UNREACHABLE"
+reason = "An abort arm."
+reviewer = "$3"
+TOML
+}
+tree
+package
+exclusions "A default." "" ""
+branch
+exclusions "Another reason." "" "the maintainer"
+cat >>"$repo/exclusions.toml" <<'TOML'
+
+[[exclusion]]
+mutant = "calc/calc.mbt,is_blank,NOT,!,,0"
+text = "5fd10e41baf9fa48"
+category = "ARID"
+reason = "A new entry."
+reviewer = "the maintainer"
+
+[[exclusion]]
+mutant = "calc/calc.mbt,is_blank,INT,0,1,0"
+text = "5fd10e41baf9fa48"
+category = "ARID"
+reason = "A new entry, not reviewed."
+reviewer = ""
+TOML
+report reviewers
+mentions reviewers "## Exclusion entries whose reviewer changed"
+mentions reviewers '- `engine/crud.mbt,crud_call,5:13`: from none to "the maintainer"'
+mentions reviewers '- `calc/calc.mbt,is_blank,NOT,!,,0`: a new entry, reviewed by "the maintainer"'
+lacks reviewers '- `calc/calc.mbt,is_odd,INT,0,-1,0`'
+lacks reviewers '- `calc/calc.mbt,is_blank,INT,0,1,0`'
+
+# A reviewer taken away shows too.
+tree
+package
+exclusions "A default." "the maintainer" ""
+branch
+exclusions "A default." "" ""
+report reviewer-gone
+mentions reviewer-gone '- `calc/calc.mbt,is_odd,INT,0,-1,0`: from "the maintainer" to none'
+
 # A watched Markdown file whose diff holds a fence of its own: the report
 # fences the diff with more backticks, so that the fence does not end it.
 tree
