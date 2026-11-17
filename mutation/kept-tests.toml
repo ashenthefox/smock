@@ -339,7 +339,8 @@ callback in openssl/openssl.c, the alert code read, close_notify read as
 Closed, the self-signed certificate's names and keys, and the handshakes
 with each kind of chain, whose first step is the bindings' loading), and the
 e2e TLS tests, whose outcomes smock's server decides and which a removal
-batch judges.
+batch judges. Those of these tests whose subject smock's C decides are
+kept under own-c.
 """
 
 [[reason.test]]
