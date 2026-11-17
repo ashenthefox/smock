@@ -518,6 +518,31 @@ test "the same values quoted are strings, and look-alikes that no YAML version t
       #|1e3_0 -> {"a":"1e3_0"}
     ),
   )
+  // Near misses of the YAML 1.1 int, float and timestamp types
+  // (yaml.org/type/int.html, float.html and timestamp.html): the digits of
+  // an integer or a float start with a digit, not `_`, and an exponent
+  // needs a digit after its sign; a date without a time has a two-digit
+  // month and day, a month or day has at most two digits, and a time has
+  // an hour and a two-digit second. `1.x` is not a JSON number either,
+  // whose point needs a digit after it (RFC 8259, section 6). No YAML
+  // version types them, so each is a string, as docs/definition-files.md
+  // says of every other plain scalar.
+  inspect(
+    as_value([
+      "_1", "_1.5", "1.5e+", "1.x", "2001-1-14", "2001-123-14", "2001-12-14T:59:43",
+      "2001-12-14 21:59:4x",
+    ]),
+    content=(
+      #|_1 -> {"a":"_1"}
+      #|_1.5 -> {"a":"_1.5"}
+      #|1.5e+ -> {"a":"1.5e+"}
+      #|1.x -> {"a":"1.x"}
+      #|2001-1-14 -> {"a":"2001-1-14"}
+      #|2001-123-14 -> {"a":"2001-123-14"}
+      #|2001-12-14T:59:43 -> {"a":"2001-12-14T:59:43"}
+      #|2001-12-14 21:59:4x -> {"a":"2001-12-14 21:59:4x"}
+    ),
+  )
 }
 
 ///|
