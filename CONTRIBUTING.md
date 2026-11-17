@@ -131,10 +131,22 @@ Packages of `smock/smock`:
   ([ADR 0005](docs/adr/0005-http2-comes-from-moonhttp.md)).
   On the TLS port the same loop reads and writes through a TLS stream; on
   the admin port it answers the Admin API. It reloads rotated certificates,
-  and reads the SNI name from the ClientHello before OpenSSL sees it, so that
-  the name chooses the certificate without a C callback. Its one C
-  function, in `server/reset.c`, sets `SO_LINGER` so that the reset Fault
-  ends a connection with an RST, the exception ADR 0001 makes for it.
+  and reads the SNI name from the ClientHello, with `serverparsers`, before
+  OpenSSL sees it, so that the name chooses the certificate without a C
+  callback. Its one C function, in `server/reset.c`, sets `SO_LINGER` so
+  that the reset Fault ends a connection with an RST, the exception
+  ADR 0001 makes for it.
+- `serverparsers`: the parsers of `server` that do no I/O, in a package of
+  their own so that in-process tests reach them, on `wasm-gc` as well as
+  natively. It reads the host name that a TLS ClientHello asks for by SNI
+  (RFC 6066, section 3) from the octets a client has sent so far, or tells
+  that more octets are needed; `server` reads them from the socket and
+  chooses the certificate by the name. It imports no moonhttp
+  ([ADR 0005](docs/adr/0005-http2-comes-from-moonhttp.md),
+  [ADR 0006](docs/adr/0006-tests-are-judged-by-four-ledgers.md)): anything
+  that needs it stays in `server`. Its tests read no files: the
+  ClientHellos they start from, captured from a real client, are bytes in
+  the test source.
 - `watch`: polls the definitions directory and the certificate files
   every second, so that `server` can reload them (native). It uses no
   file-system events until a release of the async runtime fixes its file
@@ -198,8 +210,9 @@ Packages of `smock/smock`:
 A package that does I/O or uses FFI declares `supported_targets = "native"`.
 Every other package also builds for `wasm-gc`, and CI tests it there. The
 packages that decide a response, `definitions`, `engine`, `template` and
-`llm`, the ones they import, `prng`, `cookies`, `unicode` and `log`, and the
-OpenAPI converter, `importopenapi`, must stay that way:
+`llm`, the ones they import, `prng`, `cookies`, `unicode` and `log`, the
+OpenAPI converter, `importopenapi`, and the parsers of `server` that do no
+I/O, `serverparsers`, must stay that way:
 `scripts/check-no-io.sh` fails if one of them leaves out `wasm-gc`, reads
 the environment, binds C or imports a package that does I/O.
 
@@ -281,7 +294,7 @@ moon check --deny-warn --target all
 moon fmt --check
 moon bench -p smock/smock/engine --release   # match index lookups: 100 vs 10,000 Stubs
 scripts/coverage.sh            # point coverage of the in-process tests, per package (needs python3)
-scripts/check-no-io.sh         # no I/O in the protocol modules, the packages that decide a response and the OpenAPI converter
+scripts/check-no-io.sh         # no I/O in the protocol modules, the packages that decide a response, the OpenAPI converter and server's parsers
 scripts/check-no-c.sh          # the C boundary of ADR 0001, in smock and in the modules it resolves (after moon check; needs jq)
 scripts/check-moonhttp-pin.sh  # the build resolves the moonhttp that moon.mod names (needs jq)
 scripts/check-notice.sh        # NOTICE names the toolchain and every module the build resolves (needs jq)
@@ -642,10 +655,13 @@ the rules for writing and removing tests apply already.
 - **Point**: an instrumentation point of moon's coverage, at a
   function's first statement, a then, else or match-arm body, or a call.
   It is covered when its counter is above zero.
-- **Pure package**: a package of code that builds on wasm-gc. There are
-  19: `buildinfo`, `cookies`, `definitions`, `engine`, `grpc`, `http1`,
-  `importopenapi`, `llm`, `log`, `metrics`, `prng`, `protobuf`, `re2`,
-  `settings`, `template`, `unicode`, `usage`, `xml` and `yaml`.
+- **Pure package**: a package of code that builds on wasm-gc. There were
+  19 when the test review began: `buildinfo`, `cookies`, `definitions`,
+  `engine`, `grpc`, `http1`, `importopenapi`, `llm`, `log`, `metrics`,
+  `prng`, `protobuf`, `re2`, `settings`, `template`, `unicode`, `usage`,
+  `xml` and `yaml`. `serverparsers`, made since from the parsers of
+  `server`, is pure too, but it is not in the two stages that take the 19
+  to L4 (below): how far it climbs is the maintainer's decision.
   `testcerts` builds there too, but it is data only, so it is not one.
   The native-only packages are `server`, `cmd/smock`, `defdir`, `watch`,
   `openssl`, `protobuf-conformance`, `schema` and `e2e`.
