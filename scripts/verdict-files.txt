@@ -1,9 +1,9 @@
-# The files that decide a verdict: of the coverage and mutation ledgers,
-# of the merge and release checks that read them, and of the suites that
-# run against a list of cases that may fail (CONTRIBUTING.md, "The
-# weakening report"). On each push to a branch other than main, the
-# weakening report (scripts/weakening-report.py) lists every change to
-# them, for the maintainer to read before merging the branch.
+# The files that decide a verdict: of the four ledgers, of the merge and
+# release checks that read them, and of the suites that run against a list
+# of cases that may fail (CONTRIBUTING.md, "The weakening report"). On
+# each push to a branch other than main, the weakening report
+# (scripts/weakening-report.py) lists every change to them, for the
+# maintainer to read before merging the branch.
 #
 # A line is a path, spaces, and what the file is. A path that ends in /
 # names every file under that directory, and a * stands for any text
@@ -21,6 +21,7 @@ scripts/weakening-report.py            the weakening report, which reads this li
 exclusions.*                           the exclusion list of surviving mutants and uncovered points, with each entry's category, reason and reviewer (#302)
 mutation/l4-packages.txt               the list of packages at L4 (#312)
 mutation/kept-tests.*                  the keep list: the tests kept for reasons the kill matrix cannot see (#351)
+docs/ledgers/                          the use-case and boundary ledgers, whose rows keep their tests under removal rule (C) (#286)
 mutation/                              the mutation runner and its committed data: the operator set and its alternative rule (#298, #299), the site counts and approved drops (#309), the flake threshold, and the flake rates if they are committed (#301), the fixture module and its expected verdicts (#298), and the canary's mutants, recorded verdicts and explained differences (#308)
 coverage/                              the coverage wrapper and its committed data: the bisect parser (#296), the floors and approved raises (#297), and the scope's list of generated files
 scripts/check-merge.*                  the merge check (#312)

@@ -336,6 +336,8 @@ python3 -m unittest discover -s bench -p test_compare.py -v   # the benchmark's 
 python3 scripts/check-kept-tests.py   # every test that the keep list, mutation/kept-tests.toml, names is still there (needs Python 3.11 or later)
 scripts/test-check-kept-tests.sh     # that check, on small trees
 scripts/test-trace-links.sh          # the trace links of the removal proof (scripts/trace-links.py), on small git histories with a stand-in for gh (needs python3 and git)
+python3 scripts/check-ledgers.py     # every test that the use-case and boundary ledgers, docs/ledgers/, name is still there, and each row's status agrees with what it names
+scripts/test-check-ledgers.sh        # that check, on small trees
 helm lint --strict charts/smock --set adminAuth.tokenSecret.name=smock-admin-token   # the Helm chart passes helm's lint (needs helm)
 scripts/test-helm-chart.sh           # rendering tests of the Helm chart (needs helm, yq and jq)
 python3 -m unittest discover -s bench -p test_gke_script.py -v   # scripts/gke-bench.sh against fake gcloud, kubectl and docker commands, about 5 minutes
@@ -396,6 +398,14 @@ the searches that found its tests. A removal batch never proposes a test
 on it. `scripts/check-kept-tests.py` fails when a test that the list names
 is no longer there, so a change that renames, moves or removes a listed
 test changes the list in the same commit.
+
+[`docs/ledgers/`](docs/ledgers/use-cases.md) holds the use-case and
+boundary ledgers of the test review
+([The four ledgers](#the-four-ledgers)): each documented feature, message
+and limit, with its source and the tests that check it.
+`scripts/check-ledgers.py` fails in the same way when a test that a ledger
+names is no longer there, and when a row's status does not agree with what
+it names.
 
 `scripts/check-h2spec.sh` runs h2spec 2.6.0, the HTTP/2 conformance tool,
 against a smock binary: every case of its `generic`, `http2` and `hpack`
@@ -700,7 +710,9 @@ never gated. Each baseline below was measured at d953f320.
    crosses it. A limit in the code that no document states is a finding:
    once the maintainer confirms it, the documents state it, and it is
    tested like the others. Baseline: about 33 of the 40 most important
-   limits tested on both sides.
+   limits tested on both sides. The
+   [boundary ledger](docs/ledgers/boundaries.md) lists each limit with its
+   source and its tests.
 4. **Use cases**: every documented feature has an automated test, or a
    recorded manual check with its reason. Every Definition-file example
    in the documents passes `smock check` in CI. Every message a user can
@@ -708,6 +720,8 @@ never gated. Each baseline below was measured at d953f320.
    covered, 2 partly and 4 not; 70 of the 71 whole Definition files in the
    documents pass once given the context they leave out; 22 messages, 20
    of which a user can see, and the top-level help asserted by no test.
+   The [use-case ledger](docs/ledgers/use-cases.md) lists each feature and
+   each message with its source and its tests.
 
 **Scope.** All non-test source of the workspace, except generated files
 (the Unicode data table and the build information) and the test
