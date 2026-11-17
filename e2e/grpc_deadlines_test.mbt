@@ -256,13 +256,15 @@ async test "a delay shorter than the call's deadline is served, and so is a dela
             .filter(field => field.0.has_prefix("grpc-"))
             .map(field => "\{field.0}: \{field.1}")
             .join(", ")
-          let at_once = if headers.is_empty() {
-            " "
+          // A call without a delay has no competing event: its status shows
+          // that it was served, and how fast is the runner's speed.
+          let (at_once, when) = if headers.is_empty() {
+            (" ", ", after the delay of 1000 ms: \{ms >= delay}")
           } else {
-            " x-delay: none, "
+            (" x-delay: none, ", "")
           }
           out.push(
-            "grpc-timeout \{timeout},\{at_once}\{reply.data.length()} message: \{status}, after the delay of 1000 ms: \{ms >= delay}",
+            "grpc-timeout \{timeout},\{at_once}\{reply.data.length()} message: \{status}\{when}",
           )
         }
         let (_, page) = smock.journal()
@@ -272,7 +274,7 @@ async test "a delay shorter than the call's deadline is served, and so is a dela
             #|grpc-timeout 5S, 1 message: grpc-status: 0, after the delay of 1000 ms: true
             #|grpc-timeout 99999999H, 1 message: grpc-status: 0, after the delay of 1000 ms: true
             #|grpc-timeout 0m, 0 message: grpc-status: 4, grpc-message: deadline exceeded, after the delay of 1000 ms: false
-            #|grpc-timeout 0m, x-delay: none, 1 message: grpc-status: 0, after the delay of 1000 ms: false
+            #|grpc-timeout 0m, x-delay: none, 1 message: grpc-status: 0
             #|Journal:
             #|"slow" 200 "OK"
             #|"slow" 200 "OK"
