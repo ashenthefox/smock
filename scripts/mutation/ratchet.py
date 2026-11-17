@@ -65,6 +65,7 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import NamedTuple
 
@@ -137,27 +138,32 @@ class Definition:
                           ensure_ascii=False, separators=(",", ":"))
 
 
-def definitions(root, package, moonc):
-    """The top-level definitions of a package's non-test source, outside
-    generated files and test blocks, in the order of its files and lines."""
-    found = []
+def definitions(root, names, moonc, jobs=4):
+    """The top-level definitions of each package's non-test source,
+    outside generated files and test blocks, in the order of its files and
+    lines. The compiler parses jobs files at once."""
     files = []
-    for path in sites.source_files(root, [package]):
-        text = (root / path).read_text(encoding="utf-8")
-        if not sites.is_generated(text):
-            files.append((path, text))
+    for package in names:
+        for path in sites.source_files(root, [package]):
+            text = (root / path).read_text(encoding="utf-8")
+            if not sites.is_generated(text):
+                files.append((package, path, text))
     with tempfile.TemporaryDirectory(prefix="smock-ratchet-") as tmp:
-        for index, (path, text) in enumerate(files):
-            source = sites.SourceFile(path, text)
-            for entry in sites.parse_tree(sites.dump(moonc, "wasm-gc", Path(tmp), index, path, text)):
-                if not (isinstance(entry, list) and len(entry) == 3 and entry[0] == "base_pos"):
-                    raise RatchetError(f"{path}: unexpected entry in the parse tree: {str(entry)[:80]}")
-                item = sites.Item(source, entry[1], entry[2])
-                if item.is_test():
-                    continue
-                first, last = item.lines()
-                body = "\n".join(text.split("\n")[first - 1 : last])
-                found.append(Definition(path.as_posix(), item.name(), first, last, body))
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            trees = list(pool.map(lambda f: sites.dump(moonc, "wasm-gc", Path(tmp), f[0], f[1][1], f[1][2]),
+                                  enumerate(files)))
+    found = {package: [] for package in names}
+    for (package, path, text), tree in zip(files, trees):
+        source = sites.SourceFile(path, text)
+        for entry in sites.parse_tree(tree):
+            if not (isinstance(entry, list) and len(entry) == 3 and entry[0] == "base_pos"):
+                raise RatchetError(f"{path}: unexpected entry in the parse tree: {str(entry)[:80]}")
+            item = sites.Item(source, entry[1], entry[2])
+            if item.is_test():
+                continue
+            first, last = item.lines()
+            body = "\n".join(text.split("\n")[first - 1 : last])
+            found[package].append(Definition(path.as_posix(), item.name(), first, last, body))
     return found
 
 
@@ -178,7 +184,7 @@ def tree_counts(root, finder, moonc):
     """Each package's definitions, each with its counts of sites, on
     root's tree."""
     names = packages(root)
-    by_package = {p: definitions(root, p, moonc) for p in names}
+    by_package = definitions(root, names, moonc)
     by_file = {}
     for found in by_package.values():
         for definition in found:
