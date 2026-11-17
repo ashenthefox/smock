@@ -141,12 +141,18 @@ Packages of `smock/smock`:
   natively. It reads the host name that a TLS ClientHello asks for by SNI
   (RFC 6066, section 3) from the octets a client has sent so far, or tells
   that more octets are needed; `server` reads them from the socket and
-  chooses the certificate by the name. It imports no moonhttp
+  chooses the certificate by the name. It builds the reply of a Mock's
+  reflection service to the first request message of a call, which
+  `server` sends, and reads when a certificate expires from its PEM, which
+  `server` reports in the expiry metric. It imports no moonhttp
   ([ADR 0005](docs/adr/0005-http2-comes-from-moonhttp.md),
   [ADR 0006](docs/adr/0006-tests-are-judged-by-four-ledgers.md)): anything
   that needs it stays in `server`. Its tests read no files: the
   ClientHellos they start from, captured from a real client, are bytes in
-  the test source.
+  the test source, the reflection service's Descriptor sets and messages
+  are protoc's, which `scripts/gen-protobuf-fixtures.sh` writes in hex
+  there, and the certificates are RFC 7468's examples or built in the
+  test.
 - `watch`: polls the definitions directory and the certificate files
   every second, so that `server` can reload them (native). It uses no
   file-system events until a release of the async runtime fixes its file
