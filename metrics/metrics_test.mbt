@@ -218,6 +218,34 @@ test "label values that run together the same way are still different series" {
   )
 }
 
+///|
+test "a metric name is a Prometheus metric name: one with a colon, a capital Z or a 0 after the first character" {
+  // The Prometheus text exposition format 0.0.4 writes a metric name as an
+  // identifier with "the usual Prometheus expression language restrictions",
+  // which Prometheus's data model writes as `[a-zA-Z_:][a-zA-Z0-9_:]*`: `:`,
+  // as in a recording rule's name, letters up to `Z`, and digits from `0`
+  // after the first character.
+  let registry = @metrics.Registry()
+  for name in ["job:smock_requests:sum", "smock_A_Z", "smock_0_9"] {
+    let _ = registry.gauge(name, help="A name.")
+  }
+  inspect(
+    registry.render(),
+    content=(
+      #|# HELP job:smock_requests:sum A name.
+      #|# TYPE job:smock_requests:sum gauge
+      #|job:smock_requests:sum 0
+      #|# HELP smock_A_Z A name.
+      #|# TYPE smock_A_Z gauge
+      #|smock_A_Z 0
+      #|# HELP smock_0_9 A name.
+      #|# TYPE smock_0_9 gauge
+      #|smock_0_9 0
+      #|
+    ),
+  )
+}
+
 // The label names of a metric are fixed when it is registered. Getting it
 // wrong is a mistake in smock's code, not in its input, so it aborts.
 
