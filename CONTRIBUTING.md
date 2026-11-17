@@ -642,7 +642,9 @@ finder and the runner on `scripts/mutation/fixture`, a module that is not
 a member of the workspace. In its package `calc`, each site's mutant has a
 known outcome, given beside the site with its reason: some are killed, a
 few survive, and one times out. The package `shapes` holds a site in each
-kind of definition, and look-alikes that are not sites.
+kind of definition, and look-alikes that are not sites. `moon fmt --check`
+at the root does not read the fixture: run `moon fmt` inside it after a
+change.
 
 ## Benchmark
 
