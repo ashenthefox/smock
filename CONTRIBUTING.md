@@ -951,7 +951,9 @@ when the mutant times out again and the run without it finishes within
 the limit; otherwise it is recorded as unconfirmed. The baseline runs
 twice before any mutant. The runner records each test's flake rate, and a
 test above the flake threshold, which the maintainer sets, gives no kill
-credit until it is fixed.
+credit until it is fixed. The flake threshold is 1% of a test's runs,
+over the latest 10 runs whose flake records the runner reads;
+`mutation/flakes.toml` holds both numbers.
 
 **Kill credit for a pure package.** Any wasm-gc test of any package of
 the workspace gives credit. The package's own tests run first. For the

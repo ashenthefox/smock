@@ -1,0 +1,13 @@
+# The flake threshold of the mutation runner (CONTRIBUTING.md, "Outcomes
+# and kill credit"; scripts/mutation/confirm.py reads it). A test gives no
+# kill credit while its flake rate, over the latest `recent_runs` runs whose
+# flake records the runner reads, is above `threshold`. A test's flake rate
+# is the share of its runs that gave a flaky result: a failure without a
+# mutant, or a pass when a kill is run again with the mutant on. The
+# weakening report lists any change to this file.
+
+# A share of a test's runs, from 0 to below 1.
+threshold = 0.01
+
+# How many runs, the latest first, the rate is taken over.
+recent_runs = 10
