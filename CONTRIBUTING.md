@@ -1852,9 +1852,9 @@ package's own tests, as in a run without the mode.
 
 The tests of a matrix are those that moon's outline
 (`moon test --outline`) lists for the package and its importers. The run
-stops if the outline lists a different number of tests than the runs
-without a mutant ran, or two tests that the matrix would name alike. A
-test is named by its package, `/` and its file, then `:` and its name, as
+stops before any mutant if the outline lists two tests that the matrix
+would name alike, and after the package's mutants if it lists a different
+number of tests than the runs without a mutant ran. A test is named by its package, `/` and its file, then `:` and its name, as
 in `smock/smock/usage/usage_test.mbt:<name>`, or, for a test with no name
 such as a documentation test, `#` and its index in the file, as in
 `smock/http1/target.mbt#0`. Confirmation and the flake records name such
