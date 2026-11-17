@@ -322,6 +322,20 @@ class KillMatrixTest(unittest.TestCase):
         self.assertEqual((matrix["set"], [(m["id"], m["outcome"], len(m["killing_tests"])) for m in matrix["mutants"]]),
                          ("full", [(MATRIX[0][0], "killed", 5)]))
 
+    def test_a_run_stops_when_moons_outline_does_not_list_every_test_it_ran(self):
+        # A moon whose outline leaves out its last test, as one whose
+        # outline the runner no longer reads would.
+        moon = self.tmp / "short-outline"
+        moon.write_text('#!/bin/sh\ncase " $* " in *" --outline "*) "$0.real" "$@" | sed \'$d\';;'
+                        ' *) exec "$0.real" "$@";; esac\n')
+        moon.chmod(moon.stat().st_mode | stat.S_IXUSR)
+        Path(f"{moon}.real").symlink_to(self.moon)
+        result = run_runner(FIXTURE, self.tmp / "work", self.tmp / "short", moon, "--matrix", "--mutant",
+                            MATRIX[1][0], "units")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("moon lists 6 tests of mutation/fixture/units, mutation/fixture/dial, mutation/fixture/meter,"
+                      " but ran 7", result.stderr)
+
     def test_a_kill_matrix_runs_alone(self):
         for other in (["--totals-only", "--list", "x.jsonl"], ["--self-test-only"]):
             result = run_runner(FIXTURE, self.tmp / "work", self.tmp / "refused", self.moon, "--matrix", *other,
