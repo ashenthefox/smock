@@ -588,6 +588,18 @@ test "malformed indentation gives an error at the deepest node reached, or a val
       #|"a: |\n  \n  x" -> {"a":"\nx"}
     ),
   )
+  // A sequence item where the mapping expects its next key, and a key
+  // continued on a more indented line: YAML limits an implicit key to a
+  // single line (YAML 1.2.2, section 8.2.2). The messages are those
+  // #280's acceptance criteria name; the pointer is the deepest node
+  // reached, or the member for a key, as `parse` documents.
+  inspect(
+    each(["a: 1\n- b", "a\n b: 1"]),
+    content=(
+      #|"a: 1\n- b" -> error /a: expected a key, found a sequence item; check the indentation
+      #|"a\n b: 1" -> error /a b: a key must be on a single line
+    ),
+  )
 }
 
 ///|
@@ -633,6 +645,18 @@ test "unterminated quotes and flow collections give an error at the deepest node
       #|"a: \"x\" y" -> error /a: unexpected text after the value
     ),
   )
+  // A flow collection closed by the other bracket, and a key in a flow
+  // mapping with no ':' after it. The messages are those #280's acceptance
+  // criteria name; the pointer is the deepest node reached, as `parse`
+  // documents.
+  inspect(
+    each(["a: [1}", "a: {x: 1]", "a: {\"x\" 1}"]),
+    content=(
+      #|"a: [1}" -> error /a/0: expected , or ] in a flow sequence
+      #|"a: {x: 1]" -> error /a/x: expected , or } in a flow mapping
+      #|"a: {\"x\" 1}" -> error /a/x: expected ':' after a key
+    ),
+  )
 }
 
 ///|
@@ -671,6 +695,15 @@ test "empty values, empty documents and stray indicators give an error" {
       #|"a: \"\\u12\"" -> error /a: invalid escape: expected a hexadecimal digit
       #|"a: \"\\ud800\"" -> error /a: invalid escape: a high surrogate must be followed by a low surrogate
       #|"a: \"\\udc00\"" -> error /a: invalid escape: not a Unicode character
+    ),
+  )
+  // A `-` item indicator inside a flow collection: YAML embeds flow nodes
+  // in block collections, "but not vice-versa" (YAML 1.2.2, section
+  // 8.2.3). The message is the one #280's acceptance criteria name.
+  inspect(
+    each(["[- a]"]),
+    content=(
+      #|"[- a]" -> error /0: a block sequence cannot be inside a flow collection
     ),
   )
 }
