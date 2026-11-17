@@ -1,0 +1,19 @@
+# The raises of coverage floors that a change records (#297,
+# CONTRIBUTING.md, "The coverage floors"). The coverage ratchet
+# (scripts/coverage-ratchet.py, in CI's job coverage) compares each
+# package's floor in coverage/floors.txt with its floor at the merge base
+# with main. A floor above the base's, or a first floor above 0 for a
+# package that had none there, fails the ratchet unless the change adds a
+# line here for that package:
+#
+#   <package> <points> <reason>
+#
+# <package> is the package's directory, as coverage/floors.txt names it;
+# <points> is how many points the floor rises, which the ratchet's message
+# gives; <reason> says why the points cannot be covered now, such as the
+# issue that will cover them. Only the lines that a change adds record its
+# raises, and those of a package must add up to at least its raise. A line
+# is not the approval, since every commit here has the same author: the
+# weakening report lists it with the floors it raises, and the maintainer's
+# acknowledgment of that report at the merge is the approval. The lines
+# stay, as the record of what was approved.
