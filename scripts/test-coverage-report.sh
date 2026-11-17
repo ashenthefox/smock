@@ -69,6 +69,7 @@ says() {
 # Every point of prng's four has a count above 0, on its two lines.
 report covered "$fixtures/covered.bisect"
 exits covered 0
+says covered "package points covered uncovered lines covered"
 says covered "prng 4 of 4 100.0% 0 2 of 2"
 
 # --- A partly covered line -------------------------------------------------

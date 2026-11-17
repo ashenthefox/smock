@@ -251,15 +251,26 @@ def print_report(packages):
             print(f"{name}: {len(package.uncovered)} of {package.points} points uncovered")
             for file, line, column, definition in package.uncovered:
                 print(f"  {file}:{line}:{column}  {definition}")
-    width = max(len(name) for name in packages)
+    rows = [("package", "points covered", "", "uncovered", "lines covered")]
     for name in sorted(packages):
         package = packages[name]
-        print(
-            f"{name:<{width}}  {package.covered} of {package.points}  "
-            f"{percent(package.covered, package.points)}  "
-            f"{package.points - package.covered}  "
-            f"{package.lines_covered()} of {len(package.lines)}"
+        rows.append(
+            (
+                name,
+                f"{package.covered} of {package.points}",
+                percent(package.covered, package.points),
+                str(package.points - package.covered),
+                f"{package.lines_covered()} of {len(package.lines)}",
+            )
         )
+    widths = [max(len(row[column]) for row in rows) for column in range(5)]
+    print()
+    for row in rows:
+        print(
+            f"{row[0]:<{widths[0]}}  {row[1]:>{widths[1]}} {row[2]:>{widths[2]}}"
+            f"  {row[3]:>{widths[3]}}  {row[4]:>{widths[4]}}"
+        )
+    print()
     inside = [packages[name] for name in sorted(packages) if name in BINARY_ONLY]
     outside = [packages[name] for name in sorted(packages) if name not in BINARY_ONLY]
     print(summary("Outside server and cmd/smock", outside))
