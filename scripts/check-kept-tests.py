@@ -20,7 +20,8 @@ The list is TOML, with nothing at its top but these:
   [[reason]]
       id         lower-case words joined by hyphens, unique in the list;
       rule       which reason of rule (C) it is: spec constant, backend
-                 agreement, dependency or deliberate overlap;
+                 agreement, dependency, deliberate overlap or smock's own
+                 C;
       title      what the reason keeps;
       source     where the reason comes from;
       search     the searches over test names, files and comments that
@@ -56,7 +57,7 @@ import re
 import sys
 import tomllib
 
-RULES = ["spec constant", "backend agreement", "dependency", "deliberate overlap"]
+RULES = ["spec constant", "backend agreement", "dependency", "deliberate overlap", "smock's own C"]
 REASON_KEYS = ["id", "rule", "title", "source", "search", "found", "test"]
 TEST_KEYS = ["file", "name", "source"]
 ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
