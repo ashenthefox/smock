@@ -1,6 +1,7 @@
 """Chooses which mutants a run of the mutation runner makes, beyond its set
-and the ids of --mutant (CONTRIBUTING.md, "Mutation runner"): shard k of
-n of them. scripts/mutation/run.py calls it; it runs nothing itself.
+and the ids of --mutant (CONTRIBUTING.md, "Mutation runner"): a seeded
+sample of them, stratified by package, and shard k of n of them.
+scripts/mutation/run.py calls it; it runs nothing itself.
 
 The run's order is the order of the packages given, then the finder's
 order within each package. A choice keeps that order, so that the shards
@@ -8,6 +9,7 @@ of a run, read in shard order, hold its mutants in its own order.
 """
 
 import argparse
+import hashlib
 import re
 
 SHARD = re.compile(r"^(\d+)/(\d+)$")
@@ -39,6 +41,30 @@ def shard(chosen, directories, index, count):
     for directory, site in order[start:end]:
         mine[directory].append(site)
     return mine
+
+
+def sample(chosen, directories, size, seed):
+    """A sample of size of the chosen mutants, stratified by package: each
+    package's share of it is its share of the mutants, rounded down, and
+    the mutants left over go to the packages whose shares lost the most in
+    rounding (the first package given wins a tie). Within a package, the
+    mutants taken are those whose ids, with the seed, have the smallest
+    SHA-256 hashes, so that the same seed and the same mutants give the
+    same sample, whatever the version of Python."""
+    total = sum(len(chosen[d]) for d in directories)
+    if size >= total:
+        return {d: list(chosen[d]) for d in directories}
+    quotas = {d: size * len(chosen[d]) // total for d in directories}
+    lost = sorted(directories, key=lambda d: (-(size * len(chosen[d]) % total), directories.index(d)))
+    for directory in lost[: size - sum(quotas.values())]:
+        quotas[directory] += 1
+    taken = {}
+    for directory in directories:
+        ranked = sorted(range(len(chosen[directory])),
+                        key=lambda i: (hashlib.sha256(f"{seed}\n{chosen[directory][i]['id']}".encode()).hexdigest(), i))
+        keep = set(ranked[: quotas[directory]])
+        taken[directory] = [s for i, s in enumerate(chosen[directory]) if i in keep]
+    return taken
 
 
 def running(directories, chosen, mine, selected, shard_index):

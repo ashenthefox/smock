@@ -521,6 +521,9 @@ def main():
     parser.add_argument("--mutant", action="append", help="run only the mutant with this id")
     parser.add_argument("--sites-only", action="store_true",
                         help="count the sites of each package in both sets, and run no mutant")
+    parser.add_argument("--sample", type=int, metavar="N",
+                        help="run a sample of N of the mutants, stratified by package")
+    parser.add_argument("--seed", default="0", help="the seed of --sample (0 unless given)")
     parser.add_argument("--shard", type=choice.shard_spec, metavar="K/N",
                         help="run only shard K of N of the mutants (K from 1)")
     parser.add_argument("--workers", type=int, default=1, help="how many mutants build and run at once")
@@ -530,6 +533,8 @@ def main():
     args = parser.parse_args()
     if args.workers < 1:
         parser.error("--workers must be at least 1")
+    if args.sample is not None and (args.sample < 1 or args.mutant):
+        parser.error("--sample takes a number from 1, and no --mutant")
     root = Path(args.root).resolve()
     work = Path(args.work).resolve() if args.work else root / "_build" / "mutation"
     out = Path(args.out).resolve() if args.out else work / "out"
@@ -545,8 +550,11 @@ def main():
             raise RunnerError(f"the packages' sites name several operator sets: {sorted(versions)}")
         operator_set = versions.pop() if versions else None
         sites, whole = choose(found, args.set, args.mutant, args.packages)
+        if args.sample is not None:
+            whole = choice.sample(whole, args.packages, args.sample, args.seed)
         chosen = choice.shard(whole, args.packages, *args.shard) if args.shard else whole
-        runs = choice.running(args.packages, whole, chosen, bool(args.mutant), args.shard and args.shard[0])
+        selected = bool(args.mutant) or args.sample is not None
+        runs = choice.running(args.packages, whole, chosen, selected, args.shard and args.shard[0])
         records, summaries = [], []
         if not args.sites_only:
             files = listed_files(root)

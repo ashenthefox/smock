@@ -104,5 +104,48 @@ class ShardTest(unittest.TestCase):
             self.assertIn("argument --shard: ", result.stderr)
 
 
+class SampleTest(unittest.TestCase):
+    """Seeded samples, chosen without a run (--sites-only)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-choice-samples-"))
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def chosen(self, name, *args, root=FIXTURE):
+        out = self.tmp / name
+        result = run_runner(root, out, "--sites-only", *args, *PACKAGES)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return [(s["file"].split("/")[0], s["id"]) for s in read_lines(out / "chosen.jsonl")]
+
+    def test_a_seeded_sample_is_stratified_by_package_and_the_same_for_the_same_seed_and_tree(self):
+        # #305: "A seeded sample of N mutants, stratified by package, gives
+        # the same mutants for the same seed and tree."
+        whole = self.chosen("whole")
+        sample = self.chosen("sample", "--sample", "20", "--seed", "one")
+        self.assertEqual(len(sample), 20)
+        # Stratified: each package's share of the sample is its share of
+        # the set, rounded down or up.
+        for package in PACKAGES:
+            share = 20 * sum(1 for p, _ in whole if p == package) / len(whole)
+            taken = sum(1 for p, _ in sample if p == package)
+            self.assertIn(taken, {int(share), int(share) + 1} if share != int(share) else {int(share)}, package)
+        # The sample's mutants are the set's, in the run's order.
+        self.assertEqual([m for m in whole if m in sample], sample)
+        self.assertEqual(self.chosen("again", "--sample", "20", "--seed", "one"), sample)
+        self.assertNotEqual(self.chosen("other", "--sample", "20", "--seed", "two"), sample)
+        # The same tree elsewhere.
+        copy = self.tmp / "copy"
+        shutil.copytree(FIXTURE, copy, ignore=shutil.ignore_patterns("_build", "target", ".mooncakes"))
+        self.assertEqual(self.chosen("copy", "--sample", "20", "--seed", "one", root=copy), sample)
+
+    def test_a_sample_as_large_as_the_set_is_the_set(self):
+        whole = self.chosen("whole-full", "--set", "full")
+        self.assertEqual(self.chosen("all", "--set", "full", "--sample", str(len(whole) + 5)), whole)
+
+
 if __name__ == "__main__":
     unittest.main()
