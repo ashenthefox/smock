@@ -13,6 +13,10 @@
 #   not run it; Dependabot's pull request does.
 # - Its schedule runs it once a week, so that a table that no push changes
 #   is still compared with what unicode.org serves.
+# - One step runs `python3 scripts/gen-unicode-data.py --check`, with no
+#   directory, so that it downloads the files, and with nothing after it
+#   that could hide a failure. That step and its job run in every run of
+#   the workflow (no condition), and neither continues on error.
 #
 # scripts/test-check-unicode-data-workflow.sh tests this check. It needs yq
 # (mikefarah/yq v4, on GitHub's Ubuntu runners) and jq.
@@ -56,6 +60,33 @@ pull_request=$(jq -cn --argjson paths "$paths" '{"paths": $paths}')
 schedule=$(printf '%s\n' "$json" | jq -r '[.on.schedule[]?.cron | tostring] | join("; ")')
 printf '%s\n' "$schedule" | grep -Eqx '([0-5]?[0-9]) ([01]?[0-9]|2[0-3]) \* \* [0-6]' ||
   fail "it should run once a week (one schedule at one minute, hour and day of the week), not: ${schedule:-never}"
+
+# What is wrong with the steps that run the generator, one line each. The
+# check is the generator with --check and no directory: with one, it reads
+# the files there instead of downloading them.
+# shellcheck disable=SC2016 # jq's variables, not this shell's
+problems=$(printf '%s\n' "$json" | jq -r --arg command "python3 scripts/gen-unicode-data.py --check" '
+  def command: (.run // "") | tostring | gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "");
+  def continues: (.["continue-on-error"] // false) != false;
+  [.jobs | to_entries[] | .value as $job | .value.steps[]?
+   | select(command | test("gen-unicode-data"))
+   | {command: command, job: $job, step: .}] as $runs
+  | ($runs | map(.command)) as $commands
+  | (if $commands != [$command] then
+       "one step should run \($command), which downloads the Unicode Character Database and compares the table with what it gives, not: \(if $commands == [] then "nothing" else $commands | join("; ") end)"
+     else empty end),
+    ($runs[] | (.job.if, .step.if) | select(. != null)
+     | "the check should run in every run of the workflow, so neither its job nor its step should have a condition, not if: \(.)"),
+    ($runs[] | select(.job | continues)
+     | "the job that runs the check should not continue on error: a failed check would pass"),
+    ($runs[] | select(.step | continues)
+     | "the step that runs the check should not continue on error: a failed check would pass")')
+if [ -n "$problems" ]; then
+  printf '%s\n' "$problems" | while IFS= read -r problem; do
+    echo "check-unicode-data-workflow: $workflow: $problem" >&2
+  done
+  failed=1
+fi
 
 if [ "$failed" -ne 0 ]; then
   exit 1

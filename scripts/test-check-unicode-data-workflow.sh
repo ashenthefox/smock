@@ -151,6 +151,52 @@ refuses two-schedules \
   "it should run once a week" \
   "not: 23 4 * * 2; 41 5 * * 5"
 
+# --- What it runs ----------------------------------------------------------------
+
+# The step that runs the check, for the expressions below.
+step='.jobs[].steps[] | select(has("run"))'
+
+refuses no-check \
+  "del($step)" \
+  "one step should run python3 scripts/gen-unicode-data.py --check, which downloads the Unicode Character Database and compares the table with what it gives, not: nothing"
+
+refuses writes-the-table \
+  "($step).run = \"python3 scripts/gen-unicode-data.py\"" \
+  "one step should run python3 scripts/gen-unicode-data.py --check" \
+  "not: python3 scripts/gen-unicode-data.py"
+
+refuses reads-a-local-copy \
+  "($step).run = \"python3 scripts/gen-unicode-data.py --check ucd\"" \
+  "one step should run python3 scripts/gen-unicode-data.py --check" \
+  "not: python3 scripts/gen-unicode-data.py --check ucd"
+
+refuses hides-a-failure \
+  "($step).run = \"python3 scripts/gen-unicode-data.py --check || true\"" \
+  "one step should run python3 scripts/gen-unicode-data.py --check" \
+  "not: python3 scripts/gen-unicode-data.py --check || true"
+
+refuses check-twice \
+  '.jobs.again = .jobs.check' \
+  "one step should run python3 scripts/gen-unicode-data.py --check" \
+  "not: python3 scripts/gen-unicode-data.py --check; python3 scripts/gen-unicode-data.py --check"
+
+refuses step-with-a-condition \
+  "($step).if = \"github.event_name != 'schedule'\"" \
+  "the check should run in every run of the workflow, so neither its job nor its step should have a condition, not if: github.event_name != 'schedule'"
+
+refuses job-with-a-condition \
+  '.jobs.check.if = "github.event_name == '"'push'"'"' \
+  "the check should run in every run of the workflow" \
+  "not if: github.event_name == 'push'"
+
+refuses step-continues-on-error \
+  "($step).continue-on-error = true" \
+  "the step that runs the check should not continue on error: a failed check would pass"
+
+refuses job-continues-on-error \
+  '.jobs.check.continue-on-error = true' \
+  "the job that runs the check should not continue on error: a failed check would pass"
+
 echo
 echo "test-check-unicode-data-workflow: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
