@@ -120,7 +120,7 @@ pub struct Mock {
   /// gRPC Stubs, in the same order. It is `stubs` itself when the Mock has
   /// no gRPC Stub.
   http_stubs : ReadOnlyArray[Stub]
-  /// The match index of `http_stubs`, which `candidates` looks up.
+  /// The match index of `http_stubs`, which `first_candidate` looks up.
   priv index : MatchIndex
   /// The gRPC Stubs of the Mock by their exact path, each list in matching
   /// order, which `grpc_candidates` looks up.
