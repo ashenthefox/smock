@@ -3,6 +3,7 @@
 guesses, as .github/workflows/measure-costs.yml does on CI's runners.
 
 usage: python3 scripts/measure-costs.py <part> <out dir> [--runs N] [--jobs N]
+         [--file NAME]... [--timeout S]
 
 Each part writes <out dir>/<part>.json, keeps moon's output under
 <out dir>/logs/<part>/, and exits 1 when a measurement failed, after it has
@@ -15,6 +16,12 @@ its start to its exit, measured here.
         own work around a run; then runs every e2e test in one process,
         `--runs` times (3 by default): moon runs a package's async tests ten
         at a time, in one process.
+  alone Runs each e2e test alone, in a moon process of its own, one after
+        another, `--runs` times (1 by default; 0 runs none), since moon prints
+        no time per test: alone.tsv has one line for each run of a test, and
+        alone.json each test's times and their totals, median, 90th
+        percentile (nearest rank) and slowest. `--file` keeps the tests of one
+        file, and `--timeout` is the time limit of one test (300 s).
 
 It refuses to run when a variable that gives moon another C compiler, a
 wrapper of it or flags is set (MOON_CC, MOON_AR, MOON_CC_WRAPPER): on amd64,
@@ -145,7 +152,112 @@ def part_e2e(out, args):
     return 0
 
 
-PARTS = {"e2e": part_e2e}
+OUTLINE = re.compile(r'^\s*\d+\.\s+(\S+)\s+(\S+):(\d+)\s+index=(\d+)\s+name="(.*)"\s*$')
+
+ALONE_METHOD = (
+    "Each e2e test runs alone, in a moon test process of its own "
+    "(moon test --target native e2e/<file> -i <index>), one test after another. "
+    "Its time is the wall time of that command, so it holds moon's own work around "
+    "a run (the e2e part's noop) and the harness's build of cmd/smock, which has "
+    "nothing to do. A test that runs past the time limit is stopped with every "
+    "process it started."
+)
+
+
+def nearest_rank(values, share):
+    """The nearest-rank percentile: the smallest value that at least `share`
+    of the values are at or below."""
+    ordered = sorted(values)
+    rank = max(1, -(-len(ordered) * share // 1))
+    return ordered[int(rank) - 1]
+
+
+def median(values):
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def part_alone(out, args):
+    logs = out / "logs" / "alone"
+    result = {"part": "alone", "machine": machine(), "method": ALONE_METHOD, "runs": args.runs, "tests": []}
+    if args.runs == 0:
+        result["ok"] = True
+        write(out, "alone", result)
+        return 0
+    result["builds"] = [
+        timed(["moon", "build", "--target", "native", "cmd/smock", *jobs(args)], logs / "cmd-build.log"),
+        timed(
+            ["moon", "test", "--target", "native", "-p", "smock/smock/e2e", "--build-only", *jobs(args)],
+            logs / "e2e-build.log",
+        ),
+    ]
+    outline = subprocess.run(
+        ["moon", "test", "--target", "native", "-p", "smock/smock/e2e", "--outline"],
+        cwd=ROOT, capture_output=True, text=True,
+    ).stdout
+    (logs / "outline.txt").write_text(outline)
+    tests = []
+    for line in outline.splitlines():
+        found = OUTLINE.match(line)
+        if found and (not args.file or found.group(2) in args.file):
+            tests.append(
+                {"file": found.group(2), "line": int(found.group(3)), "index": int(found.group(4)),
+                 "name": found.group(5), "seconds": [], "failures": 0, "timed_out": 0}
+            )
+    result["tests"] = tests
+    if not all(passed(step) for step in result["builds"]) or not tests:
+        result["ok"] = False
+        write(out, "alone", result)
+        print("measure-costs: the e2e package did not build, or lists no test", file=sys.stderr)
+        return 1
+    with open(out / "alone.tsv", "w") as table:
+        table.write("run\tfile\tline\tindex\tseconds\texit_status\tname\n")
+        for run in range(1, args.runs + 1):
+            for test in tests:
+                log = logs / f"{test['file']}-{test['index']}-run-{run}.log"
+                step = timed(
+                    ["moon", "test", "--target", "native", f"e2e/{test['file']}", "-i", str(test["index"])],
+                    log, timeout=args.timeout,
+                )
+                test["seconds"].append(step["seconds"])
+                if step["timed_out"]:
+                    test["timed_out"] += 1
+                elif passed(step) and step.get("tests") == {"total": 1, "passed": 1, "failed": 0}:
+                    log.unlink()
+                else:
+                    test["failures"] += 1
+                status = "timeout" if step["timed_out"] else step["exit_status"]
+                table.write(
+                    f"{run}\t{test['file']}\t{test['line']}\t{test['index']}\t{step['seconds']}\t{status}\t{test['name']}\n"
+                )
+                table.flush()
+    each = [median(test["seconds"]) for test in tests]
+    failed_runs = sum(test["failures"] for test in tests)
+    timed_out_runs = sum(test["timed_out"] for test in tests)
+    result["summary"] = {
+        "tests": len(tests),
+        "test_runs": len(tests) * args.runs,
+        "failed_runs": failed_runs,
+        "timed_out_runs": timed_out_runs,
+        # Over each test's median, when a test runs more than once.
+        "total_seconds": round(sum(each), 3),
+        "median_seconds": median(each),
+        "p90_seconds": nearest_rank(each, 0.9),
+        "max_seconds": max(each),
+    }
+    result["ok"] = failed_runs == 0 and timed_out_runs == 0
+    write(out, "alone", result)
+    if failed_runs:
+        print(f"measure-costs: {failed_runs} of {len(tests) * args.runs} runs of an e2e test alone failed", file=sys.stderr)
+    if timed_out_runs:
+        print(f"measure-costs: {timed_out_runs} runs of an e2e test alone ran past {args.timeout} s", file=sys.stderr)
+    return 0 if result["ok"] else 1
+
+
+PARTS = {"e2e": part_e2e, "alone": part_alone}
 
 
 def main():
@@ -154,6 +266,8 @@ def main():
     parser.add_argument("out", type=Path, help="the directory the part writes to")
     parser.add_argument("--runs", type=int, default=None, help="how many runs (e2e: 3)")
     parser.add_argument("--jobs", type=int, default=None, help="moon's -j for the builds")
+    parser.add_argument("--file", action="append", help="alone: only the tests of this e2e file (repeatable)")
+    parser.add_argument("--timeout", type=float, default=300, help="alone: the time limit of one test, in seconds")
     args = parser.parse_args()
     if args.runs is None:
         args.runs = {"e2e": 3}.get(args.part, 1)

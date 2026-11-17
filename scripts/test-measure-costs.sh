@@ -37,7 +37,8 @@ mkdir -p "$tmp/bin"
 # The fake moon writes each call to $FAKE_LOG, with "[mutant]" before it
 # when engine/range.mbt holds the rebuild part's mutant. A run of tests
 # prints moon's total line: engine's tests fail with the mutant, as the
-# real ones do; one e2e test alone fails when it is $FAKE_FAILING_TEST;
+# real ones do; one e2e test alone fails when it is $FAKE_FAILING_TEST,
+# and hangs when it is $FAKE_HANGING_TEST;
 # every e2e run fails when $FAKE_E2E_FAILS is set.
 cat >"$tmp/bin/moon" <<'EOF'
 #!/bin/sh
@@ -58,6 +59,9 @@ build) exit 0 ;;
 esac
 case $args in
 *" -i "*)
+  if [ -n "${FAKE_HANGING_TEST-}" ] && [ "${args#*" $FAKE_HANGING_TEST "}" != "$args" ]; then
+    sleep 60
+  fi
   if [ -n "${FAKE_FAILING_TEST-}" ] && [ "${args#*" $FAKE_FAILING_TEST "}" != "$args" ]; then
     echo "Total tests: 1, passed: 0, failed: 1."
     exit 2
@@ -176,6 +180,74 @@ MOON_CC=gcc measure moon-cc e2e --runs 1
 exits moon-cc 2
 says moon-cc "MOON_CC is set"
 called moon-cc ""
+
+# --- alone: each e2e test alone -----------------------------------------------------------
+
+# What moon test --outline prints, for three tests in two files; a name may
+# hold quotes.
+cat >"$FAKE_OUTLINE" <<'EOF'
+   1. smock/smock/e2e b_test.mbt:7 index=0 name="a first test"
+   2. smock/smock/e2e b_test.mbt:30 index=1 name="a test that says "hello" twice"
+   3. smock/smock/e2e a_test.mbt:12 index=0 name="another file's test"
+EOF
+
+measure alone alone --runs 2
+exits alone 0
+called alone "build --target native cmd/smock
+test --target native -p smock/smock/e2e --build-only
+test --target native -p smock/smock/e2e --outline
+test --target native e2e/b_test.mbt -i 0
+test --target native e2e/b_test.mbt -i 1
+test --target native e2e/a_test.mbt -i 0
+test --target native e2e/b_test.mbt -i 0
+test --target native e2e/b_test.mbt -i 1
+test --target native e2e/a_test.mbt -i 0"
+holds alone alone.json '.ok == true and .runs == 2 and (.method | test("alone"))' "ok, with its method"
+holds alone alone.json '.tests | length == 3
+  and .[1] == (.[1] + {"file": "b_test.mbt", "line": 30, "index": 1, "name": "a test that says \"hello\" twice", "failures": 0, "timed_out": 0})
+  and all(.[]; (.seconds | length == 2) and all(.seconds[]; . >= 0))' \
+  "each test, with the time of each of its runs"
+holds alone alone.json '.summary | .tests == 3 and .test_runs == 6 and .failed_runs == 0 and .timed_out_runs == 0
+  and (.total_seconds, .median_seconds, .p90_seconds, .max_seconds | . >= 0)' \
+  "the totals, the median, the 90th percentile and the slowest"
+if [ "$(wc -l <"$tmp/alone/alone.tsv")" = 7 ] && head -1 "$tmp/alone/alone.tsv" | grep -q "^run	file	line	index	seconds	exit_status	name$"; then
+  pass "alone: writes one line for each run of a test, under a header"
+else
+  fail "alone: alone.tsv is: $(cat "$tmp/alone/alone.tsv")"
+fi
+
+FAKE_FAILING_TEST="e2e/b_test.mbt -i 1" measure alone-fails alone --runs 2
+exits alone-fails 1
+holds alone-fails alone.json '.ok == false and .summary.failed_runs == 2
+  and ([.tests[] | select(.failures > 0) | [.file, .index, .failures]] == [["b_test.mbt", 1, 2]])' \
+  "not ok, with the test that failed and how often"
+says alone-fails "2 of 6 runs of an e2e test alone failed"
+if ls "$tmp/alone-fails/logs/alone/" | grep -q "b_test.mbt-1"; then
+  pass "alone-fails: keeps moon's output of the test that failed"
+else
+  fail "alone-fails: keeps no output of the test that failed: $(ls -R "$tmp/alone-fails/logs" 2>&1)"
+fi
+
+started=$(date +%s)
+FAKE_HANGING_TEST="e2e/b_test.mbt -i 0" measure alone-hangs alone --timeout 1
+exits alone-hangs 1
+holds alone-hangs alone.json '.summary.timed_out_runs == 1
+  and ([.tests[] | select(.timed_out > 0) | [.file, .index]] == [["b_test.mbt", 0]])' \
+  "the test that ran past the time limit"
+if [ $(($(date +%s) - started)) -lt 30 ]; then
+  pass "alone-hangs: stops the test that hangs, and what it started"
+else
+  fail "alone-hangs: waited for the test that hangs"
+fi
+
+measure alone-one-file alone --file a_test.mbt
+exits alone-one-file 0
+holds alone-one-file alone.json '[.tests[].file] == ["a_test.mbt"] and .runs == 1' "only the tests of that file, once"
+
+measure alone-none alone --runs 0
+exits alone-none 0
+called alone-none ""
+holds alone-none alone.json '.ok == true and .runs == 0 and .tests == []' "no test, and ok"
 
 echo
 echo "test-measure-costs: $passed passed, $failed failed"
