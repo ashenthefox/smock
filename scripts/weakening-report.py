@@ -357,9 +357,7 @@ def snapshot_spans(item, names):
     """The ranges of lines, first and last, of an item that hold a
     snapshot: the content= of a call of inspect, debug_inspect or
     json_inspect, and the value of a constant or a variable that a
-    content= names."""
-    if item.kind == "let" and item.name in names:
-        return [(0, len(item.lines) - 1)]
+    content= names, from its let to the end of its statement."""
     code = [code_of(line) for line in item.lines]
     spans = []
     for i, text in enumerate(code):

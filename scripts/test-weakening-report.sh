@@ -249,6 +249,47 @@ mentions bound '+  guard took < 2500L else { fail("took \{took} ms") }'
 mentions bound '-  let fast = took < 300L'
 mentions bound '+  let fast = took < 3000L'
 
+# The bound in the variable alone: a comparison is an assertion line of
+# its own, whatever the lines beside it.
+tree
+package
+timed
+branch
+sed -i 's/took < 300L/took < 3000L/' "$repo/add/timed_test.mbt"
+report bound-variable
+mentions bound-variable '-  let fast = took < 300L'
+mentions bound-variable '+  let fast = took < 3000L'
+lacks bound-variable 'guard'
+
+# A guard whose pattern matches more, and an if whose failure can no longer
+# happen, with no comparison on their lines.
+tree
+package
+file add/patterns_test.mbt <<'MBT'
+///|
+test "answers with a reply" {
+  let reply : Int? = Some(5)
+  guard reply is Some(5) else {
+    fail("no reply")
+  }
+}
+
+///|
+/// Fails when the text is empty.
+fn check_filled(text : String) -> Unit raise {
+  if text.is_empty() {
+    fail("empty")
+  }
+}
+MBT
+branch
+sed -i 's/Some(5) else/Some(_) else/; s/if text.is_empty() {/if text.is_empty() \&\& false {/' "$repo/add/patterns_test.mbt"
+report patterns
+mentions patterns '-  guard reply is Some(5) else {'
+mentions patterns '+  guard reply is Some(_) else {'
+mentions patterns '-  if text.is_empty() {'
+mentions patterns '+  if text.is_empty() && false {'
+
 # An assertion removed, and a line changed inside one that spans lines.
 tree
 package
@@ -478,6 +519,22 @@ mentions skip '`add/add_test.mbt:9`: test "adds a negative number": `#cfg(target
 mentions skip '`add/add_test.mbt:15`: test "adds zero": `#skip("flaky")`'
 lacks skip "## Tests deleted"
 
+# A test that keeps the attribute it had, and gains a skip: only the skip
+# is listed.
+tree
+file add/add_test.mbt <<'MBT'
+///|
+#cfg(target="native")
+test "adds two numbers" {
+  assert_eq(2 + 3, 5)
+}
+MBT
+branch
+sed -i 's/^#cfg(target="native")$/#cfg(target="native")\n#skip/' "$repo/add/add_test.mbt"
+report skip-kept
+mentions skip-kept '`add/add_test.mbt:4`: test "adds two numbers": `#skip`'
+lacks skip-kept '`#cfg'
+
 # A package whose tests no longer run on wasm-gc.
 tree
 package
@@ -589,6 +646,7 @@ echo "operators" | file runner/operators.txt
 echo "on: push" | file ci/mutation-weekly.yml
 echo "on: push" | file ci/other.yml
 echo "not runner" | file runner.txt
+echo "on: push" | file ci/mutation/deeper.yml
 report verdict
 mentions verdict "## Files that decide a verdict changed"
 mentions verdict '### `floors.txt` (changed)'
@@ -602,6 +660,7 @@ mentions verdict '### `ci/mutation-weekly.yml` (added)'
 mentions verdict 'The mutation workflows (listed as `ci/mutation*.yml`).'
 lacks verdict 'ci/other.yml'
 lacks verdict 'runner.txt'
+lacks verdict 'ci/mutation/deeper.yml'
 
 # A file deleted, and a path taken off the list while its file changes:
 # the list of the base and the head's both count, and a change to the list
