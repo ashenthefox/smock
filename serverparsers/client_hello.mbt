@@ -8,7 +8,7 @@
 
 ///|
 /// What the first bytes from a TLS client tell about the name it asks for.
-priv enum ClientHello {
+pub enum ClientHello {
   /// More bytes are needed to tell.
   Incomplete
   /// The host name of the ClientHello's server_name extension (RFC 6066,
@@ -26,7 +26,7 @@ const MAX_CLIENT_HELLO = 65536
 /// Reads the ClientHello at the start of `data`, the bytes a client has
 /// sent so far. The ClientHello may span several TLS records, and a record
 /// several reads.
-fn read_client_hello(data : BytesView) -> ClientHello {
+pub fn read_client_hello(data : BytesView) -> ClientHello {
   // The handshake messages, gathered from the records read so far.
   let message = Buffer()
   let mut pos = 0

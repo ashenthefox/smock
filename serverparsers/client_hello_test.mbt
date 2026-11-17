@@ -4,14 +4,14 @@
 // Hosts of a listed Mock gets that Mock's certificate, and one without SNI
 // the default certificate (docs/running.md, "Certificates for single
 // Mocks"). The ClientHellos are captured from a real client
-// (client_hello_captures_wbtest.mbt), or derived from those here: sent in
+// (client_hello_captures_test.mbt), or derived from those here: sent in
 // other records, grown, or with one length field changed.
 
 ///|
 /// What the reader gives for `data`, the octets received so far, written
 /// as its constructors read.
 fn read(data : BytesView) -> String {
-  match read_client_hello(data) {
+  match @serverparsers.read_client_hello(data) {
     Incomplete => "Incomplete"
     ServerName(Some(name)) => "ServerName(Some(\"\{name}\"))"
     ServerName(None) => "ServerName(None)"

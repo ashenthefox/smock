@@ -1,5 +1,5 @@
 // ClientHellos captured from a real client, for the tests of the ClientHello
-// reader (client_hello_wbtest.mbt). The client is `openssl s_client` of
+// reader (client_hello_test.mbt). The client is `openssl s_client` of
 // OpenSSL 4.1.0 (23 Oct 2026), on linux-aarch64. Each capture is every octet
 // the client sent before it waited for the server: one TLS record that holds
 // its ClientHello. A listener on the loopback interface wrote what it received
