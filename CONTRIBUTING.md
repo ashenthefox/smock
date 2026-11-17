@@ -267,7 +267,12 @@ real gRPC client, and the calls grpcurl makes, each with what it prints
 
 `scripts/coverage-tests/` holds the small bisect reports, and the small
 source tree they describe, that test the coverage report of
-`scripts/coverage.sh` (see [Build and test](#build-and-test)).
+`scripts/coverage.sh` and the coverage ratchet (see
+[Build and test](#build-and-test)).
+
+`coverage/` holds the coverage floors, each package's most uncovered
+points, and the list of the raises of a floor that a change recorded (see
+[The coverage floors](#the-coverage-floors)).
 
 `scripts/mutation/` holds the mutation runner, its site finder, operator
 set v1 (`operators.py`), the runner's self-test (`selftest.py`), the
@@ -307,6 +312,7 @@ moon check --deny-warn --target all
 moon fmt --check
 moon bench -p smock/smock/engine --release   # match index lookups: 100 vs 10,000 Stubs
 scripts/coverage.sh            # point coverage of the in-process tests, per package (needs python3)
+python3 scripts/coverage-ratchet.py check _coverage/coverage.bisect   # each package's uncovered points against its floor, and the floors against the merge base with main (after scripts/coverage.sh; needs git)
 scripts/check-no-io.sh         # no I/O in the protocol modules, the packages that decide a response, the OpenAPI converter and server's parsers
 scripts/check-no-c.sh          # the C boundary of ADR 0001, in smock and in the modules it resolves (after moon check; needs jq)
 scripts/check-moonhttp-pin.sh  # the build resolves the moonhttp that moon.mod names (needs jq)
@@ -353,6 +359,7 @@ scripts/test-yaml-test-suite-verdict.sh   # how a run of yaml-test-suite is judg
 scripts/test-check-schema.sh         # the JSON Schema cross-check, with a fake validator and a fake smock (needs jq)
 scripts/test-check-doc-examples.sh   # the check of the documents' examples, with a fake smock and a fake jsonnet (needs python3 and jq)
 scripts/test-coverage-report.sh      # the coverage report, on small bisect reports (needs python3)
+scripts/test-coverage-ratchet.sh     # the coverage ratchet, on small bisect reports in small git histories (needs python3 and git)
 scripts/test-random-seeds.sh         # the script that writes random seeds into the properties, on a copy of re2's property and on small trees (needs python3)
 python3 scripts/check-doc-links.py   # the documents' links into the repository lead to a file, and to a heading when they name one (needs git)
 scripts/test-check-doc-links.sh      # that check, on small trees (needs python3 and git)
@@ -557,8 +564,8 @@ takes a few minutes; a later run rebuilds only what changed. It reads
 every trace source in the target directory, so remove the directory
 after removing a package.
 
-CI runs all of these but `moon bench`, `scripts/coverage.sh` and the tests
-of `scripts/gke-bench.sh` on each push to a branch and on each pull request
+CI runs all of these but `moon bench` and the tests of
+`scripts/gke-bench.sh` on each push to a branch and on each pull request
 (`.github/workflows/ci.yml`). It does not run on a pushed tag, since the
 release workflow checks that CI passed on the tagged commit
 ([What a tag does](docs/releasing.md#what-a-tag-does)), nor on a push to a
@@ -570,7 +577,12 @@ need no build of smock, on linux/amd64; a step that fails does not stop
 the steps after it, so that one run shows every failure. The job
 `yaml-test-suite` runs `scripts/check-yaml-test-suite.sh` beside it, on
 linux/amd64: it fetches the suite and builds the testee
-([yaml-test-suite/README.md](yaml-test-suite/README.md)).
+([yaml-test-suite/README.md](yaml-test-suite/README.md)). The job
+`coverage` runs `scripts/coverage.sh` and then the coverage ratchet beside
+them, on linux/amd64, whose native builds are about six times faster than
+linux/arm64's, so that it stays off the path of the longest job, the native
+tests on linux/arm64. It takes about a minute
+([The coverage floors](#the-coverage-floors)).
 `.github/workflows/build-test.yml` runs the rest, in jobs that run side by
 side:
 
@@ -605,9 +617,9 @@ side:
 
 `release` hands each release binary over as the workflow artifact
 `release-linux-<arch>`. Then the job `keep` of `ci.yml`, which runs after
-the jobs of `build-test.yml` and the jobs `scripts` and `yaml-test-suite`,
-and only when each of them that ran has passed and the run was not
-cancelled, keeps the binary of each architecture for 7 days as
+the jobs of `build-test.yml` and the jobs `scripts`, `yaml-test-suite` and
+`coverage`, and only when each of them that ran has passed and the run
+was not cancelled, keeps the binary of each architecture for 7 days as
 `smock-linux-amd64` and `smock-linux-arm64`,
 for a machine that cannot build it
 ([On GKE Autopilot](bench/README.md#on-gke-autopilot)). A run in which a
@@ -620,8 +632,9 @@ head's and a CI run on a push of that head, to a branch other than
 `main`, succeeded and was last updated within 24 hours
 (`scripts/ci-plan.sh`). That run tested the same tree, the workflows and
 scripts included. `release`, `protobuf-conformance`, `llm-sdks` and the
-jobs `scripts` and `yaml-test-suite` run in every run, so `main`'s
-binaries are built and checked from `main`'s own commit, and `keep` keeps
+jobs `scripts`, `yaml-test-suite` and `coverage` run in every run, so
+`main`'s binaries are built and checked from `main`'s own commit, and
+`keep` keeps
 them once every job has passed.
 Every other run, and a run whose plan fails, runs every job.
 
@@ -730,7 +743,9 @@ decision and why. This section holds the rules, for anyone who writes,
 changes or removes a test. The review builds its tooling step by step:
 until the coverage wrapper, the mutation runner and the branch checks
 exist, the ledgers are kept by hand and none of them stops a merge, but
-the rules for writing and removing tests apply already.
+the rules for writing and removing tests apply already. The first to stop
+one are the coverage floors, on every push
+([The coverage floors](#the-coverage-floors)).
 
 ### Terms
 
@@ -853,6 +868,53 @@ anyone can run again
 ([The search for documented limits](docs/ledgers/boundaries.md#the-search-for-documented-limits)).
 Step 3's close checks the ledgers against the documents once more
 ([#340](https://github.com/hirunefu/smock/issues/340)).
+
+### The coverage floors
+
+Each package has a floor: the most uncovered points its in-process tests
+may leave, as `scripts/coverage.sh` counts them. `coverage/floors.txt`
+holds them; they were first taken from the report at d88929b2. CI's job
+`coverage` runs `scripts/coverage.sh` on every push and pull request, then
+`scripts/coverage-ratchet.py check` on its bisect report, against the
+merge base with `main`:
+
+- A package whose uncovered points are above its floor fails the job. The
+  ratchet names the package and its new uncovered points: those on the
+  lines that the change adds or changes, or every uncovered point of the
+  package when none is on such a line, as when a test that reached them
+  is gone. At or below its floor, a package passes, so the job never asks
+  a change for more than it touched.
+- Below its floor, a package passes, and the ratchet says that the floor
+  can be lowered. The change that lowers the count lowers the floor with
+  it: run `scripts/coverage.sh`, then
+  `python3 scripts/coverage-ratchet.py write _coverage/coverage.bisect`,
+  which writes each package's count as its floor, and commit
+  `coverage/floors.txt`.
+- A floor rises only with the maintainer's approval. A floor above the
+  one at the merge base, or a first floor above 0 for a new package, fails
+  the job unless the change adds a line for that package to
+  `coverage/approved-raises.txt`: `<package> <points> <reason>`, with the
+  number of points the floor rises and why they cannot be covered now.
+  That line is not the approval, since every commit here has the same
+  author. The weakening report lists every changed floor and every
+  recorded raise, and the maintainer's acknowledgment of it at the merge
+  is the approval.
+- A package without a floor, a floor of a package that the report no
+  longer holds, and a malformed line fail the job too; `write` adds and
+  removes such floors.
+
+`server` and `cmd/smock` have floors too, of their in-process points. Most
+of their code only the binary runs, so a change that adds code there that
+only the e2e tests reach records a raise; e2e coverage is reported apart
+([#342](https://github.com/hirunefu/smock/issues/342)).
+
+The job writes the table of the packages, with their points and floors,
+to its summary, and keeps the report and the bisect report as the
+artifact `coverage-report` for 7 days, also when the ratchet fails. It
+runs on linux/amd64 beside the other jobs, and `keep` waits for it, on
+`main` too. Coverage counted the same points on linux/amd64 and
+linux/arm64 when step 0 measured it
+([#276](https://github.com/hirunefu/smock/issues/276)).
 
 ### The ladder
 
