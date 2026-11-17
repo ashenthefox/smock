@@ -68,10 +68,63 @@ class History:
         self.git("add", "-A")
         self.git("commit", "-q", "-m", message)
 
+    def edit(self, path, old, new):
+        """Replaces the one occurrence of old in a file of the module."""
+        file = self.root / path
+        text = file.read_text()
+        if text.count(old) != 1:
+            raise AssertionError(f"{path} does not hold {old!r} once")
+        file.write_text(text.replace(old, new))
+
+    def drops(self, *lines):
+        """Adds lines to the list of approved drops."""
+        path = self.root / "mutation" / "approved-drops.txt"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        before = path.read_text() if path.is_file() else ""
+        path.write_text(before + "".join(f"{line}\n" for line in lines))
+
+    def counted_base(self):
+        """Commits the counts on main, and starts the branch change there."""
+        self.ratchet("write")
+        self.commit("counts")
+        self.git("checkout", "-q", "-b", "change")
+
     def counts(self, package):
         """The committed counts of a package, as a list of objects."""
         path = self.root / "mutation" / "site-counts" / f"{package}.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def finder_without(tmp, condition):
+    """A narrowed site finder: it runs sites.py, and leaves out each line
+    for which condition, a Python expression over the line's object s,
+    holds."""
+    script = tmp / "narrowed.py"
+    script.write_text(
+        "import json, subprocess, sys\n"
+        f"result = subprocess.run([sys.executable, {str(SITES)!r}, *sys.argv[1:]], capture_output=True, text=True)\n"
+        "sys.stderr.write(result.stderr)\n"
+        "for line in result.stdout.splitlines():\n"
+        "    s = json.loads(line)\n"
+        f"    if not ({condition}):\n"
+        "        print(line)\n"
+        "sys.exit(result.returncode)\n")
+    return f"{sys.executable} {script}"
+
+
+# is_odd, as calc/calc.mbt has it, with its doc comment.
+IS_ODD = """///|
+/// Whether `n` is odd.
+pub fn is_odd(n : Int32) -> Bool {
+  // BODY `{ false }`: killed, by 3.
+  // NOT `!` removed: killed, by 3.
+  // INT `2` to `3` and to `1`, and INT `0` to `1`: killed, by 3. The full
+  // set adds `0` for the `2`.
+  // INT `0` to `-1`: survives, since no test has a negative odd number.
+  !(n % 2 == 0)
+}
+
+"""
 
 
 class RatchetTest(unittest.TestCase):
@@ -114,6 +167,137 @@ class RatchetTest(unittest.TestCase):
         result = self.history.ratchet("check", "--base", "main")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("the committed site counts of log differ from the site finder's on this tree", result.stderr)
+
+    def test_a_drop_of_exactly_a_deleted_definitions_sites_passes(self):
+        self.history.counted_base()
+        self.history.edit("calc/calc.mbt", IS_ODD, "")
+        self.history.ratchet("write")
+        self.history.commit("delete is_odd")
+        result = self.history.ratchet("check", "--base", "main")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # is_odd held 6 sites of the pinned set and 7 of the full set.
+        self.assertIn("ratchet: calc: 19 sites in the pinned set and 24 in the full set, against the base's 25"
+                      " and 31; the definitions that the change deletes or changes held 6 and 7.", result.stdout)
+
+    def test_a_changed_definition_may_lose_its_sites(self):
+        self.history.counted_base()
+        self.history.edit("calc/calc.mbt", "!(n % 2 == 0)", "n % 2 != 0")
+        self.history.ratchet("write")
+        self.history.commit("simpler is_odd")
+        result = self.history.ratchet("check", "--base", "main")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_drop_beyond_the_deleted_definitions_sites_with_a_narrowed_finder_fails(self):
+        self.history.counted_base()
+        # The finder no longer finds calc's comparisons, and the change
+        # also deletes is_odd: 6 + 3 sites fewer in the pinned set, of
+        # which is_odd held only 6.
+        narrowed = finder_without(self.tmp, 's["file"] == "calc/calc.mbt" and s["operator"] == "ROR"')
+        self.history.edit("calc/calc.mbt", IS_ODD, "")
+        self.history.ratchet("write", finder=narrowed)
+        self.history.commit("narrow the finder")
+        result = self.history.ratchet("check", "--base", "main", finder=narrowed)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        for chosen in ("pinned", "full"):
+            self.assertIn(f"ratchet: calc: 3 sites of ROR in the {chosen} set are gone from definitions that the"
+                          " change neither deletes nor changes (in_range 2 to 0, halve_until 1 to 0).",
+                          result.stderr)
+            self.assertIn(f'add "calc ROR {chosen} 3 <reason>" to mutation/approved-drops.txt', result.stderr)
+        self.assertNotIn("is_odd", result.stderr)
+
+    def test_a_definition_left_as_it_was_that_loses_every_site_fails(self):
+        self.history.counted_base()
+        narrowed = finder_without(self.tmp, 's["definition"] == "is_odd"')
+        self.history.ratchet("write", finder=narrowed)
+        self.history.commit("no site in is_odd")
+        result = self.history.ratchet("check", "--base", "main", finder=narrowed)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("ratchet: calc: 4 sites of INT in the pinned set are gone from definitions that the change"
+                      " neither deletes nor changes (is_odd 4 to 0).", result.stderr)
+        self.assertIn("ratchet: calc: 1 site of NOT in the full set is gone", result.stderr)
+
+    def test_a_drop_that_the_change_records_as_approved_passes(self):
+        self.history.counted_base()
+        narrowed = finder_without(self.tmp, 's["file"] == "calc/calc.mbt" and s["operator"] == "ROR"')
+        self.history.ratchet("write", finder=narrowed)
+        self.history.drops("calc ROR pinned 3 the finder leaves out comparisons, for this test",
+                           "calc ROR full 3 the same")
+        self.history.commit("narrow the finder, approved")
+        result = self.history.ratchet("check", "--base", "main", finder=narrowed)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("ratchet: calc: 3 sites of ROR in the pinned set dropped, as mutation/approved-drops.txt"
+                      " records: the finder leaves out comparisons, for this test", result.stdout)
+
+    def test_only_the_lines_that_the_change_adds_approve_a_drop(self):
+        # A line the base already has approved an earlier drop.
+        self.history.drops("calc ROR pinned 3 an earlier drop", "calc ROR full 3 the same")
+        self.history.counted_base()
+        narrowed = finder_without(self.tmp, 's["file"] == "calc/calc.mbt" and s["operator"] == "ROR"')
+        self.history.ratchet("write", finder=narrowed)
+        self.history.commit("narrow the finder")
+        result = self.history.ratchet("check", "--base", "main", finder=narrowed)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("ratchet: calc: 3 sites of ROR in the pinned set are gone", result.stderr)
+
+    def test_an_approved_drop_must_be_the_drop_the_change_makes(self):
+        self.history.counted_base()
+        narrowed = finder_without(self.tmp, 's["file"] == "calc/calc.mbt" and s["operator"] == "ROR"')
+        self.history.ratchet("write", finder=narrowed)
+        self.history.drops("calc ROR pinned 2 too few", "calc ROR full 3 right", "log STR pinned 1 no such drop")
+        self.history.commit("narrow the finder, recorded wrongly")
+        result = self.history.ratchet("check", "--base", "main", finder=narrowed)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("ratchet: mutation/approved-drops.txt records 2 sites of ROR in the pinned set dropped in"
+                      " calc, but the change drops 3", result.stderr)
+        self.assertIn("ratchet: mutation/approved-drops.txt records 1 site of STR in the pinned set dropped in"
+                      " log, but the change drops none there", result.stderr)
+        self.assertNotIn("in the full set are gone", result.stderr)
+
+    def test_a_malformed_line_of_approved_drops_fails(self):
+        self.history.counted_base()
+        self.history.drops("calc ROR pinned 3")
+        self.history.commit("no reason")
+        result = self.history.ratchet("check", "--base", "main")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("mutation/approved-drops.txt:1: should be <package> <operator> <pinned|full> <sites>"
+                      " <reason>", result.stderr)
+
+    def test_a_definition_moved_to_another_file_is_the_same_definition(self):
+        self.history.counted_base()
+        # Within STR's scope: the same sites, nothing dropped.
+        self.history.edit("calc/calc.mbt", IS_ODD, "")
+        (self.history.root / "calc" / "odd.mbt").write_text(IS_ODD)
+        self.history.ratchet("write")
+        self.history.commit("move is_odd")
+        self.assertEqual(self.history.ratchet("check", "--base", "main").returncode, 0)
+        # Out of STR's scope: log/target.mbt is outside it, so is_comment's
+        # string is no site there, though the change did not change it.
+        is_comment = (self.history.root / "log" / "lines.mbt").read_text().split("///|\n")[2]
+        self.history.edit("log/lines.mbt", "///|\n" + is_comment, "")
+        target = self.history.root / "log" / "target.mbt"
+        target.write_text(target.read_text() + "\n///|\n" + is_comment)
+        self.history.ratchet("write")
+        self.history.commit("move is_comment out of STR's scope")
+        result = self.history.ratchet("check", "--base", "main")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("ratchet: log: 1 site of STR in the pinned set is gone from definitions that the change"
+                      " neither deletes nor changes (is_comment 1 to 0).", result.stderr)
+
+    def test_without_counts_at_the_base_nothing_is_compared(self):
+        self.history.commit("no counts")
+        self.history.git("checkout", "-q", "-b", "change")
+        self.history.edit("calc/calc.mbt", IS_ODD, "")
+        self.history.ratchet("write")
+        self.history.commit("counts")
+        result = self.history.ratchet("check", "--base", "main")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("has no committed site counts: nothing to compare with", result.stdout)
+
+    def test_a_base_that_git_does_not_know_cannot_be_judged(self):
+        self.history.counted_base()
+        result = self.history.ratchet("check", "--base", "nowhere")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("ratchet: git merge-base HEAD nowhere", result.stderr)
 
 
 if __name__ == "__main__":

@@ -66,6 +66,7 @@ import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
+from typing import NamedTuple
 
 import operators as ops
 import sites
@@ -245,6 +246,124 @@ def differences(committed, files):
     return messages
 
 
+def git(root, *args):
+    """The output of a git command in root."""
+    result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RatchetError(f"git {' '.join(args)}: {result.stderr.strip()}")
+    return result.stdout
+
+
+def at_base(root, base):
+    """The merge base of HEAD and base, the counts committed there, by
+    package, and the text of the list of approved drops there."""
+    merge_base = git(root, "merge-base", "HEAD", base).strip()
+    names = git(root, "ls-tree", "-r", "--name-only", merge_base, "--", f"{COUNTS.as_posix()}/").splitlines()
+    counts = {}
+    for name in names:
+        if name.endswith(".jsonl"):
+            package = Path(name).relative_to(COUNTS).as_posix().removesuffix(".jsonl")
+            text = git(root, "show", f"{merge_base}:./{name}")
+            counts[package] = [json.loads(line) for line in text.splitlines() if line.strip()]
+    listed = git(root, "ls-tree", "--name-only", merge_base, "--", DROPS.as_posix()).strip()
+    drops = git(root, "show", f"{merge_base}:./{DROPS.as_posix()}") if listed else ""
+    return merge_base, counts, drops
+
+
+class Drop(NamedTuple):
+    """A line of the list of approved drops."""
+
+    package: str
+    operator: str
+    set: str
+    sites: int
+    reason: str
+
+
+def read_drops(text, problems):
+    """The lines of a list of approved drops, each with its line number;
+    a malformed line is a problem."""
+    drops = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        fields = line.split(None, 4)
+        if (len(fields) != 5 or fields[1] not in ops.OPERATORS or fields[2] not in SETS
+                or not fields[3].isdigit() or int(fields[3]) < 1):
+            problems.append(f"{DROPS.as_posix()}:{number}: should be <package> <operator> <pinned|full> <sites>"
+                            f" <reason>, with an operator of operator set {ops.VERSION} and a number of sites"
+                            f" from 1, not: {line}")
+            continue
+        drops.append((number, Drop(fields[0], fields[1], fields[2], int(fields[3]), fields[4].strip())))
+    return drops
+
+
+def sites_of(count, what):
+    """A count of sites of an operator, in words."""
+    return f"{count} site{'' if count == 1 else 's'} of {what}"
+
+
+def ratchet(base_counts, by_package, added, problems, notes):
+    """Compares the base's counts with the tree's, package by package: a
+    problem for each drop in a definition that the change neither deletes
+    nor changes that no added line of approved drops records, and for each
+    added line that records no such drop."""
+    gone = {}
+    for package, base in sorted(base_counts.items()):
+        head = by_package.get(package, [])
+        same = {}
+        for definition in head:
+            same.setdefault(definition.text, []).append(definition)
+        held = {s: 0 for s in SETS}
+        for entry in base:
+            kept = same.get(entry["text"])
+            if not kept:
+                for chosen in SETS:
+                    held[chosen] += sum(entry[chosen].values())
+                continue
+            definition = kept.pop(0)
+            for chosen in SETS:
+                for operator in ops.OPERATORS:
+                    before, after = entry[chosen].get(operator, 0), definition.counts[chosen][operator]
+                    if after < before:
+                        drop = gone.setdefault((package, operator, chosen), [0, []])
+                        drop[0] += before - after
+                        drop[1].append(f"{entry['definition']} {before} to {after}")
+        totals = {s: (sum(sum(e[s].values()) for e in base), sum(sum(d.counts[s].values()) for d in head))
+                  for s in SETS}
+        if any(after < before for before, after in totals.values()):
+            notes.append(f"{package}: {totals['pinned'][1]} sites in the pinned set and {totals['full'][1]} in"
+                         f" the full set, against the base's {totals['pinned'][0]} and {totals['full'][0]}; the"
+                         f" definitions that the change deletes or changes held {held['pinned']} and"
+                         f" {held['full']}.")
+    approved = {}
+    for number, drop in added:
+        key = (drop.package, drop.operator, drop.set)
+        if key in approved:
+            problems.append(f"{DROPS.as_posix()}:{number}: a second line for {drop.operator} in the {drop.set}"
+                            f" set of {drop.package}")
+        approved[key] = drop
+    for key, (count, where) in sorted(gone.items()):
+        package, operator, chosen = key
+        drop = approved.pop(key, None)
+        if drop is not None and drop.sites == count:
+            notes.append(f"{package}: {sites_of(count, operator)} in the {chosen} set dropped, as"
+                         f" {DROPS.as_posix()} records: {drop.reason}")
+        elif drop is not None:
+            problems.append(f"{DROPS.as_posix()} records {sites_of(drop.sites, operator)} in the {chosen} set"
+                            f" dropped in {package}, but the change drops {count}")
+        else:
+            problems.append(f"{package}: {sites_of(count, operator)} in the {chosen} set"
+                            f" {'is' if count == 1 else 'are'} gone from definitions that the change neither"
+                            f" deletes nor changes ({', '.join(where)}). A change may drop only the sites of the"
+                            f" definitions it deletes or changes, and any other drop needs the maintainer's"
+                            f" approval: add \"{package} {operator} {chosen} {count} <reason>\" to"
+                            f" {DROPS.as_posix()} in the same change.")
+    for drop in approved.values():
+        problems.append(f"{DROPS.as_posix()} records {sites_of(drop.sites, drop.operator)} in the {drop.set} set"
+                        f" dropped in {drop.package}, but the change drops none there")
+
+
 def check(root, finder, moonc, base):
     """Checks the committed counts against root's tree and against the
     base: whether it passed."""
@@ -254,11 +373,31 @@ def check(root, finder, moonc, base):
     if problems:
         problems.append(f"Run `python3 scripts/mutation/ratchet.py write` and commit {COUNTS.as_posix()}/ with the"
                         " change that alters the sites.")
+    notes = []
+    merge_base, base_counts, base_drops = at_base(root, base)
+    drops_path = root / DROPS
+    drops = read_drops(drops_path.read_text(encoding="utf-8") if drops_path.is_file() else "", problems)
+    if not base_counts:
+        notes.append(f"the merge base with {base}, {merge_base[:12]}, has no committed site counts: nothing to"
+                     " compare with.")
+    else:
+        earlier = Counter(drop for _, drop in read_drops(base_drops, []))
+        added = []
+        for number, drop in drops:
+            if earlier[drop]:
+                earlier[drop] -= 1
+            else:
+                added.append((number, drop))
+        ratchet(base_counts, by_package, added, problems, notes)
+    for note in notes:
+        print(f"ratchet: {note}")
     for problem in problems:
         print(f"ratchet: {problem}", file=sys.stderr)
     if problems:
         return False
-    print(f"ratchet: the committed site counts of {len(files)} packages are the tree's.")
+    print(f"ratchet: the committed site counts of {len(files)} packages are the tree's, and no site dropped"
+          f" beyond the definitions that the change deletes or changes against {merge_base[:12]}, the merge base"
+          f" with {base}, but as {DROPS.as_posix()} records.")
     return True
 
 
