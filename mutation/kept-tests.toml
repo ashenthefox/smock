@@ -1245,12 +1245,48 @@ decides (the 100 Continue before a Fault, the seeded draws of a reset
 Fault, the Journal entry committed before the RST, the Scenario each reset
 moves, the log lines of a Fault, the --tls-http2 setting, the server's
 choice of protocol after ALPN, SNI, the set of names in the certificate,
-its log entry, its reloads and its expiry metric); the test that the
-certificate stays in memory, a documented feature that both the MoonBit
-and the C keep, and whose keep reason a removal batch derives; and the
-tests of Definition files' hosts and of HTTP/2's drain, which reach no C.
-No test checks the C's other settings: TLS 1.2 at least, no renegotiation,
-and no session cache on a server.
+its reloads and its expiry metric); and the tests of Definition files'
+hosts and of HTTP/2's drain, which reach no C. No test checks the C's other
+settings: TLS 1.2 at least, no renegotiation, and no session cache on a
+server.
+
+Compared with the tests a separate reviewer expected under this reason (12
+of the bindings' 13; in e2e, the RST, both ALPN tests of tls_test.mbt,
+tls_http2_test.mbt's TLS 1.2 suites, grpc_detection_test.mbt's h2 alone
+refused with --tls-http2 off, self_signed_test.mbt's validity, its two tests
+of IP or DNS names and its fingerprint; and maybe its certificate in memory
+and certificates_test.mbt's two refusals whose reasons smock's C reads),
+two tests are added and the others stay out:
+- Added: self_signed_test.mbt's log entry at startup. Its fingerprint is
+  the C's SHA-256 digest (smock_openssl_self_signed_sha256), compared with
+  what openssl x509 -fingerprint -sha256 reads from the certificate smock
+  presents. It is the only test of that value: the bindings' test checks
+  only its shape and that two certificates differ.
+- Added: self_signed_test.mbt's certificate and key held in memory. The C
+  generates both and hands them over as bytes, so a change to the C that
+  wrote them to a file fails this test while no mutant can, and no row of
+  the use-case ledger names it, so no keep reason a removal batch derives
+  holds it.
+- Out: the ECDSA chain's handshake. smock_openssl_ctx_use_chain and
+  smock_openssl_ctx_use_key have no branch on the key's type
+  (PEM_read_bio_PrivateKey reads either), so the listed RSA handshake runs
+  the same C.
+- Out: the leaf sent without its intermediate and the key update, whose
+  outcomes OpenSSL decides: they are kept under dependency-openssl.
+- Out: the message of a refused configuration. Its three cases are among
+  those the listed test of refusals with their reasons asserts, and its
+  subject, the text, is TlsError::message's, in MoonBit.
+- Out: the --tls-http2 tests of tls_test.mbt and grpc_detection_test.mbt.
+  Their subject is the list of protocols the MoonBit hands the C, and the
+  C's part, a client that offers only h2 refused, is asserted by the listed
+  ALPN tests.
+- Out: self_signed_test.mbt's default names, localhost, 127.0.0.1 and ::1.
+  Its subject is the names the MoonBit chooses; add_name's IP or DNS names,
+  IPv6 included, are asserted by the listed tests of the bindings and of
+  every Mock Host.
+- Out: certificates_test.mbt's pair refused at a rotation and at startup.
+  Their subject is what smock does with a pair it cannot use, and the
+  reasons the C reads are asserted by the bindings' listed test.
 """
 
 [[reason.test]]
@@ -1317,3 +1353,13 @@ source = 'smock_openssl_self_signed_new signs the certificate with its own subje
 file = 'e2e/self_signed_test.mbt'
 name = 'the certificate also covers every Mock Host, IP addresses as IP addresses and the rest as DNS names, so a client that trusts it can call each Mock by its Host'
 source = 'add_name in smock_openssl_self_signed_new (docs/running.md, The self-signed certificate: Hosts that are IP addresses are IP address names, the others DNS names)'
+
+[[reason.test]]
+file = 'e2e/self_signed_test.mbt'
+name = 'a log entry at startup says that a self-signed certificate is in use, with its SHA-256 fingerprint and its names'
+source = "smock_openssl_self_signed_sha256 gives the certificate's SHA-256 digest, which the log entry carries and openssl x509 -fingerprint -sha256 gives from the certificate presented (docs/running.md, The self-signed certificate: a log entry at startup gives its SHA-256 fingerprint and its names; check its fingerprint against the log with openssl x509 -in smock.pem -noout -fingerprint -sha256)"
+
+[[reason.test]]
+file = 'e2e/self_signed_test.mbt'
+name = 'the generated certificate and its key stay in memory: smock serves HTTPS with them from an empty read-only directory as its working directory, HOME and TMPDIR, which stays empty'
+source = 'smock_openssl_self_signed_new generates the key and the certificate and gives them as bytes, which the bindings load from memory (docs/running.md, The self-signed certificate: both are generated with OpenSSL and held only in memory; nothing is written to disk)'
