@@ -385,6 +385,9 @@ certificates, so an alert on it notices a renewal that stopped working
 before clients fail. When smock cannot read the notAfter of a certificate
 it loads at startup, such as one whose notAfter is not a time in RFC
 5280's form, which OpenSSL still loads, the certificate's series gives 0.
+A rotation to such a certificate leaves the series at the notAfter of the
+certificate before, while the reload's log entry gives `"expiry":null`
+([Rotating certificates](#rotating-certificates)).
 
 ### The self-signed certificate
 
