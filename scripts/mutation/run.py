@@ -7,7 +7,7 @@ it, and writes one record per mutant, a summary per package and a report
 usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir>]
            [--set pinned|full] [--mutant <id>]... [--sites-only] [--workers <n>]
            [--list <file> [--totals-only]] [--sample <n> [--seed <s>]] [--shard <k>/<n>]
-           [--changed [--base <ref>]] [--self-test-only]
+           [--changed [--base <ref>]] [--self-test-only] [--matrix]
            [--flakes <file>] [--moon <moon>] [--finder <command>]
            [<package directory>...]
 
@@ -112,6 +112,15 @@ outcome, after both runs, is
                and survived;
   survived     every test that gives kill credit passed.
 
+With --matrix, the kill-matrix mode (matrix.py), each mutant runs once
+with the tests of the package and of its importers that build on wasm-gc
+together, whichever would kill it first, with no early stop, and each
+test that failed is confirmed on its own: its record lists every test
+that kills it, with its package and layer. Its summary then counts, in
+place of the runs with the package's own tests alone and with its
+importers' tests, the tests that kill some mutant and those that alone
+kill one, and the runner writes the matrix per package.
+
 Before the tests run, compare.py compares the compiler's output for the
 mutated package with the output without a mutant and with the earlier
 mutants' outputs; the mutant keeps the lines of the source. Where it
@@ -146,7 +155,9 @@ It writes into <out> (<work>/out unless it is given):
                  survivor's status after the exclusion list (exclusion,
                  below);
   summary.json   the operator set's version, the set that ran (listed for
-                 --list), what chose the mutants (selection), the flake
+                 --list), what chose the mutants (selection), that the
+                 run was a kill matrix (kill_matrix, with --matrix), the
+                 flake
                  threshold with the tests above it and those with a
                  flaky result in this run ("flakes"), and per package: the
                  baseline (both runs, and the tests that failed in them),
@@ -184,7 +195,12 @@ It writes into <out> (<work>/out unless it is given):
                  and last the flaky tests. It also prints the report;
   flakes.json    the flake records: the latest runs' records, this one
                  included, and each test's flake rate over them, for the
-                 next run's --flakes.
+                 next run's --flakes;
+  matrix/        with --matrix, each package's kill matrix,
+                 <package directory>.json: every test that ran, and each
+                 mutant with every test that kills it, which
+                 scripts/mutation/matrix.py reads. Every run removes what
+                 an earlier one wrote there.
 
 A position is the place of one or more sites: their file, operator, line
 and column.
@@ -222,6 +238,7 @@ import compare
 import confirm
 import exclusions
 import importers
+import matrix
 import selftest
 
 HERE = Path(__file__).resolve().parent
@@ -511,19 +528,23 @@ def package_summary(root, directory, sites, skipped, chosen, operator_set):
     }
 
 
-def run_package(root, directory, sites, mutants, workers, log, self_test_only=False):
+def run_package(root, directory, sites, mutants, workers, log, self_test_only=False, kill_matrix=False):
     """Runs the chosen mutants of one package, whose sites are given, with
     its own tests, and those that survive again with the tests of its
     importers that build on wasm-gc: its records, and its summary's counts
     of the run, with its own tests alone and after its importers' tests.
     The package's self-test runs first when it has a mutant to run, or
-    with self_test_only."""
+    with self_test_only. With kill_matrix, each mutant runs with its own
+    and its importers' tests at once instead (matrix.py)."""
     package = package_name(root, directory)
     first = workers[0]
     try:
         packages, native_only = importers.find(first.moon, first.tree, first.target, package)
     except importers.ImportersError as error:
         raise RunnerError(str(error)) from error
+    if kill_matrix:
+        return matrix.run_package(workers, package, directory, packages, native_only, sites, mutants, log,
+                                  run_tests, outcome_counts, RunnerError)
     credit = importers.credit(packages, native_only)
     records, baseline, limit, self_test = run_tests(workers, package, [package], mutants, log,
                                                     f"{package}: {len(sites)} sites", own=directory,
@@ -718,6 +739,7 @@ def report(operator_set, chosen, summaries, records):
             out += [after, ""]
         out += compare.report(mine)
         out += importers.report_lines(summary)
+        out += matrix.report_lines(summary)
         out += confirm.Judge.baseline_lines(summary)
         timed_out = [r for r in mine if r["outcome"] == "timed out"]
         if timed_out:
@@ -790,6 +812,9 @@ def main():
                         help="run only shard K of N of the mutants (K from 1)")
     parser.add_argument("--self-test-only", action="store_true",
                         help="run each package's self-test, and no mutant")
+    parser.add_argument("--matrix", action="store_true",
+                        help="run each mutant with its package's and its importers' tests at once, and write the"
+                             " kill matrix")
     parser.add_argument("--workers", type=int, default=1, help="how many mutants build and run at once")
     parser.add_argument("--flakes", help="the flake records of an earlier run (its flakes.json)")
     parser.add_argument("--moon", default="moon", help="the moon command")
@@ -816,6 +841,8 @@ def main():
                                 or args.sites_only):
         parser.error("--self-test-only runs no mutant, so it takes no --mutant, --list, --sample, --changed"
                      " or --sites-only")
+    if args.matrix and (args.totals_only or args.self_test_only):
+        parser.error("--matrix takes no --totals-only or --self-test-only")
     root = Path(args.root).resolve()
     work = Path(args.work).resolve() if args.work else root / "_build" / "mutation"
     out = Path(args.out).resolve() if args.out else work / "out"
@@ -875,7 +902,8 @@ def main():
             summary["set"] = run_set
             if not args.sites_only:
                 package_records, counts = run_package(root, directory, sites[directory], chosen[directory],
-                                                      workers, log, self_test_only=args.self_test_only)
+                                                      workers, log, self_test_only=args.self_test_only,
+                                                      kill_matrix=args.matrix)
                 for record in package_records:
                     record.update(set=run_set)
                 summary.update(counts)
@@ -898,6 +926,9 @@ def main():
     finally:
         if args.totals_only:
             choice.drop_builds(work)
+    # Every run rewrites the kill matrices: a run with --totals-only keeps
+    # none that would name a mutant.
+    matrix.write(out, operator_set, run_set, summaries, records)
     if args.totals_only:
         print(choice.write_totals(out, operator_set, choice.selection(args), args.packages, summaries, records,
                                   unapplied, outcome_counts))
@@ -923,7 +954,8 @@ def main():
                     f.write(json.dumps(site, ensure_ascii=False) + "\n")
     (out / "summary.json").write_text(
         json.dumps({"operator_set": operator_set, "set": run_set, "selection": choice.selection(args),
-                    **({"changed": changes} if changes is not None else {}), "packages": summaries, **flakes},
+                    **({"changed": changes} if changes is not None else {}),
+                    **({"kill_matrix": True} if args.matrix else {}), "packages": summaries, **flakes},
                    indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     text = report(operator_set, run_set, summaries, records)
     if entries is not None and not args.sites_only:

@@ -22,7 +22,8 @@ per test its failures, its reruns with a mutant on, and its flaky results
 among them. The threshold and the number of recent runs are the
 maintainer's, in mutation/flakes.toml.
 
-A test is named by its package, its file and its name, as moon names it.
+A test is named by its package, its file and its name, as moon names it;
+a test with no name, by `#` and its index in the file instead.
 
 usage: python3 scripts/mutation/confirm.py merge <flakes.json>...
 
@@ -57,8 +58,11 @@ def load_policy(path=POLICY):
 
 
 def key(test):
-    """A test's name: its package, its file and its name."""
-    return test.get("package"), test.get("file"), test.get("name")
+    """A test's name: its package, its file and its name, or, for a test
+    that has none, `#` and its index in the file, by which alone moon tells
+    such tests apart."""
+    name = test.get("name") or f"#{test.get('index')}"
+    return test.get("package"), test.get("file"), name
 
 
 def named(test_key):

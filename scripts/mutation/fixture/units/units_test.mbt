@@ -15,3 +15,17 @@ test "a number below the range is not in it" {
 test "a number beyond the end of a range is past it" {
   assert_true(@units.past(5, 3))
 }
+
+// Two tests with no name, which moon tells apart only by their index in
+// the file. Each needs a number well inside a range, so of units' mutants
+// only within's BODY `{ false }` fails them.
+
+///|
+test {
+  assert_true(@units.within(5, 1, 9))
+}
+
+///|
+test {
+  assert_true(@units.within(4, 0, 8))
+}
