@@ -1,0 +1,94 @@
+# Measures on CI's runners what the cost model of the test review (#275)
+# guesses: every e2e test run in one process and each e2e test run alone,
+# native rebuilds after one mutant in engine, and builds with coverage
+# against plain ones (scripts/measure-costs.py says how each is measured).
+# It runs on linux/amd64 and linux/arm64, and keeps what it measured as
+# workflow artifacts, also when a measurement fails.
+#
+# It runs only when started by hand from the Actions tab or with
+# `gh workflow run measure-costs.yml`, never on a schedule, on pull requests
+# or on pushes (scripts/check-measure-costs-workflow.sh checks that).
+# scripts/estimate-costs.py recomputes the cost model from the artifacts of
+# both architectures. CONTRIBUTING.md says how to start it and read it.
+#
+# It sets no variable that chooses moon's C compiler or its flags: on
+# amd64, moon's native debug builds skip the system C compiler, and the
+# measurement is of the builds as CI's test job makes them.
+name: Measure test costs
+
+on:
+  workflow_dispatch:
+    inputs:
+      e2e-runs:
+        description: "How many times to run every e2e test in one process (default: 3)"
+        type: string
+        default: "3"
+      alone-runs:
+        description: "How many times to run each e2e test alone, or 0 for none (default: 1)"
+        type: string
+        default: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: measure (linux/${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            machine: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    steps:
+      # The first measurement reads it, to say how long the checkout and the
+      # setup took, which every job of a sharded run spends again.
+      - name: Note when the job started
+        run: echo "MEASURE_JOB_STARTED=$(date +%s)" >>"$GITHUB_ENV"
+
+      - uses: actions/checkout@v7
+
+      # The runner check, OpenSSL, the pinned MoonBit and moon update.
+      - uses: ./.github/actions/native-setup
+        with:
+          machine: ${{ matrix.machine }}
+
+      - run: moon version --all
+
+      - name: Run every e2e test in one process
+        env:
+          RUNS: ${{ inputs.e2e-runs }}
+        run: python3 scripts/measure-costs.py e2e "$RUNNER_TEMP/measurements" --runs "$RUNS"
+
+      # Each measurement runs also when one before it failed, so that one
+      # run shows them all.
+      - name: Run each e2e test alone
+        if: ${{ !cancelled() }}
+        env:
+          RUNS: ${{ inputs.alone-runs }}
+        run: python3 scripts/measure-costs.py alone "$RUNNER_TEMP/measurements" --runs "$RUNS"
+
+      - name: Rebuild natively after one mutant in engine
+        if: ${{ !cancelled() }}
+        run: python3 scripts/measure-costs.py rebuild "$RUNNER_TEMP/measurements"
+
+      - name: Build and test with coverage and without
+        if: ${{ !cancelled() }}
+        run: python3 scripts/measure-costs.py coverage "$RUNNER_TEMP/measurements"
+
+      - name: Show the summary
+        if: always()
+        run: python3 scripts/measure-costs.py summary "$RUNNER_TEMP/measurements" >>"$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: measurements-linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/measurements
+          if-no-files-found: warn
