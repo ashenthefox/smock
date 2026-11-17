@@ -418,6 +418,118 @@ MBT
 report input
 empty input
 
+# --- Skip attributes and settings that keep tests off wasm-gc ---------------------
+
+# A test skipped, a new test skipped, and a test compiled for native alone.
+tree
+package
+branch
+file add/add_test.mbt <<'MBT'
+///|
+#skip
+test "adds two numbers" {
+  assert_eq(@add.add(2, 3), 5)
+}
+
+///|
+#cfg(target="native")
+test "adds a negative number" {
+  inspect(@add.add(2, -3), content="-1")
+}
+
+///|
+#skip("flaky")
+test "adds zero" {
+  assert_eq(@add.add(2, 0), 2)
+}
+MBT
+report skip
+mentions skip "## Skip attributes and target settings added"
+mentions skip '`add/add_test.mbt:3`: test "adds two numbers": `#skip`'
+mentions skip '`add/add_test.mbt:9`: test "adds a negative number": `#cfg(target="native")`'
+mentions skip '`add/add_test.mbt:15`: test "adds zero": `#skip("flaky")`'
+lacks skip "## Tests deleted"
+
+# A package whose tests no longer run on wasm-gc.
+tree
+package
+file add/moon.pkg <<'PKG'
+import {
+  "moonbitlang/core/json",
+}
+PKG
+branch
+cat >>"$repo/add/moon.pkg" <<'PKG'
+
+supported_targets = "native"
+PKG
+report package-targets
+mentions package-targets '`add/moon.pkg`: the tests of `add` no longer run on wasm-gc: `supported_targets = "native"`'
+
+# The same in a package's JSON settings, by a list of targets.
+tree
+package
+echo '{ "import": [] }' >"$repo/add/moon.pkg.json"
+branch
+echo '{ "import": [], "supported-targets": ["native", "js"] }' >"$repo/add/moon.pkg.json"
+report package-targets-json
+mentions package-targets-json '`add/moon.pkg.json`: the tests of `add` no longer run on wasm-gc'
+
+# A test file that no longer builds for wasm-gc.
+tree
+package
+file add/moon.pkg <<'PKG'
+options(
+  targets: {
+    "add_test.mbt": [ "native", "wasm-gc" ],
+  },
+)
+PKG
+branch
+sed -i 's/"native", "wasm-gc"/"native"/' "$repo/add/moon.pkg"
+report file-targets
+mentions file-targets '`add/moon.pkg`: `add/add_test.mbt` no longer runs on wasm-gc: `"add_test.mbt": [ "native" ]`'
+
+# The same in settings that the package had not.
+tree
+package
+branch
+file add/moon.pkg <<'PKG'
+options(targets: { "add_test.mbt": ["native"] })
+PKG
+report file-targets-new
+mentions file-targets-new '`add/moon.pkg`: `add/add_test.mbt` no longer runs on wasm-gc: `"add_test.mbt": ["native"]`'
+
+# Another import, a package that runs on wasm-gc as well, and one that
+# stays native-only weaken nothing.
+tree
+package
+file add/moon.pkg <<'PKG'
+supported_targets = "native"
+PKG
+file sub/sub_test.mbt <<'MBT'
+///|
+test "subtracts" {
+  assert_eq(3 - 2, 1)
+}
+MBT
+file sub/moon.pkg <<'PKG'
+supported_targets = "native"
+PKG
+branch
+file add/moon.pkg <<'PKG'
+import {
+  "moonbitlang/core/json",
+}
+
+supported_targets = "native+wasm-gc"
+PKG
+file sub/moon.pkg <<'PKG'
+supported_targets = "-all+native"
+PKG
+report targets-kept
+empty targets-kept
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]

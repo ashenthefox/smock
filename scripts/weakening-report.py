@@ -21,6 +21,7 @@ not a commit.
 
 import argparse
 import difflib
+import json
 import posixpath
 import re
 import subprocess
@@ -45,6 +46,11 @@ def git(repo, *args):
 def show(repo, rev, path):
     """The text of path at rev."""
     return git(repo, "show", f"{rev}:{path}")
+
+
+def exists(repo, rev, path):
+    """Whether path is a file at rev."""
+    return bool(git(repo, "ls-tree", "--name-only", rev, "--", path).strip())
 
 
 def files_in(repo, rev, directory):
@@ -90,6 +96,8 @@ class Item:
     # the header in its file.
     lines: list
     line: int
+    # The attributes written before the header, such as #skip.
+    attributes: list
 
     def title(self):
         """How the report names the item."""
@@ -153,7 +161,10 @@ def items_of(path, text):
                 kind, name = match.group(1), match.group(2)
             else:
                 kind, name = "item", " ".join(text_of_header.split())
-            items.append(Item(path, kind, name, segment[first:], start + first + 1))
+            attributes = [line.strip() for line in segment[:first] if line.strip().startswith("#")]
+            items.append(
+                Item(path, kind, name, segment[first:], start + first + 1, attributes)
+            )
     return items
 
 
@@ -368,8 +379,8 @@ def key(item):
 
 def pair(base_items, head_items):
     """The items of the base that the head still has, each with its head
-    item, and those it does not. An item keeps its key; one of several of
-    the same key is matched in its file first."""
+    item; those it does not; and the head's new items. An item keeps its
+    key; one of several of the same key is matched in its file first."""
     free = list(head_items)
     pairs, gone = [], []
     for item in base_items:
@@ -381,7 +392,184 @@ def pair(base_items, head_items):
         chosen = (same_file or candidates)[0]
         free.remove(chosen)
         pairs.append((item, chosen))
-    return pairs, gone
+    return pairs, gone, free
+
+
+# --- Where tests run -------------------------------------------------------------
+
+SKIP = re.compile(r"#(?:skip|cfg)\b")
+TARGETS = {"wasm", "wasm-gc", "js", "native", "llvm"}
+TARGET = re.compile(r"([+-]?)\s*(all|wasm-gc|wasm|js|native|llvm)\b")
+SUPPORTED = re.compile(
+    r'(?:^[ \t]*supported_targets[ \t]*=|"supported-targets"[ \t]*:)[ \t]*'
+    r'("(?:[^"\\]|\\.)*"|\[[^\]]*\])',
+    re.M,
+)
+FILE_TARGETS = re.compile(r'"?\btargets"?\s*:\s*\{')
+
+
+def skips_added(before, after):
+    """The attributes of a test that skip it, or compile it for some
+    targets alone, that after has and before had not."""
+    if after.kind != "test":
+        return []
+    had = before.attributes if before else []
+    return [text for text in after.attributes if SKIP.match(text) and text not in had]
+
+
+def loads(text):
+    """A JSON value written in a package's settings, which may end a list
+    or an object with a comma."""
+    return json.loads(re.sub(r",(\s*[\]}])", r"\1", text))
+
+
+def targets(value):
+    """The set of targets a supported-targets value names: a list, or an
+    expression such as "native", "native+wasm" or "-all+native". None
+    when it cannot be read."""
+    if isinstance(value, list):
+        return set(value)
+    tokens = TARGET.findall(value) if isinstance(value, str) else []
+    if not tokens:
+        return None
+    result = set(TARGETS) if tokens[0][0] == "-" else set()
+    for sign, name in tokens:
+        names = TARGETS if name == "all" else {name}
+        result = result - names if sign == "-" else result | names
+    return result
+
+
+def allows_wasm_gc(condition):
+    """Whether a file's condition in a package's targets lets it build for
+    wasm-gc: a target, a list of them, or ["and" | "or" | "not", ...]. A
+    condition on debug or release builds alone allows it."""
+
+    def value(cond):
+        # True or False, or None for a condition that does not name targets.
+        if isinstance(cond, str):
+            if cond in ("debug", "release"):
+                return None
+            named = targets(cond)
+            return None if named is None else "wasm-gc" in named
+        if isinstance(cond, list) and cond and cond[0] in ("and", "or", "not"):
+            values = [value(c) for c in cond[1:]]
+            if cond[0] == "not":
+                return None if not values or values[0] is None else not values[0]
+            if cond[0] == "and":
+                return not any(v is False for v in values)
+            return any(v is not False for v in values)
+        if isinstance(cond, list):
+            return any(value(c) is not False for c in cond)
+        return None
+
+    return value(condition) is not False
+
+
+def balanced(text, start):
+    """The index just past the bracket that closes the one at start,
+    outside string literals."""
+    depth, i = 0, start
+    while i < len(text):
+        c = text[i]
+        if c == '"':
+            i += 1
+            while i < len(text) and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+        elif c in "[{(":
+            depth += 1
+        elif c in "]})":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return len(text)
+
+
+ENTRY = re.compile(r'\s*,?\s*"([^"]+)"\s*:\s*')
+UNREADABLE = "unreadable"
+
+
+def settings(text):
+    """What a package's settings say of where its tests run: its supported
+    targets, as written and as a set of targets (None when it names none);
+    and the condition of each file in its targets, with the entry as
+    written. A value that cannot be read is UNREADABLE."""
+    supported = SUPPORTED.search(text or "")
+    package = (None, None)
+    if supported:
+        try:
+            named = targets(loads(supported.group(1)))
+        except ValueError:
+            named = None
+        package = (supported.group(0).strip(), UNREADABLE if named is None else named)
+    files = {}
+    if found := FILE_TARGETS.search(text or ""):
+        body = text[found.end() - 1 : balanced(text, found.end() - 1)]
+        i = 1
+        while (entry := ENTRY.match(body, i)) and entry.end() < len(body):
+            j = entry.end()
+            end = balanced(body, j) if body[j] in "[{" else body.index('"', j + 1) + 1
+            written = " ".join(body[entry.start() : end].split()).lstrip(", ")
+            try:
+                files[entry.group(1)] = (written, loads(body[j:end]))
+            except ValueError:
+                files[entry.group(1)] = (written, UNREADABLE)
+            i = end
+    return package, files
+
+
+def runs_on_wasm_gc(named):
+    """Whether a package whose supported targets are named runs its tests
+    on wasm-gc: True, False, or None when the report cannot tell."""
+    if named == UNREADABLE:
+        return None
+    return named is None or "wasm-gc" in named
+
+
+def kept_off_wasm_gc(repo, base, head, path):
+    """What a change to a package's settings keeps off wasm-gc, as lines
+    of the report: the package's tests, or a test file."""
+    package = posixpath.dirname(path)
+    shown = f"`{package}`" if package else "the root package"
+
+    def read(rev):
+        return show(repo, rev, path) if exists(repo, rev, path) else None
+
+    (_, base_named), base_files = settings(read(base))
+    (written, head_named), head_files = settings(read(head))
+    tests = [
+        item
+        for rev in (base, head)
+        for item in package_items(repo, rev, package)
+        if item.kind == "test"
+    ]
+    out = []
+    if tests and runs_on_wasm_gc(base_named) is not False:
+        if runs_on_wasm_gc(head_named) is None:
+            out.append(
+                f"- `{path}`: the report cannot tell whether the tests of {shown} "
+                f"still run on wasm-gc: `{written}`"
+            )
+        elif not runs_on_wasm_gc(head_named):
+            out.append(f"- `{path}`: the tests of {shown} no longer run on wasm-gc: `{written}`")
+    tested = {item.path for item in tests}
+    for name in sorted(head_files):
+        file = posixpath.join(package, name)
+        if not (is_test_file(file) or file in tested):
+            continue
+        if name in base_files:
+            before = base_files[name][1]
+            if before != UNREADABLE and not allows_wasm_gc(before):
+                continue
+        written, condition = head_files[name]
+        if condition == UNREADABLE:
+            out.append(
+                f"- `{path}`: the report cannot tell whether `{file}` still runs on "
+                f"wasm-gc: `{written}`"
+            )
+        elif not allows_wasm_gc(condition):
+            out.append(f"- `{path}`: `{file}` no longer runs on wasm-gc: `{written}`")
+    return out
 
 
 # --- The report ----------------------------------------------------------------
@@ -397,15 +585,21 @@ def report(repo, base_ref, head_ref):
         for line in git(repo, "diff", "--name-status", "--no-renames", base, head).splitlines()
     ]
 
-    deleted, assertions, snapshots = [], [], []
+    deleted, assertions, snapshots, skips = [], [], [], []
     packages = sorted({posixpath.dirname(path) for _, path in changed if is_moonbit(path)})
     for package in packages:
         base_items = package_items(repo, base, package)
         head_items = package_items(repo, head, package)
         names = snapshot_names(base_items + head_items)
-        pairs, gone = pair(base_items, head_items)
+        pairs, gone, new = pair(base_items, head_items)
         deleted.extend(item for item in gone if item.kind == "test")
-        for before, after in pairs:
+        for before, after in pairs + [(None, item) for item in new]:
+            skips.extend(
+                f"- `{after.path}:{after.line}`: {after.title()}: `{text}`"
+                for text in skips_added(before, after)
+            )
+            if before is None:
+                continue
             in_snapshots, in_assertions = weakened(before, after, names)
             if in_snapshots:
                 snapshots.append(changed_item(before, after, in_snapshots))
@@ -414,6 +608,8 @@ def report(repo, base_ref, head_ref):
     for status, path in changed:
         if "__snapshot__" in path.split("/") and status in ("M", "D"):
             snapshots.append(changed_file(repo, base, head, path))
+        if posixpath.basename(path) in ("moon.pkg", "moon.pkg.json"):
+            skips.extend(kept_off_wasm_gc(repo, base, head, path))
 
     short = lambda rev: git(repo, "rev-parse", "--short", rev).strip()
     out = [
@@ -435,7 +631,9 @@ def report(repo, base_ref, head_ref):
             out += [f"## {title}", ""]
             for entry in entries:
                 out += entry
-    if not (deleted or assertions or snapshots):
+    if skips:
+        out += ["## Skip attributes and target settings added", "", *skips, ""]
+    if not (deleted or assertions or snapshots or skips):
         out += ["Nothing to report.", ""]
     return out
 
