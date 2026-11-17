@@ -36,6 +36,7 @@ import choice
 import compare
 import confirm
 import importers
+import matrix
 import run
 
 # What a shard's summary of a package gives of its own run, beside the
@@ -90,13 +91,14 @@ def ordered(directories):
 
     def of_run(summary):
         selection = dict(summary["selection"], shard=None)
-        return summary.get("operator_set"), summary.get("set"), selection, summary.get("changed")
+        kill_matrix = any("matrix" in package for package in summary["packages"])
+        return summary.get("operator_set"), summary.get("set"), selection, summary.get("changed"), kill_matrix
 
     first = of_run(shards[0][3])
     for index, _, directory, summary, *_ in shards[1:]:
         if of_run(summary) != first:
             raise MergeError(f"shard {index}/{count} ({directory}) is of another run than shard 1/{count}:"
-                             " its operator set, set, selection or changed lines differ")
+                             " its operator set, set, selection, changed lines or kill-matrix mode differ")
     return shards
 
 
@@ -126,6 +128,8 @@ def merge(directories):
                 summary["own"] = run.outcome_counts(importers.own_records(package))
             if "importers" in summary:
                 summary["importers"] = importers.merge_credits([p["importers"] for _, p in mine])
+            if "matrix" in summary:
+                summary["matrix"] = matrix.merged([p["matrix"] for _, p in mine], package, MergeError)
             if chosen_set == "full":
                 summary.update(run.alternative_counts(package))
             summary["shards"] = [{"shard": f"{index}/{count}", **{k: p[k] for k in OWN_RUN if k in p},
@@ -167,6 +171,7 @@ def main():
     with open(out / "mutants.jsonl", "w", encoding="utf-8") as f:
         for record in records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    matrix.write(out, summary["operator_set"], summary["set"], summary["packages"], records)
     for name, lines in (("chosen.jsonl", chosen), ("unapplied.jsonl", unapplied)):
         if lines is not None:
             with open(out / name, "w", encoding="utf-8") as f:

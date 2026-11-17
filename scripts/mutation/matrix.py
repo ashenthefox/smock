@@ -161,6 +161,19 @@ def counts(found, records):
     }
 
 
+def merged(founds, records, error):
+    """What the summary of a run in shards says of a package's matrix,
+    from what its shards' summaries say (scripts/mutation/merge.py): the
+    same packages and tests in each, and the counts taken again from all
+    its records."""
+    first = founds[0]
+    for found in founds[1:]:
+        if (found["packages"], found["native_only"], found["tests"]) != (
+                first["packages"], first["native_only"], first["tests"]):
+            raise error(f"the shards' kill matrices of {first['packages'][0]} hold different tests")
+    return counts(first, records)
+
+
 def report_lines(summary):
     """The lines of the report that give a package's kill matrix: the tests
     that ran, how many of them kill some mutant and alone kill one, and

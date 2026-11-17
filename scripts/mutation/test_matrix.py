@@ -272,6 +272,32 @@ class KillMatrixTest(unittest.TestCase):
                 for m in self.tool("kills", "--without", "--test", test_id(METER_LOW), self.out)}
         self.assertEqual({i: told[i] for i in mutants}, run)
 
+    def test_the_shards_of_a_kill_matrix_merge_into_the_matrix_of_the_run_without_shards(self):
+        shards = []
+        for k in (1, 2):
+            shards.append(self.tmp / f"shard-{k}")
+            result = run_runner(FIXTURE, self.tmp / f"work-shard-{k}", shards[-1], self.moon, "--matrix", "--shard",
+                                f"{k}/2", "units")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        merged = self.tmp / "merged"
+        result = subprocess.run([sys.executable, str(HERE / "merge.py"), "--out", str(merged), *map(str, shards)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((merged / "matrix" / "units.json").read_text(),
+                         (self.out / "matrix" / "units.json").read_text())
+        whole = json.loads((self.out / "summary.json").read_text())["packages"][0]["matrix"]
+        self.assertEqual(json.loads((merged / "summary.json").read_text())["packages"][0]["matrix"], whole)
+        self.assertIn("- 7 of these tests kill some mutant, and 4 of them alone kill some mutant.",
+                      (merged / "report.md").read_text())
+        # A shard of a run that is no kill matrix is of another run.
+        other = self.tmp / "shard-2-other"
+        result = run_runner(FIXTURE, self.tmp / "work-shard-2", other, self.moon, "--shard", "2/2", "units")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = subprocess.run([sys.executable, str(HERE / "merge.py"), "--out", str(self.tmp / "mixed"),
+                                 str(shards[0]), str(other)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("is of another run", result.stderr)
+
     def test_a_kill_matrix_runs_alone(self):
         for other in (["--totals-only", "--list", "x.jsonl"], ["--self-test-only"]):
             result = run_runner(FIXTURE, self.tmp / "work", self.tmp / "refused", self.moon, "--matrix", *other,
