@@ -475,3 +475,25 @@ test "ranges: the read, idle and write timeouts, by their flags or variables, ta
     ),
   )
 }
+
+///|
+test "ranges: --journal-body-limit, by its flag or SMOCK_JOURNAL_BODY_LIMIT, takes 0 and 1073741824, and refuses -1, 1073741825 and a value that is not a decimal integer" {
+  // No document gives this range: docs/running.md's Settings table and the
+  // help give the default alone, and only the refusal names the range. It
+  // is the code's, a finding that #320 takes to the maintainer.
+  inspect(
+    each_by_flag_and_variable(
+      "--journal-body-limit",
+      "SMOCK_JOURNAL_BODY_LIMIT",
+      ["0", "1073741824", "-1", "1073741825", "4KiB"],
+      settings => settings.journal_body_limit.to_string(),
+    ),
+    content=(
+      #|0: 0
+      #|1073741824: 1073741824
+      #|-1: invalid value "-1" for --journal-body-limit (SMOCK_JOURNAL_BODY_LIMIT): must be an integer from 0 to 1073741824
+      #|1073741825: invalid value "1073741825" for --journal-body-limit (SMOCK_JOURNAL_BODY_LIMIT): must be an integer from 0 to 1073741824
+      #|4KiB: invalid value "4KiB" for --journal-body-limit (SMOCK_JOURNAL_BODY_LIMIT): must be an integer from 0 to 1073741824
+    ),
+  )
+}
