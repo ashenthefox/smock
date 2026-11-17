@@ -164,6 +164,12 @@ format, and neither does a read or an idle timeout. A write timeout is not
 logged either, but in the `mockoon` format the request whose response it
 cut short still gets its `Transaction recorded` line.
 
+Over HTTP/1.1, neither the read nor the idle timeout runs while smock
+waits before a response, as for a delay, or writes one, however long that
+takes: the idle timeout runs from the end of the last response. A request
+that has begun holds off the idle timeout, even a shorter one: from its
+first byte it has the whole read timeout to arrive.
+
 Known limitation: after answering a request with 400, 413, 431, 501 or 505,
 smock closes the connection without reading the rest of the request. A
 client that is still sending it, such as a body over `--body-limit`, may
