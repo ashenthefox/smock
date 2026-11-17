@@ -19,8 +19,9 @@ what another test file defines is then an error, at the line that uses it.
 For each such error it prints <file>:<line>: uses <name>, which <file>
 defines, once for each name a file uses, at its first use. The name is a
 function, a value, a constant, a type, an enum's constructor, an error
-type, a method (Type::method), a trait's implementation (impl Trait for
-Type), or a struct that a record literal builds. It finds the file that
+type, a method (Type::method, one that a trait's implementation defines
+included), a trait's implementation (impl Trait for Type), or a struct
+that a record literal builds. It finds the file that
 defines it by moon fmt's layout: a top-level item starts at column 0.
 Any other error, such as one that follows from an unknown name, is
 printed with the compiler's message. Then it prints a count. It exits
@@ -146,7 +147,7 @@ class Definitions:
         if m:
             wanted = {f.strip() for f in m.group(1).split(",")}
             for name, fields, path in self.structs:
-                if wanted <= fields:
+                if wanted == fields:
                     return name, path
         return None
 
@@ -248,9 +249,9 @@ def main():
         for path, line, message in sorted(own, key=lambda e: (e[0], e[1])):
             found = definitions.definer(message)
             if found:
-                if found[0] in seen:
+                if (path, found[0]) in seen:
                     continue
-                seen.add(found[0])
+                seen.add((path, found[0]))
                 print(f"{path}:{line}: uses {found[0]}, which {found[1]} defines")
             else:
                 print(f"{path}:{line}: {message}")

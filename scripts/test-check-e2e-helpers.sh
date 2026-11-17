@@ -43,13 +43,18 @@ file() {
 }
 
 # harness: writes the harness file e2e/harness_test.mbt, with a type, a
-# function and a value that every test file may use.
+# trait, a function and a value that every test file may use.
 harness() {
   file e2e/harness_test.mbt <<'MBT'
 ///|
 /// What the harness serves.
 struct Thing {
   n : Int
+}
+
+///|
+trait Greet {
+  greet(Self) -> String
 }
 
 ///|
@@ -166,7 +171,7 @@ enum Shape {
 ///|
 struct Point {
   x : Int
-  y : Int
+  mut y : Int
 }
 
 ///|
@@ -175,8 +180,18 @@ fn Thing::twice(self : Thing) -> Int {
 }
 
 ///|
+async fn Thing::slowly(self : Thing) -> Int {
+  self.n
+}
+
+///|
 impl Show for Thing with output(_self, logger) {
   logger.write_string("thing")
+}
+
+///|
+impl Greet for Thing with greet(_self) {
+  "hi"
 }
 
 ///|
@@ -223,11 +238,12 @@ test "b" {
     _ => ()
   }
   assert_eq(first([1]), 1)
+  assert_eq(t.greet(), "hi")
 }
 
 ///|
-async fn sooner() -> Int {
-  later() - 1
+async fn sooner(t : Thing) -> Int {
+  later() - t.slowly()
 }
 MBT
 check kinds
@@ -244,9 +260,11 @@ says kinds "e2e/b_test.mbt:14: uses Oops, which e2e/a_test.mbt defines"
 says kinds "e2e/b_test.mbt:16: uses pairs, which e2e/a_test.mbt defines"
 mentions kinds "e2e/b_test.mbt:17: Please implement method \`get\`"
 says kinds "e2e/b_test.mbt:20: uses first, which e2e/a_test.mbt defines"
-says kinds "e2e/b_test.mbt:25: uses later, which e2e/a_test.mbt defines"
+says kinds "e2e/b_test.mbt:21: uses Thing::greet, which e2e/a_test.mbt defines"
+says kinds "e2e/b_test.mbt:26: uses later, which e2e/a_test.mbt defines"
+says kinds "e2e/b_test.mbt:26: uses Thing::slowly, which e2e/a_test.mbt defines"
 says kinds "check-e2e-helpers: e2e: 1 of 2 test files uses what another test file defines"
-lines kinds 14
+lines kinds 16
 
 # The harness files may use each other, but nothing a test file defines.
 module
@@ -273,6 +291,12 @@ test "a" {
   assert_eq(twice_shared() + needs_a(), 4)
 }
 MBT
+file e2e/b_test.mbt <<'MBT'
+///|
+test "b" {
+  assert_eq(twice_shared(), 2)
+}
+MBT
 check harness
 exits harness 1
 says harness "e2e/http2_harness_test.mbt:8: uses only_a, which e2e/a_test.mbt defines"
@@ -294,7 +318,7 @@ test "a" {
 MBT
 check harnesses
 exits harnesses 0
-says harnesses "check-e2e-helpers: e2e: each of the 1 test files checks with the 2 harness files alone"
+says harnesses "check-e2e-helpers: e2e: each of the 2 test files checks with the 2 harness files alone"
 
 # Several files that use what others define are each named, in name order,
 # and a file that two others use is named for each.
