@@ -1,10 +1,76 @@
 #!/usr/bin/env python3
 """Checks the use-case and boundary ledgers, docs/ledgers/use-cases.md and
-docs/ledgers/boundaries.md.
+docs/ledgers/boundaries.md (CONTRIBUTING.md, "How tests are judged"). Each
+test and check a row names must be there, so that a test renamed, moved to
+another file or removed fails the check until the ledger follows it, and
+each row must say where its feature, limit or message comes from and how
+far it is checked.
 
 usage: python3 scripts/check-ledgers.py [<tree>]
 
 <tree> is the checkout to check: this one, unless it is given.
+
+A ledger is Markdown. Its rows are those of the tables whose header's
+first cell is ID, and the header gives the table's kind by its columns:
+
+  | ID | Feature | Source | Status | Checked by |
+      a documented feature; its id is F and two digits, and its status
+      tested, partly, manual or open;
+  | ID | Message | Source | Seen by | Status | Checked by |
+      a message smock gives; its id is M and two digits, its status
+      asserted, open, deleted or manual, and seen by user, when a user of
+      smock can see it, or package, when only a package's interface shows
+      it;
+  | ID | Limit | Source | Package | Status | At the limit | Just past it |
+      a limit; its id is L, two digits and maybe a lower-case letter, its
+      status tested, partly or open, and its package one or more package
+      directories, each in backquotes and separated by ", ", that hold it.
+
+Another table whose header starts with ID is a problem. Each row has a
+cell for each column. Its id is unique across the two ledgers. Its source
+holds a Markdown link or names an issue (#<number>).
+
+The cells that name what checks a row (Checked by, At the limit and Just
+past it) hold entries separated by <br>, each one of these, and maybe text
+after it:
+
+  `<path>` "<name>"
+      a test: <path> is a test file, a path from <tree> that ends in
+      _test.mbt, _wbtest.mbt or .mbt.md, and <name> the test's name as the
+      file writes it between the quotes, escapes included, as moon's test
+      metadata and the keep list name it. The file must hold exactly one
+      test block of that name: a line that starts with `test "<name>"` or
+      `async test "<name>"`, as moon fmt writes test blocks. A name in a
+      comment or in a string, or the start of a longer name, is not a test;
+  `<path>`
+      a check that CI runs, such as a script: <path> is a file or a
+      directory of <tree> that is not a test file;
+  #<number>
+      a ticket or an issue that adds what is missing, or that deleted a
+      message;
+  Manual: <reason>
+      a manual check, with why it is not automated.
+
+The status agrees with the entries:
+
+  tested, asserted
+      tests and checks alone; for a limit, on each side;
+  partly
+      tests, checks and tickets alone, with at least one ticket and one
+      test or check;
+  manual
+      at least one manual check;
+  open
+      tickets alone;
+  deleted
+      tickets alone: the one that deleted the message.
+
+It prints each problem as <ledger>:<line>: <id>: <what is wrong>, and then
+a count. It exits with 1 when it found a problem, and with 2 when a ledger
+or a test file cannot be read.
+
+CI runs it on every push (ci.yml). scripts/test-check-ledgers.sh tests it.
+It needs Python 3.9 or later.
 """
 import os
 import re
@@ -40,6 +106,8 @@ STATUSES = {
 }
 LINK = re.compile(r"\]\([^)]+\)")
 TICKET = re.compile(r"#[0-9]+\b")
+PACKAGE = re.compile(r"`([^`]+)`")
+PACKAGES = re.compile(r"`[^`]+`(?:, `[^`]+`)*")
 
 
 def plural(count, word):
@@ -63,7 +131,7 @@ class Tree:
         such file."""
         if path not in self.names:
             full = os.path.join(self.root, path)
-            if not os.path.isfile(full):
+            if not self.exists(path) or not os.path.isfile(full):
                 self.names[path] = None
             else:
                 with open(full, encoding="utf-8") as f:
@@ -151,6 +219,18 @@ def status_problem(kind, status, sides):
     return None
 
 
+def package_problems(cell, tree):
+    """The problems of `cell`, a limit's cell that names the packages that
+    hold it."""
+    if not PACKAGES.fullmatch(cell):
+        return ["the package is not one or more package directories, each in backquotes"]
+    problems = []
+    for package in PACKAGE.findall(cell):
+        if not tree.exists(f"{package}/moon.pkg"):
+            problems.append(f"{package} is not a package: it has no moon.pkg")
+    return problems
+
+
 def row_problems(kind, values, tree):
     """The problems of a row of `kind`, whose cells are `values` by their
     column."""
@@ -162,6 +242,8 @@ def row_problems(kind, values, tree):
         problems.append("the source has no link and names no issue")
     if kind == "message" and values["Seen by"] not in ("user", "package"):
         problems.append("seen by is not user or package")
+    if kind == "limit":
+        problems += package_problems(values["Package"], tree)
     sides = []
     for column in TEST_COLUMNS[kind]:
         side = set()
@@ -191,14 +273,21 @@ def ledger_problems(path, text, tree, counts, ids):
         row = cells(line)
         if kind is None:
             if row and row[0] == "ID":
-                kind = KINDS.get(tuple(row))
+                kind = KINDS.get(tuple(row), "unknown")
                 columns = row
+                if kind == "unknown":
+                    problems.append(
+                        (number, None, "the table's columns are not those of the features, the messages or the limits")
+                    )
             continue
-        if all(set(cell) <= set("-: ") for cell in row):
+        if kind == "unknown" or all(set(cell) <= set("-: ") for cell in row):
             continue
         counts[kind] += 1
-        values = dict(zip(columns, row + [""] * (len(columns) - len(row))))
+        values = dict(zip(columns, row))
         row_id = values["ID"]
+        if len(row) != len(columns):
+            problems.append((number, row_id, f"the row has {len(row)} cells, not {len(columns)}"))
+            continue
         found = row_problems(kind, values, tree)
         if row_id in ids:
             found.append(f"{ids[row_id]} has the id {row_id} too")
@@ -218,12 +307,21 @@ def main(argv):
     counts = {"feature": 0, "message": 0, "limit": 0}
     problems = []
     ids = {}
-    for ledger in LEDGERS:
-        with open(os.path.join(root, ledger), encoding="utf-8") as f:
-            text = f.read()
-        problems += [(ledger,) + problem for problem in ledger_problems(ledger, text, tree, counts, ids)]
+    try:
+        for ledger in LEDGERS:
+            try:
+                with open(os.path.join(root, ledger), encoding="utf-8") as f:
+                    text = f.read()
+            except (OSError, UnicodeDecodeError) as error:
+                why = error.strerror if isinstance(error, OSError) else "it is not UTF-8"
+                print(f"check-ledgers: cannot read {ledger}: {why}", file=sys.stderr)
+                return 2
+            problems += [(ledger,) + problem for problem in ledger_problems(ledger, text, tree, counts, ids)]
+    except (OSError, UnicodeDecodeError) as error:
+        print(f"check-ledgers: cannot read a test file: {error}", file=sys.stderr)
+        return 2
     for ledger, line, row, text in problems:
-        print(f"{ledger}:{line}: {row}: {text}")
+        print(f"{ledger}:{line}: {text}" if row is None else f"{ledger}:{line}: {row}: {text}")
     counted = (
         f"{plural(counts['feature'], 'feature')}, {plural(counts['message'], 'message')}"
         f" and {plural(counts['limit'], 'limit')}"

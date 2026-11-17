@@ -291,6 +291,56 @@ says statuses "docs/ledgers/boundaries.md:10: L14: an open row names tickets alo
 says statuses "check-ledgers: 11 features, 7 messages and 6 limits, 14 problems"
 lines statuses 15
 
+# --- Packages and tables -------------------------------------------------------
+
+# A limit names the packages that hold it, each a directory with a moon.pkg;
+# a table whose header starts with ID has the columns of one kind, and each
+# of its rows a cell for each column.
+tree
+ledgers
+cat >>"$root/docs/ledgers/boundaries.md" <<'MD'
+| L20 | Two packages | #1 | `http1`, `server` | open | #324 | #324 |
+| L21 | No package | #1 |  | open | #324 | #324 |
+| L22 | Not a package | #1 | `scripts` | open | #324 | #324 |
+| L23 | Not code | #1 | http1 | open | #324 | #324 |
+| L24 | Short row | #1 | `http1` | open | #324 |
+
+| ID | Limit | Source | Status |
+|---|---|---|---|
+| L25 | Another table | #1 | open |
+MD
+check packages
+exits packages 1
+says packages "docs/ledgers/boundaries.md:7: L21: the package is not one or more package directories, each in backquotes"
+says packages "docs/ledgers/boundaries.md:8: L22: scripts is not a package: it has no moon.pkg"
+says packages "docs/ledgers/boundaries.md:9: L23: the package is not one or more package directories, each in backquotes"
+says packages "docs/ledgers/boundaries.md:10: L24: the row has 6 cells, not 7"
+says packages "docs/ledgers/boundaries.md:12: the table's columns are not those of the features, the messages or the limits"
+says packages "check-ledgers: 1 feature, 1 message and 6 limits, 5 problems"
+lines packages 6
+
+# --- Files that cannot be read -------------------------------------------------
+
+tree
+ledgers
+rm "$root/docs/ledgers/boundaries.md"
+check no-ledger
+exits no-ledger 2
+lines no-ledger 1
+says no-ledger "check-ledgers: cannot read docs/ledgers/boundaries.md: No such file or directory"
+
+tree
+ledgers
+status=0
+python3 scripts/check-ledgers.py "$root" extra >"$tmp/usage.out" 2>&1 || status=$?
+echo "$status" >"$tmp/usage.status"
+exits usage 2
+if grep -q "^usage: python3 scripts/check-ledgers.py" "$tmp/usage.out"; then
+  pass "usage: prints the usage"
+else
+  fail "usage: does not print the usage"
+fi
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]
