@@ -9,7 +9,7 @@
 {"file":"yaml/parser.mbt","definition":"Parser::column","text":"49e6b36a9c703fab","pinned":{"BODY":1,"AOR":1},"full":{"BODY":1,"AOR":1}}
 {"file":"yaml/parser.mbt","definition":"Parser::at_eof","text":"e11ab1b1fa95e52c","pinned":{"BODY":1,"ROR":1},"full":{"BODY":1,"ROR":1}}
 {"file":"yaml/parser.mbt","definition":"Parser::skip_space","text":"616472e837783a5b","pinned":{"BODY":1,"IFC":1,"DEL":1},"full":{"BODY":1,"IFC":2,"DEL":1}}
-{"file":"yaml/parser.mbt","definition":"Parser::skip_comment","text":"61004b20b45907d2","pinned":{"BODY":1,"IFC":2,"NOT":1,"DEL":1},"full":{"BODY":1,"IFC":4,"NOT":1,"DEL":1}}
+{"file":"yaml/parser.mbt","definition":"Parser::skip_comment","text":"d75d73cf5a18b95d","pinned":{"BODY":1,"IFC":2,"LCR":2,"NOT":1,"DEL":1,"AOR":1,"INT":2},"full":{"BODY":1,"IFC":4,"LCR":2,"NOT":1,"DEL":1,"AOR":1,"INT":2}}
 {"file":"yaml/parser.mbt","definition":"Parser::from_line_start","text":"aef21cf6c5412995","pinned":{"BODY":1,"IFC":5,"NOT":1,"DEL":4,"BOOL":2,"STR":1},"full":{"BODY":1,"IFC":10,"NOT":1,"DEL":4,"BOOL":2,"STR":2}}
 {"file":"yaml/parser.mbt","definition":"Parser::next_content","text":"2363ef00c59aeeb3","pinned":{"BODY":1,"DEL":3,"BOOL":1,"STR":1},"full":{"BODY":1,"DEL":3,"BOOL":1,"STR":2}}
 {"file":"yaml/parser.mbt","definition":"Parser::document","text":"dd099c66eb5134f4","pinned":{"BODY":1,"IFC":9,"LCR":5,"NOT":2,"DEL":9,"BOOL":2,"AOR":2,"INT":5,"STR":12},"full":{"BODY":1,"IFC":18,"LCR":5,"NOT":2,"DEL":9,"BOOL":2,"AOR":2,"INT":10,"STR":18}}

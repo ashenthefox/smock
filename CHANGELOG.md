@@ -696,6 +696,12 @@ of each GitHub release include its section
   document and the second starts another. smock read the second `---` as
   the document's text, so `---` on two lines read as the string `---`
   ([smock#365](https://github.com/hirunefu/smock/issues/365)).
+- In YAML, a `#` with no space or tab before it no longer starts a
+  comment, as YAML says. After a quoted value or a flow collection, such
+  as `key: "value"# note` or `[a, b]#note`, smock dropped the rest of the
+  line as a comment; it now rejects the text. Inside a plain value, as in
+  `path: /a#b`, the `#` is part of the value, as before
+  ([smock#366](https://github.com/hirunefu/smock/issues/366)).
 
 ## [0.4.0] - 2026-11-01
 

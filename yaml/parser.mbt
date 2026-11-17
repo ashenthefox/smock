@@ -146,8 +146,12 @@ fn Parser::skip_space(self : Parser) -> Unit {
 }
 
 ///|
+/// Skips a comment: a `#` at the start of a line or after white space, to
+/// the end of its line. A `#` right after other text starts no comment
+/// (YAML 1.2.2, section 6.6), so it is left for the caller to refuse.
 fn Parser::skip_comment(self : Parser) -> Unit {
-  if self.peek() == '#' {
+  if self.peek() == '#' &&
+    (self.pos == self.line_start || self.chars[self.pos - 1] is (' ' | '\t')) {
     while !(self.peek() is ('\n' | EOF)) {
       self.bump()
     }

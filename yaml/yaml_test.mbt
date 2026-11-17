@@ -209,6 +209,42 @@ test "comments run from a # after white space to the end of the line" {
       #|{"request":{"method":"GET","path":"/a#b","x#y":"quoted # not a comment"},"list":["a","b"]}
     ),
   )
+  // "Comments must be separated from other tokens by white space
+  // characters" (YAML 1.2.2, section 6.6). A `#` right after a quoted
+  // scalar, a flow collection or a flow indicator starts no comment, so the
+  // text is refused: yaml-test-suite marks the first three inputs, SU5Z,
+  // 9JBA and CVW2, as errors. Each refusal comes with the message the
+  // parser gives for what it finds there instead: text after a value, a
+  // plain value that starts with an indicator, as the tests above assert for
+  // `a: [1, 2]]` and `a: @x`, and the two flow messages #280's acceptance
+  // criteria name. The nearest inputs that stay valid follow: a `#` after a
+  // space or a tab, which section 6.6 allows, and a `#` inside a plain
+  // scalar, which section 7.3.3 allows after a character that is not white
+  // space ("An ns-char preceding").
+  inspect(
+    each([
+      "key: \"value\"# invalid comment", "---\n[ a, b, c, ]#invalid\n", "---\n[ a, b, c,#invalid\n]\n",
+      "a: 'x'#c", "a: {b: 1}#c", "[a, \"b\"#c\n]", "{a: \"b\"#c\n}", "[#c\n a]",
+      "key: \"value\" # c", "key: \"value\"\t# c", "a: [x]\t# c", "{a: \"b\" # c\n}",
+      "key: value# c", "[a#b, c]",
+    ]),
+    content=(
+      #|"key: \"value\"# invalid comment" -> error /key: unexpected text after the value
+      #|"---\n[ a, b, c, ]#invalid\n" -> error /2: unexpected text after the value
+      #|"---\n[ a, b, c,#invalid\n]\n" -> error /3: a plain value cannot start with #; quote this value
+      #|"a: 'x'#c" -> error /a: unexpected text after the value
+      #|"a: {b: 1}#c" -> error /a/b: unexpected text after the value
+      #|"[a, \"b\"#c\n]" -> error /1: expected , or ] in a flow sequence
+      #|"{a: \"b\"#c\n}" -> error /a: expected , or } in a flow mapping
+      #|"[#c\n a]" -> error /0: a plain value cannot start with #; quote this value
+      #|"key: \"value\" # c" -> {"key":"value"}
+      #|"key: \"value\"\t# c" -> {"key":"value"}
+      #|"a: [x]\t# c" -> {"a":["x"]}
+      #|"{a: \"b\" # c\n}" -> {"a":"b"}
+      #|"key: value# c" -> {"key":"value# c"}
+      #|"[a#b, c]" -> ["a#b","c"]
+    ),
+  )
 }
 
 ///|

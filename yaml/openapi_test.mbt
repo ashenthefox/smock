@@ -461,6 +461,27 @@ test "malformed text gives the same error in both modes" {
       #|  openapi: error /a: invalid block scalar header
     ),
   )
+  // A `#` with no white space before it starts no comment: "Comments must
+  // be separated from other tokens by white space characters" (YAML 1.2.2,
+  // section 6.6). yaml-test-suite marks these three, SU5Z, 9JBA and CVW2,
+  // as errors, and both modes refuse them, with the messages yaml_test.mbt's
+  // comment test gives.
+  inspect(
+    both([
+      "key: \"value\"# invalid comment", "---\n[ a, b, c, ]#invalid\n", "---\n[ a, b, c,#invalid\n]\n",
+    ]),
+    content=(
+      #|"key: \"value\"# invalid comment"
+      #|  safe: error /key: unexpected text after the value
+      #|  openapi: error /key: unexpected text after the value
+      #|"---\n[ a, b, c, ]#invalid\n"
+      #|  safe: error /2: unexpected text after the value
+      #|  openapi: error /2: unexpected text after the value
+      #|"---\n[ a, b, c,#invalid\n]\n"
+      #|  safe: error /3: a plain value cannot start with #; quote this value
+      #|  openapi: error /3: a plain value cannot start with #; quote this value
+    ),
+  )
 }
 
 ///|
