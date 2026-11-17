@@ -492,14 +492,22 @@ async test "the generated certificate and its key stay in memory: smock serves H
 }
 
 ///|
-/// When the certificate in the PEM file `file` expires, its notAfter, in
-/// seconds since the Unix epoch, as `openssl x509` and `date` read it.
-async fn not_after(file : String) -> String {
-  let (_, text) = run_openssl(["x509", "-in", file, "-noout", "-enddate"])
-  let date = line_after(text, "notAfter=")
+/// A bound of the validity of the certificate in the PEM file `file`, its
+/// notBefore or its notAfter as `bound` names it, in seconds since the Unix
+/// epoch, as `openssl x509` and `date` read it.
+async fn validity_bound(file : String, bound : String) -> String {
+  let (_, text) = run_openssl(["x509", "-in", file, "-noout", "-dates"])
+  let date = line_after(text, "\{bound}=")
   let (status, out) = @process.collect_stdout("date", ["-u", "-d", date, "+%s"])
   guard status == 0 else { fail("date cannot read \{date}") }
   out.text().trim().to_owned()
+}
+
+///|
+/// When the certificate in the PEM file `file` expires, its notAfter, in
+/// seconds since the Unix epoch, as `openssl x509` and `date` read it.
+async fn not_after(file : String) -> String {
+  validity_bound(file, "notAfter")
 }
 
 ///|
