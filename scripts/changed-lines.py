@@ -232,6 +232,14 @@ def markdown(found, records):
            f"Head `{found['head'][:12]}`, against `{found['base']}`, merge base `{found['merge_base'][:12]}`,"
            f" {'on a push' if found['event'] == 'push' else 'in a run started by hand'}.", ""]
     lines = found["lines"]
+    if not lines:
+        return "\n".join(out + ["No non-test line of a pure package changed, so no mutant ran: the whole diff is"
+                                " covered.", ""])
+    if not found["mutants"]:
+        return "\n".join(out + [
+            f"**The whole diff is covered**: {lines} changed non-test {'line' if lines == 1 else 'lines'} in the pure"
+            f" packages ({', '.join(found['packages'])}), with no mutant of the pinned set on"
+            f" {'it' if lines == 1 else 'them'}, so none ran.", ""])
     on_lines = (f"{lines} changed non-test {'line' if lines == 1 else 'lines'} in the pure packages"
                 f" ({', '.join(found['packages'])}), with {found['mutants']} mutants of the pinned set on them")
     if not found["covered"]:

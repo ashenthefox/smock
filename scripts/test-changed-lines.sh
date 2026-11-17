@@ -341,6 +341,38 @@ for kept in plan.json report.md report.json shard-1/summary.json shard-2/mutants
   fi
 done
 
+# --- A push that changes no non-test line of a pure package ----------------------
+
+# The test file, the generated file and the package that builds only
+# natively change: the plan runs no shard, and the report says that
+# nothing ran and that the whole diff is covered.
+history
+change "no source line" <<'SH'
+printf 'test "u" {\n  assert_eq(2, 2)\n}\n' >>calc/calc_test.mbt
+printf 'let g2 : Int = 0\n' >>calc/gen.mbt
+printf 'let h2 : Int = 0\n' >>host/host.mbt
+SH
+job none
+
+status none plan 0
+outputs none 'shards=[]'
+calls none "--root <tmp>/repo --out <tmp>/none/plan/sites --changed --base origin/main --sites-only"
+status none report 0
+json none '[.covered, .lines, .packages, .mutants, .shards, .ran, .survivors]' '[true,0,[],0,0,0,[]]'
+says none "No non-test line of a pure package changed, so no mutant ran: the whole diff is covered."
+says_not none "| package |"
+
+# A changed line with no mutant on it: nothing runs either.
+history
+change "a line with no site" <<'SH'
+sed -i 's/^let a5 : Int = 5$/let a5 : Int = 50 \/\/ nosite/' calc/calc.mbt
+SH
+job no-mutant
+
+outputs no-mutant 'shards=[]'
+json no-mutant '[.covered, .lines, .packages, .mutants, .shards, .ran]' '[true,1,["calc"],0,0,0]'
+says no-mutant "**The whole diff is covered**: 1 changed non-test line in the pure packages (calc), with no mutant of the pinned set on it, so none ran."
+
 # --- A diff too large for the shards, and a run started by hand -----------------
 
 # 601 mutants: more than the 600 that three shards run on a push. The plan
