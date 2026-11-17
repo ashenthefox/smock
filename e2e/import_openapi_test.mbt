@@ -355,6 +355,72 @@ async test "smock import-openapi --overwrite on replaces an existing --output, a
 }
 
 ///|
+/// What the directory `dir` holds beside the output `petstore.json`:
+/// whether it is there, and how many other files there are, and how many
+/// of them still hold `content`.
+async fn beside_output(dir : String, content~ : String) -> String {
+  let names = @fs.readdir(dir, sort=true)
+  let others = names.filter(name => name != "petstore.json")
+  let mut kept = 0
+  for name in others {
+    if @fs.read_file("\{dir}/\{name}").text() == content {
+      kept += 1
+    }
+  }
+  let output = if names.contains("petstore.json") { "there" } else { "absent" }
+  "petstore.json: \{output}; \{others.length()} other files, \{kept} as they were"
+}
+
+///|
+async test "smock import-openapi tries the temporary names .petstore.json.tmp and .petstore.json.tmp1 to .petstore.json.tmp99, touches none that exists, and writes nothing when all 100 exist" {
+  // The rule is the import guide's (Regenerating), which the maintainer
+  // confirms on #291.
+  with_petstore(petstore_document, dir => {
+    let defs = "\{dir}/defs"
+    let taken = [".petstore.json.tmp"]
+    for n in 1..<100 {
+      taken.push(".petstore.json.tmp\{n}")
+    }
+    for name in taken {
+      @fs.write_file("\{defs}/\{name}", "another run's")
+    }
+    let args = [
+      "\{dir}/api/petstore.json",
+      "--mock",
+      "petstore",
+      "--output",
+      "\{defs}/petstore.json",
+    ]
+    let all_taken = import_openapi(args, dir~)
+    let after_refusal = beside_output(defs, content="another run's")
+    // One name free, the last of the 100, is enough.
+    @fs.remove("\{defs}/.petstore.json.tmp99")
+    let one_free = import_openapi(args, dir~)
+    inspect(
+      (
+        $|all 100 taken: \{all_taken}
+        $|\{after_refusal}
+        $|.petstore.json.tmp99 free: \{one_free}
+        $|\{beside_output(defs, content="another run's")}
+        $|.petstore.json.tmp99: \{@fs.exists("\{defs}/.petstore.json.tmp99")}
+      ),
+      content=(
+        #|all 100 taken: status 1
+        #|<dir>/defs/petstore.json: cannot be written: the temporary files .petstore.json.tmp to .petstore.json.tmp99 all exist
+        #|nothing written: 1 errors
+        #|
+        #|petstore.json: absent; 100 other files, 100 as they were
+        #|.petstore.json.tmp99 free: status 0
+        #|wrote <dir>/defs/petstore.json: 1 Stubs from 1 operations, 0 warnings
+        #|
+        #|petstore.json: there; 99 other files, 99 as they were
+        #|.petstore.json.tmp99: false
+      ),
+    )
+  })
+}
+
+///|
 async test "smock import-openapi rejects bad arguments as usage errors, on stderr with exit status 2" {
   let cases = [
     ["api.txt", "--mock", "m", "--output", "m.json"],
