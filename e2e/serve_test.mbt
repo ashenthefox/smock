@@ -228,10 +228,12 @@ async test "smock, smock help and smock --help print one usage, which lists the 
   let (_, usage, _) = smock_output(["--help"])
   let out = []
   // #370's criterion: the three print one usage, and nothing on stderr.
+  // docs/commands.md: "`smock` alone, `smock help` and `smock --help` print
+  // a usage that lists them, and exit with status 0."
   for args in [[], ["help"], ["--help"]] {
-    let (_, stdout, stderr) = smock_output(args)
+    let (status, stdout, stderr) = smock_output(args)
     out.push(
-      "\{["smock", ..args].join(" ")}: the usage: \{stdout == usage}, stderr: \{stderr.length()} bytes",
+      "\{["smock", ..args].join(" ")}: status \{status}, the usage: \{stdout == usage}, stderr: \{stderr.length()} bytes",
     )
   }
   // docs/commands.md: "The `smock` binary has four commands beside `help`",
@@ -249,9 +251,9 @@ async test "smock, smock help and smock --help print one usage, which lists the 
   inspect(
     out.join("\n"),
     content=(
-      #|smock: the usage: true, stderr: 0 bytes
-      #|smock help: the usage: true, stderr: 0 bytes
-      #|smock --help: the usage: true, stderr: 0 bytes
+      #|smock: status 0, the usage: true, stderr: 0 bytes
+      #|smock help: status 0, the usage: true, stderr: 0 bytes
+      #|smock --help: status 0, the usage: true, stderr: 0 bytes
       #|commands: serve, check, render, import-openapi, help
     ),
   )
