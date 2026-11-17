@@ -702,6 +702,11 @@ of each GitHub release include its section
   line as a comment; it now rejects the text. Inside a plain value, as in
   `path: /a#b`, the `#` is part of the value, as before
   ([smock#366](https://github.com/hirunefu/smock/issues/366)).
+- In YAML, a tab between two `-` on one line, as in `-<tab>- x`, is now
+  rejected as a tab in indentation, as the documents say: the white space
+  after the first `-` indents the nested sequence. smock read it as a
+  nested sequence, and in an OpenAPI document `-<tab>-` read as `[[null]]`
+  ([smock#367](https://github.com/hirunefu/smock/issues/367)).
 
 ## [0.4.0] - 2026-11-01
 

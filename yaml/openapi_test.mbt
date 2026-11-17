@@ -482,6 +482,27 @@ test "malformed text gives the same error in both modes" {
       #|  openapi: error /3: a plain value cannot start with #; quote this value
     ),
   )
+  // A tab between two `-` indicators on one line is in the indentation of
+  // the nested sequence (YAML 1.2.2, section 8.2.1), where "tab characters
+  // must not be used" (section 6.1). docs/openapi/references-and-yaml.md
+  // lists "tabs in indentation" among the errors "at its pointer, with a
+  // message that names it", so the OpenAPI mode refuses it as the safe
+  // subset does. yaml-test-suite marks the first two, Y79Y/004 and
+  // Y79Y/005, as errors.
+  inspect(
+    both(["-\t-\n", "- \t-\n", "-\t- x"]),
+    content=(
+      #|"-\t-\n"
+      #|  safe: error /0: tabs are not allowed in indentation
+      #|  openapi: error /0: tabs are not allowed in indentation
+      #|"- \t-\n"
+      #|  safe: error /0: tabs are not allowed in indentation
+      #|  openapi: error /0: tabs are not allowed in indentation
+      #|"-\t- x"
+      #|  safe: error /0: tabs are not allowed in indentation
+      #|  openapi: error /0: tabs are not allowed in indentation
+    ),
+  )
 }
 
 ///|

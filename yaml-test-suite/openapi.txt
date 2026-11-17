@@ -55,8 +55,6 @@ DK95/00  differs  The white space at the start of a line holds a tab, before con
 Q5MG     differs  The white space at the start of a line holds a tab, before content. YAML reads the tab as separation, since only spaces indent (YAML 1.2.2, 6.1). The documents list it among the valid YAML that smock refuses on purpose: "a tab in the white space at the start of a line" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "tabs are not allowed in indentation".
 
 # Bugs.
-Y79Y/004  #367     A bug: a tab separates two block sequence indicators on one line, which YAML refuses: the inner sequence would be indented by a tab (YAML 1.2.2, 6.1). smock reads [[null]].
-Y79Y/005  #367     A bug: a tab separates two block sequence indicators on one line, which YAML refuses: the inner sequence would be indented by a tab (YAML 1.2.2, 6.1). smock reads [[null]].
 JEF9/02   #368     A bug: the last line of a block scalar ends the input, with no line break. The suite reads a line break there, and smock reads none.
 L24T/01   #368     A bug: the last line of a block scalar ends the input, with no line break. The suite reads a line break there, and smock reads none.
 Y79Y/000  #369     A bug: a line of a block scalar holds a tab where its content would be indented, which YAML refuses: only spaces indent (YAML 1.2.2, 6.1 and 8.1.1.1). smock reads an empty line.

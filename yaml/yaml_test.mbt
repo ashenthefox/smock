@@ -681,6 +681,27 @@ test "tabs in indentation give an error; tabs elsewhere are white space" {
       #|"a: |\n  x\ty\n" -> {"a":"x\ty\n"}
     ),
   )
+  // In a nested sequence that starts on its parent's `-` line, "both the
+  // "-" indicator and the following spaces are considered to be part of the
+  // indentation of the nested collection" (YAML 1.2.2, section 8.2.1), and
+  // "tab characters must not be used in indentation" (section 6.1). So a
+  // tab between two `-` indicators is a tab in indentation, which `parse`
+  // rejects ("tabs in indentation"), with the message above.
+  // yaml-test-suite marks the first two inputs, Y79Y/004 and Y79Y/005, as
+  // errors. A tab between `-` and a scalar separates them and indents
+  // nothing: the suite reads `-\t-1` as [-1] (Y79Y/010) and `-\tbaz` as
+  // "baz" (6BCT, YAML 1.2.2's Example 6.3).
+  inspect(
+    each(["-\t-\n", "- \t-\n", "-\t- x", "- -\t- x", "-\t-1\n", "-\tbaz"]),
+    content=(
+      #|"-\t-\n" -> error /0: tabs are not allowed in indentation
+      #|"- \t-\n" -> error /0: tabs are not allowed in indentation
+      #|"-\t- x" -> error /0: tabs are not allowed in indentation
+      #|"- -\t- x" -> error /0/0: tabs are not allowed in indentation
+      #|"-\t-1\n" -> [-1]
+      #|"-\tbaz" -> ["baz"]
+    ),
+  )
 }
 
 ///|

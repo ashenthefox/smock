@@ -30,7 +30,7 @@
 {"file":"yaml/parser.mbt","definition":"Parser::chomping","text":"64cca5efde688611","pinned":{"DEL":2},"full":{"DEL":2}}
 {"file":"yaml/parser.mbt","definition":"Parser::block_scalar","text":"602a1a549af5538f","pinned":{"BODY":1,"ROR":9,"IFC":24,"LCR":10,"NOT":4,"DEL":30,"BOOL":6,"AOR":9,"INT":29,"STR":3},"full":{"BODY":1,"ROR":9,"IFC":48,"LCR":10,"NOT":4,"DEL":30,"BOOL":6,"AOR":9,"INT":48,"STR":6}}
 {"file":"yaml/parser.mbt","definition":"Parser::at_sequence_item","text":"9bc0da266c8b68af","pinned":{"BODY":1,"LCR":1,"INT":1},"full":{"BODY":1,"LCR":1,"INT":2}}
-{"file":"yaml/parser.mbt","definition":"Parser::block_sequence","text":"dd877aa9296b7ee6","pinned":{"BODY":1,"ROR":1,"IFC":2,"LCR":3,"NOT":3,"DEL":7,"AOR":1,"INT":1},"full":{"BODY":1,"ROR":1,"IFC":4,"LCR":3,"NOT":3,"DEL":7,"AOR":1,"INT":2}}
+{"file":"yaml/parser.mbt","definition":"Parser::block_sequence","text":"8bc6e03ad6e4b881","pinned":{"BODY":1,"ROR":1,"IFC":4,"LCR":3,"NOT":3,"DEL":8,"AOR":1,"INT":1,"STR":1},"full":{"BODY":1,"ROR":1,"IFC":8,"LCR":3,"NOT":3,"DEL":8,"AOR":1,"INT":2,"STR":2}}
 {"file":"yaml/parser.mbt","definition":"Parser::continues_block","text":"776edcca06810eb9","pinned":{"BODY":1,"ROR":2,"IFC":2,"LCR":3,"DEL":1,"BOOL":2,"STR":1},"full":{"BODY":1,"ROR":2,"IFC":4,"LCR":3,"DEL":1,"BOOL":2,"STR":2}}
 {"file":"yaml/parser.mbt","definition":"Parser::block_mapping","text":"512b0d6aadbd007a","pinned":{"BODY":1,"IFC":4,"NOT":2,"DEL":10,"BOOL":1,"AOR":1,"INT":1,"STR":3},"full":{"BODY":1,"IFC":8,"NOT":2,"DEL":10,"BOOL":1,"AOR":1,"INT":2,"STR":6}}
 {"file":"yaml/parser.mbt","definition":"Parser::mapping_value","text":"22faf59d05f01f9e","pinned":{"BODY":1,"ROR":1,"IFC":4,"LCR":1,"DEL":2,"BOOL":1},"full":{"BODY":1,"ROR":1,"IFC":8,"LCR":1,"DEL":2,"BOOL":1}}

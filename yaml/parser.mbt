@@ -820,7 +820,17 @@ fn Parser::block_sequence(
     let item_pointer = child(pointer, items.length().to_string())
     self.reached = item_pointer
     self.bump()
+    let separation = self.pos
     self.skip_space()
+    // A sequence on the same line is indented by the `-` and the white
+    // space after it (YAML 1.2.2, section 8.2.1), which must not hold a tab.
+    if self.at_sequence_item() {
+      for i in separation..<self.pos {
+        if self.chars[i] == '\t' {
+          self.fail("tabs are not allowed in indentation")
+        }
+      }
+    }
     self.skip_comment()
     let empty = self.peek() is ('\n' | EOF) &&
       !(self.next_content() && self.column() > column)
