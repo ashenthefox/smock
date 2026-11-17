@@ -913,12 +913,13 @@ class ImportersTest(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         found = {line["package"]: line for line in map(json.loads, result.stdout.splitlines())}
-        # template: llm and definitions import it, engine, importopenapi and
-        # settings through them; defdir, server and cmd/smock build only
-        # natively (#300: engine's tests killed 16 of template's survivors).
+        # template: llm and definitions import it, engine, importopenapi,
+        # serverparsers (which imports definitions since #318) and settings
+        # through them; defdir, server and cmd/smock build only natively
+        # (#300: engine's tests killed 16 of template's survivors).
         self.assertEqual(found["smock/smock/template"]["importers"],
                          ["smock/smock/definitions", "smock/smock/engine", "smock/smock/importopenapi",
-                          "smock/smock/llm", "smock/smock/settings"])
+                          "smock/smock/llm", "smock/smock/serverparsers", "smock/smock/settings"])
         self.assertEqual(found["smock/smock/template"]["native_only"],
                          ["smock/smock/cmd/smock", "smock/smock/defdir", "smock/smock/server"])
         # Through as many packages as it takes: only template imports
