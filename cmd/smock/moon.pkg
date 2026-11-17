@@ -4,6 +4,7 @@ import {
   "moonbitlang/async/os_error",
   "moonbitlang/core/argparse",
   "moonbitlang/core/buffer",
+  "moonbitlang/core/coverage",
   "moonbitlang/core/env",
   "moonbitlang/core/json",
   "moonbitlang/x/sys",

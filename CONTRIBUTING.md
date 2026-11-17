@@ -573,6 +573,59 @@ takes a few minutes; a later run rebuilds only what changed. It reads
 every trace source in the target directory, so remove the directory
 after removing a package.
 
+What the e2e tests reach in the binary is counted apart. With
+`SMOCK_COVERAGE_DUMP` set and not empty, smock writes its coverage
+counters to stdout as it exits, after all else it writes there, in the
+form core's coverage runtime prints them: the line
+`----- BEGIN MOONBIT COVERAGE -----`, a JSON object of counts, and the
+line `----- END MOONBIT COVERAGE -----`. A build without coverage writes
+an empty object. Nothing else in what smock does changes, and the
+variable is for these runs only, so the user documents leave it out. Build the instrumented binary in a target
+directory of its own (`scripts/coverage.sh` builds the same one), then
+run the e2e tests with `SMOCK_E2E_BINARY` naming it and
+`SMOCK_COVERAGE_DUMP` naming an empty directory, each absolute or
+relative to the module root:
+
+```sh
+moon build --target native --enable-coverage --target-dir _coverage cmd/smock
+rm -rf _coverage/e2e
+SMOCK_E2E_BINARY=_coverage/native/debug/build/smock/smock/cmd/smock/smock.exe \
+  SMOCK_COVERAGE_DUMP=_coverage/e2e moon test --target native -p smock/smock/e2e
+```
+
+With `SMOCK_E2E_BINARY` set, the harness runs that binary and builds
+nothing; without it, it builds and runs the native debug build, as
+usual. Build the binary from the commit checked out: the test of
+`smock --version` checks that it names that commit. With
+`SMOCK_COVERAGE_DUMP` set, it gives the variable to every
+smock it starts, `smock serve` and the one-shot commands alike, takes
+the counters out of each one's stdout before a test reads it, and keeps
+them in that directory as runtime logs, `moonbit_coverage_e2e_*.txt`.
+The e2e package stays a plain build: its own coverage, of the clients
+its tests run, is not smock's. Read the logs with the toolchain's
+coverage reader directly, as `scripts/coverage.sh` does, with the target
+directory's trace sources. A run leaves hundreds of logs, so join them
+into one first: the reader counts a file of several sets of counters as
+it counts the files apart. Give it that script's logs too to merge the
+two:
+
+```sh
+find _coverage/e2e -name '*.txt' -exec cat {} + >_coverage/e2e.txt
+find _coverage -name '*.trace.source' -exec moonrun "$(dirname "$(command -v moonrun)")/moon_cove.wasm" \
+  -- -f bisect -o _coverage/e2e.bisect -t _coverage/e2e.txt {} +
+python3 scripts/coverage-report.py _coverage/e2e.bisect
+```
+
+A smock process writes no counters when it does not reach its exit:
+when a signal it leaves at its default action ends it (SIGKILL, SIGINT
+and SIGHUP, or an out-of-memory kill), when it aborts, and when it
+prints the usage or the version (`smock`, `smock help`, `--help`,
+`--version`), which the argument parser does and then exits itself. The
+two tests that close and stall smock's stdout
+(`e2e/mockoon_log_test.mbt`) get none either: its reading end is closed
+by the time smock exits. The harness expects this: such a process leaves
+no log.
+
 CI runs all of these but `moon bench` and the tests of
 `scripts/gke-bench.sh` on each push to a branch and on each pull request
 (`.github/workflows/ci.yml`). It does not run on a pushed tag, since the

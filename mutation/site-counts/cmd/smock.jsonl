@@ -18,7 +18,7 @@
 {"file":"cmd/smock/import_openapi.mbt","definition":"write_atomically","text":"0bdf5d3e4d438cee","pinned":{"BODY":1,"IFC":2,"DEL":1,"AOR":3,"INT":8},"full":{"BODY":1,"IFC":4,"DEL":1,"AOR":3,"INT":10}}
 {"file":"cmd/smock/import_openapi.mbt","definition":"write_and_close","text":"fb03a74da4107c1a","pinned":{"BODY":1},"full":{"BODY":1}}
 {"file":"cmd/smock/import_openapi.mbt","definition":"write_failure","text":"ea37019f42eb830f","pinned":{"BODY":1,"IFC":2},"full":{"BODY":1,"IFC":4}}
-{"file":"cmd/smock/main.mbt","definition":"exit","text":"2cc16686aeb033a0","pinned":{"BODY":1},"full":{"BODY":1}}
+{"file":"cmd/smock/main.mbt","definition":"exit","text":"0ded7ef3aa753b60","pinned":{"BODY":1,"IFC":1,"DEL":2},"full":{"BODY":1,"IFC":1,"DEL":2}}
 {"file":"cmd/smock/main.mbt","definition":"main","text":"cdb879511bce464b","pinned":{"IFC":1,"DEL":11,"BOOL":1,"INT":5},"full":{"IFC":2,"DEL":11,"BOOL":1,"INT":15}}
 {"file":"cmd/smock/main.mbt","definition":"render","text":"aca2b00572c1fcc6","pinned":{"BODY":1,"DEL":6,"INT":7},"full":{"BODY":1,"DEL":6,"INT":15}}
 {"file":"cmd/smock/main.mbt","definition":"check","text":"bc83589167cf48eb","pinned":{"BODY":1,"IFC":1,"NOT":1,"DEL":3,"BOOL":1,"INT":2},"full":{"BODY":1,"IFC":2,"NOT":1,"DEL":3,"BOOL":1,"INT":4}}

@@ -8,14 +8,33 @@
 // back from responses, the Journal, the metrics, the logs and the status.
 
 ///|
-/// The binary under test: the native debug build of `cmd/smock`. Tests run
-/// with the module root as their working directory.
-let binary : String = "_build/native/debug/build/smock/smock/cmd/smock/smock.exe"
+/// The binary that `SMOCK_E2E_BINARY` names in the tests' environment, such
+/// as a build with coverage in a target directory of its own, or `None`
+/// when it is unset or empty.
+let given_binary : String? = match @env.get_env_var("SMOCK_E2E_BINARY") {
+  None | Some("") => None
+  path => path
+}
+
+///|
+/// The binary under test: the one `SMOCK_E2E_BINARY` names, or else the
+/// native debug build of `cmd/smock`. Tests run with the module root as
+/// their working directory, where a relative path starts.
+let binary : String = given_binary.unwrap_or(
+  "_build/native/debug/build/smock/smock/cmd/smock/smock.exe",
+)
 
 ///|
 /// Builds the binary once per test process, so the tests always run the
-/// code they are built from.
+/// code they are built from. A binary that `SMOCK_E2E_BINARY` names is run
+/// as it is, and the native debug build is neither built nor run.
 let build : @async.Lazy[Unit] = @async.Lazy(() => {
+  if given_binary is Some(path) {
+    if !@fs.exists(path) {
+      fail("SMOCK_E2E_BINARY names \{path}, which does not exist")
+    }
+    return
+  }
   let (status, output) = @process.collect_output_merged("moon", [
     "build", "--target", "native", "cmd/smock",
   ])
@@ -23,6 +42,88 @@ let build : @async.Lazy[Unit] = @async.Lazy(() => {
     fail("moon build failed:\n\{output.text()}")
   }
 })
+
+///|
+/// The environment variable that makes smock write its coverage counters
+/// to stdout as it exits, when it is set and not empty (`cmd/smock`).
+let coverage_variable : String = "SMOCK_COVERAGE_DUMP"
+
+///|
+/// Where the harness keeps the coverage counters of every smock it starts,
+/// when the tests run with `SMOCK_COVERAGE_DUMP` set and not empty: the
+/// directory it names. The harness then gives the variable to every smock,
+/// takes the counters out of what each writes to stdout, and keeps them
+/// there as runtime logs that the coverage reader reads (`keep_counters`).
+/// `None` when the tests collect no coverage.
+let coverage_logs : String? = match @env.get_env_var(coverage_variable) {
+  None | Some("") => None
+  dir => dir
+}
+
+///|
+/// The first and the last line of the coverage counters that smock writes
+/// to stdout as it exits, as core's coverage runtime (`@coverage.end`)
+/// prints them, around a JSON object of the counts.
+let counters_begin : String = "----- BEGIN MOONBIT COVERAGE -----"
+
+///|
+let counters_end : String = "----- END MOONBIT COVERAGE -----"
+
+///|
+/// `env`, the environment of a smock process, with `SMOCK_COVERAGE_DUMP`
+/// set when the tests collect coverage or `dump` asks for the counters.
+fn coverage_env(env : Map[String, String], dump~ : Bool) -> Map[String, String] {
+  let out = Map::from_iter(env.iter())
+  if dump || coverage_logs is Some(_) {
+    out[coverage_variable] = "1"
+  }
+  out
+}
+
+///|
+/// When the test process started, in milliseconds since the epoch, which
+/// tells the logs of one run from those of another (`keep_counters`).
+let run_started : UInt64 = @env.now()
+
+///|
+/// How many sets of coverage counters this test process has kept.
+let counters_kept : Ref[Int32] = Ref(0)
+
+///|
+/// Keeps `counters`, the lines of one smock's coverage counters from the
+/// first to the last, each with its newline, as a runtime log in the
+/// directory `coverage_logs` names, which it creates if needed:
+/// `moonbit_coverage_e2e_<when the run started>_<n>.txt`, the form of the
+/// logs that `moon test --enable-coverage` writes. Keeps nothing when the
+/// tests collect no coverage.
+async fn keep_counters(counters : String) -> Unit {
+  guard coverage_logs is Some(dir) else { return }
+  // Numbered before the first await, so that no other test takes the same
+  // number meanwhile.
+  counters_kept.val += 1
+  let name = "moonbit_coverage_e2e_\{run_started}_\{counters_kept.val}.txt"
+  @fs.mkdir(dir, recursive=true, allow_exist=true)
+  write(dir, name, counters)
+}
+
+///|
+/// Splits `stdout`, all that smock wrote to stdout, into what it wrote
+/// besides its coverage counters, and the counters, from their first line
+/// to their last, or `None` when it wrote none. Counters cut short, with
+/// no last line, are left out, and not returned.
+fn split_counters(stdout : String) -> (String, String?) {
+  let begin = if stdout.has_prefix("\{counters_begin}\n") {
+    Some(0)
+  } else {
+    stdout.find("\n\{counters_begin}\n").map(at => at + 1)
+  }
+  guard begin is Some(begin) else { return (stdout, None) }
+  guard stdout[begin:].find("\n\{counters_end}\n") is Some(at) else {
+    return (stdout[:begin].to_owned(), None)
+  }
+  let end = begin + at + 1 + counters_end.length() + 1
+  ("\{stdout[:begin]}\{stdout[end:]}", Some(stdout[begin:end].to_owned()))
+}
 
 ///|
 /// How long a test waits for smock to start listening or to exit.
@@ -415,17 +516,21 @@ struct Stopped {
 /// arguments and becomes smock by exec, such as `systemd-run --scope ...
 /// --`, so that the signal still reaches smock. With `close_stdout`, the
 /// reading end of smock's stdout is closed once smock listens, so that every
-/// write smock makes there after that fails.
+/// write smock makes there after that fails. When the tests collect
+/// coverage, smock's coverage counters are kept (`keep_counters`) and left
+/// out of the lines of its stdout. With `dump`, smock is asked for them in
+/// any case, and they stay in those lines.
 async fn with_smock(
   args : Array[String],
   env~ : Map[String, String] = Map([]),
   cwd~ : String = ".",
   under~ : Array[String] = [],
   close_stdout~ : Bool = false,
+  dump~ : Bool = false,
   f : async (Smock) -> Unit,
 ) -> Stopped {
   @async.with_task_group(group => {
-    let serving = Serving::start(group, args, env~, cwd~, under~)
+    let serving = Serving::start(group, args, env~, cwd~, under~, dump~)
     guard serving.listening_on(["plain", "tls", "admin"]) is Some(ports) else {
       fail("smock exited before listening:\n\{serving.log().join("\n")}")
     }
@@ -487,13 +592,15 @@ fn logs_to_stdout(args : Array[String], env : Map[String, String]) -> Bool {
 /// its environment, in the working directory `cwd`, under the command
 /// `under` when given (see `with_smock`), and reads the lines of its stderr
 /// and of its stdout as they come. Its log lines come from stderr, or from
-/// stdout when a test sets the mockoon log format.
+/// stdout when a test sets the mockoon log format. Its coverage counters
+/// are kept and left out, or stay with `dump`, as `with_smock` says.
 async fn[X] Serving::start(
   group : @async.TaskGroup[X],
   args : Array[String],
   env~ : Map[String, String] = Map([]),
   cwd~ : String = ".",
   under~ : Array[String] = [],
+  dump~ : Bool = false,
 ) -> Serving {
   build.wait()
   let (stderr, stderr_end) = @process.read_from_process()
@@ -504,7 +611,7 @@ async fn[X] Serving::start(
     group,
     command[0],
     command[1:],
-    extra_env=smock_env(env),
+    extra_env=coverage_env(smock_env(env), dump~),
     inherit_env=false,
     stdout=stdout_end,
     stderr=stderr_end,
@@ -513,15 +620,33 @@ async fn[X] Serving::start(
   )
   let logs_to_stdout = logs_to_stdout(args, env)
   let lines : @async.Queue[String?] = @async.Queue(kind=Unbounded)
+  // The lines of smock's coverage counters read so far, from the first.
+  let counters = []
   // Reads the lines of `output` into `into` until smock closes it, and, if
-  // it carries the log, passes each on to `lines`.
+  // it carries the log, passes each on to `lines`. If it carries coverage
+  // counters, as stdout does when smock is asked for them, they are kept
+  // (`keep_counters`), and go into `into` only with `dump`.
   let read_lines = (
     output : @process.ReadFromProcess,
     into : Array[String],
     log : Bool,
+    carries_counters : Bool,
   ) => {
     for ;; {
       let line = output.read_until("\n")
+      if line is Some(line) &&
+        carries_counters &&
+        (line == counters_begin || !counters.is_empty()) {
+        counters.push(line)
+        if line == counters_end {
+          keep_counters(counters.iter().map(line => "\{line}\n").join(""))
+          counters.clear()
+        }
+        if dump {
+          into.push(line)
+        }
+        continue
+      }
       if line is Some(line) {
         into.push(line)
       }
@@ -538,12 +663,17 @@ async fn[X] Serving::start(
   let stdout_reader = group.spawn(() => {
     // Reading may stop with the reading end left open (`stall_stdout`).
     defer (if !stdout_stalled.val { stdout.close() })
-    read_lines(stdout, stdout_lines, logs_to_stdout)
+    read_lines(
+      stdout,
+      stdout_lines,
+      logs_to_stdout,
+      dump || coverage_logs is Some(_),
+    )
   })
   let logs = []
   let reader = group.spawn(() => {
     defer stderr.close()
-    read_lines(stderr, logs, !logs_to_stdout)
+    read_lines(stderr, logs, !logs_to_stdout, false)
   })
   {
     process,
@@ -739,20 +869,33 @@ async fn smock_stdout(args : Array[String]) -> (Int32, String) {
 /// Runs `smock <args>` with only `env` as its environment, in the working
 /// directory `cwd` (by default the test's own), until it exits by itself,
 /// and returns its exit status and what it wrote to stdout and to stderr.
+/// When the tests collect coverage, its coverage counters are kept
+/// (`keep_counters`) and left out of its stdout. With `dump`, smock is
+/// asked for them in any case, and they stay in its stdout.
 async fn smock_output(
   args : Array[String],
   env~ : Map[String, String] = Map([]),
   cwd~ : String = ".",
+  dump~ : Bool = false,
 ) -> (Int32, String, String) {
   build.wait()
   let smock = @fs.realpath(binary)
+  let env = coverage_env(env, dump~)
   let result = @async.with_timeout_opt(patience_ms, () => {
     @process.collect_output(smock, args, extra_env=env, inherit_env=false, cwd~)
   })
   guard result is Some((status, stdout, stderr)) else {
     fail("smock \{args.join(" ")} did not exit in time")
   }
-  (status, stdout.text(), stderr.text())
+  let stdout = stdout.text()
+  guard dump || coverage_logs is Some(_) else {
+    return (status, stdout, stderr.text())
+  }
+  let (rest, counters) = split_counters(stdout)
+  if counters is Some(counters) {
+    keep_counters(counters)
+  }
+  (status, if dump { stdout } else { rest }, stderr.text())
 }
 
 ///|

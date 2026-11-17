@@ -17,3 +17,4 @@
 # weakening report lists it with the floors it raises, and the maintainer's
 # acknowledgment of that report at the merge is the approval. The lines
 # stay, as the record of what was approved.
+cmd/smock 3 exit's coverage dump (#341): it writes the counters only when the e2e tests' smock exits, and no in-process test runs cmd/smock; e2e's coverage counts it (#342)

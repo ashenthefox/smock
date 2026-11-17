@@ -17,7 +17,7 @@
 # approval.
 
 buildinfo 5
-cmd/smock 285
+cmd/smock 288
 cookies 0
 defdir 42
 definitions 41

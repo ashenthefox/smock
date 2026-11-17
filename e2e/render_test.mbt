@@ -430,11 +430,7 @@ async test "an invalid definitions directory gives the messages smock check give
       ),
     ],
     dir => {
-      let (check_status, check_stdout, _) = @process.collect_output(
-        binary,
-        ["check", dir],
-        inherit_env=false,
-      )
+      let (check_status, check_stdout, _) = smock_output(["check", dir])
       let (status, stdout, stderr) = render_output([
         "--dir",
         dir,
@@ -443,7 +439,7 @@ async test "an invalid definitions directory gives the messages smock check give
         "\{dir}/samples/user.json",
       ])
       inspect(
-        "check: status \{check_status}\n\{check_stdout.text()}render: status \{status}, stdout \{stdout.escape()}\n\{stderr}",
+        "check: status \{check_status}\n\{check_stdout}render: status \{status}, stdout \{stdout.escape()}\n\{stderr}",
         content=(
           #|check: status 1
           #|30-broken.json: /mocks/0/name: the Mock name "users" is already declared at 10-users.json: /mocks/0/name
