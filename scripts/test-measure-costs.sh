@@ -39,7 +39,9 @@ mkdir -p "$tmp/bin"
 # prints moon's total line: engine's tests fail with the mutant, as the
 # real ones do; one e2e test alone fails when it is $FAKE_FAILING_TEST,
 # and hangs when it is $FAKE_HANGING_TEST;
-# every e2e run fails when $FAKE_E2E_FAILS is set.
+# every e2e run fails when $FAKE_E2E_FAILS is set, and every run with
+# coverage when $FAKE_COVERAGE_FAILS is. A dry run prints a plan whose C
+# compiler is the system's, or with coverage tcc and the system's.
 cat >"$tmp/bin/moon" <<'EOF'
 #!/bin/sh
 if [ "$*" = "version --all" ]; then echo "moon 0.0.0-fake"; exit 0; fi
@@ -49,10 +51,29 @@ echo "$mutant$*" >>"$FAKE_LOG"
 args=" $* "
 case $args in
 *" --outline "*) cat "$FAKE_OUTLINE"; exit 0 ;;
+*" --enable-coverage "*" --dry-run "*)
+  printf '%s\n' "moonc build-package ./a.mbt -enable-coverage" "/opt/moon/bin/internal/tcc -o a.o -c a.c" \
+    "/usr/bin/gcc-14 -o b.o -c b.c" "moon tool archive --output x.a"
+  exit 0 ;;
+*" --dry-run "*)
+  printf '%s\n' "moonc build-package ./a.mbt" "/usr/bin/cc -o a.o -c a.c" "/usr/bin/cc -o b.exe b.o" \
+    "moon tool archive --output x.a"
+  exit 0 ;;
 esac
 if [ -n "${FAKE_FAIL_WITH_MUTANT-}" ] && [ -n "$mutant" ]; then exit 1; fi
 case $args in
 *" --build-only "*) exit 0 ;;
+esac
+# A run with coverage leaves what moon's runs leave in the target
+# directory: the compiler's trace of the sources, and one log of counters.
+case $args in
+*" --enable-coverage "*)
+  dir=${args#*" --target-dir "}
+  dir=${dir%% *}
+  mkdir -p "$dir/native/debug/test/p"
+  : >"$dir/native/debug/test/p/p.trace.source"
+  : >"$dir/moonbit_coverage_$$.txt"
+  if [ -n "${FAKE_COVERAGE_FAILS-}" ]; then echo "Total tests: 5, passed: 4, failed: 1."; exit 2; fi ;;
 esac
 case $1 in
 build) exit 0 ;;
@@ -76,6 +97,14 @@ esac
 echo "Total tests: 5, passed: 5, failed: 0."
 EOF
 chmod +x "$tmp/bin/moon"
+# moon_cove, which the fake moonrun stands for, reports a total of points.
+: >"$tmp/bin/moon_cove.wasm"
+cat >"$tmp/bin/moonrun" <<'EOF'
+#!/bin/sh
+echo "moonrun $*" >>"$FAKE_LOG"
+echo "Total: 7/9"
+EOF
+chmod +x "$tmp/bin/moonrun"
 
 # The tree the script runs in: a copy of it, and of the file that the
 # rebuild part changes.
@@ -318,6 +347,81 @@ exits rebuild-no-text 1
 says rebuild-no-text "engine/range.mbt holds the mutant's original text 0 times, not once"
 called rebuild-no-text ""
 cp engine/range.mbt "$tree/engine/"
+
+# --- coverage: builds and runs with coverage and without ------------------------------
+
+native_only="smock/smock/server smock/smock/defdir smock/smock/watch smock/smock/openssl smock/smock/protobuf-conformance smock/smock/schema"
+wasm_gc="smock/smock/buildinfo smock/smock/cookies smock/smock/definitions smock/smock/engine smock/smock/importopenapi smock/smock/llm smock/smock/log smock/smock/metrics smock/smock/prng smock/smock/settings smock/smock/template smock/smock/unicode smock/smock/usage smock/grpc smock/http1 smock/protobuf smock/re2 smock/xml"
+
+# The calls of one mode, with <cov> for its flag, <plan1> and <plan2> for
+# the dry runs' target directories, <dir> for its tests' and <bin> for the
+# binary's.
+mode_calls="test --target native<cov> -p $native_only --build-only --dry-run --target-dir <plan1>
+build --target native<cov> cmd/smock --dry-run --target-dir <plan2>
+test --target native<cov> -p $native_only --build-only --target-dir <dir>
+test --target native<cov> -p $native_only --target-dir <dir>
+test --target wasm-gc<cov> -p $wasm_gc --build-only --target-dir <dir>
+test --target wasm-gc<cov> -p $wasm_gc --target-dir <dir>
+test --target native<cov> -p smock/yaml --build-only --target-dir <dir>
+test --target native<cov> -p smock/yaml --target-dir <dir>
+build --target native<cov> cmd/smock --target-dir <bin>"
+
+# covered <name>: the fake moon got the calls of the plain mode, then those
+# of the coverage mode and the report, each mode in target directories of
+# its own, outside the tree and gone afterwards.
+covered() {
+  dirs=$(sed -n 's/.*--target-dir \([^ ]*\).*/\1/p' "$FAKE_LOG" | awk '!seen[$0]++')
+  set -- "$1" $dirs
+  if [ $# != 9 ]; then
+    fail "$1: uses $(($# - 1)) target directories, not 8: $dirs"
+    return
+  fi
+  # The counters, one log for each run with coverage.
+  counters=$(sed -n 's/^moonrun .*\.trace\.source \(.*\) -f summary$/\1/p' "$FAKE_LOG")
+  called "$1" "$(echo "$mode_calls" | sed "s|<cov>||; s|<plan1>|$2|; s|<plan2>|$3|; s|<dir>|$4|; s|<bin>|$5|")
+$(echo "$mode_calls" | sed "s|<cov>| --enable-coverage|; s|<plan1>|$6|; s|<plan2>|$7|; s|<dir>|$8|; s|<bin>|$9|")
+moonrun $tmp/bin/moon_cove.wasm -- $8/native/debug/test/p/p.trace.source $counters -f summary"
+  if echo "$counters" | grep -qE "^(-t ${8}/moonbit_coverage_[0-9]+\.txt ?){3}$"; then
+    pass "$1: reports the counters of the coverage mode's three runs"
+  else
+    fail "$1: reports the counters $counters"
+  fi
+  shift
+  for dir in "$@"; do
+    if [ -e "$dir" ] || [ "${dir#"$tree"}" != "$dir" ]; then
+      fail "$1: leaves a target directory, or uses one in the tree: $dir"
+      return
+    fi
+  done
+  pass "coverage: uses target directories of its own, and removes them"
+}
+
+measure coverage coverage
+exits coverage 0
+covered coverage
+holds coverage coverage.json '.ok == true' "ok"
+holds coverage coverage.json "(.packages.native_only | join(\" \")) == \"$native_only\"
+  and (.packages.wasm_gc | join(\" \")) == \"$wasm_gc\" and .packages.yaml_native == [\"smock/yaml\"]" \
+  "the packages of each build"
+holds coverage coverage.json '[.plain, .coverage][] | [.native_only, .wasm_gc, .yaml_native][] | [.build, .run][]
+  | .exit_status == 0 and .seconds >= 0' "each build and run of each mode, timed"
+holds coverage coverage.json '[.plain, .coverage][] | [.native_only, .wasm_gc, .yaml_native][] | .run.tests.total == 5' \
+  "moon's totals of each run"
+holds coverage coverage.json '[.plain.binary, .coverage.binary][] | .exit_status == 0 and .seconds >= 0' \
+  "the binary in each mode, timed"
+holds coverage coverage.json '.plain.plans | (.native_only | del(.log)) == (.binary | del(.log))
+  and (.native_only | .system_cc == 2 and .tcc == 0 and .commands == 4)' \
+  "the plain plans' C compiler commands: the system's"
+holds coverage coverage.json '.coverage.plans.native_only | .system_cc == 1 and .tcc == 1 and .commands == 4' \
+  "the coverage plans' C compiler commands: tcc and the system's"
+holds coverage coverage.json '.coverage.report | .exit_status == 0 and .covered == 7 and .points == 9' \
+  "the report's total of points covered"
+holds coverage coverage.json '.plain | has("report") | not' "no report of the plain mode"
+
+FAKE_COVERAGE_FAILS=1 measure coverage-fails coverage
+exits coverage-fails 1
+holds coverage-fails coverage.json '.ok == false and .coverage.native_only.run.tests.failed == 1
+  and .plain.native_only.run.exit_status == 0' "not ok, with both modes"
 
 echo
 echo "test-measure-costs: $passed passed, $failed failed"

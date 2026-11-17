@@ -30,6 +30,16 @@ its start to its exit, measured here.
         the wasm-gc rebuild and run of engine's tests. The mutant is undone
         afterwards, also when a build fails or the job is cancelled, and
         both runs must fail, or the mutant was not built.
+  coverage
+        Builds and runs, plain and then with --enable-coverage, each mode in
+        target directories of its own and from clean: the tests of the
+        native-only packages, those of the pure packages on wasm-gc but
+        yaml, yaml's natively, and the binary. For each mode it also counts,
+        in moon's dry run of the native-only packages' tests and of the
+        binary, the commands that run the system's C compiler and those
+        that run tcc: on amd64, moon's debug builds skip the system's C
+        compiler. With coverage, moon_cove reports the points covered, which
+        tells that the coverage build works.
 
 It refuses to run when a variable that gives moon another C compiler, a
 wrapper of it or flags is set (MOON_CC, MOON_AR, MOON_CC_WRAPPER): on amd64,
@@ -324,7 +334,130 @@ def part_rebuild(out, args):
     return 0 if result["ok"] else 1
 
 
-PARTS = {"e2e": part_e2e, "alone": part_alone, "rebuild": part_rebuild}
+# What the coverage part builds and runs: the native-only packages that have
+# tests (cmd/smock has none, and the binary is built on its own), every
+# pure package on wasm-gc but yaml, and yaml natively, since one of its tests
+# overflows wasm-gc's stack when it is instrumented (#275, step 2).
+NATIVE_ONLY = [
+    "smock/smock/server", "smock/smock/defdir", "smock/smock/watch", "smock/smock/openssl",
+    "smock/smock/protobuf-conformance", "smock/smock/schema",
+]
+WASM_GC = [
+    "smock/smock/buildinfo", "smock/smock/cookies", "smock/smock/definitions", "smock/smock/engine",
+    "smock/smock/importopenapi", "smock/smock/llm", "smock/smock/log", "smock/smock/metrics",
+    "smock/smock/prng", "smock/smock/settings", "smock/smock/template", "smock/smock/unicode",
+    "smock/smock/usage", "smock/grpc", "smock/http1", "smock/protobuf", "smock/re2", "smock/xml",
+]
+YAML_NATIVE = ["smock/yaml"]
+
+# A C compiler other than tcc, by its file name: cc, gcc, clang, c++ or g++,
+# with a prefix such as x86_64-linux-gnu- or a suffix such as -14.
+SYSTEM_CC = re.compile(r"(?:.*-)?(?:cc|gcc|clang|c\+\+|g\+\+)(?:-[0-9.]+)?")
+REPORT_TOTAL = re.compile(r"Total: (\d+)/(\d+)")
+
+
+def compilers(plan):
+    """How many commands a dry run's plan holds, and how many of them run
+    tcc or the system's C compiler."""
+    counts = {"commands": 0, "system_cc": 0, "tcc": 0}
+    for line in plan.splitlines():
+        words = [os.path.basename(word.strip("'\"")) for word in line.split()[:3]]
+        if not words:
+            continue
+        counts["commands"] += 1
+        if "tcc" in words:
+            counts["tcc"] += 1
+        elif SYSTEM_CC.fullmatch(words[0]):
+            counts["system_cc"] += 1
+    return counts
+
+
+def planned(command, log):
+    """The C compilers of the commands moon would run for command from
+    clean: its dry run in an empty target directory."""
+    target = Path(tempfile.mkdtemp(prefix="measure-plan-"))
+    try:
+        found = subprocess.run(
+            [*command, "--dry-run", "--target-dir", str(target)], cwd=ROOT, capture_output=True, text=True
+        )
+    finally:
+        shutil.rmtree(target, ignore_errors=True)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(found.stdout + found.stderr)
+    return {**compilers(found.stdout), "exit_status": found.returncode, "log": str(log)}
+
+
+def coverage_mode(mode, out, args):
+    """What the coverage part measures in one mode, plain or coverage."""
+    logs = out / "logs" / "coverage"
+    flag = ["--enable-coverage"] if mode == "coverage" else []
+    native = ["moon", "test", "--target", "native", *flag]
+    wasm_gc = ["moon", "test", "--target", "wasm-gc", *flag]
+    binary = ["moon", "build", "--target", "native", *flag, "cmd/smock"]
+    result = {
+        "plans": {
+            "native_only": planned([*native, "-p", *NATIVE_ONLY, "--build-only"], logs / f"{mode}-plan-native-only.txt"),
+            "binary": planned(binary, logs / f"{mode}-plan-binary.txt"),
+        }
+    }
+    target = Path(tempfile.mkdtemp(prefix=f"measure-{mode}-"))
+    target_binary = Path(tempfile.mkdtemp(prefix=f"measure-{mode}-binary-"))
+    in_target = ["--target-dir", str(target)]
+    try:
+        for name, command, packages in (
+            ("native_only", native, NATIVE_ONLY),
+            ("wasm_gc", wasm_gc, WASM_GC),
+            ("yaml_native", native, YAML_NATIVE),
+        ):
+            result[name] = {
+                "build": timed(
+                    [*command, "-p", *packages, "--build-only", *in_target, *jobs(args)], logs / f"{mode}-{name}-build.log"
+                ),
+                "run": timed([*command, "-p", *packages, *in_target], logs / f"{mode}-{name}-run.log"),
+            }
+        result["binary"] = timed([*binary, "--target-dir", str(target_binary), *jobs(args)], logs / f"{mode}-binary.log")
+        if mode == "coverage":
+            # moon coverage report reads _build alone, so moon_cove, which it
+            # runs, gets this target directory's traces and counters here.
+            cove = Path(shutil.which("moon")).resolve().parent / "moon_cove.wasm"
+            counters = []
+            for log in sorted(target.glob("moonbit_coverage_*.txt")):
+                counters += ["-t", str(log)]
+            traces = [str(trace) for trace in sorted(target.rglob("*.trace.source"))]
+            report = timed(["moonrun", str(cove), "--", *traces, *counters, "-f", "summary"], logs / "report.log")
+            found = REPORT_TOTAL.search(Path(report["log"]).read_text(errors="replace"))
+            report["covered"] = int(found.group(1)) if found else None
+            report["points"] = int(found.group(2)) if found else None
+            result["report"] = report
+    finally:
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.rmtree(target_binary, ignore_errors=True)
+    steps = [result[name][step] for name in ("native_only", "wasm_gc", "yaml_native") for step in ("build", "run")]
+    steps.append(result["binary"])
+    if mode == "coverage":
+        steps.append(result["report"])
+    # A coverage build works when its tests pass and the report counts points.
+    result["ok"] = all(passed(step) for step in steps) and (mode != "coverage" or (result["report"]["points"] or 0) > 0)
+    return result
+
+
+def part_coverage(out, args):
+    result = {
+        "part": "coverage",
+        "machine": machine(),
+        "packages": {"native_only": NATIVE_ONLY, "wasm_gc": WASM_GC, "yaml_native": YAML_NATIVE},
+    }
+    for mode in ("plain", "coverage"):
+        result[mode] = coverage_mode(mode, out, args)
+    result["ok"] = result["plain"]["ok"] and result["coverage"]["ok"]
+    write(out, "coverage", result)
+    for mode in ("plain", "coverage"):
+        if not result[mode]["ok"]:
+            print(f"measure-costs: a build, a run or the report of the {mode} mode failed", file=sys.stderr)
+    return 0 if result["ok"] else 1
+
+
+PARTS = {"e2e": part_e2e, "alone": part_alone, "rebuild": part_rebuild, "coverage": part_coverage}
 
 
 def main():
