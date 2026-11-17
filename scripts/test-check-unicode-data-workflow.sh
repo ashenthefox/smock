@@ -79,6 +79,51 @@ refuses no-schedule \
   "it should run on a push, on a pull request, on a weekly schedule and by hand" \
   "not on: pull_request push workflow_dispatch"
 
+# A push or a pull request runs the download only when it changes one of
+# the three files that the check reads or that say what it runs.
+refuses push-on-every-change \
+  'del(.on.push.paths)' \
+  "on a push, it should run only when the table, the generator or this workflow changes, and not on a dependabot/** branch"
+
+refuses pull-request-on-every-change \
+  'del(.on.pull_request.paths)' \
+  "on a pull request, it should run only when the table, the generator or this workflow changes"
+
+refuses push-without-the-table \
+  '.on.push.paths -= ["unicode/data.mbt"]' \
+  "on a push, it should run only when" \
+  '"paths":["scripts/gen-unicode-data.py",".github/workflows/unicode-data.yml"]'
+
+refuses push-without-the-generator \
+  '.on.push.paths -= ["scripts/gen-unicode-data.py"]' \
+  "on a push, it should run only when"
+
+refuses push-without-the-workflow \
+  '.on.push.paths -= [".github/workflows/unicode-data.yml"]' \
+  "on a push, it should run only when"
+
+refuses pull-request-without-the-table \
+  '.on.pull_request.paths -= ["unicode/data.mbt"]' \
+  "on a pull request, it should run only when"
+
+refuses pull-request-without-the-generator \
+  '.on.pull_request.paths -= ["scripts/gen-unicode-data.py"]' \
+  "on a pull request, it should run only when"
+
+refuses pull-request-without-the-workflow \
+  '.on.pull_request.paths -= [".github/workflows/unicode-data.yml"]' \
+  "on a pull request, it should run only when"
+
+refuses pull-request-with-ignored-paths \
+  '.on.pull_request.paths-ignore = ["unicode/*.mbt"]' \
+  "on a pull request, it should run only when"
+
+# Dependabot opens a pull request for each of its branches, and the pull
+# request's run checks the same change.
+refuses push-on-dependabot-branches \
+  'del(.on.push.branches-ignore)' \
+  "on a push, it should run only when"
+
 echo
 echo "test-check-unicode-data-workflow: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
