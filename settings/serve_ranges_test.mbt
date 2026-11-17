@@ -46,3 +46,19 @@ test "ranges: each port flag takes 65535, the largest port TCP's 16-bit fields h
     ),
   )
 }
+
+///|
+test "ranges: --replicas takes 10000 and refuses 10001" {
+  // docs/running.md, Settings: --replicas takes 1 to 10000.
+  let replicas = (settings : @settings.ServeSettings) => settings.replicas
+  inspect(
+    [
+      serve_with(["--replicas", "10000"], replicas),
+      serve_with(["--replicas", "10001"], replicas),
+    ].join("\n"),
+    content=(
+      #|10000
+      #|invalid value "10001" for --replicas (SMOCK_REPLICAS): must be an integer from 1 to 10000
+    ),
+  )
+}
