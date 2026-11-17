@@ -199,3 +199,65 @@ test "ranges: --journal-max-entries takes 1073741824 and refuses 1073741825" {
     ),
   )
 }
+
+///|
+test "ranges: --replicas, by its flag or SMOCK_REPLICAS, takes 1 and 10000, and refuses 0, 10001 and a value that is not a decimal integer" {
+  // docs/running.md, Settings: --replicas takes 1 to 10000.
+  inspect(
+    each_by_flag_and_variable(
+      "--replicas",
+      "SMOCK_REPLICAS",
+      ["1", "10000", "0", "10001", "two"],
+      settings => settings.replicas.to_string(),
+    ),
+    content=(
+      #|1: 1
+      #|10000: 10000
+      #|0: invalid value "0" for --replicas (SMOCK_REPLICAS): must be an integer from 1 to 10000
+      #|10001: invalid value "10001" for --replicas (SMOCK_REPLICAS): must be an integer from 1 to 10000
+      #|two: invalid value "two" for --replicas (SMOCK_REPLICAS): must be an integer from 1 to 10000
+    ),
+  )
+}
+
+///|
+test "ranges: --header-count-limit, by its flag or SMOCK_HEADER_COUNT_LIMIT, takes 1 and 1073741824, and refuses 0, 1073741825 and a value that is not a decimal integer" {
+  // docs/running.md, Settings: --header-count-limit takes 1 to 1073741824
+  // (2^30).
+  inspect(
+    each_by_flag_and_variable(
+      "--header-count-limit",
+      "SMOCK_HEADER_COUNT_LIMIT",
+      ["1", "1073741824", "0", "1073741825", "100.0"],
+      settings => settings.header_count_limit.to_string(),
+    ),
+    content=(
+      #|1: 1
+      #|1073741824: 1073741824
+      #|0: invalid value "0" for --header-count-limit (SMOCK_HEADER_COUNT_LIMIT): must be an integer from 1 to 1073741824
+      #|1073741825: invalid value "1073741825" for --header-count-limit (SMOCK_HEADER_COUNT_LIMIT): must be an integer from 1 to 1073741824
+      #|100.0: invalid value "100.0" for --header-count-limit (SMOCK_HEADER_COUNT_LIMIT): must be an integer from 1 to 1073741824
+    ),
+  )
+}
+
+///|
+test "ranges: --journal-max-entries, by its flag or SMOCK_JOURNAL_MAX_ENTRIES, takes 1 and 1073741824, and refuses 0, 1073741825 and a value that is not a decimal integer" {
+  // docs/running.md, Settings: --journal-max-entries takes 1 to 1073741824
+  // (2^30).
+  inspect(
+    each_by_flag_and_variable(
+      "--journal-max-entries",
+      "SMOCK_JOURNAL_MAX_ENTRIES",
+      ["1", "1073741824", "0", "1073741825", "10k"],
+      settings => settings.journal_max_entries.to_string(),
+    ),
+    content=(
+      #|1: 1
+      #|1073741824: 1073741824
+      #|0: invalid value "0" for --journal-max-entries (SMOCK_JOURNAL_MAX_ENTRIES): must be an integer from 1 to 1073741824
+      #|1073741825: invalid value "1073741825" for --journal-max-entries (SMOCK_JOURNAL_MAX_ENTRIES): must be an integer from 1 to 1073741824
+      #|10k: invalid value "10k" for --journal-max-entries (SMOCK_JOURNAL_MAX_ENTRIES): must be an integer from 1 to 1073741824
+    ),
+  )
+}
