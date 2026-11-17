@@ -401,9 +401,10 @@ def check(root, finder, moonc, base):
         print(f"ratchet: {problem}", file=sys.stderr)
     if problems:
         return False
-    print(f"ratchet: the committed site counts of {len(files)} packages are the tree's, and no site dropped"
-          f" beyond the definitions that the change deletes or changes against {merge_base[:12]}, the merge base"
-          f" with {base}, but as {DROPS.as_posix()} records.")
+    compared = (f", and no site dropped beyond the definitions that the change deletes or changes against"
+                f" {merge_base[:12]}, the merge base with {base}, but as {DROPS.as_posix()} records"
+                if base_counts else "")
+    print(f"ratchet: the committed site counts of {len(files)} packages are the tree's{compared}.")
     return True
 
 
