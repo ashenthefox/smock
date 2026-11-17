@@ -224,7 +224,13 @@ test "a metric name is a Prometheus metric name: one with a colon, a capital Z o
   // identifier with "the usual Prometheus expression language restrictions",
   // which Prometheus's data model writes as `[a-zA-Z_:][a-zA-Z0-9_:]*`: `:`,
   // as in a recording rule's name, letters up to `Z`, and digits from `0`
-  // after the first character.
+  // after the first character. `Registry::counter`, which `gauge` follows:
+  // "A name with `:` is accepted, though Prometheus keeps `:` for recording
+  // rules", as #278's acceptance criterion asks ("accepted where the format
+  // allows them") and the maintainer confirmed on 2026-11-17 (#275). The
+  // data model's note is known, and smock does not follow it: "Colons (':')
+  // are reserved for user-defined recording rules. They SHOULD NOT be used
+  // by exporters or direct instrumentation."
   let registry = @metrics.Registry()
   for name in ["job:smock_requests:sum", "smock_A_Z", "smock_0_9"] {
     let _ = registry.gauge(name, help="A name.")

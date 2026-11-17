@@ -196,8 +196,11 @@ test "scheduling delay: the run_delay of /proc/<pid>/schedstat, from nanoseconds
       @usage.scheduling_delay_seconds("65958 0 2\n"),
       @usage.scheduling_delay_seconds("2034567890123 987654321 41234\n"),
       // The waiting time is the second of the three fields that the kernel's
-      // sched-stats document gives the file, and the only one read: a line
-      // of exactly two fields holds it.
+      // sched-stats document gives the file. A line of exactly two fields
+      // holds it, and is read, as #278's acceptance criterion asks and the
+      // maintainer confirmed on 2026-11-17 (#275): "Only the second field
+      // is read, so a line of two fields is read too, though the kernel
+      // writes three" (`scheduling_delay_seconds`).
       @usage.scheduling_delay_seconds("65958000 1500000\n"),
       // Too few fields, a field that is not a number, and no line.
       @usage.scheduling_delay_seconds("65958\n"),
