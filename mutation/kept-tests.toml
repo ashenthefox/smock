@@ -327,7 +327,7 @@ source = "ADR 0005: moonhttp's bound on a decoded header list, twice --header-si
 [[reason.test]]
 file = 'e2e/http2_hpack_test.mbt'
 name = "h2c: a header block that does not decode, with a Huffman code with EOS or bad padding, an index that names no entry, or a table size update past 4,096 octets, the size of smock's decoding table, gets GOAWAY COMPRESSION_ERROR, and a fresh connection is served; the table keeps an entry of 4,096 octets and not one larger"
-source = "RFC 7541, sections 2.3.3, 4.2 and 5.2, and RFC 9113, section 4.3: a header block that does not decode is a connection error, COMPRESSION_ERROR, which moonhttp's decoder raises"
+source = "RFC 7541, sections 2.3.3, 5.2 and 6.3, and RFC 9113, section 4.3: a header block that does not decode is a connection error, COMPRESSION_ERROR, which moonhttp's decoder raises; a table size update past the limit is a decoding error (RFC 7541, section 6.3: 'A value that exceeds this limit MUST be treated as a decoding error'), the limit within which the encoder must stay (section 4.2)"
 
 [[reason.test]]
 file = 'e2e/http2_rapid_reset_test.mbt'
