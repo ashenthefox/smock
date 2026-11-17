@@ -8,6 +8,9 @@ test "a counter renders its help, its type and one sample per label set, in the 
   )
   requests.labels(["users", "get-user"]).inc()
   requests.labels(["orders", ""]).inc(by=2)
+  // Prometheus's guidelines for client libraries: inc(double v) "MUST check
+  // that v >= 0", so 0 is allowed, and leaves the counter as it was.
+  requests.labels(["orders", ""]).inc(by=0)
   requests.labels(["users", "get-user"]).inc()
   inspect(
     registry.render(),
