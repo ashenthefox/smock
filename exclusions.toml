@@ -268,3 +268,15 @@ text = "aa6fa5137018e310"
 category = "UNREACHABLE"
 reason = "An abort arm, which an invariant guards; its message: \"\\{text} is not a JSON number\"."
 reviewer = ""
+
+# The abort arm that #280 put in place of a message no input reaches, which
+# the maintainer approved (UNREACHABLE).
+
+[[exclusion]]
+file = "yaml/scalar.mbt"
+definition = "resolve_core"
+position = "29:12"
+text = "1836af689293fe31"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"core_decimal gives a number in JSON syntax\"."
+reviewer = ""
