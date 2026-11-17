@@ -263,3 +263,11 @@ reads the aliases and writes each part in full:
 npx @redocly/cli@2.55.0 bundle api/petstore.yaml --output api/petstore.bundled.json
 smock import-openapi api/petstore.bundled.json --mock petstore --output defs/petstore.yaml
 ```
+
+Some valid YAML is an error too, on purpose, as it is in Definition files
+([Writing Definition files in
+YAML](../definition-files.md#writing-definition-files-in-yaml)): a file
+with no document, a key that is a collection, a `key: value` pair in a
+flow sequence without braces, a key of a flow mapping written over
+several lines, and a tab in the white space at the start of a line, even
+where YAML would read it as a separator rather than as indentation.

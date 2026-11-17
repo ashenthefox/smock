@@ -58,6 +58,15 @@ pub impl Show for ParseError with fn output(self, logger) {
 /// characters, and nesting deeper than 1024 collections, the limit of
 /// `@json.parse`.
 ///
+/// Rejected too, on purpose, though YAML allows them: a text with no
+/// document, such as an empty one or one of comments only; a key that is a
+/// collection, such as `[a, b]: 1`; a `key: value` pair in a flow sequence
+/// without braces (a single pair mapping), such as `[a: 1]`; a key of a
+/// flow mapping written over several lines, such as a plain key whose `:`
+/// is on the next line; and a tab in the white space at the start of a
+/// line, even where YAML reads it as separation rather than as
+/// indentation.
+///
 /// With `openapi=true`, `parse` reads the text as OpenAPI asks YAML to be
 /// read: by the YAML 1.2 core schema, with every key a string. This mode is
 /// for OpenAPI documents only; Definition files never use it. It differs

@@ -626,6 +626,13 @@ only a safe subset of YAML (`yaml/`):
   plain scalar is a string.
 - Anchors, aliases, tags, merge keys, duplicate keys and multiple documents
   are rejected.
+- Some valid YAML is rejected too, on purpose: a file with no document,
+  such as an empty file or one of comments only; a key that is a
+  collection, such as `[a, b]: 1`; a `key: value` pair in a flow sequence
+  without braces, such as `[a: 1]` (write `[{a: 1}]`); a key of a flow
+  mapping written over several lines, such as a plain key whose `:` is on
+  the next line; and a tab in the white space at the start of a line, even
+  where YAML would read it as a separator rather than as indentation.
 
 A JSON file with a key repeated in one object is rejected too, at the later
 key: JSON parsers disagree on which of the two values counts.
