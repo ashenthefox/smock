@@ -30,6 +30,9 @@ fn templated(i : Int32, members : String) -> String {
 
 ///|
 test "a text template that does not parse is reported with the file, the JSON Pointer of the field and the column of the problem" {
+  // The last three bodies hold literals that are not JSON numbers
+  // (templates.md: a literal is "a JSON number"), with the messages #281's
+  // acceptance criteria name.
   let bodies = [
     "abc ${query.x", "${}", "${ }", "${query.}", "${query.x query.y}", "${user.id}",
     "${item.sku}", "${fake.phone()}", "${fake.int(1)}", "${now(1, 2)}", "${fake.int('a', 2)}",
@@ -236,6 +239,8 @@ test "each value of a header given an array is its own text template, reported a
 
 ///|
 test "a structured template that does not parse is reported at the JSON Pointer of the value, every problem in it" {
+  // `x` and `z` give two messages #281's acceptance criteria name: only
+  // `loop.index` is under `loop` (templates.md), and `as` is a name.
   inspect(
     template_problems(
       (
