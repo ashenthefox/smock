@@ -252,7 +252,7 @@ async fn Admin::handle(self : Admin, request : @http1.Request) -> Reply {
   let path = path_of(request.target)
   let at_path = []
   for route in routes {
-    if path_params(route.path, path) is Some(params) {
+    if @serverparsers.path_params(route.path, path) is Some(params) {
       at_path.push((route, params))
     }
   }
@@ -319,28 +319,6 @@ async fn Admin::handle(self : Admin, request : @http1.Request) -> Reply {
     refresh(self)
   }
   (route.answer)(self, { request, params, body, })
-}
-
-///|
-/// The path parameters of `path` when it fits the route path `template`,
-/// where `{name}` stands for any one non-empty path segment: each name with
-/// its segment, as sent. `None` when it does not fit.
-fn path_params(template : String, path : String) -> Map[String, String]? {
-  let expected = template.split("/").collect()
-  let actual = path.split("/").collect()
-  if expected.length() != actual.length() {
-    return None
-  }
-  let params = Map([])
-  for i, t in expected {
-    let a = actual[i]
-    if t.has_prefix("{") && t.has_suffix("}") && a != "" {
-      params[t[1:t.length() - 1].to_owned()] = a.to_owned()
-    } else if t != a {
-      return None
-    }
-  }
-  Some(params)
 }
 
 ///|
