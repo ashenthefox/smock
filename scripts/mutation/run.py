@@ -58,9 +58,9 @@ says how), and one for a contributor's branch (changed.py says how):
                    nothing and says so. The summary gives the lines
                    (changed).
 
-Without --mutant, --list, --sample or --changed, every package given runs, one that
-has no mutant at all in the first shard; with one of them, only the
-packages that hold one of the shard's mutants run.
+Without --mutant, --list, --sample or --changed, every package given
+runs, one that has no mutant at all in the first shard; with one of them,
+only the packages that hold one of the shard's mutants run.
 
 For each worker, the runner copies <root> into <work>/tree-<n>, the files
 that git tracks and the untracked ones it does not ignore, and builds
