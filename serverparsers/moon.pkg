@@ -1,5 +1,6 @@
 import {
   "smock/http1",
+  "smock/smock/definitions",
   "moonbitlang/core/encoding/utf8",
 }
 
