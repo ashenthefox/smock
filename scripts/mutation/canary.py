@@ -64,9 +64,15 @@ stops, and with 2 when its input is wrong.
 
 import argparse
 import json
+import posixpath
+import shlex
+import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
+
+import sites as finder
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
@@ -170,6 +176,129 @@ def read_explained(path, entries):
             raise CanaryError(f"{where}: {name} replayed as {item['replayed']} is explained twice")
         explained[(name, item["replayed"])] = item
     return explained
+
+
+def git(repo, *args):
+    """The output of a git command in repo, as bytes."""
+    result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True)
+    if result.returncode != 0:
+        raise CanaryError(f"git {' '.join(args)}: {result.stderr.decode(errors='replace').strip()}")
+    return result.stdout
+
+
+def directories(entries):
+    """The package directories of the mutants' files, in the data's order."""
+    found = []
+    for entry in entries:
+        directory = posixpath.dirname(entry["file"])
+        if directory not in found:
+            found.append(directory)
+    return found
+
+
+def export(repo, commit, packages, into):
+    """Writes the .mbt files of the package directories, as the commit holds
+    them, into a directory: what the site finder reads of a package."""
+    for directory in packages:
+        names = git(repo, "ls-tree", "--name-only", commit, "--", f"{directory}/").decode("utf-8").splitlines()
+        for name in names:
+            if name.endswith(".mbt"):
+                path = into / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(git(repo, "show", f"{commit}:./{name}"))
+
+
+def text_problems(entries, root):
+    """Where a mutant's original text is not at its offset in the file under
+    root, which holds the commit's files."""
+    problems = []
+    for entry in entries:
+        path = root / entry["file"]
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        if text[entry["offset"] : entry["offset"] + len(entry["original"])] != entry["original"]:
+            problems.append(f"{entry['name']}: {entry['file']} does not hold {json.dumps(entry['original'])}"
+                            f" at offset {entry['offset']} on {entry['commit']}")
+    return problems
+
+
+def finder_sites(command, root, packages):
+    """The sites of the full set that the site finder makes in the package
+    directories under root; the sites that a rule skipped are left out."""
+    result = subprocess.run([*command, "--root", str(root), "--set", "full", *packages], capture_output=True,
+                            text=True)
+    if result.returncode != 0:
+        raise CanaryError(f"the site finder failed on {root}:\n{result.stderr}")
+    return [s for s in map(json.loads, result.stdout.splitlines()) if "id" in s]
+
+
+def trimmed(source, start, end):
+    """A span of a file without the white space at its edges."""
+    while start < end and source.text[start].isspace():
+        start += 1
+    while end > start and source.text[end - 1].isspace():
+        end -= 1
+    return start, end
+
+
+def site_problems(entries, root, found):
+    """Where the site finder's sites (found) disagree with what the data
+    records: a mutant within operator set v1 whose site the finder no
+    longer makes, or makes elsewhere, and a mutant recorded outside v1 that
+    a site makes."""
+    by_id = {s["id"]: s for s in found}
+    sources, effects = {}, {}
+    for entry in entries:
+        file = entry["file"]
+        if file not in sources:
+            sources[file] = finder.SourceFile(Path(file), (root / file).read_text(encoding="utf-8"))
+            effects[file] = {}
+            for site in found:
+                if site["file"] == file:
+                    start = sources[file].offset(site["line"], site["column"])
+                    made = finder.effect(sources[file], start, start + len(site["original"]), site["replacement"])
+                    effects[file].setdefault(made, site["id"])
+    problems = []
+    for entry in entries:
+        source = sources[entry["file"]]
+        start, end = entry["offset"], entry["offset"] + len(entry["original"])
+        if "v1" in entry:
+            site = by_id.get(entry["v1"])
+            if site is None:
+                problems.append(f"{entry['name']}: the site finder makes no site {entry['v1']}")
+                continue
+            # The site holds the mutant's place: a site of v1 that makes the
+            # same mutant as a change written another way (CONTRIBUTING, "The
+            # canary") holds the change's text, without its edges' white space.
+            first = source.offset(site["line"], site["column"])
+            low, high = trimmed(source, start, end)
+            if site["file"] != entry["file"] or not first <= low <= high <= first + len(site["original"]):
+                problems.append(f"{entry['name']}: the site {entry['v1']} is not at its place,"
+                                f" {entry['file']} offset {entry['offset']}")
+        else:
+            made = effects[entry["file"]].get(finder.effect(source, start, end, entry["replacement"]))
+            if made is not None:
+                problems.append(f"{entry['name']}: the site {made} makes it, though it is recorded outside"
+                                f" operator set v1 ({entry['outside']})")
+    return problems
+
+
+def check_sites(entries, root, command):
+    """The problems of the data on the commit's files under root: texts not
+    at their offsets, and sites that disagree with the data."""
+    problems = text_problems(entries, root)
+    if problems:
+        return problems
+    return site_problems(entries, root, finder_sites(command, root, directories(entries)))
+
+
+def sites_line(entries, problems):
+    """What the check of the sites prints."""
+    within = sum("v1" in e for e in entries)
+    if problems:
+        return "\n".join(["sites: the canary's data disagrees with its commit or the site finder:"]
+                         + [f"- {p}" for p in problems])
+    return (f"sites: {len(entries)} mutants on {entries[0]['commit'][:8]}: {within} within operator set v1, each"
+            f" made by the site it names, and {len(entries) - within} outside it, made by no site.")
 
 
 def replayed_verdicts(records, by_id):
@@ -309,6 +438,14 @@ def main():
         entries = read_data(args.data)
         explained = read_explained(args.explained, entries)
         names = chosen_names(entries, getattr(args, "mutant", None))
+        command = shlex.split(args.finder) if getattr(args, "finder", None) else [sys.executable,
+                                                                                  str(HERE / "sites.py")]
+        if args.command == "sites":
+            with tempfile.TemporaryDirectory(prefix="canary-sites-") as tmp:
+                export(args.repo, entries[0]["commit"], directories(entries), Path(tmp))
+                problems = check_sites(entries, Path(tmp), command)
+            print(sites_line(entries, problems))
+            sys.exit(1 if problems else 0)
         if args.command == "compare":
             ok = compare_output(entries, explained, Path(args.out), names)
             sys.exit(0 if ok else 1)

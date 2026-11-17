@@ -29,9 +29,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
+FIXTURE = HERE / "fixture"
 CANARY = HERE / "canary.py"
 DATA = REPO / "mutation" / "canary" / "mutants.jsonl"
-EXPLAINED = REPO / "mutation" / "canary" / "explained.toml"
 COMMIT = "d953f320e0bb4fad15352224d01c365a02c0ab79"
 
 
@@ -103,6 +103,116 @@ class DataTest(unittest.TestCase):
             self.assertEqual(("v1" in entry) + ("outside" in entry), 1, entry["name"])
             if "outside" in entry:
                 self.assertRegex(entry["outside"], r"^(ROR|INT|LCR|DEL): ", entry["name"])
+
+
+def git(repo, *args):
+    """Runs git in repo, as an author of its own, and gives its output."""
+    author = ["-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false"]
+    result = subprocess.run(["git", "-C", str(repo), *author, *args], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise AssertionError(f"git {' '.join(args)} failed:\n{result.stderr}")
+    return result.stdout
+
+
+def fixture_history(directory, files=None):
+    """A git repository at directory whose one commit holds a copy of the
+    fixture module, the toolchain pin of this repository and the files
+    given by path: the commit's id."""
+    shutil.copytree(FIXTURE, directory, ignore=shutil.ignore_patterns("_build", "target", ".mooncakes"))
+    shutil.copyfile(REPO / ".moonbit-version", directory / ".moonbit-version")
+    for path, text in (files or {}).items():
+        (directory / path).parent.mkdir(parents=True, exist_ok=True)
+        (directory / path).write_text(text, encoding="utf-8")
+    git(directory, "init", "-q", "-b", "main")
+    git(directory, "add", "-A")
+    git(directory, "commit", "-q", "-m", "the fixture")
+    return git(directory, "rev-parse", "HEAD").strip()
+
+
+def at(text, before, original):
+    """The offset of original in text, where it follows before."""
+    return text.index(before + original) + len(before)
+
+
+class SitesTest(unittest.TestCase):
+    """canary.py sites: the data against its commit, and against the site
+    finder there."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-canary-sites-"))
+        cls.repo = cls.tmp / "repo"
+        cls.commit = fixture_history(cls.repo)
+        # A list of explained differences that holds none.
+        cls.explained = cls.tmp / "explained.toml"
+        cls.explained.write_text("")
+        calc = (FIXTURE / "calc" / "calc.mbt").read_text(encoding="utf-8")
+        low = at(calc, "\n  low ", "<=")
+        # calc.mbt's comments: ROR `low <= n` to `low < n` is killed; `>` is
+        # not ROR's boundary alternative, so no site of v1 makes it.
+        cls.within = entry("within", "killed", offset=low, commit=cls.commit,
+                           v1="calc/calc.mbt,in_range,ROR,<=,<,0")
+        cls.outside = entry("outside", "killed", offset=low, replacement=">", commit=cls.commit,
+                            outside="ROR: only the boundary alternative, < with <= and > with >=")
+        # A finder that no longer finds comparisons.
+        cls.narrowed = cls.tmp / "narrowed.py"
+        cls.narrowed.write_text(
+            "import json, subprocess, sys\n"
+            f"result = subprocess.run([sys.executable, {str(HERE / 'sites.py')!r}, *sys.argv[1:]],"
+            " capture_output=True, text=True)\n"
+            "for line in result.stdout.splitlines():\n"
+            "    if json.loads(line)['operator'] != 'ROR':\n"
+            "        print(line)\n"
+            "sys.exit(result.returncode)\n")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def sites(self, entries, *args):
+        data = self.tmp / "mutants.jsonl"
+        write_lines(data, entries)
+        return run_canary("sites", "--repo", self.repo, "--data", data, "--explained", self.explained, *args)
+
+    def test_the_committed_canary_is_what_the_site_finder_makes_on_d953f320(self):
+        # #308: "Each canary mutant within operator set v1 is among the
+        # sites the current site finder produces on d953f320".
+        result = run_canary("sites")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("250 mutants on d953f320: 214 within operator set v1, each made by the site it names,"
+                      " and 36 outside it, made by no site.", result.stdout)
+
+    def test_a_mutant_within_v1_and_one_outside_it_check_out(self):
+        result = self.sites([self.within, self.outside])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_narrowed_site_finder_fails_the_check(self):
+        # #308: "one that is not fails the replay, so that a narrowed site
+        # finder shows here".
+        result = self.sites([self.within, self.outside], "--finder", f"{sys.executable} {self.narrowed}")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("within: the site finder makes no site calc/calc.mbt,in_range,ROR,<=,<,0", result.stdout)
+
+    def test_a_site_that_makes_a_mutant_recorded_outside_v1_fails_the_check(self):
+        # CONTRIBUTING, "The canary": a widened finder fails too.
+        widened = dict(self.within, outside="ROR: made up")
+        del widened["v1"]
+        result = self.sites([widened])
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("within: the site calc/calc.mbt,in_range,ROR,<=,<,0 makes it, though it is recorded"
+                      " outside operator set v1 (ROR: made up)", result.stdout)
+
+    def test_a_site_elsewhere_does_not_make_the_mutant(self):
+        moved = dict(self.within, v1="calc/calc.mbt,in_range,ROR,<=,<,1")
+        result = self.sites([moved])
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("within: the site calc/calc.mbt,in_range,ROR,<=,<,1 is not at its place", result.stdout)
+
+    def test_a_mutant_whose_text_is_not_at_its_offset_fails_the_check(self):
+        result = self.sites([dict(self.within, offset=self.within["offset"] + 1)])
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(f"within: calc/calc.mbt does not hold \"<=\" at offset {self.within['offset'] + 1}"
+                      f" on {self.commit}", result.stdout)
 
 
 def entry(name, verdict, file="calc/calc.mbt", offset=0, original="<=", replacement="<", **more):
