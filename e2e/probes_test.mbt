@@ -134,30 +134,46 @@ async fn fifo_writer(path : String) -> @fs.File {
 async test "after the first definition set has loaded and before the plain and TLS ports open, /readyz fails with not_ready while /startupz passes" {
   with_definitions([("users.json", users)], dir => {
     with_certificates(certs => {
-      // A FIFO as the certificate file holds smock in that window: smock
-      // reads the file after the first definition set has loaded and
-      // before it opens the plain and TLS ports (#291), and the read lasts
-      // until the test has written the certificate and closed the FIFO.
+      // FIFOs as the certificate and key files hold smock in that window:
+      // smock reads the files after the first definition set has loaded and
+      // before it opens the plain and TLS ports (#291), and the read of each
+      // lasts until the test has written it and closed the FIFO.
       let cert = "\{certs.dir}/fifo-chain.pem"
-      let (status, output) = @process.collect_output_merged("mkfifo", [cert])
+      let key = "\{certs.dir}/fifo-key.pem"
+      let (status, output) = @process.collect_output_merged("mkfifo", [
+        cert, key,
+      ])
       guard status == 0 else { fail("mkfifo failed: \{output.text()}") }
       @async.with_task_group(group => {
         let serving = Serving::start(
           group,
-          ["--dir", dir, "--port", "0", ..certs.args(cert~)],
+          ["--dir", dir, "--port", "0", ..certs.args(cert~, key~)],
         )
-        // smock first opens the file to note its times, for the polls that
-        // rotate certificates, before its admin port opens: let it.
+        // Before its admin port opens, smock opens the certificate file and
+        // then the key file to note their times, for the polls that rotate
+        // certificates: let both opens through. An open of a FIFO waits for
+        // the other end, whichever side comes first. A writer of this test
+        // still open when smock opens a file to read it would let that open
+        // through, and the read would end empty when the writer closed. So
+        // each writer closes before the next one opens, and smock gets past
+        // each open only once a writer opens: it reaches the read of the
+        // certificate after the key's writer opened, so after the
+        // certificate's first writer closed.
         fifo_writer(cert).close()
+        fifo_writer(key).close()
         guard serving.listening_on(["admin"]) is Some(ports) else {
           fail("smock exited before it listened on its admin port")
         }
         let smock = serving.smock(ports)
-        // Then it opens the file to read it, once the first definition set
-        // has loaded.
+        // Then it reads the certificate file, once the first definition set
+        // has loaded, and then the key file, after the certificate's writer
+        // has closed, so after the key's first writer closed too.
         let writer = fifo_writer(cert)
         let during = smock.probes()
         writer.write(@utf8.encode(@testcerts.rsa_chain + "\n"))
+        writer.close()
+        let writer = fifo_writer(key)
+        writer.write(@utf8.encode(@testcerts.rsa_key + "\n"))
         writer.close()
         guard serving.listening_on(["plain", "tls"]) is Some(_) else {
           fail("smock exited before it listened:\n\{serving.log().join("\n")}")
