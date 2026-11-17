@@ -127,7 +127,9 @@ class MergeTest(unittest.TestCase):
         cls.whole = cls.run_once(cls.tmp / "whole")
         cls.shards = [cls.run_once(cls.tmp / f"shard-{k}", "--shard", f"{k}/3") for k in (1, 2, 3)]
         cls.merged = cls.tmp / "merged"
-        cls.result = subprocess.run([sys.executable, str(MERGE), "--out", str(cls.merged), *map(str, cls.shards)],
+        # The shards in any order.
+        given = [cls.shards[2], cls.shards[0], cls.shards[1]]
+        cls.result = subprocess.run([sys.executable, str(MERGE), "--out", str(cls.merged), *map(str, given)],
                                     capture_output=True, text=True)
 
     @classmethod
