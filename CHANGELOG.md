@@ -698,6 +698,14 @@ of each GitHub release include its section
   Kubernetes take an integer. The Services' ports, the replica count in
   the notes after an install, and Definition files or body files given as
   numbers were written the same way.
+- The certificate expiry metric, and the `expiry` of a reload's log entry,
+  now give the notAfter of the certificate that the TLS port presents:
+  the first block of the certificate file labelled `CERTIFICATE`,
+  `X509 CERTIFICATE` or `TRUSTED CERTIFICATE`, the block OpenSSL loads.
+  smock read the first block whose label ended with `CERTIFICATE`, so a
+  file that started with an `ATTRIBUTE CERTIFICATE` got a metric of 0 and
+  an `expiry` of null, and one that started with an `X.509 CERTIFICATE`,
+  which OpenSSL skips, got that block's notAfter.
 
 ## [0.4.0] - 2026-11-01
 

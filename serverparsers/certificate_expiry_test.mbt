@@ -2,8 +2,8 @@
 // `smock_tls_certificate_expiry_timestamp_seconds` reports for each
 // certificate the TLS port presents (docs/running.md, "Certificate
 // expiry"), and the log entry of each reload gives (docs/running.md,
-// "Rotating certificates"): the first CERTIFICATE block of the PEM
-// (RFC 7468), the DER walk to the notAfter of its TBSCertificate (RFC 5280,
+// "Rotating certificates"): the first block of the PEM (RFC 7468) that
+// OpenSSL loads as the leaf of the TLS port's chain, the DER walk to the notAfter of its TBSCertificate (RFC 5280,
 // section 4.1; X.690), and the time there (RFC 5280, section 4.1.2.5), in
 // milliseconds since the Unix epoch. The certificates are the examples of
 // RFC 7468, or built here, field by field, as X.690 encodes them. Each
@@ -120,6 +120,49 @@ let figure_16 : String =
   #|
 
 ///|
+/// RFC 7468's example of an attribute certificate (section 12, Figure 14):
+/// an ATTRIBUTE CERTIFICATE, an AttributeCertificate of RFC 5755, which
+/// holds no notAfter of a certificate.
+let figure_14 : String =
+  #|-----BEGIN ATTRIBUTE CERTIFICATE-----
+  #|MIICKzCCAZQCAQEwgZeggZQwgYmkgYYwgYMxCzAJBgNVBAYTAlVTMREwDwYDVQQI
+  #|DAhOZXcgWW9yazEUMBIGA1UEBwwLU3RvbnkgQnJvb2sxDzANBgNVBAoMBkNTRTU5
+  #|MjE6MDgGA1UEAwwxU2NvdHQgU3RhbGxlci9lbWFpbEFkZHJlc3M9c3N0YWxsZXJA
+  #|aWMuc3VueXNiLmVkdQIGARWrgUUSoIGMMIGJpIGGMIGDMQswCQYDVQQGEwJVUzER
+  #|MA8GA1UECAwITmV3IFlvcmsxFDASBgNVBAcMC1N0b255IEJyb29rMQ8wDQYDVQQK
+  #|DAZDU0U1OTIxOjA4BgNVBAMMMVNjb3R0IFN0YWxsZXIvZW1haWxBZGRyZXNzPXNz
+  #|dGFsbGVyQGljLnN1bnlzYi5lZHUwDQYJKoZIhvcNAQEFBQACBgEVq4FFSjAiGA8z
+  #|OTA3MDIwMTA1MDAwMFoYDzM5MTEwMTMxMDUwMDAwWjArMCkGA1UYSDEiMCCGHmh0
+  #|dHA6Ly9pZGVyYXNobi5vcmcvaW5kZXguaHRtbDANBgkqhkiG9w0BAQUFAAOBgQAV
+  #|M9axFPXXozEFcer06bj9MCBBCQLtAM7ZXcZjcxyva7xCBDmtZXPYUluHf5OcWPJz
+  #|5XPus/xS9wBgtlM3fldIKNyNO8RsMp6Ocx+PGlICc7zpZiGmCYLl64lAEGPO/bsw
+  #|Smluak1aZIttePeTAHeJJs8izNJ5aR3Wcd3A5gLztQ==
+  #|-----END ATTRIBUTE CERTIFICATE-----
+  #|
+
+///|
+/// RFC 7468's Figure 6 as OpenSSL writes a trusted certificate
+/// (`openssl x509 -trustout -addtrust serverAuth`): under the label
+/// TRUSTED CERTIFICATE, the certificate, then OpenSSL's trust settings.
+/// Its notAfter is Figure 6's, as `openssl x509 -noout -enddate` prints it.
+let figure_6_trusted : String =
+  #|-----BEGIN TRUSTED CERTIFICATE-----
+  #|MIICLDCCAdKgAwIBAgIBADAKBggqhkjOPQQDAjB9MQswCQYDVQQGEwJCRTEPMA0G
+  #|A1UEChMGR251VExTMSUwIwYDVQQLExxHbnVUTFMgY2VydGlmaWNhdGUgYXV0aG9y
+  #|aXR5MQ8wDQYDVQQIEwZMZXV2ZW4xJTAjBgNVBAMTHEdudVRMUyBjZXJ0aWZpY2F0
+  #|ZSBhdXRob3JpdHkwHhcNMTEwNTIzMjAzODIxWhcNMTIxMjIyMDc0MTUxWjB9MQsw
+  #|CQYDVQQGEwJCRTEPMA0GA1UEChMGR251VExTMSUwIwYDVQQLExxHbnVUTFMgY2Vy
+  #|dGlmaWNhdGUgYXV0aG9yaXR5MQ8wDQYDVQQIEwZMZXV2ZW4xJTAjBgNVBAMTHEdu
+  #|dVRMUyBjZXJ0aWZpY2F0ZSBhdXRob3JpdHkwWTATBgcqhkjOPQIBBggqhkjOPQMB
+  #|BwNCAARS2I0jiuNn14Y2sSALCX3IybqiIJUvxUpj+oNfzngvj/Niyv2394BWnW4X
+  #|uQ4RTEiywK87WRcWMGgJB5kX/t2no0MwQTAPBgNVHRMBAf8EBTADAQH/MA8GA1Ud
+  #|DwEB/wQFAwMHBgAwHQYDVR0OBBYEFPC0gf6YEr+1KLlkQAPLzB9mTigDMAoGCCqG
+  #|SM49BAMCA0gAMEUCIDGuwD1KPyG+hRf88MeyMQcqOFZD0TbVleF+UsAGQ4enAiEA
+  #|l4wOuDwKQa+upc8GftXE2C//4mKANBC6It01gUaTIpowDDAKBggrBgEFBQcDAQ==
+  #|-----END TRUSTED CERTIFICATE-----
+  #|
+
+///|
 /// `text` with the label `from` of its encapsulation boundaries replaced
 /// by `to`.
 fn relabel(text : String, from : String, to : String) -> String {
@@ -129,7 +172,7 @@ fn relabel(text : String, from : String, to : String) -> String {
 }
 
 ///|
-test "the expiry is read from the first CERTIFICATE block: after explanatory text and blocks of other labels, with lines ended by CRLF or by blanks, in a chain the leaf's, which comes first, and under the old label X509 CERTIFICATE, which OpenSSL also loads for the TLS port (RFC 7468, sections 2, 3, 5.1, 5.2, 7 and 10; docs/running.md, HTTPS and Certificate expiry)" {
+test "the expiry is read from the first block that OpenSSL loads as the TLS port's leaf, one labelled CERTIFICATE, X509 CERTIFICATE or TRUSTED CERTIFICATE: after explanatory text and blocks of other labels, an ATTRIBUTE CERTIFICATE and an X.509 CERTIFICATE included, with lines ended by CRLF or by blanks, in a chain the leaf's, which comes first (RFC 7468, sections 2, 3, 5.1, 5.2, 7, 10 and 12; docs/running.md, HTTPS and Certificate expiry; OpenSSL's PEM_read_bio_X509_AUX)" {
   let figure_16_relabelled = relabel(
     figure_16, "X509 CERTIFICATE", "CERTIFICATE",
   )
@@ -140,6 +183,19 @@ test "the expiry is read from the first CERTIFICATE block: after explanatory tex
       // openssl/openssl.c loads the TLS port's chain, reads it: the TLS
       // port presents the certificate, so the metric reports it.
       "X509 CERTIFICATE: \{expiry(pem(figure_16))}",
+      // PEM_read_bio_X509_AUX reads a TRUSTED CERTIFICATE too, the
+      // certificate and the trust settings after it, and the TLS port
+      // presents the certificate.
+      "TRUSTED CERTIFICATE: \{expiry(pem(figure_6_trusted))}",
+      // Section 12: an ATTRIBUTE CERTIFICATE is an attribute certificate,
+      // and section 5.1: parsers SHOULD NOT read "X.509 CERTIFICATE" as
+      // "CERTIFICATE". PEM_read_bio_X509_AUX skips both and presents the
+      // certificate after them, as a program that calls it on these files
+      // prints with OpenSSL 4.1.0: "notAfter Dec 22 07:41:51 2012 GMT". And
+      // docs/running.md, Certificate expiry: the metric "gives when each
+      // certificate the TLS port presents expires (its notAfter)".
+      "an ATTRIBUTE CERTIFICATE first: \{expiry(pem(figure_14 + figure_6))}",
+      "an X.509 CERTIFICATE first: \{expiry(pem(relabel(figure_16, "X509 CERTIFICATE", "X.509 CERTIFICATE") + figure_6))}",
       // Section 5.2: tools emit explanatory text before the BEGIN line, and
       // section 2: "Data before the encapsulation boundaries are permitted".
       "explanatory text before: \{expiry(pem(figure_7))}",
@@ -157,6 +213,9 @@ test "the expiry is read from the first CERTIFICATE block: after explanatory tex
     ].join("\n"),
     content=(
       #|X509 CERTIFICATE: 1726294550000
+      #|TRUSTED CERTIFICATE: 1356162111000
+      #|an ATTRIBUTE CERTIFICATE first: 1356162111000
+      #|an X.509 CERTIFICATE first: 1356162111000
       #|explanatory text before: 1373339437000
       #|CRLF: 1356162111000
       #|blanks at the ends of lines: 1356162111000
