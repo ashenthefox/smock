@@ -192,7 +192,8 @@ exits good 0
 says good "check-kept-tests: 6 tests under 3 reasons, each found"
 lines good 1
 
-# Every rule of rule (C) that the list holds.
+# Every rule of rule (C) that the list holds: the four of #275, and the
+# tests of smock's own C, which the maintainer added on 2026-11-17.
 tree
 tests
 head_of "$list"
@@ -200,9 +201,10 @@ reason "$list" a "spec constant"
 reason "$list" b "backend agreement"
 reason "$list" c "dependency"
 reason "$list" d "deliberate overlap"
+reason "$list" e "smock's own C"
 check rules
 exits rules 0
-says rules "check-kept-tests: 0 tests under 4 reasons, each found"
+says rules "check-kept-tests: 0 tests under 5 reasons, each found"
 
 # --- A listed test that is gone ---------------------------------------------
 
@@ -378,7 +380,7 @@ exits reasons 1
 says reasons "$root/$list: no-search: no search"
 says reasons "$root/$list: empty-search: the search is empty"
 says reasons "$root/$list: nothing-found: no found"
-says reasons "$root/$list: other-rule: the rule is not one of spec constant, backend agreement, dependency and deliberate overlap"
+says reasons "$root/$list: other-rule: the rule is not one of spec constant, backend agreement, dependency, deliberate overlap and smock's own C"
 says reasons "$root/$list: no-search: another reason has the id no-search"
 says reasons "$root/$list: no-search: owner is not a key of a reason"
 says reasons "check-kept-tests: 0 tests under 5 reasons, 6 problems"

@@ -44,13 +44,16 @@ such a file before parsing it.
   message the documents give for that construct. A refusal for another
   reason fails, so that it cannot pass as "outside the subset".
 - Otherwise, where the suite gives JSON, smock must read that JSON: the
-  same values, and the members of each object in the same order.
+  same values, and the members of each object in the same order, as
+  `parse`'s documentation says ("The members of a mapping are read in the
+  order they are written").
 - Otherwise, the suite gives no JSON, and smock must read the input.
 
 The constructs are those that `parse`'s documentation and
 [Writing Definition files in YAML](../docs/definition-files.md#writing-definition-files-in-yaml)
-name with their messages, each found from the suite's events or from the
-input:
+name with their messages, the rules that `parse` "also holds to" included
+(an empty key, a duplicate key, a number JSON cannot hold), each found from
+the suite's events or from the input:
 
 | Construct | Found from | Refused in | The message |
 |---|---|---|---|
