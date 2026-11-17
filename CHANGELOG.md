@@ -690,6 +690,12 @@ of each GitHub release include its section
   gRPC in its description of smock, as the README's opening line does: "A
   mock server for HTTP/1.1, HTTP/2, HTTPS, Server-Sent Events and gRPC
   unary calls." It left gRPC out.
+- A YAML Definition file or OpenAPI document that starts with two `---`
+  markers with nothing but comments between them is now rejected as
+  multiple documents, as the documents say: the first `---` starts an empty
+  document and the second starts another. smock read the second `---` as
+  the document's text, so `---` on two lines read as the string `---`
+  ([smock#365](https://github.com/hirunefu/smock/issues/365)).
 
 ## [0.4.0] - 2026-11-01
 

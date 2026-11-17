@@ -399,6 +399,20 @@ test "anchors, aliases, tags, merge keys, duplicate keys, several documents, dir
       #|  openapi: error : explicit keys (?) are not supported
     ),
   )
+  // Two `---` markers with nothing between them start two documents, the
+  // first of them empty (YAML 1.2.2, section 9.1.4; yaml-test-suite's 6XDY).
+  // Both modes reject them: "more than one document" is among the errors
+  // that docs/openapi/references-and-yaml.md lists, "Each of these is an
+  // error at its pointer, with a message that names it", and
+  // docs/definition-files.md rejects "multiple documents".
+  inspect(
+    both(["---\n---\n"]),
+    content=(
+      #|"---\n---\n"
+      #|  safe: error : multiple documents are not supported
+      #|  openapi: error : multiple documents are not supported
+    ),
+  )
 }
 
 ///|

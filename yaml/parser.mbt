@@ -213,6 +213,11 @@ fn Parser::document(self : Parser) -> Json raise ParseError {
       inline = true
     }
   }
+  // A second `---` before any content ends the first document, which is
+  // empty, and starts another.
+  if content && self.at_marker('-') {
+    self.fail("multiple documents are not supported", pointer="")
+  }
   if !content || self.at_marker('.') {
     self.fail("the document is empty", pointer="")
   }

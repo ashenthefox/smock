@@ -112,7 +112,7 @@ listed case with its outcome and reason.
 Unlike h2spec's lists, these may keep entries marked as bugs, each with
 its issue, when a branch merges into `main`, until yaml's L4 ticket (#323)
 fixes them ([Before merging into main](../docs/merging-into-main.md)).
-Each bug has an issue of its own, which its entries name: #365 to #369.
+Each bug has an issue of its own, which its entries name: #366 to #369.
 
 ## How it runs
 

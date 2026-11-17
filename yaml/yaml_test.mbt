@@ -363,6 +363,25 @@ test "anchors, aliases, tags, merge keys, duplicate keys and multiple documents 
       #|"%YAML 1.2\n---\na: 1" -> error : directives (%) are not supported
     ),
   )
+  // Two `---` markers with nothing but white space and comments between
+  // them start two documents, the first of them empty: "Since the existence
+  // of the document is indicated by this marker, the document itself may be
+  // completely empty" (YAML 1.2.2, section 9.1.4). yaml-test-suite's 6XDY,
+  // `---\n---\n`, reads as two documents. The documents reject them as
+  // multiple documents ("Anchors, aliases, tags, merge keys, duplicate keys
+  // and multiple documents are rejected", docs/definition-files.md, Writing
+  // Definition files in YAML), with the message above for multiple documents.
+  inspect(
+    each([
+      "---\n---\n", "---\n---", "--- # a comment\n\n# another\n---\na: 1", "---\n--- x",
+    ]),
+    content=(
+      #|"---\n---\n" -> error : multiple documents are not supported
+      #|"---\n---" -> error : multiple documents are not supported
+      #|"--- # a comment\n\n# another\n---\na: 1" -> error : multiple documents are not supported
+      #|"---\n--- x" -> error : multiple documents are not supported
+    ),
+  )
 }
 
 ///|
