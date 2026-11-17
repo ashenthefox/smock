@@ -5,8 +5,11 @@
 ///
 /// For a value that is not read, such as a tag or an ambiguous plain
 /// scalar, the pointer names that value; for a key, it names the member.
-/// For a syntax error, it names the deepest node the parser reached. It is
-/// `""` for the whole document.
+/// A key written over several lines, which YAML allows only on one line,
+/// names the member by its text with the lines folded, as a scalar over
+/// several lines is read: `a\n b: 1` gives `/a b`. For a syntax error, it
+/// names the deepest node the parser reached. It is `""` for the whole
+/// document.
 #derive(Debug, Eq)
 pub(all) suberror ParseError {
   ParseError(pointer~ : String, message~ : String)

@@ -591,8 +591,13 @@ test "malformed indentation gives an error at the deepest node reached, or a val
   // A sequence item where the mapping expects its next key, and a key
   // continued on a more indented line: YAML limits an implicit key to a
   // single line (YAML 1.2.2, section 8.2.2). The messages are those
-  // #280's acceptance criteria name; the pointer is the deepest node
-  // reached, or the member for a key, as `parse` documents.
+  // #280's acceptance criteria name. The first pointer is the deepest node
+  // reached; the second names the member by its folded key, as
+  // `ParseError` documents: "A key written over several lines, which YAML
+  // allows only on one line, names the member by its text with the lines
+  // folded, as a scalar over several lines is read: `a\n b: 1` gives
+  // `/a b`." The line break folds into a space (YAML 1.2.2, section 6.5),
+  // and the maintainer confirmed that pointer on 2026-11-17 (#275).
   inspect(
     each(["a: 1\n- b", "a\n b: 1"]),
     content=(
