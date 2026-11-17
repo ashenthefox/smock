@@ -793,7 +793,10 @@ the ledgers, for the maintainer to read before the merge into `main`. A
 removal batch keeps the only test of a row unless it names another
 ([Removing a test](#removing-a-test)). No check sees a feature, a limit or
 a message documented without a row: whoever reviews the change looks for
-one. Step 3's close checks the ledgers against the documents once more
+one. The boundary ledger records the search that listed its limits, which
+anyone can run again
+([The search for documented limits](docs/ledgers/boundaries.md#the-search-for-documented-limits)).
+Step 3's close checks the ledgers against the documents once more
 ([#340](https://github.com/hirunefu/smock/issues/340)).
 
 ### The ladder
