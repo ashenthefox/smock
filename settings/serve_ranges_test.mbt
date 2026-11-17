@@ -62,3 +62,22 @@ test "ranges: --replicas takes 10000 and refuses 10001" {
     ),
   )
 }
+
+///|
+test "ranges: --header-count-limit takes 1073741824 and refuses 1073741825" {
+  // docs/running.md, Settings: --header-count-limit takes 1 to 1073741824
+  // (2^30).
+  let header_count_limit = (settings : @settings.ServeSettings) => {
+    settings.header_count_limit
+  }
+  inspect(
+    [
+      serve_with(["--header-count-limit", "1073741824"], header_count_limit),
+      serve_with(["--header-count-limit", "1073741825"], header_count_limit),
+    ].join("\n"),
+    content=(
+      #|1073741824
+      #|invalid value "1073741825" for --header-count-limit (SMOCK_HEADER_COUNT_LIMIT): must be an integer from 1 to 1073741824
+    ),
+  )
+}
