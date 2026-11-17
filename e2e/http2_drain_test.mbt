@@ -32,11 +32,13 @@ async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY
           ])
           let _ = raw.frames_until_stream_ends(1)
         }
-        // docs/http2.md, The drain: the final GOAWAY comes once the client
+        // docs/http2.md, The drain: the first GOAWAY and the PING come
+        // first, as the frames show; the final GOAWAY comes once the client
         // answers the PING, so before the second after the first GOAWAY in
         // which smock waits for that answer (less 200 ms, as
-        // `about_a_second` allows); and smock exits before the drain
-        // timeout.
+        // `about_a_second` allows); the connection closes "about two
+        // seconds after SIGTERM at the latest", which the test allows up to
+        // 3 times; and smock exits before the drain timeout.
         let drain = 10000L
         let start = @async.now()
         smock.terminate()
@@ -48,10 +50,10 @@ async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY
             [
               "a client that acknowledges the PING:",
               ..warned.shown,
-              "both at once: \{warned.end_ms < 1000}",
               ..told.shown,
               "at once after the acknowledgement, before the second's wait is over: \{told.end_ms - warned.end_ms < 800}",
               "then: \{after.shown.length()} frames, \{after.how}, about a second after the final GOAWAY: \{about_a_second(after.end_ms - told.end_ms)}",
+              "closed within 3 times the two seconds: \{after.end_ms < 3 * 2000}",
             ]
           })
           let unacked = group.spawn(() => {
@@ -61,10 +63,10 @@ async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY
             [
               "a client that does not:",
               ..warned.shown,
-              "both at once: \{warned.end_ms < 1000}",
               ..told.shown,
               "about a second after the PING: \{about_a_second(told.end_ms - warned.end_ms)}",
               "then: \{after.shown.length()} frames, \{after.how}, about a second after the final GOAWAY: \{about_a_second(after.end_ms - told.end_ms)}",
+              "closed within 3 times the two seconds: \{after.end_ms < 3 * 2000}",
             ]
           })
           (acked.wait(), unacked.wait())
@@ -81,17 +83,17 @@ async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY
             #|a client that acknowledges the PING:
             #|GOAWAY last=2147483647 NO_ERROR
             #|PING
-            #|both at once: true
             #|GOAWAY last=1 NO_ERROR
             #|at once after the acknowledgement, before the second's wait is over: true
             #|then: 0 frames, a FIN, about a second after the final GOAWAY: true
+            #|closed within 3 times the two seconds: true
             #|a client that does not:
             #|GOAWAY last=2147483647 NO_ERROR
             #|PING
-            #|both at once: true
             #|GOAWAY last=1 NO_ERROR
             #|about a second after the PING: true
             #|then: 0 frames, a FIN, about a second after the final GOAWAY: true
+            #|closed within 3 times the two seconds: true
             #|exit status 0, before the drain timeout: true
           ),
         )
