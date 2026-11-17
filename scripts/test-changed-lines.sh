@@ -440,6 +440,89 @@ for width in 0 21 x; do
   status "width-$width" plan 2
 done
 
+# --- What fails the job ---------------------------------------------------------
+
+# says_err <job> <step> <text>: the step printed <text> on standard error.
+says_err() {
+  if grep -qF -- "$3" "$tmp/$1/$2.err"; then
+    pass "$1: $2 says $3"
+  else
+    fail "$1: $2 does not say $3"
+    sed 's/^/     /' "$tmp/$1/$2.err"
+  fi
+}
+
+# A runner that fails fails the plan and the shard: the job does not
+# continue on error.
+history
+change "a killed line" <<'SH'
+sed -i 's/^let a6 : Int = 6$/let a6 : Int = 60/' calc/calc.mbt
+SH
+FAKE_RUNNER=fail job runner-fails
+status runner-fails plan 1
+says_err runner-fails plan "changed-lines: the runner failed:"
+job one
+mkdir -p "$tmp/one/failing"
+FAKE_RUNNER=fail step one failing shard --root "$repo" --runner "$runner" --plan "$tmp/one/plan" --shard 1 \
+  --out "$tmp/one/failing/out" || true
+status one failing 1
+step one beyond shard --root "$repo" --runner "$runner" --plan "$tmp/one/plan" --shard 2 \
+  --out "$tmp/one/beyond/out" || true
+status one beyond 1
+says_err one beyond "changed-lines: the plan has 1 shards, and no shard 2"
+
+# The report refuses shards that are not the plan's: one missing, one
+# given twice, or one that ran on other lines, as when main moved between
+# the plan and the shard.
+history
+lines calc/calc.mbt 120 killed
+git -C "$repo" commit --quiet -am "120 lines"
+job shards
+outputs shards 'shards=[1,2,3]'
+
+# report_of <name> <shard directory>...: runs the report on the job shards'
+# plan and these shard outputs, as the step <name> of the job shards.
+report_of() {
+  name=$1
+  shift
+  rm -rf "$tmp/shards/given"
+  mkdir -p "$tmp/shards/given"
+  for given in "$@"; do
+    cp -R "$given" "$tmp/shards/given/$(basename "$given")-$(find "$tmp/shards/given" -mindepth 1 -maxdepth 1 | wc -l)"
+  done
+  step shards "$name" report --plan "$tmp/shards/plan" --shards "$tmp/shards/given" --out "$tmp/shards/$name-out" ||
+    true
+}
+report_of missing "$tmp/shards/shards/changed-lines-shard-1" "$tmp/shards/shards/changed-lines-shard-3"
+status shards missing 1
+says_err shards missing "changed-lines: the output of shard 2/3 is missing"
+report_of twice "$tmp/shards/shards/changed-lines-shard-1" "$tmp/shards/shards/changed-lines-shard-2" \
+  "$tmp/shards/shards/changed-lines-shard-2" "$tmp/shards/shards/changed-lines-shard-3"
+status shards twice 1
+says_err shards twice "changed-lines: shard 2/3 is given twice"
+# main takes the branch as it is, and the branch moves on: its merge base
+# with main is now its last commit.
+git -C "$repo" update-ref refs/remotes/origin/main HEAD
+lines calc/calc.mbt 3 killed
+git -C "$repo" commit --quiet -am "after main took the branch"
+step shards later shard --root "$repo" --runner "$runner" --plan "$tmp/shards/plan" --shard 2 \
+  --out "$tmp/shards/later/changed-lines-shard-2"
+report_of other-lines "$tmp/shards/shards/changed-lines-shard-1" "$tmp/shards/later/changed-lines-shard-2" \
+  "$tmp/shards/shards/changed-lines-shard-3"
+status shards other-lines 1
+says_err shards other-lines "changed-lines: shard 2/3 ran on other lines than the plan's"
+report_of whole "$tmp/shards/shards/changed-lines-shard-1" "$tmp/shards/shards/changed-lines-shard-2" \
+  "$tmp/shards/shards/changed-lines-shard-3"
+status shards whole 0
+# A shard whose records lack a mutant, as a runner that stopped early would
+# leave them, did not run every mutant on the changed lines.
+cp -R "$tmp/shards/shards/changed-lines-shard-2" "$tmp/shards/short"
+sed -i '$d' "$tmp/shards/short/mutants.jsonl"
+report_of short "$tmp/shards/shards/changed-lines-shard-1" "$tmp/shards/short" \
+  "$tmp/shards/shards/changed-lines-shard-3"
+status shards short 1
+says_err shards short "changed-lines: the shards ran 119 mutants, and the plan has 120"
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]
