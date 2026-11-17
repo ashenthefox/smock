@@ -124,6 +124,33 @@ refuses push-on-dependabot-branches \
   'del(.on.push.branches-ignore)' \
   "on a push, it should run only when"
 
+# Once a week: at one minute of one hour, on one day of the week.
+refuses schedule-every-day \
+  '.on.schedule[0].cron = "23 4 * * *"' \
+  "it should run once a week (one schedule at one minute, hour and day of the week)" \
+  "not: 23 4 * * *"
+
+refuses schedule-twice-a-week \
+  '.on.schedule[0].cron = "23 4 * * 2,5"' \
+  "it should run once a week"
+
+refuses schedule-every-hour-of-the-day \
+  '.on.schedule[0].cron = "23 * * * 2"' \
+  "it should run once a week"
+
+refuses schedule-on-a-day-of-the-month \
+  '.on.schedule[0].cron = "23 4 1 * 2"' \
+  "it should run once a week"
+
+refuses schedule-in-one-month \
+  '.on.schedule[0].cron = "23 4 * 1 2"' \
+  "it should run once a week"
+
+refuses two-schedules \
+  '.on.schedule += [{"cron": "41 5 * * 5"}]' \
+  "it should run once a week" \
+  "not: 23 4 * * 2; 41 5 * * 5"
+
 echo
 echo "test-check-unicode-data-workflow: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

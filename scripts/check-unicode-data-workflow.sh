@@ -11,6 +11,8 @@
 #   on every such change: the check downloads its sources from unicode.org,
 #   so it does not run on every push. A push to a dependabot/** branch does
 #   not run it; Dependabot's pull request does.
+# - Its schedule runs it once a week, so that a table that no push changes
+#   is still compared with what unicode.org serves.
 #
 # scripts/test-check-unicode-data-workflow.sh tests this check. It needs yq
 # (mikefarah/yq v4, on GitHub's Ubuntu runners) and jq.
@@ -48,6 +50,12 @@ pull_request=$(jq -cn --argjson paths "$paths" '{"paths": $paths}')
   fail "on a push, it should run only when the table, the generator or this workflow changes, and not on a dependabot/** branch ($push), not: $(printf '%s\n' "$json" | jq -c .on.push)"
 [ "$(sorted .on.pull_request)" = "$(printf '%s\n' "$pull_request" | jq -c '.paths |= sort')" ] ||
   fail "on a pull request, it should run only when the table, the generator or this workflow changes ($pull_request), not: $(printf '%s\n' "$json" | jq -c .on.pull_request)"
+
+# One cron entry: a minute, an hour, every day of the month and every
+# month, and one day of the week.
+schedule=$(printf '%s\n' "$json" | jq -r '[.on.schedule[]?.cron | tostring] | join("; ")')
+printf '%s\n' "$schedule" | grep -Eqx '([0-5]?[0-9]) ([01]?[0-9]|2[0-3]) \* \* [0-6]' ||
+  fail "it should run once a week (one schedule at one minute, hour and day of the week), not: ${schedule:-never}"
 
 if [ "$failed" -ne 0 ]; then
   exit 1
