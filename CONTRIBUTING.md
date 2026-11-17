@@ -10,8 +10,8 @@ vulnerability privately, as [SECURITY.md](SECURITY.md) says.
 
 This document is for people who work on smock itself. It describes the
 repository's layout, the pinned MoonBit toolchain, how to build and test
-smock, the release benchmark and the weakening report, and says where
-making a release is described. The
+smock, and the release benchmark, and says where making a release is
+described. The
 [Contributing to smock](docs/README.md#contributing-to-smock) list in
 docs/README.md names the other documents for contributors: the
 architecture decisions (ADRs), the glossary and the maintainer's

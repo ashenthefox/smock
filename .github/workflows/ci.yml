@@ -70,22 +70,6 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/check-benchmark-workflow.sh
 
-      # The branch checks run on a push to a branch other than main, in
-      # branch-checks.yml and not here, so that keep never waits for them.
-      # This checks when that workflow runs and what it runs, and tests the
-      # weakening report it writes, on small git histories.
-      - name: Check the branch checks workflow
-        if: ${{ !cancelled() }}
-        run: scripts/check-branch-checks-workflow.sh
-
-      - name: Test the check of the branch checks workflow
-        if: ${{ !cancelled() }}
-        run: scripts/test-check-branch-checks-workflow.sh
-
-      - name: Test the weakening report
-        if: ${{ !cancelled() }}
-        run: scripts/test-weakening-report.sh
-
       # The GKE run of the benchmark of another architecture than its
       # machine's takes the release binary that the job keep below keeps.
       # This checks the conditions under which the jobs of build-test.yml
@@ -108,6 +92,22 @@ jobs:
       - name: Test the plan of the weekly run with the latest MoonBit
         if: ${{ !cancelled() }}
         run: scripts/test-latest-toolchain-plan.sh
+
+      # The branch checks run on a push to a branch other than main, in
+      # branch-checks.yml and not here, so that keep never waits for them.
+      # This checks when that workflow runs and what it runs, and tests the
+      # weakening report it writes, on small git histories.
+      - name: Check the branch checks workflow
+        if: ${{ !cancelled() }}
+        run: scripts/check-branch-checks-workflow.sh
+
+      - name: Test the check of the branch checks workflow
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-branch-checks-workflow.sh
+
+      - name: Test the weakening report
+        if: ${{ !cancelled() }}
+        run: scripts/test-weakening-report.sh
 
       # --- The scripts that build-test.yml runs --------------------------------
 
