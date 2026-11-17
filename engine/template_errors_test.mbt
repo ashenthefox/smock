@@ -247,7 +247,11 @@ test "each value of a header given an array is its own text template, reported a
 ///|
 test "a structured template that does not parse is reported at the JSON Pointer of the value, every problem in it" {
   // `x` and `z` give two messages #281's acceptance criteria name: only
-  // `loop.index` is under `loop` (templates.md), and `as` is a name.
+  // `loop.index` is under `loop` (templates.md), and `as` is a name. `x`'s
+  // message has the form of a reference's error, `<reference>: <reason>`,
+  // as `path.x` and `query.a.b` have in the text-template test: the code's
+  // form, which the maintainer confirmed on 2026-11-17 (#275). Its column,
+  // 3, is where the reference starts, as in those messages.
   inspect(
     template_problems(
       (
