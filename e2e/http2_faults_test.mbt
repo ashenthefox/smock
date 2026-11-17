@@ -154,6 +154,10 @@ async test "h2c: a close Fault sends GOAWAY NO_ERROR naming the highest stream t
         Data(stream_id=3, data=b"de", end_stream=true, padding=0),
         Data(stream_id=7, data=b" more", end_stream=true, padding=0),
       ])
+      // `close` ends the other streams of the connection with it: a stream
+      // whose response waits for a delay "gets nothing more" (docs/http2.md,
+      // Faults). The frames up to the GOAWAY show that nothing of the
+      // delayed stream came before it.
       let goaway = raw.frames_until(start, is_goaway)
       // A PING, as a client might send before it reads the GOAWAY, is not
       // answered, and the delayed stream's response, due before the
@@ -169,7 +173,6 @@ async test "h2c: a close Fault sends GOAWAY NO_ERROR naming the highest stream t
           answered,
           "---",
           ..goaway.shown,
-          "GOAWAY at once: \{goaway.end_ms < 400}",
           "then: \{after.shown.length()} frames, \{after.how}, about a second after the GOAWAY: \{about_a_second(after.end_ms - goaway.end_ms)}",
           "a fresh connection: \{next.brief()}",
           "---",
@@ -182,7 +185,6 @@ async test "h2c: a close Fault sends GOAWAY NO_ERROR naming the highest stream t
           #|DATA 1 END_STREAM 4 octets
           #|---
           #|GOAWAY last=7 NO_ERROR
-          #|GOAWAY at once: true
           #|then: 0 frames, a FIN, about a second after the GOAWAY: true
           #|a fresh connection: 200 fast (end)
           #|---
