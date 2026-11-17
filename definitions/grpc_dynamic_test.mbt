@@ -118,6 +118,13 @@ test "conditions on Struct, Value, ListValue and NullValue: a Struct's keys are 
 }
 
 ///|
+/// The Stub `huge` gives a Struct a member of 1e309, the first power of ten
+/// beyond the range of a double. A Struct's members are values that a
+/// google.protobuf.Value holds, "a number, which prints as a `double`
+/// does" (docs/grpc/messages.md), so no call's message can hold it: "A
+/// value that can never match is a problem: a number out of its type's
+/// range", reported "at the JSON Pointer of the value at fault"
+/// (docs/definition-files/grpc.md). The message ends as #283 names it.
 test "an Any's type that the set lacks, in a condition or a static reply, is a problem; so are members that do not fit the type it names, and values of the wrong form" {
   inspect(
     documents(
@@ -154,6 +161,10 @@ test "an Any's type that the set lacks, in a condition or a static reply, is a p
         #|    mock: documents
         #|    request: { path: /dynamic.Documents/Put, body: { json: { labels: [], list: {}, nothing: x, attachment: x, values: [{ "@type": 1 }] } } }
         #|    response: { json: { list: [{ a: [null] }], attachments: [null] } }
+        #|  - id: huge
+        #|    mock: documents
+        #|    request: { path: /dynamic.Documents/Describe, body: { json: { a: 1e309 } } }
+        #|    response: {}
       ),
     ),
     content=(
@@ -172,6 +183,7 @@ test "an Any's type that the set lacks, in a condition or a static reply, is a p
       #|a.yaml: /stubs/7/request/body/json/nothing: must be null: the field nothing of dynamic.Document has the type google.protobuf.NullValue
       #|a.yaml: /stubs/7/request/body/json/attachment: must be an object that gives the type URL of the message it holds as "@type": the field attachment of dynamic.Document has the type google.protobuf.Any
       #|a.yaml: /stubs/7/response/json/attachments/0: cannot be null: it is an element of the repeated field attachments of dynamic.Document
+      #|a.yaml: /stubs/8/request/body/json/a: must be a JSON value: null, a number within the range of a double, a string, true or false, an object or an array: it is a value of a google.protobuf.Value
     ),
   )
 }

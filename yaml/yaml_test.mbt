@@ -518,6 +518,31 @@ test "the same values quoted are strings, and look-alikes that no YAML version t
       #|1e3_0 -> {"a":"1e3_0"}
     ),
   )
+  // Near misses of the YAML 1.1 int, float and timestamp types
+  // (yaml.org/type/int.html, float.html and timestamp.html): the digits of
+  // an integer or a float start with a digit, not `_`, and an exponent
+  // needs a digit after its sign; a date without a time has a two-digit
+  // month and day, a month or day has at most two digits, and a time has
+  // an hour and a two-digit second. `1.x` is not a JSON number either,
+  // whose point needs a digit after it (RFC 8259, section 6). No YAML
+  // version types them, so each is a string, as docs/definition-files.md
+  // says of every other plain scalar.
+  inspect(
+    as_value([
+      "_1", "_1.5", "1.5e+", "1.x", "2001-1-14", "2001-123-14", "2001-12-14T:59:43",
+      "2001-12-14 21:59:4x",
+    ]),
+    content=(
+      #|_1 -> {"a":"_1"}
+      #|_1.5 -> {"a":"_1.5"}
+      #|1.5e+ -> {"a":"1.5e+"}
+      #|1.x -> {"a":"1.x"}
+      #|2001-1-14 -> {"a":"2001-1-14"}
+      #|2001-123-14 -> {"a":"2001-123-14"}
+      #|2001-12-14T:59:43 -> {"a":"2001-12-14T:59:43"}
+      #|2001-12-14 21:59:4x -> {"a":"2001-12-14 21:59:4x"}
+    ),
+  )
 }
 
 ///|
@@ -561,6 +586,18 @@ test "malformed indentation gives an error at the deepest node reached, or a val
       #|"a: [1]\n  b: 2" -> error /a/0: bad indentation
       #|"a: |\n    \n  x" -> error /a: a leading empty line of a block scalar has more spaces than its first line
       #|"a: |\n  \n  x" -> {"a":"\nx"}
+    ),
+  )
+  // A sequence item where the mapping expects its next key, and a key
+  // continued on a more indented line: YAML limits an implicit key to a
+  // single line (YAML 1.2.2, section 8.2.2). The messages are those
+  // #280's acceptance criteria name; the pointer is the deepest node
+  // reached, or the member for a key, as `parse` documents.
+  inspect(
+    each(["a: 1\n- b", "a\n b: 1"]),
+    content=(
+      #|"a: 1\n- b" -> error /a: expected a key, found a sequence item; check the indentation
+      #|"a\n b: 1" -> error /a b: a key must be on a single line
     ),
   )
 }
@@ -608,6 +645,18 @@ test "unterminated quotes and flow collections give an error at the deepest node
       #|"a: \"x\" y" -> error /a: unexpected text after the value
     ),
   )
+  // A flow collection closed by the other bracket, and a key in a flow
+  // mapping with no ':' after it. The messages are those #280's acceptance
+  // criteria name; the pointer is the deepest node reached, as `parse`
+  // documents.
+  inspect(
+    each(["a: [1}", "a: {x: 1]", "a: {\"x\" 1}"]),
+    content=(
+      #|"a: [1}" -> error /a/0: expected , or ] in a flow sequence
+      #|"a: {x: 1]" -> error /a/x: expected , or } in a flow mapping
+      #|"a: {\"x\" 1}" -> error /a/x: expected ':' after a key
+    ),
+  )
 }
 
 ///|
@@ -646,6 +695,15 @@ test "empty values, empty documents and stray indicators give an error" {
       #|"a: \"\\u12\"" -> error /a: invalid escape: expected a hexadecimal digit
       #|"a: \"\\ud800\"" -> error /a: invalid escape: a high surrogate must be followed by a low surrogate
       #|"a: \"\\udc00\"" -> error /a: invalid escape: not a Unicode character
+    ),
+  )
+  // A `-` item indicator inside a flow collection: YAML embeds flow nodes
+  // in block collections, "but not vice-versa" (YAML 1.2.2, section
+  // 8.2.3). The message is the one #280's acceptance criteria name.
+  inspect(
+    each(["[- a]"]),
+    content=(
+      #|"[- a]" -> error /0: a block sequence cannot be inside a flow collection
     ),
   )
 }
