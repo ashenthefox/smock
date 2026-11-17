@@ -1,7 +1,9 @@
 # Commands
 
-The `smock` binary has four commands beside `help`. `smock serve` runs
-the server, and [Running smock](running.md) describes it. This document
+The `smock` binary has four commands beside `help`. `smock` alone,
+`smock help` and `smock --help` print a usage that lists them, and exit
+with status 0. `smock serve` runs the server, and [Running
+smock](running.md) describes it. This document
 describes the three that read or write Definition files without serving:
 [`smock check`](#smock-check), [`smock render`](#smock-render) and
 [`smock import-openapi`](#smock-import-openapi), whose guide is
