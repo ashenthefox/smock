@@ -165,7 +165,8 @@ fn add_file_fields(
 ///|
 /// Sets the expiry metric to the expiry of the certificate as read last.
 fn Pair::set_expiry(self : Pair) -> Unit {
-  if self.last_read is Ok((cert, _)) && certificate_expiry(cert) is Some(expiry) {
+  if self.last_read is Ok((cert, _)) &&
+    @serverparsers.certificate_expiry(cert) is Some(expiry) {
     self.expiry.set(expiry.to_double() / 1000.0)
   }
 }
@@ -292,7 +293,10 @@ async fn Certificates::check_pair(self : Certificates, pair : Pair) -> Bool {
   pair.last_read = read
   let (loaded, expiry) = match read {
     Ok((cert, key)) =>
-      (load_pair(cert, key, alpn=self.alpn), certificate_expiry(cert))
+      (
+        load_pair(cert, key, alpn=self.alpn),
+        @serverparsers.certificate_expiry(cert),
+      )
     Err(reason) => (Err(reason), None)
   }
   let fields = pair_fields(pair.mock, pair.files)
