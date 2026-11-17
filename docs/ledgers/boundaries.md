@@ -191,7 +191,9 @@ survey's rows, with L41 to L43, or a row that #375 added.
 
 **Limits in the code that no document states** are findings, not rows:
 #375 takes each one that checking the rows' packages met to the
-maintainer.
+maintainer. Checking them met one: `http1`'s parser takes a negative body
+limit as 0, so a request with a body of one byte gets 413.
+`Parser::Parser`'s documentation says nothing of a negative limit.
 
 ## Gaps that no ticket closes
 
