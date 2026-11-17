@@ -709,7 +709,7 @@ never gated. Each baseline below was measured at d953f320.
    in the documents passes `smock check` in CI. Every message a user can
    see is asserted at least once. Baseline: of 99 documented features, 93
    covered, 2 partly and 4 not; 70 of the 71 whole Definition files in the
-   documents pass once given the context they leave out; 22 messages, 20
+   documents pass once given the context they leave out; 22 messages, 19
    of which a user can see, and the top-level help asserted by no test.
 
 **Scope.** All non-test source of the workspace, except generated files
