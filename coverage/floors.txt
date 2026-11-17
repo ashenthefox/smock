@@ -20,8 +20,8 @@ buildinfo 5
 cmd/smock 285
 cookies 0
 defdir 42
-definitions 42
-engine 103
+definitions 41
+engine 78
 grpc 0
 http1 11
 importopenapi 39
@@ -30,7 +30,7 @@ log 13
 metrics 1
 openssl 24
 prng 0
-protobuf 114
+protobuf 113
 protobuf-conformance 52
 re2 5
 server 3282
