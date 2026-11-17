@@ -268,9 +268,11 @@ error() {
 constructs() {
   suite
   testcase ANCH "An anchor" 'a: &x 1\n' '+STR\n+DOC\n+MAP\n=VAL :a\n=VAL &x :1\n-MAP\n-DOC\n-STR' '{"a": 1}'
+  # shellcheck disable=SC2016 # smock's message names $ref, not a variable
   answer ANCH "$(error 'anchors (&) are not supported; quote the value if it is text' /a)" \
     "$(error 'anchors (&) are not supported; reuse parts with $ref, or quote the value if it is text' /a)"
   testcase ALIA "An alias" '- &x a\n- *x\n' '+STR\n+DOC\n+SEQ\n=VAL &x :a\n=ALI *x\n-SEQ\n-DOC\n-STR' '["a", "a"]'
+  # shellcheck disable=SC2016 # smock's message names $ref, not a variable
   answer ALIA "$(error 'aliases (*) are not supported; quote the value if it is text' /1)" \
     "$(error 'aliases (*) are not supported; reuse parts with $ref, or quote the value if it is text' /1)"
   testcase TAGS "A tag" 'a: !!str 1\n' '+STR\n+DOC\n+MAP\n=VAL :a\n=VAL <tag:yaml.org,2002:str> :1\n-MAP\n-DOC\n-STR' '{"a": "1"}'
