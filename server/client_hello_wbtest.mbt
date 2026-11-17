@@ -364,12 +364,16 @@ fn grown(message : Bytes, extensions~ : Int32, received~ : Int32) -> Bytes {
 }
 
 ///|
-test "the cap, a finding for the maintainer (#289): a whole ClientHello that ends at the 65,535th octet received reads as its name, and one that ends at the 65,536th as no name, which no document states and RFC 8446 does not ask for" {
-  // No document of smock states a cap, and RFC 8446 lets a ClientHello
-  // reach 2^24 - 1 octets (section 4): the values past 65,535 octets
-  // received are the code's today, until the maintainer states which is
-  // intended. The TLS 1.3 capture is grown with a padding extension and
-  // sent in four records of at most 2^14 octets each.
+test "the cap: a whole ClientHello that ends at the 65,535th octet received reads as its name, and once 65,536 octets have been received, every octet counted, the reader reads no name, so the handshake gets the default certificate (docs/running.md, Certificates for single Mocks)" {
+  // The running guide (docs/running.md, Certificates for single Mocks):
+  // "smock reads the SNI from the octets the client has sent so far, each
+  // time more arrive. Once it has received 65,536 octets or more, counting
+  // every octet received and not only the ClientHello's, it reads no name,
+  // and the handshake gets the default certificate." The maintainer
+  // confirmed that cap on 2026-11-17 (#275); RFC 8446 lets a ClientHello
+  // reach 2^24 - 1 octets (section 4), so the cap is smock's own. The TLS
+  // 1.3 capture is grown with a padding extension and sent in four records
+  // of at most 2^14 octets each.
   let message = message(tls13_sni)
   let at_cap = grown(message, extensions=135, received=65535)
   let over_cap = grown(message, extensions=135, received=65536)
