@@ -32,6 +32,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -251,6 +252,17 @@ class KillMatrixTest(unittest.TestCase):
         result = run_runner(FIXTURE, self.tmp / "work", out, self.moon, "--sites-only", "units")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((out / "matrix").exists())
+        # Nor does a run with totals only, which keeps no file that names a
+        # mutant (CONTRIBUTING.md, "Shards, samples and listed sets"); its
+        # one key here no longer applies, so nothing runs.
+        out = self.tmp / "totals"
+        shutil.copytree(self.out, out)
+        listed = self.tmp / "gone.jsonl"
+        listed.write_text(json.dumps({"file": "units/units.mbt", "definition": "gone", "operator": "ROR",
+                                      "original": "<=", "replacement": "<", "ordinal": 0}) + "\n")
+        result = run_runner(FIXTURE, self.tmp / "work-totals", out, self.moon, "--list", listed, "--totals-only")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((out / "matrix").exists())
 
     def test_with_one_test_left_out_of_the_run_the_mutants_only_it_killed_survive(self):
         # meter's only test left out: `low < n`, which only it killed,
@@ -297,6 +309,18 @@ class KillMatrixTest(unittest.TestCase):
                                  str(shards[0]), str(other)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
         self.assertIn("is of another run", result.stderr)
+
+    def test_a_kill_matrix_runs_over_the_full_set_too(self):
+        # For removal proofs (#306, first criterion). units' full set has
+        # no alternatives beyond the pinned set's, so within's BODY stands
+        # for it.
+        out = self.tmp / "full"
+        result = run_runner(FIXTURE, self.tmp / "work", out, self.moon, "--matrix", "--set", "full", "--mutant",
+                            MATRIX[0][0], "units")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        matrix = json.loads((out / "matrix" / "units.json").read_text())
+        self.assertEqual((matrix["set"], [(m["id"], m["outcome"], len(m["killing_tests"])) for m in matrix["mutants"]]),
+                         ("full", [(MATRIX[0][0], "killed", 5)]))
 
     def test_a_kill_matrix_runs_alone(self):
         for other in (["--totals-only", "--list", "x.jsonl"], ["--self-test-only"]):
@@ -375,6 +399,41 @@ class MatrixToolTest(unittest.TestCase):
         import matrix
         self.assertEqual([matrix.layer(p) for p in ("smock/smock/e2e", "smock/smock/engine", "smock/yaml")],
                          ["e2e", "in-process", "in-process"])
+
+
+class OutlineTest(unittest.TestCase):
+    """Every test of a kill matrix comes from moon's outline, which a fake
+    moon prints here as moon 0.1.20261104 does: a name escapes each `\\`
+    and `"` once more than moon's failures and the test's file write it,
+    and a test with no name has none."""
+
+    class Problem(Exception):
+        pass
+
+    def outline(self, text):
+        sys.path.insert(0, str(HERE))
+        import matrix
+        tmp = Path(tempfile.mkdtemp(prefix="test-matrix-outline-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "outline.txt").write_text(text)
+        worker = types.SimpleNamespace(moon=["sh", "-c", 'cat "$0"', str(tmp / "outline.txt")], tree=tmp,
+                                         target=tmp / "target")
+        return matrix.outline(worker, ["p/q"], self.Problem)
+
+    def test_a_name_is_read_as_the_tests_file_writes_it(self):
+        tests = self.outline('   1. p/q q_test.mbt:2 index=0 name="a \\\\\\"b\\\\\\" c\\\\\\\\d é"\n'
+                             '   2. p/q q.mbt:5 index=0\n'
+                             '   3. p/q q.mbt:9 index=0 name="x"\n'
+                             'Warning: a line that names no test\n')
+        self.assertEqual([(t["file"], t["line"], t["index"], t["name"], t["layer"]) for t in tests], [
+            ("q_test.mbt", 2, 0, 'a \\"b\\" c\\\\d é', "in-process"),
+            ("q.mbt", 5, 0, "", "in-process"),
+            ("q.mbt", 9, 0, "x", "in-process"),
+        ])
+
+    def test_two_tests_by_one_name_stop_the_run(self):
+        with self.assertRaisesRegex(self.Problem, "two tests by one name.*p/q/q.mbt#0"):
+            self.outline("   1. p/q q.mbt:5 index=0\n   2. p/q q.mbt:9 index=0\n")
 
 
 # A moon that answers the runs of tests, but not their builds, dry runs or

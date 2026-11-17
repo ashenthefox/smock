@@ -18,7 +18,9 @@ mutants it ran, the run without a mutant and the time limit, those of
 its importers' tests, and its self-test), since each shard ran the tests
 without a mutant and the self-test on its own. When every shard wrote flake records, they merge as
 confirm.py merge merges them into flakes.json, and the summary and the
-report give this run's flaky results over all the shards. The report is
+report give this run's flaky results over all the shards. For a run in
+kill-matrix mode, each package's matrix is written again from all its
+records (matrix.py), and its counts taken again. The report is
 the one run.py writes from them, which it also prints; for a listed set,
 the keys that no longer apply are those the first shard gives; for a run
 on changed lines, the report starts with its base and lines.

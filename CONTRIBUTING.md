@@ -1821,6 +1821,98 @@ merge is the approval. A merge base with no committed counts, from before
 this check, is compared with nothing; on `main`, the merge base is the
 commit itself.
 
+### The kill matrix
+
+A [kill matrix](#terms) gives, for each mutant, every test that kills it.
+Snapshot audits choose among the tests that alone kill some mutant
+([Snapshot audits](#snapshot-audits)), and a removal batch compares the
+matrix before and after its removals ([Removing a test](#removing-a-test)).
+`--matrix` makes the runner build one:
+
+```sh
+python3 scripts/mutation/run.py --matrix usage
+python3 scripts/mutation/run.py --matrix --set full usage
+```
+
+In this mode, each mutant runs once against the tests of its package and
+of all the package's importers that build on wasm-gc together, whichever
+would kill it first, with no early stop. A run without the mode runs the
+importers' tests only against the survivors of the package's own. Each
+test that fails is confirmed on its own: it is credited with the kill
+only if it fails again with the mutant on and passes with it off, so a
+flaky test drops out of the matrix while the other tests keep the kill.
+Each record lists every test that kills its mutant, with its package and
+its **layer**: `in-process` for the tests of every package but `e2e`,
+whose tests are `e2e`. Removal rule (A) counts only the kills of tests in
+the same layer as the test removed or a lower one, and `in-process` is the
+lower. The mode runs over the pinned set or, for removal proofs, over the
+full set, and with the other options that choose mutants; it takes no
+`--totals-only` or `--self-test-only`. Its self-test runs with the
+package's own tests, as in a run without the mode.
+
+The tests of a matrix are those that moon's outline
+(`moon test --outline`) lists for the package and its importers. The run
+stops if the outline lists a different number of tests than the runs
+without a mutant ran, or two tests that the matrix would name alike. A
+test is named by its package, `/` and its file, then `:` and its name, as
+in `smock/smock/usage/usage_test.mbt:<name>`, or, for a test with no name
+such as a documentation test, `#` and its index in the file, as in
+`smock/http1/target.mbt#0`. Confirmation and the flake records name such
+a test by its index too, since moon tells it apart by nothing else.
+
+A time-out names no test: the run stops whole at its limit, so which test
+would have failed is not known. It stays a time-out in every answer of the
+tool below, and a removal batch sees a lost time-out only in the matrix
+after the removal.
+
+Besides the usual output, the run writes
+`_build/mutation/out/matrix/<package directory>.json`, the package's
+matrix: the packages whose tests ran, its importers that build only
+natively, every test that ran with its name, package, file, line, index,
+name and layer, and each mutant with its outcome and the names of the
+tests that kill it, and, for a duplicate, the mutant it compiles as. Every
+run rewrites `matrix/`, so a run without the mode leaves none. The summary
+gives, per package, in place of the counts with its own tests alone and
+with its importers' tests, the tests that ran, how many of them kill some
+mutant, how many alone kill some mutant, and how many mutants the tests of
+each package kill; the report gives the same counts. `merge.py` merges the
+shards of a kill-matrix run into one matrix per package, and refuses a
+shard of a run that is not one.
+
+`scripts/mutation/matrix.py` reads matrices, given as files or as a run's
+output directory, and prints JSON lines:
+
+```sh
+python3 scripts/mutation/matrix.py alone _build/mutation/out
+python3 scripts/mutation/matrix.py alone --none _build/mutation/out
+python3 scripts/mutation/matrix.py kills --without --test '<test>' _build/mutation/out
+python3 scripts/mutation/matrix.py kills --package smock/smock/usage _build/mutation/out
+python3 scripts/mutation/matrix.py kills --without --test '<test>' --layer in-process _build/mutation/out
+```
+
+- `alone` lists the tests that alone kill some mutant, each with those
+  mutants; `--none`, the other tests, each with the mutants it kills
+  together with other tests. A duplicate counts as the mutant it compiles
+  as.
+- `kills` gives each mutant's outcome as if only a set of tests had run:
+  the tests `--test` names and the tests of the packages `--package`
+  names, or every other test with `--without`, and with `--layer`, only
+  those of the set in that layer or a lower one. A mutant that the matrix
+  holds as killed survives unless a test of the set kills it. So, with one
+  test left out, the mutants that only it killed show as survivors, as
+  they do in a run without that test.
+
+The tests (`scripts/mutation/test_matrix.py`) run the mode on the
+fixture's package `units`, whose mutants the tests of `units`, `meter` and
+`dial` kill, some by several tests of several packages and some by one
+test alone, while `probe`'s test, which builds only natively, never runs.
+Two of `units`' tests have no name. A moon that answers from a script
+makes one killing test flaky, or failing without the mutant, and the run
+leaves that test out of the matrix. One run leaves `meter`'s test out and
+gets the survivors that `kills --without` gives. The tool's other tests
+read a matrix written by hand, with an e2e test, a duplicate and a
+time-out.
+
 ## The weakening report
 
 Before the maintainer merges a branch into `main`, they read what it

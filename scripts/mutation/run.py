@@ -7,7 +7,7 @@ it, and writes one record per mutant, a summary per package and a report
 usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir>]
            [--set pinned|full] [--mutant <id>]... [--sites-only] [--workers <n>]
            [--list <file> [--totals-only]] [--sample <n> [--seed <s>]] [--shard <k>/<n>]
-           [--changed [--base <ref>]] [--self-test-only]
+           [--changed [--base <ref>]] [--self-test-only] [--matrix]
            [--flakes <file>] [--moon <moon>] [--finder <command>]
            [<package directory>...]
 
@@ -112,6 +112,15 @@ outcome, after both runs, is
                and survived;
   survived     every test that gives kill credit passed.
 
+With --matrix, the kill-matrix mode (matrix.py), each mutant runs once
+with the tests of the package and of its importers that build on wasm-gc
+together, whichever would kill it first, with no early stop, and each
+test that failed is confirmed on its own: its record lists every test
+that kills it, with its package and layer. Its summary then counts, in
+place of the runs with the package's own tests alone and with its
+importers' tests, the tests that kill some mutant and those that alone
+kill one, and the runner writes the matrix per package.
+
 Before the tests run, compare.py compares the compiler's output for the
 mutated package with the output without a mutant and with the earlier
 mutants' outputs; the mutant keeps the lines of the source. Where it
@@ -177,7 +186,12 @@ It writes into <out> (<work>/out unless it is given):
                  and last the flaky tests. It also prints the report;
   flakes.json    the flake records: the latest runs' records, this one
                  included, and each test's flake rate over them, for the
-                 next run's --flakes.
+                 next run's --flakes;
+  matrix/        with --matrix, each package's kill matrix,
+                 <package directory>.json: every test that ran, and each
+                 mutant with every test that kills it, which
+                 scripts/mutation/matrix.py reads. Every run removes what
+                 an earlier one wrote there.
 
 A position is the place of one or more sites: their file, operator, line
 and column.
@@ -885,6 +899,9 @@ def main():
     finally:
         if args.totals_only:
             choice.drop_builds(work)
+    # Every run rewrites the kill matrices: a run with --totals-only keeps
+    # none that would name a mutant.
+    matrix.write(out, operator_set, run_set, summaries, records)
     if args.totals_only:
         print(choice.write_totals(out, operator_set, choice.selection(args), args.packages, summaries, records,
                                   unapplied, outcome_counts))
@@ -893,7 +910,6 @@ def main():
     with open(out / "mutants.jsonl", "w", encoding="utf-8") as f:
         for record in records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    matrix.write(out, operator_set, run_set, summaries, records)
     flakes = {} if judge is None else {"flakes": judge.summary()}
     if judge is not None:
         (out / "flakes.json").write_text(json.dumps(judge.records(), indent=2, ensure_ascii=False) + "\n",
