@@ -23,6 +23,23 @@ TEST_ENTRY = re.compile(r'`([^`]+)` "((?:[^"\\]|\\.)*)"')
 CHECK_ENTRY = re.compile(r"`([^`]+)`(?:\s|$)")
 TICKET_ENTRY = re.compile(r"#[0-9]+\b")
 MANUAL_ENTRY = re.compile(r"Manual: \S")
+ID = {
+    "feature": re.compile(r"F[0-9]{2}"),
+    "message": re.compile(r"M[0-9]{2}"),
+    "limit": re.compile(r"L[0-9]{2}[a-z]?"),
+}
+ID_SHAPES = {
+    "feature": "F and two digits",
+    "message": "M and two digits",
+    "limit": "L, two digits and maybe a lower-case letter",
+}
+STATUSES = {
+    "feature": ["tested", "partly", "manual", "open"],
+    "message": ["asserted", "open", "deleted", "manual"],
+    "limit": ["tested", "partly", "open"],
+}
+LINK = re.compile(r"\]\([^)]+\)")
+TICKET = re.compile(r"#[0-9]+\b")
 
 
 def plural(count, word):
@@ -103,9 +120,67 @@ def entry_problems(entry, column, tree):
     return []
 
 
-def ledger_problems(path, text, tree, counts):
+def status_problem(kind, status, sides):
+    """What is wrong with the status `status` of a row of `kind`, whose
+    cells that name what checks it hold the entries of the kinds `sides`,
+    one set for each cell, or None."""
+    if status not in STATUSES[kind]:
+        listed = STATUSES[kind]
+        return f"the status is not {', '.join(listed[:-1])} or {listed[-1]}"
+    found = set().union(*sides)
+    tested = bool(found & {"test", "check"})
+    if status in ("tested", "asserted"):
+        if not all(side and side <= {"test", "check"} for side in sides):
+            what = "an asserted row" if status == "asserted" else "a tested row"
+            return f"{what} names tests and checks alone"
+    elif status == "partly":
+        if not (found <= {"test", "check", "ticket"} and tested and "ticket" in found):
+            return (
+                "a partly tested row names tests, checks and tickets alone,"
+                " with at least one ticket and one test or check"
+            )
+    elif status == "manual":
+        if "manual" not in found:
+            return "a manual row names a manual check with its reason"
+    elif status == "open":
+        if found != {"ticket"}:
+            return "an open row names tickets alone"
+    elif status == "deleted":
+        if found != {"ticket"}:
+            return "a deleted row names tickets alone: the one that deleted it"
+    return None
+
+
+def row_problems(kind, values, tree):
+    """The problems of a row of `kind`, whose cells are `values` by their
+    column."""
+    problems = []
+    row_id = values["ID"]
+    if not ID[kind].fullmatch(row_id):
+        problems.append(f"the id is not {ID_SHAPES[kind]}")
+    if not (LINK.search(values["Source"]) or TICKET.search(values["Source"])):
+        problems.append("the source has no link and names no issue")
+    if kind == "message" and values["Seen by"] not in ("user", "package"):
+        problems.append("seen by is not user or package")
+    sides = []
+    for column in TEST_COLUMNS[kind]:
+        side = set()
+        for entry in values[column].split("<br>"):
+            entry = entry.strip()
+            problems += entry_problems(entry, column, tree)
+            if entry and entry_kind(entry):
+                side.add(entry_kind(entry))
+        sides.append(side)
+    problem = status_problem(kind, values["Status"], sides)
+    if problem is not None:
+        problems.append(problem)
+    return problems
+
+
+def ledger_problems(path, text, tree, counts, ids):
     """The problems of the ledger `path`, whose text is `text`, each as
-    (line, id, text)."""
+    (line, id, text). `ids` maps each id seen in the ledgers so far to where
+    its row is."""
     problems = []
     kind = None
     columns = []
@@ -122,11 +197,14 @@ def ledger_problems(path, text, tree, counts):
         if all(set(cell) <= set("-: ") for cell in row):
             continue
         counts[kind] += 1
-        values = dict(zip(columns, row))
-        for column in TEST_COLUMNS[kind]:
-            for entry in values.get(column, "").split("<br>"):
-                for problem in entry_problems(entry.strip(), column, tree):
-                    problems.append((number, values["ID"], problem))
+        values = dict(zip(columns, row + [""] * (len(columns) - len(row))))
+        row_id = values["ID"]
+        found = row_problems(kind, values, tree)
+        if row_id in ids:
+            found.append(f"{ids[row_id]} has the id {row_id} too")
+        else:
+            ids[row_id] = f"{path}:{number}"
+        problems += [(number, row_id, problem) for problem in found]
     return problems
 
 
@@ -139,10 +217,11 @@ def main(argv):
     tree = Tree(root)
     counts = {"feature": 0, "message": 0, "limit": 0}
     problems = []
+    ids = {}
     for ledger in LEDGERS:
         with open(os.path.join(root, ledger), encoding="utf-8") as f:
             text = f.read()
-        problems += [(ledger,) + problem for problem in ledger_problems(ledger, text, tree, counts)]
+        problems += [(ledger,) + problem for problem in ledger_problems(ledger, text, tree, counts, ids)]
     for ledger, line, row, text in problems:
         print(f"{ledger}:{line}: {row}: {text}")
     counted = (
