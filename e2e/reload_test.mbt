@@ -805,9 +805,8 @@ let large_body_file_bytes : Int32 = 16 * 1024 * 1024
 /// A debug build answers within about 10 ms, since it hashes 64 KiB between
 /// pauses. The tests of this package share one event loop, so a test that
 /// computes meanwhile delays the reply as it reaches this test, and this
-/// allows as much as the other timing tests do, such as `lateness` in
-/// harness_test.mbt. It stays under the 400 ms it takes to hash the file
-/// at once.
+/// allows for that. It stays under the 400 ms it takes to hash the file at
+/// once.
 let while_reloading_ms : Int64 = 250
 
 ///|
