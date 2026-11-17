@@ -62,9 +62,14 @@ review lists the batch: the entries that the tree adds or changes against
        author cannot know which: with --seed, it lists them; without, it
        says how many there are to draw.
 
+The coverage report (scripts/coverage-report.py, through points()) and
+the mutation runner (run.py and merge.py, through annotate() and counts())
+read the list too.
+
 The definitions are read with the site finder's parser (sites.py), so
-check and new need moonc; review does not. It exits with 2 when it cannot judge: a file does not parse,
-or a point of `new` lies in no definition.
+check and new need moonc; review does not. It exits with 2 when it cannot
+judge: a file does not parse, git cannot answer, or a point of `new` lies
+in no definition.
 """
 
 import argparse
