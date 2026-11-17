@@ -149,5 +149,5 @@ exits last-byte 0
 broken past-end "BISECT-COVERAGE-4 1 13 prng/prng.mbt 2 206 396 2 1 0" \
   "prng/prng.mbt has a point at byte 396, past its end"
 
-echo "$passed passed, $failed failed"
+echo "test-coverage-report: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
