@@ -442,6 +442,19 @@ measure nothing summary
 exits nothing 1
 says nothing "no part wrote to"
 
+# --- What the parts write is what the estimate reads -----------------------------------------
+
+mkdir -p "$tmp/whole"
+cp "$tmp/e2e/e2e.json" "$tmp/alone/alone.json" "$tmp/rebuild/rebuild.json" "$tmp/coverage/coverage.json" "$tmp/whole/"
+status=0
+python3 "$repo/scripts/estimate-costs.py" "$tmp/whole" >"$tmp/whole.out" 2>&1 || status=$?
+if [ "$status" = 0 ] && grep -qF "| A server mutant through e2e | about 35 s locally |" "$tmp/whole.out" \
+  && ! sed -n '/^## Recomputed estimate/,/^## Decision 6/p' "$tmp/whole.out" | grep -q "not measured"; then
+  pass "estimate: recomputes every figure from what the parts wrote"
+else
+  fail "estimate: exits with $status on what the parts wrote: $(cat "$tmp/whole.out")"
+fi
+
 echo
 echo "test-measure-costs: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
