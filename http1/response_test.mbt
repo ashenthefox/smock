@@ -48,7 +48,8 @@ test "a status without a known reason phrase gets an empty one" {
 test "the status line carries the reason phrase RFC 9110 gives each status it defines, and RFC 6585 gives 429 and 431" {
   // Each phrase is the heading of the status's section: RFC 9110, sections
   // 15.2 to 15.6, and RFC 6585, sections 4 and 5, for 429 and 431, which
-  // RFC 9110 does not define.
+  // RFC 9110 does not define. The line's form is RFC 9112, section 4's
+  // `status-line = HTTP-version SP status-code SP [ reason-phrase ]`.
   let statuses = [
     100, 101, 200, 201, 202, 203, 204, 205, 206, 300, 301, 302, 303, 304, 305, 307,
     308, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414,
