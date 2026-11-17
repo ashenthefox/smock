@@ -204,3 +204,56 @@ async test "smock --version names the commit checked out and the toolchain in us
   assert_eq(built_commit, commit)
   assert_eq(built_toolchain, toolchain)
 }
+
+///|
+/// The commands of the `smock` binary that the usage lists, in order: the
+/// first word of each line under `Commands:`.
+fn listed_commands(usage : String) -> Array[String] {
+  let out = []
+  let mut listing = false
+  for line in usage.split("\n") {
+    if line == "Commands:" {
+      listing = true
+    } else if listing && line.has_prefix("  ") {
+      out.push(line.trim_start().split(" ").next().unwrap_or("").to_owned())
+    } else {
+      listing = false
+    }
+  }
+  out
+}
+
+///|
+async test "smock, smock help and smock --help print one usage, which lists the commands docs/commands.md names and says what smock serves as the README's opening line does" {
+  let (_, usage, _) = smock_output(["--help"])
+  let out = []
+  // #370's criterion: the three print one usage, and nothing on stderr.
+  for args in [[], ["help"], ["--help"]] {
+    let (_, stdout, stderr) = smock_output(args)
+    out.push(
+      "\{["smock", ..args].join(" ")}: the usage: \{stdout == usage}, stderr: \{stderr.length()} bytes",
+    )
+  }
+  // docs/commands.md: "The `smock` binary has four commands beside `help`",
+  // which it names.
+  out.push("commands: \{listed_commands(usage).join(", ")}")
+  // README.md opens with "smock is a mock server for ...": the usage's
+  // description says the same, as "A mock server for ...".
+  let readme = @fs.read_file("README.md").text().replace_all(old="\n", new=" ")
+  guard readme.find("smock is a ") is Some(start) else {
+    fail("README.md does not say what smock is")
+  }
+  let opening = readme[start:]
+  let opening = opening[:opening.find(". ").unwrap_or(opening.length() - 1) + 1].to_owned()
+  let description = usage.split("\n").nth(2).unwrap_or("").to_owned()
+  inspect(
+    out.join("\n"),
+    content=(
+      #|smock: the usage: true, stderr: 0 bytes
+      #|smock help: the usage: true, stderr: 0 bytes
+      #|smock --help: the usage: true, stderr: 0 bytes
+      #|commands: serve, check, render, import-openapi, help
+    ),
+  )
+  assert_eq("smock is a\{description[1:]}", opening)
+}

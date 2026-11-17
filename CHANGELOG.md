@@ -680,6 +680,10 @@ of each GitHub release include its section
   [moonbitlang/async#725](https://github.com/moonbitlang/async/issues/725)),
   so smock no longer uses it: it polls every second instead of using file
   events, until a release of the runtime fixes that.
+- The usage that `smock`, `smock help` and `smock --help` print now names
+  gRPC in its description of smock, as the README's opening line does: "A
+  mock server for HTTP/1.1, HTTP/2, HTTPS, Server-Sent Events and gRPC
+  unary calls." It left gRPC out.
 
 ## [0.4.0] - 2026-11-01
 
