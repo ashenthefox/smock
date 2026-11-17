@@ -5,62 +5,6 @@
 // are never cut.
 
 ///|
-/// One line of the large body file.
-let big_line : String = "0123456789abcde\n"
-
-///|
-/// The size of the large body file, 16 MiB: more than the socket buffers of
-/// both ends hold on loopback, so that smock's write waits on a client that
-/// reads slowly or not at all.
-let big_size : Int32 = 16 * 1024 * 1024
-
-///|
-/// Mock `big`, whose Stubs answer `GET /big` with the large body file at
-/// once, `GET /delayed` with it after a delay of 100 ms, `GET /half` with
-/// half of it (a partial Fault), and `GET /events` with a stream of four
-/// events of 16 KiB each, without delays.
-let big_defs : String = {
-  let data = "x".repeat(16 * 1024)
-  let event = "{ \"data\": \"\{data}\" }"
-  let defs =
-    $|{ "mocks": [{ "name": "big" }],
-    $|  "stubs": [
-    $|    { "id": "big", "mock": "big", "request": { "path": "/big" },
-    $|      "response": { "status": 200, "bodyFile": "big.txt" } },
-    $|    { "id": "delayed", "mock": "big", "request": { "path": "/delayed" },
-    $|      "response": { "status": 200, "bodyFile": "big.txt" },
-    $|      "fault": { "delay": { "fixed": 100 } } },
-    $|    { "id": "half", "mock": "big", "request": { "path": "/half" },
-    $|      "response": { "status": 200, "bodyFile": "big.txt" },
-    $|      "fault": { "connection": { "kind": "partial" } } },
-    $|    { "id": "events", "mock": "big", "request": { "path": "/events" },
-    $|      "response": { "status": 200,
-    $|        "events": [\{event}, \{event}, \{event}, \{event}] } } ] }
-  defs
-}
-
-///|
-/// The text of the large body file: `big_line` over and over, `big_size`
-/// bytes in all. It is built once, as the test process starts, and by
-/// doubling, a few copies of memory in all: `String::repeat` appends one
-/// line at a time, which took 50 to 140 ms on each call, in which no other
-/// test of the package ran.
-let big_text : String = {
-  let mut text = big_line
-  while text.length() < big_size {
-    text = text + text[:big_size - text.length()].to_owned()
-  }
-  text
-}
-
-///|
-/// The definitions directory of Mock `big`: its Definition file and its
-/// large body file.
-fn big_files() -> Array[(String, String)] {
-  [("big.json", big_defs), ("files/big.txt", big_text)]
-}
-
-///|
 /// Sends `request` on `conn` again and again, pipelined, and never reads,
 /// until a write fails because smock has closed the connection. Returns how
 /// many milliseconds after `since` that was. smock reads nothing while a

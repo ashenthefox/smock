@@ -3,22 +3,6 @@
 // (contract_test.mbt).
 
 ///|
-/// The probes, in the order the tests show them.
-let probes : Array[String] = ["/startupz", "/readyz", "/livez"]
-
-///|
-/// Each probe's answer, without a token, as `<path>: <status> <body>`, one
-/// per line, each checked against the document.
-async fn Smock::probes(self : Smock) -> String {
-  let out = []
-  for path in probes {
-    let response = self.admin("GET", path, token=None)
-    out.push("\{path}: \{response.status} \{response.body}")
-  }
-  out.join("\n")
-}
-
-///|
 async test "the probes need no token while authentication is on, and pass once smock serves" {
   with_definitions([("users.json", users)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {

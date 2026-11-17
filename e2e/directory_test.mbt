@@ -1,15 +1,4 @@
 ///|
-/// A Definition file declaring one Stub of Mock `m` that answers `GET path`
-/// with 200 and `body`.
-fn stub_file(id : String, path : String, body : String) -> String {
-  (
-    $|{ "stubs": [{ "id": "\{id}", "mock": "m",
-    $|  "request": { "method": "GET", "path": "\{path}" },
-    $|  "response": { "status": 200, "body": "\{body}" } }] }
-  )
-}
-
-///|
 async test "Definition files are the regular top-level .json files, symlinks followed, dot entries skipped, in byte-wise name order" {
   with_definitions(
     [

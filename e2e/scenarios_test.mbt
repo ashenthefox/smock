@@ -3,53 +3,6 @@
 // connection per request, with Ephemeral Stubs added over the Admin API.
 
 ///|
-/// The example of spec #48: `GET /orders/42` answers pending until `POST
-/// /orders/42/pay` moves the Scenario `checkout` to `Paid`, and paid after.
-let checkout : String =
-  #|{ "mocks": [{ "name": "payments" }],
-  #|  "stubs": [
-  #|    { "id": "order-pending", "mock": "payments",
-  #|      "request": { "method": "GET", "path": "/orders/42" },
-  #|      "scenario": { "name": "checkout", "requires": "Started" },
-  #|      "response": { "status": 200, "json": { "status": "pending" } } },
-  #|    { "id": "pay", "mock": "payments",
-  #|      "request": { "method": "POST", "path": "/orders/42/pay" },
-  #|      "scenario": { "name": "checkout", "requires": "Started", "moveTo": "Paid" },
-  #|      "response": { "status": 200 } },
-  #|    { "id": "order-paid", "mock": "payments",
-  #|      "request": { "method": "GET", "path": "/orders/42" },
-  #|      "scenario": { "name": "checkout", "requires": "Paid" },
-  #|      "response": { "status": 200, "json": { "status": "paid" } } } ] }
-
-///|
-/// `meth path` with a real HTTP client on a connection of its own, with
-/// the Session `session` in its baggage when given: the status and the
-/// body, if any.
-async fn Smock::order(
-  self : Smock,
-  meth : String,
-  path : String,
-  session? : String,
-) -> String {
-  let headers : @http.Headers = Map([])
-  if session is Some(session) {
-    let (name, value) = baggage(session)
-    headers[@http.CaseInsensitiveString(name)] = value
-  }
-  let client = @http.Client("http://127.0.0.1:\{self.port}", headers~)
-  defer client.close()
-  let response = if meth == "POST" {
-    client.post(path, "")
-  } else {
-    client.get(path)
-  }
-  match client.read_all().text() {
-    "" => "\{response.code}, no body"
-    body => "\{response.code} \{body}"
-  }
-}
-
-///|
 async test "over HTTP, each Session walks the checkout Scenario on its own: test-a pays and sees paid, test-b still sees pending, and its second payment matches nothing" {
   with_definitions([("payments.json", checkout)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {

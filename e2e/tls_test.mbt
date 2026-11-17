@@ -3,19 +3,6 @@
 // its leaf certificate.
 
 ///|
-/// `GET /users/1`, asking smock to close the connection after answering.
-let get_user : String = "GET /users/1 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
-
-///|
-/// Sends `request` on a new connection and reads one response.
-async fn Smock::exchange(self : Smock, over : Over, request : String) -> String {
-  let conn = self.connect(over~)
-  defer conn.close()
-  conn.write(request)
-  read_response(conn)
-}
-
-///|
 async test "with a certificate chain and its key, smock serves HTTPS on the TLS port with the same responses as on the plain port, for RSA and ECDSA keys" {
   with_definitions([("users.json", users)], dir => {
     with_certificates(certs => {
