@@ -47,10 +47,9 @@ search = [
   '''git grep -n -i 'spec oracle' -- '*_test.mbt' '*_wbtest.mbt' '*.mbt.md'''',
 ]
 found = """
-The first search, over test names, finds 20 tests; the second, a test that
+The first search, over test names, finds 21 tests; the second, a test that
 inspects a package's constant itself, finds grpc's content type; the third
-finds nothing at this commit (#279 marks two of the tests below "A spec
-oracle." in their doc comments).
+finds the doc comments of two of the tests below, which say "A spec oracle."
 
 Listed: a test whose name says that its subject is a value a spec fixes, a
 code, a name or a content type, and whose every expected value comes from
@@ -62,9 +61,6 @@ PROTOCOL-HTTP2 reserves only the names that start with grpc- ("Header names
 starting with grpc- but not listed here are reserved for future GRPC use"),
 and content-type and te come from smock's own reading; and the e2e tests
 that see these values on the wire, which a removal batch judges.
-
-Not yet here: http1's test of the reason phrase of every status RFC 9110 and
-RFC 6585 define (#284) belongs to this reason once it is merged.
 """
 
 [[reason.test]]
@@ -81,6 +77,11 @@ source = "PROTOCOL-HTTP2 (https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-
 file = 'grpc/content_type_test.mbt'
 name = 'the content type of gRPC calls and replies is application/grpc'
 source = 'PROTOCOL-HTTP2, Requests: Content-Type is content-type application/grpc, with an optional +proto, +json or custom subtype'
+
+[[reason.test]]
+file = 'http1/response_test.mbt'
+name = 'the status line carries the reason phrase RFC 9110 gives each status it defines, and RFC 6585 gives 429 and 431'
+source = "RFC 9110, sections 15.2 to 15.6, the heading of each status's section, and RFC 6585, sections 4 and 5, for 429 and 431"
 
 # --------------------------------------------------------------------------
 
