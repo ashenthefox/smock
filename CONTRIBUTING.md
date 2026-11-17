@@ -1467,7 +1467,8 @@ their diffs. A change with no such line runs nothing and says so.
 Package directories given limit the run to them. With `--sites-only`, it
 counts the mutants on the changed lines and runs none, and with `--shard`
 the shards merge as above. A change of 460 such lines, about the 75th
-percentile of merges into `main`, had 174 mutants.
+percentile of merges into `main`, had 174 mutants, which ran in 3.5
+minutes on wasm-gc on an arm64 laptop with 8 cores.
 
 To see the sites of a package, and to run one mutant, or the few mutants
 of a small package (they need python3, git, moon and moonc):
