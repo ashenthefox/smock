@@ -7,7 +7,8 @@
 # accepts as they are. scripts/test-helm-chart-on-kind.sh installs the chart
 # on a real cluster.
 #
-# It needs helm (v3.8 or later, or v4), yq (mikefarah/yq v4) and jq.
+# It needs helm (v3.13 or later, for `helm install --dry-run=client`, or
+# v4), yq (mikefarah/yq v4) and jq.
 #
 # usage: scripts/test-helm-chart.sh
 #
@@ -50,6 +51,21 @@ render() {
   else
     fail "$name: rendering failed: $(cat "$tmp/$name.err")"
     echo '[]' >"$tmp/$name.json"
+  fi
+}
+
+# notes <name> [helm install flags...]: the notes that `helm install` shows
+# after it installs the chart, as release "smock" in namespace "mocks", into
+# $tmp/<name>.notes. A client-side dry run renders them without a cluster.
+notes() {
+  name=$1
+  shift
+  if KUBECONFIG="$tmp/no-cluster" helm install smock "$chart" --namespace mocks --dry-run=client "$@" \
+    >"$tmp/$name.install" 2>"$tmp/$name.err"; then
+    sed -n '/^NOTES:$/,$p' "$tmp/$name.install" >"$tmp/$name.notes"
+  else
+    fail "$name: the dry-run install failed: $(cat "$tmp/$name.err")"
+    : >"$tmp/$name.notes"
   fi
 }
 
@@ -534,6 +550,49 @@ check custom-ports "ports from the values reach smock, the Pod and the Services"
    and [service("smock") | .spec.ports[] | .port] == [8080, 8443]
    and [service("smock-admin") | .spec.ports[] | .port] == [9999]'
 
+# Ports and the replica count, a million or more each, from a values file:
+# the Pod, the Services, the Deployment and the notes after an install write
+# them with the digits of the values file, as the chart writes every number
+# it prints from values (#377). No port goes that high; the chart leaves the
+# range to Kubernetes.
+cat >"$tmp/values-large.yaml" <<'YAML'
+replicas: 1000000
+ports:
+  plain: 1008080
+  tls: 1008443
+  admin: 1009091
+service:
+  plainPort: 1000080
+  tlsPort: 1000443
+adminService:
+  port: 1009090
+YAML
+replicas=$(yq '.replicas' "$tmp/values-large.yaml")
+plain_port=$(yq '.service.plainPort' "$tmp/values-large.yaml")
+tls_port=$(yq '.service.tlsPort' "$tmp/values-large.yaml")
+admin_port=$(yq '.adminService.port' "$tmp/values-large.yaml")
+render large --values "$tmp/values-token.yaml" --values "$tmp/values-large.yaml"
+check_text large "ports and a replica count of a million or more from a values file are written in full" \
+  '[smock | .ports[] | .containerPort] == [$smock_plain, $smock_tls, $smock_admin]
+   and [service("smock") | .spec.ports[] | .port] == [$plain, $tls]
+   and [service("smock-admin") | .spec.ports[] | .port] == [$admin]
+   and deployment.spec.replicas == $replicas' \
+  --arg smock_plain "$(yq '.ports.plain' "$tmp/values-large.yaml")" \
+  --arg smock_tls "$(yq '.ports.tls' "$tmp/values-large.yaml")" \
+  --arg smock_admin "$(yq '.ports.admin' "$tmp/values-large.yaml")" \
+  --arg plain "$plain_port" --arg tls "$tls_port" --arg admin "$admin_port" --arg replicas "$replicas"
+notes large --values "$tmp/values-token.yaml" --values "$tmp/values-large.yaml"
+missing=
+for text in "(ports $plain_port and $tls_port)" "(port $admin_port)" "port-forward service/smock-admin $admin_port" \
+  "localhost:$admin_port/v1/status" "With $replicas replicas"; do
+  grep -qF -- "$text" "$tmp/large.notes" || missing="$missing \"$text\""
+done
+if [ -z "$missing" ]; then
+  pass "large: the notes after an install write those ports and that replica count in full"
+else
+  fail "large: the notes after an install lack$missing: $(cat "$tmp/large.notes")"
+fi
+
 check ports "the probes call /startupz, /readyz and /livez on the admin port, without a token" \
   '[smock | .startupProbe, .readinessProbe, .livenessProbe | .httpGet] == [
      {"path": "/startupz", "port": "admin"},
@@ -653,8 +712,8 @@ check pre-stop "a longer preStop sleep reaches smock's container and lengthens t
   'smock.lifecycle.preStop.sleep.seconds == 15 and pod.terminationGracePeriodSeconds == 45'
 printf 'lifecycle:\n  preStopSleepSeconds: 1000000\n' >"$tmp/values-pre-stop.yaml"
 render pre-stop-long --values "$tmp/values-token.yaml" --values "$tmp/values-pre-stop.yaml"
-check pre-stop-long "a preStop sleep from a values file is written out in full" \
-  'smock.lifecycle.preStop.sleep.seconds == 1000000 and pod.terminationGracePeriodSeconds == 1000030'
+check_text pre-stop-long "a preStop sleep from a values file is written out in full" \
+  'smock.lifecycle.preStop.sleep.seconds == "1000000" and pod.terminationGracePeriodSeconds == "1000030"'
 render pre-stop-off --values "$tmp/values-token.yaml" --set lifecycle.preStopSleepSeconds=0
 check pre-stop-off "a preStop sleep of 0 leaves the hook out, so the chart also runs before Kubernetes 1.30" \
   '(smock | has("lifecycle") | not) and pod.terminationGracePeriodSeconds == 30'

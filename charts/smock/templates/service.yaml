@@ -19,14 +19,14 @@ spec:
     {{- include "smock.selectorLabels" . | nindent 4 }}
   ports:
     - name: http
-      port: {{ .Values.service.plainPort }}
+      port: {{ include "smock.string" .Values.service.plainPort }}
       targetPort: plain
       protocol: TCP
       {{- with .Values.service.appProtocol.plain }}
       appProtocol: {{ . | quote }}
       {{- end }}
     - name: https
-      port: {{ .Values.service.tlsPort }}
+      port: {{ include "smock.string" .Values.service.tlsPort }}
       targetPort: tls
       protocol: TCP
       {{- with .Values.service.appProtocol.tls }}
