@@ -235,7 +235,11 @@ test "a content-length is read as the decimal number its digits give, leading ze
 }
 
 ///|
-test "smock reads a content-length's digits until the length reaches 2^32, over every body limit: 4294967295 is read as itself, and 4294967296 or any longer length as 4294967296 (docs/http2.md, Request bodies, a finding that #318 takes to the maintainer)" {
+test "smock reads a content-length's digits until the length reaches 2^32, over every body limit: 4294967295 is read as itself, and 4294967296 or any longer length as 4294967296 (docs/http2.md, Request bodies)" {
+  // docs/http2.md, Request bodies: "smock reads its digits until the
+  // length reaches 4,294,967,296 (2^32), which is over every limit, so a
+  // longer one, however many digits it has, gets 413 too." The maintainer
+  // confirmed it on 2026-11-17 (#318).
   inspect(
     [
       "2147483648",
