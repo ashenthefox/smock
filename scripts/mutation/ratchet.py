@@ -1,0 +1,434 @@
+#!/usr/bin/env python3
+"""The site-count ratchet of the mutation runner (CONTRIBUTING.md,
+"Mutation runner", "The site counts"): the committed count of each
+package's sites, per definition and operator, and the check that keeps a
+change from weakening the runner by finding fewer sites.
+
+usage: python3 scripts/mutation/ratchet.py [--root <dir>] [--finder <command>]
+           [--moonc <moonc>] write
+       python3 scripts/mutation/ratchet.py [--root <dir>] [--finder <command>]
+           [--moonc <moonc>] check [--base <ref>]
+
+<root> is the workspace, the current directory unless it is given. Its
+packages are every directory with a moon.pkg or a moon.pkg.json in the
+modules that moon.work lists (or in the module at <root> without one),
+but not in a module of its own that moon.work does not list, such as the
+runner's fixture module. The site finder (scripts/mutation/sites.py, or
+--finder) gives their sites in the full set, each with whether the pinned
+set takes it.
+
+write  writes the counts into <root>/mutation/site-counts/: a file for
+       each package that has a site, named by the package's directory,
+       as mutation/site-counts/cmd/smock.jsonl for cmd/smock. Each line
+       is one top-level definition that holds a site, as JSON, in the
+       order of the package's files and of the definitions in them:
+         file        the definition's file, relative to <root>
+         definition  its name, as a site's id gives it
+         text        the first 16 hexadecimal digits of the SHA-256 of
+                     its text, from its first line to its last, which
+                     tells a definition that a change changed from one
+                     it left as it was
+         pinned      its count of sites of each operator in the pinned set
+         full        the same in the full set
+       A file of a package that no longer has a site is removed.
+
+check  fails, with 1, when the committed counts differ from what write
+       would write on <root>'s tree, and when, against the merge base of
+       HEAD and <base> (origin/main unless it is given), a package's sites
+       drop by more than the base's sites in the definitions that the
+       change deletes or changes. The base's counts are those committed
+       at the merge base. A definition that the change neither deletes
+       nor changes is one whose text the package still has, in any of its
+       files; for each such definition, each operator and each set, a
+       count of the head below the base's is a drop that only the list of
+       approved drops can allow: mutation/approved-drops.txt, in which the
+       change adds, for each package, operator and set with such a drop, a
+       line
+         <package> <operator> <pinned|full> <sites> <reason>
+       with the number of sites dropped. Only the lines that the change
+       adds approve a drop, and each must name a drop that the change
+       makes. When the merge base has no committed counts, nothing is
+       compared with it.
+
+It exits with 2 when it cannot judge: the finder fails, a file does not
+parse, or git cannot answer.
+"""
+
+import argparse
+import difflib
+import hashlib
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import NamedTuple
+
+import operators as ops
+import sites
+
+HERE = Path(__file__).resolve().parent
+COUNTS = Path("mutation") / "site-counts"
+DROPS = Path("mutation") / "approved-drops.txt"
+SETS = ("pinned", "full")
+# Directories that hold no package: build output, downloaded modules and
+# git's own.
+SKIPPED = {"_build", "target", ".mooncakes", ".git", "node_modules"}
+MEMBER = re.compile(r'"([^"]+)"')
+
+
+class RatchetError(Exception):
+    """What keeps the ratchet from judging."""
+
+
+def modules(root):
+    """The directories of the workspace's modules, relative to root."""
+    work = root / "moon.work"
+    if not work.is_file():
+        return [Path(".")]
+    text = work.read_text(encoding="utf-8")
+    members = re.search(r"members\s*=\s*\[(.*?)\]", text, re.DOTALL)
+    if not members:
+        raise RatchetError(f"{work} lists no members")
+    return [Path(os.path.normpath(m)) for m in MEMBER.findall(members.group(1))]
+
+
+def packages(root):
+    """The directories of the workspace's packages, relative to root, with
+    "/", sorted."""
+    found = set()
+    for module in modules(root):
+        top = (root / module).resolve()
+        for directory, subdirectories, names in os.walk(top):
+            here = Path(directory)
+            subdirectories[:] = sorted(
+                d for d in subdirectories
+                if d not in SKIPPED and not any((here / d / m).is_file() for m in ("moon.mod", "moon.mod.json")))
+            if "moon.pkg" in names or "moon.pkg.json" in names:
+                found.add(here.relative_to(root.resolve()).as_posix())
+    return sorted(found)
+
+
+def text_hash(text):
+    """The first 16 hexadecimal digits of a text's SHA-256."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+class Definition:
+    """A top-level definition of a package's source: its file, name, lines,
+    the hash of its text, and its counts of sites in each set."""
+
+    def __init__(self, file, name, first, last, text):
+        self.file = file
+        self.name = name
+        self.first = first
+        self.last = last
+        self.text = text_hash(text)
+        self.counts = {s: Counter() for s in SETS}
+
+    def line(self):
+        """Its line in the package's file of counts."""
+        counts = {s: {o: self.counts[s][o] for o in ops.OPERATORS if self.counts[s][o]} for s in SETS}
+        return json.dumps({"file": self.file, "definition": self.name, "text": self.text, **counts},
+                          ensure_ascii=False, separators=(",", ":"))
+
+
+def definitions(root, names, moonc, jobs=4):
+    """The top-level definitions of each package's non-test source,
+    outside generated files and test blocks, in the order of its files and
+    lines. The compiler parses jobs files at once."""
+    files = []
+    for package in names:
+        for path in sites.source_files(root, [package]):
+            text = (root / path).read_text(encoding="utf-8")
+            if not sites.is_generated(text):
+                files.append((package, path, text))
+    with tempfile.TemporaryDirectory(prefix="smock-ratchet-") as tmp:
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            trees = list(pool.map(lambda f: sites.dump(moonc, "wasm-gc", Path(tmp), f[0], f[1][1], f[1][2]),
+                                  enumerate(files)))
+    found = {package: [] for package in names}
+    for (package, path, text), tree in zip(files, trees):
+        source = sites.SourceFile(path, text)
+        for entry in sites.parse_tree(tree):
+            if not (isinstance(entry, list) and len(entry) == 3 and entry[0] == "base_pos"):
+                raise RatchetError(f"{path}: unexpected entry in the parse tree: {str(entry)[:80]}")
+            item = sites.Item(source, entry[1], entry[2])
+            if item.is_test():
+                continue
+            first, last = item.lines()
+            body = "\n".join(text.split("\n")[first - 1 : last])
+            found[package].append(Definition(path.as_posix(), item.name(), first, last, body))
+    return found
+
+
+def find_sites(finder, root, directories):
+    """The sites of the full set that the finder prints for the packages,
+    without the skipped ones."""
+    if not directories:
+        return []
+    result = subprocess.run([*finder, "--root", str(root), "--set", "full", *directories],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RatchetError(f"the site finder failed:\n{result.stderr}")
+    lines = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    return [s for s in lines if "skipped" not in s]
+
+
+def tree_counts(root, finder, moonc):
+    """Each package's definitions, each with its counts of sites, on
+    root's tree."""
+    names = packages(root)
+    by_package = definitions(root, names, moonc)
+    by_file = {}
+    for found in by_package.values():
+        for definition in found:
+            by_file.setdefault(definition.file, []).append(definition)
+    for site in find_sites(finder, root, names):
+        holders = [d for d in by_file.get(site["file"], []) if d.first <= site["line"] <= d.last]
+        if len(holders) != 1:
+            raise RatchetError(f"{site['file']}:{site['line']}: the site {site.get('id')} lies in"
+                               f" {len(holders)} top-level definitions, not one")
+        for chosen in SETS:
+            if chosen == "full" or site["pinned"]:
+                holders[0].counts[chosen][site["operator"]] += 1
+    return by_package
+
+
+def count_files(by_package):
+    """The text of each package's file of counts, by its path under the
+    counts' directory; none for a package without a site."""
+    files = {}
+    for package, found in by_package.items():
+        lines = [d.line() for d in found if sum(d.counts["full"].values())]
+        if lines:
+            files[f"{package}.jsonl"] = "".join(f"{line}\n" for line in lines)
+    return files
+
+
+def write(root, finder, moonc):
+    """Writes the counts of root's tree."""
+    files = count_files(tree_counts(root, finder, moonc))
+    directory = root / COUNTS
+    if directory.is_dir():
+        for old in sorted(directory.rglob("*.jsonl")):
+            if old.relative_to(directory).as_posix() not in files:
+                old.unlink()
+    for name, text in files.items():
+        path = directory / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    print(f"ratchet: wrote the site counts of {len(files)} packages into {COUNTS.as_posix()}/")
+
+
+def committed_files(root):
+    """The committed counts in root's tree, by path under the counts'
+    directory."""
+    directory = root / COUNTS
+    if not directory.is_dir():
+        return {}
+    return {p.relative_to(directory).as_posix(): p.read_text(encoding="utf-8")
+            for p in sorted(directory.rglob("*.jsonl"))}
+
+
+def differences(committed, files):
+    """What differs between the committed counts and those of the tree, as
+    a message for each package whose file differs, with the diff."""
+    messages = []
+    for name in sorted(set(committed) | set(files)):
+        old, new = committed.get(name, ""), files.get(name, "")
+        if old == new:
+            continue
+        diff = list(difflib.unified_diff(old.splitlines(), new.splitlines(), f"committed/{name}", f"tree/{name}",
+                                         lineterm="", n=0))
+        shown = diff[:40] + ([f"... and {len(diff) - 40} more lines"] if len(diff) > 40 else [])
+        messages.append(f"the committed site counts of {name.removesuffix('.jsonl')} differ from the site"
+                        f" finder's on this tree:\n" + "\n".join(shown))
+    return messages
+
+
+def git(root, *args):
+    """The output of a git command in root."""
+    result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RatchetError(f"git {' '.join(args)}: {result.stderr.strip()}")
+    return result.stdout
+
+
+def at_base(root, base):
+    """The merge base of HEAD and base, the counts committed there, by
+    package, and the text of the list of approved drops there."""
+    merge_base = git(root, "merge-base", "HEAD", base).strip()
+    names = git(root, "ls-tree", "-r", "--name-only", merge_base, "--", f"{COUNTS.as_posix()}/").splitlines()
+    counts = {}
+    for name in names:
+        if name.endswith(".jsonl"):
+            package = Path(name).relative_to(COUNTS).as_posix().removesuffix(".jsonl")
+            text = git(root, "show", f"{merge_base}:./{name}")
+            counts[package] = [json.loads(line) for line in text.splitlines() if line.strip()]
+    listed = git(root, "ls-tree", "--name-only", merge_base, "--", DROPS.as_posix()).strip()
+    drops = git(root, "show", f"{merge_base}:./{DROPS.as_posix()}") if listed else ""
+    return merge_base, counts, drops
+
+
+class Drop(NamedTuple):
+    """A line of the list of approved drops."""
+
+    package: str
+    operator: str
+    set: str
+    sites: int
+    reason: str
+
+
+def read_drops(text, problems):
+    """The lines of a list of approved drops, each with its line number;
+    a malformed line is a problem."""
+    drops = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        fields = line.split(None, 4)
+        if (len(fields) != 5 or fields[1] not in ops.OPERATORS or fields[2] not in SETS
+                or not fields[3].isdigit() or int(fields[3]) < 1):
+            problems.append(f"{DROPS.as_posix()}:{number}: should be <package> <operator> <pinned|full> <sites>"
+                            f" <reason>, with an operator of operator set {ops.VERSION} and a number of sites"
+                            f" from 1, not: {line}")
+            continue
+        drops.append((number, Drop(fields[0], fields[1], fields[2], int(fields[3]), fields[4].strip())))
+    return drops
+
+
+def sites_of(count, what):
+    """A count of sites of an operator, in words."""
+    return f"{count} site{'' if count == 1 else 's'} of {what}"
+
+
+def ratchet(base_counts, by_package, added, problems, notes):
+    """Compares the base's counts with the tree's, package by package: a
+    problem for each drop in a definition that the change neither deletes
+    nor changes that no added line of approved drops records, and for each
+    added line that records no such drop."""
+    gone = {}
+    for package, base in sorted(base_counts.items()):
+        head = by_package.get(package, [])
+        same = {}
+        for definition in head:
+            same.setdefault(definition.text, []).append(definition)
+        held = {s: 0 for s in SETS}
+        for entry in base:
+            kept = same.get(entry["text"])
+            if not kept:
+                for chosen in SETS:
+                    held[chosen] += sum(entry[chosen].values())
+                continue
+            definition = kept.pop(0)
+            for chosen in SETS:
+                for operator in ops.OPERATORS:
+                    before, after = entry[chosen].get(operator, 0), definition.counts[chosen][operator]
+                    if after < before:
+                        drop = gone.setdefault((package, operator, chosen), [0, []])
+                        drop[0] += before - after
+                        drop[1].append(f"{entry['definition']} {before} to {after}")
+        totals = {s: (sum(sum(e[s].values()) for e in base), sum(sum(d.counts[s].values()) for d in head))
+                  for s in SETS}
+        if any(after < before for before, after in totals.values()):
+            notes.append(f"{package}: {totals['pinned'][1]} sites in the pinned set and {totals['full'][1]} in"
+                         f" the full set, against the base's {totals['pinned'][0]} and {totals['full'][0]}; the"
+                         f" definitions that the change deletes or changes held {held['pinned']} and"
+                         f" {held['full']}.")
+    approved = {}
+    for number, drop in added:
+        key = (drop.package, drop.operator, drop.set)
+        if key in approved:
+            problems.append(f"{DROPS.as_posix()}:{number}: a second line for {drop.operator} in the {drop.set}"
+                            f" set of {drop.package}")
+        approved[key] = drop
+    for key, (count, where) in sorted(gone.items()):
+        package, operator, chosen = key
+        drop = approved.pop(key, None)
+        if drop is not None and drop.sites == count:
+            notes.append(f"{package}: {sites_of(count, operator)} in the {chosen} set dropped, as"
+                         f" {DROPS.as_posix()} records: {drop.reason}")
+        elif drop is not None:
+            problems.append(f"{DROPS.as_posix()} records {sites_of(drop.sites, operator)} in the {chosen} set"
+                            f" dropped in {package}, but the change drops {count}")
+        else:
+            problems.append(f"{package}: {sites_of(count, operator)} in the {chosen} set"
+                            f" {'is' if count == 1 else 'are'} gone from definitions that the change neither"
+                            f" deletes nor changes ({', '.join(where)}). A change may drop only the sites of the"
+                            f" definitions it deletes or changes, and any other drop needs the maintainer's"
+                            f" approval: add \"{package} {operator} {chosen} {count} <reason>\" to"
+                            f" {DROPS.as_posix()} in the same change.")
+    for drop in approved.values():
+        problems.append(f"{DROPS.as_posix()} records {sites_of(drop.sites, drop.operator)} in the {drop.set} set"
+                        f" dropped in {drop.package}, but the change drops none there")
+
+
+def check(root, finder, moonc, base):
+    """Checks the committed counts against root's tree and against the
+    base: whether it passed."""
+    by_package = tree_counts(root, finder, moonc)
+    files = count_files(by_package)
+    problems = differences(committed_files(root), files)
+    if problems:
+        problems.append(f"Run `python3 scripts/mutation/ratchet.py write` and commit {COUNTS.as_posix()}/ with the"
+                        " change that alters the sites.")
+    notes = []
+    merge_base, base_counts, base_drops = at_base(root, base)
+    drops_path = root / DROPS
+    drops = read_drops(drops_path.read_text(encoding="utf-8") if drops_path.is_file() else "", problems)
+    if not base_counts:
+        notes.append(f"the merge base with {base}, {merge_base[:12]}, has no committed site counts: nothing to"
+                     " compare with.")
+    else:
+        earlier = Counter(drop for _, drop in read_drops(base_drops, []))
+        added = []
+        for number, drop in drops:
+            if earlier[drop]:
+                earlier[drop] -= 1
+            else:
+                added.append((number, drop))
+        ratchet(base_counts, by_package, added, problems, notes)
+    for note in notes:
+        print(f"ratchet: {note}")
+    for problem in problems:
+        print(f"ratchet: {problem}", file=sys.stderr)
+    if problems:
+        return False
+    compared = (f", and no site dropped beyond the definitions that the change deletes or changes against"
+                f" {merge_base[:12]}, the merge base with {base}, but as {DROPS.as_posix()} records"
+                if base_counts else "")
+    print(f"ratchet: the committed site counts of {len(files)} packages are the tree's{compared}.")
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Write or check the committed site counts of each package.")
+    parser.add_argument("--root", default=".", help="the workspace")
+    parser.add_argument("--finder", help="the site finder's command (default: sites.py beside this script)")
+    parser.add_argument("--moonc", default="moonc", help="the compiler, whose parse tree gives the definitions")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("write", help="write the counts of the tree")
+    checking = commands.add_parser("check", help="check the counts against the tree and the base")
+    checking.add_argument("--base", default="origin/main", help="compare with the merge base of HEAD and this")
+    args = parser.parse_args()
+    root = Path(args.root).resolve()
+    finder = shlex.split(args.finder) if args.finder else [sys.executable, str(HERE / "sites.py")]
+    try:
+        if args.command == "write":
+            write(root, finder, args.moonc)
+        elif not check(root, finder, args.moonc, args.base):
+            sys.exit(1)
+    except (RatchetError, sites.FinderError, FileNotFoundError) as error:
+        print(f"ratchet: {error}", file=sys.stderr)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

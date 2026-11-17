@@ -14,9 +14,9 @@ summary, with the counts of the outcomes, of the comparison of the
 compiler's output and with the package's own tests alone taken again
 from all its records, its importers' counts summed (importers.py), and
 with "shards": what each shard that ran the package gave of its run (the
-mutants it ran, the run without a mutant and the time limit, and those
-of its importers' tests), since each shard ran the tests without a
-mutant on its own. When every shard wrote flake records, they merge as
+mutants it ran, the run without a mutant and the time limit, those of
+its importers' tests, and its self-test), since each shard ran the tests
+without a mutant and the self-test on its own. When every shard wrote flake records, they merge as
 confirm.py merge merges them into flakes.json, and the summary and the
 report give this run's flaky results over all the shards. The report is
 the one run.py writes from them, which it also prints; for a listed set,
@@ -40,7 +40,7 @@ import run
 
 # What a shard's summary of a package gives of its own run, beside the
 # counts of the outcomes, which the merge takes again from the records.
-OWN_RUN = ("mutants", "baseline", "limit_s")
+OWN_RUN = ("mutants", "baseline", "limit_s", "self_test")
 
 
 class MergeError(Exception):

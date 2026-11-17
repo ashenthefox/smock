@@ -1,0 +1,10 @@
+{"file":"usage/usage.mbt","definition":"user_hz","text":"96e36bb3494aeb55","pinned":{"INT":1},"full":{"INT":3}}
+{"file":"usage/usage.mbt","definition":"cpu_seconds","text":"7bbbe5d5e8a41fe2","pinned":{"BODY":1,"ROR":1,"AOR":5,"INT":12},"full":{"BODY":1,"ROR":1,"IFC":2,"AOR":5,"INT":17}}
+{"file":"usage/usage.mbt","definition":"resident_bytes","text":"b87c57466e52791d","pinned":{"BODY":1,"ROR":1,"AOR":2,"INT":4},"full":{"BODY":1,"ROR":1,"IFC":2,"AOR":2,"INT":8}}
+{"file":"usage/usage.mbt","definition":"involuntary_context_switches","text":"10f8537aa640a763","pinned":{"BODY":1},"full":{"BODY":1,"IFC":1}}
+{"file":"usage/usage.mbt","definition":"scheduling_delay_seconds","text":"9cd48878f1f3408c","pinned":{"BODY":1,"ROR":1,"AOR":1,"INT":4},"full":{"BODY":1,"ROR":1,"IFC":1,"AOR":1,"INT":5}}
+{"file":"usage/usage.mbt","definition":"cpu_steal_seconds","text":"0284051356eeb659","pinned":{"BODY":1,"ROR":1,"AOR":1,"INT":4},"full":{"BODY":1,"ROR":1,"IFC":2,"AOR":1,"INT":6}}
+{"file":"usage/usage.mbt","definition":"cgroup_dir","text":"cf689cdccff7a826","pinned":{"BODY":1,"IFC":2},"full":{"BODY":1,"IFC":3}}
+{"file":"usage/usage.mbt","definition":"CpuStat::parse","text":"1b442b922f72395d","pinned":{},"full":{"IFC":1}}
+{"file":"usage/usage.mbt","definition":"memory_peak","text":"5757cca3af5dc307","pinned":{"BODY":1},"full":{"BODY":1}}
+{"file":"usage/usage.mbt","definition":"decimal","text":"1532d1b444b38e25","pinned":{"BODY":1,"ROR":4,"IFC":3,"LCR":2,"DEL":1,"AOR":3,"INT":8},"full":{"BODY":1,"ROR":4,"IFC":6,"LCR":2,"DEL":1,"AOR":3,"INT":12}}

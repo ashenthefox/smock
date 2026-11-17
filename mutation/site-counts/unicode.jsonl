@@ -1,0 +1,4 @@
+{"file":"unicode/unicode.mbt","definition":"upper","text":"57121237f43beaea","pinned":{"BODY":1,"ROR":3,"IFC":2,"LCR":1,"AOR":1,"INT":3},"full":{"BODY":1,"ROR":3,"IFC":4,"LCR":1,"AOR":1,"INT":6}}
+{"file":"unicode/unicode.mbt","definition":"lower","text":"45f248e735279afe","pinned":{"BODY":1,"ROR":3,"IFC":2,"LCR":1,"AOR":1,"INT":3},"full":{"BODY":1,"ROR":3,"IFC":4,"LCR":1,"AOR":1,"INT":6}}
+{"file":"unicode/unicode.mbt","definition":"is_white_space","text":"8f5ece3d633fefa0","pinned":{"BODY":1,"ROR":2,"IFC":2,"BOOL":3},"full":{"BODY":1,"ROR":2,"IFC":4,"BOOL":3}}
+{"file":"unicode/unicode.mbt","definition":"mapped","text":"c50bf091265d2292","pinned":{"BODY":1,"ROR":3,"IFC":4,"LCR":1,"AOR":6,"INT":9},"full":{"BODY":1,"ROR":3,"IFC":8,"LCR":1,"AOR":6,"INT":13}}

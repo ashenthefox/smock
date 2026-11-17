@@ -1,0 +1,9 @@
+{"file":"protobuf-conformance/main.mbt","definition":"exit","text":"2cc16686aeb033a0","pinned":{"BODY":1},"full":{"BODY":1}}
+{"file":"protobuf-conformance/main.mbt","definition":"main","text":"9c3db51d133e7cac","pinned":{"IFC":2,"DEL":5,"INT":8},"full":{"IFC":3,"DEL":5,"INT":12}}
+{"file":"protobuf-conformance/main.mbt","definition":"read_frame","text":"aa077384a8c195b7","pinned":{"BODY":1,"INT":12},"full":{"BODY":1,"INT":22}}
+{"file":"protobuf-conformance/main.mbt","definition":"write_frame","text":"47e0c3a2f9867c80","pinned":{"BODY":1,"DEL":3,"AOR":2,"INT":6},"full":{"BODY":1,"DEL":3,"AOR":2,"INT":16}}
+{"file":"protobuf-conformance/testee.mbt","definition":"JSON_LIMIT","text":"b6174479478948f8","pinned":{"INT":1},"full":{"INT":3}}
+{"file":"protobuf-conformance/testee.mbt","definition":"answer","text":"24967b88857dec54","pinned":{"BODY":1},"full":{"BODY":1}}
+{"file":"protobuf-conformance/testee.mbt","definition":"read_request","text":"97102e524bfa86bb","pinned":{"IFC":1,"NOT":1,"DEL":8,"INT":1},"full":{"IFC":2,"NOT":1,"DEL":8,"INT":2}}
+{"file":"protobuf-conformance/testee.mbt","definition":"respond","text":"86ba74b9a202d23b","pinned":{"IFC":4,"NOT":1,"BOOL":2},"full":{"IFC":8,"NOT":1,"BOOL":2}}
+{"file":"protobuf-conformance/testee.mbt","definition":"Response::to_bytes","text":"74f550cb84ee6b6f","pinned":{"BODY":1,"DEL":2,"INT":6},"full":{"BODY":1,"DEL":2,"INT":17}}

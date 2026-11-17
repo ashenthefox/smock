@@ -1062,12 +1062,13 @@ class ConfirmationTest(unittest.TestCase):
         return out, records, summary["packages"][0], summary
 
     # The runs of tests, in turn, for one mutant: the two runs without a
-    # mutant, the mutant's run, its run again with the mutant on, and the
-    # run without it.
+    # mutant, the self-test's run (#309, which the real moon answers), the
+    # mutant's run, its run again with the mutant on, and the run without
+    # it.
 
     def test_a_kill_that_does_not_repeat_is_not_counted(self):
         # `n < high` survives calc's tests; a flaky failure says otherwise once.
-        out, records, package, _ = self.run_scripted(["real", "real", {"fail": [LOW]}],
+        out, records, package, _ = self.run_scripted(["real", "real", "real", {"fail": [LOW]}],
                                                      "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,1")
         [record] = records
         self.assertEqual((record["outcome"], record["first_outcome"], record["confirmation"]),
@@ -1087,7 +1088,7 @@ class ConfirmationTest(unittest.TestCase):
 
     def test_a_kill_whose_tests_fail_without_the_mutant_is_not_counted(self):
         # `low < n` is killed by LOW, which then fails without it too.
-        out, records, package, _ = self.run_scripted(["real", "real", "real", "real", {"fail": [LOW]}],
+        out, records, package, _ = self.run_scripted(["real", "real", "real", "real", "real", {"fail": [LOW]}],
                                                      "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,0")
         [record] = records
         self.assertEqual((record["outcome"], record["confirmation"]),
@@ -1099,7 +1100,7 @@ class ConfirmationTest(unittest.TestCase):
                                             "reruns": 1}])
 
     def test_a_time_out_that_does_not_repeat_is_unconfirmed(self):
-        out, records, package, _ = self.run_scripted(["real", "real", {"sleep": 120}],
+        out, records, package, _ = self.run_scripted(["real", "real", "real", {"sleep": 120}],
                                                      "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,1")
         [record] = records
         self.assertEqual((record["outcome"], record["first_outcome"], record["confirmation"]),
@@ -1112,7 +1113,7 @@ class ConfirmationTest(unittest.TestCase):
 
     def test_a_time_out_whose_run_without_the_mutant_is_too_slow_is_unconfirmed(self):
         # A slow runner: everything times out, the run without the mutant too.
-        _, records, package, _ = self.run_scripted(["real", "real", {"sleep": 120}, {"sleep": 120}, {"sleep": 120}],
+        _, records, package, _ = self.run_scripted(["real", "real", "real", {"sleep": 120}, {"sleep": 120}, {"sleep": 120}],
                                                    "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,1")
         [record] = records
         self.assertEqual((record["outcome"], record["confirmation"]),
@@ -1258,13 +1259,13 @@ class CompilerOutputTest(unittest.TestCase):
 
     def test_an_equivalent_mutant_or_a_duplicate_runs_no_tests(self):
         runs = [line for line in self.log.read_text().splitlines() if "--test-failure-json" in line.split()]
-        # The run without a mutant, twice, and each mutant that compiled and
-        # was neither equivalent nor a duplicate, three times: each of them
-        # is killed, and a kill is confirmed by a run with the mutant on and
-        # one without it (#301).
+        # The run without a mutant, twice, the self-test once (#309), and
+        # each mutant that compiled and was neither equivalent nor a
+        # duplicate, three times: each of them is killed, and a kill is
+        # confirmed by a run with the mutant on and one without it (#301).
         ran = [outcome for _, outcome, _ in SAME if outcome not in ("unviable", "equivalent", "duplicate")]
         self.assertEqual(set(ran), {"killed"})
-        self.assertEqual(len(runs), 2 + 3 * len(ran))
+        self.assertEqual(len(runs), 2 + 1 + 3 * len(ran))
         for record in self.records:
             if record["outcome"] in ("equivalent", "duplicate"):
                 self.assertEqual((record["killing_tests"], record["timings"]["run_s"]), ([], 0), record["id"])

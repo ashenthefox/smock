@@ -32,6 +32,10 @@
 #   Every other job runs in every run: it has no condition.
 # - The jobs that plan may skip are checks, test and release-test, and no
 #   other.
+# - The job checks, which runs with either toolchain, runs the mutation
+#   runner's tests, its self-test on the fixture module and the site-count
+#   check against the merge base with main, each once (#309), and checks
+#   out the whole history, so that the check finds that merge base.
 # - Every job with a matrix runs once for amd64 on x86_64 and once for arm64
 #   on aarch64, on the runner its matrix names, and every native setup
 #   checks that machine and installs the toolchain of the call.
@@ -240,6 +244,16 @@ problems=$(yq --output-format=json "$workflow" | jq -r \
        elif condition != null then
          "job \(.key) does not wait for plan, so it should run in every run, not \(condition | shown)"
        else empty end),
+
+  # What governs the mutation runner, in job checks.
+    ($all[] | select(.key == "checks") | . as $job
+     | (("python3 -m unittest discover -s scripts/mutation -v",
+         "python3 scripts/mutation/run.py --root scripts/mutation/fixture --self-test-only calc log",
+         "python3 scripts/mutation/ratchet.py check --base origin/main") as $command
+        | ([$job.value.steps[]? | select(command == $command)] | length) as $times
+        | if $times != 1 then "job checks should run \($command) once, not \($times) times" else empty end),
+       (if any(.value.steps[]?; ((.uses // "") | startswith("actions/checkout@")) and .with["fetch-depth"] == 0) then empty
+        else "job checks should check out the whole history (fetch-depth: 0), so that the site-count check finds the merge base with main" end)),
 
     (([$all[] | select((needed | index("plan")) != null) | .key] | sort) as $skipped
      | if $skipped != ["checks", "release-test", "test"] then

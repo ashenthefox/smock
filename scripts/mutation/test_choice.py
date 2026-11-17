@@ -161,6 +161,10 @@ class MergeTest(unittest.TestCase):
             summary = json.loads((out / "summary.json").read_text())
             packages = summary.pop("packages")
             timings = ("baseline", "limit_s", "shards")
+            for package in packages:
+                # Each shard runs the package's self-test (#309), whose
+                # timings are timings too.
+                package.get("self_test", {}).pop("timings", None)
             return (summary,
                     [({k: v for k, v in p.items() if k not in timings}, p.get("baseline", {}).get("tests"))
                      for p in packages])

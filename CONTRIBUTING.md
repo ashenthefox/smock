@@ -261,7 +261,8 @@ source tree they describe, that test the coverage report of
 `scripts/coverage.sh` (see [Build and test](#build-and-test)).
 
 `scripts/mutation/` holds the mutation runner, its site finder, operator
-set v1 (`operators.py`), and the module their tests run on,
+set v1 (`operators.py`), the runner's self-test (`selftest.py`), the
+site-count ratchet (`ratchet.py`), and the module their tests run on,
 `scripts/mutation/fixture`, which is not a member of the workspace (see
 [Mutation runner](#mutation-runner)).
 
@@ -369,6 +370,9 @@ scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, re
 python3 -m unittest discover -s scripts/mutation -v   # the mutation runner and its site finder, on a module whose mutants are known (needs git, moon and moonc)
 python3 scripts/check-e2e-helpers.py   # no e2e test file uses what another test file defines (needs moon and moonc)
 scripts/test-check-e2e-helpers.sh    # that check, on small modules (needs python3, moon and moonc)
+python3 scripts/mutation/run.py --root scripts/mutation/fixture --self-test-only calc log   # the mutation runner's self-test, on its fixture (needs git, moon and moonc)
+python3 scripts/mutation/ratchet.py write   # the site counts of each package, into mutation/site-counts/ (needs moonc)
+python3 scripts/mutation/ratchet.py check --base origin/main   # the site counts are the commit's, and no package's sites drop beyond what the change deletes or changes (needs git and moonc)
 ```
 
 `scripts/test-helm-chart.sh` renders `charts/smock` for each delivery mode
@@ -450,6 +454,12 @@ the searches that found its tests. A removal batch never proposes a test
 on it. `scripts/check-kept-tests.py` fails when a test that the list names
 is no longer there, so a change that renames, moves or removes a listed
 test changes the list in the same commit.
+
+`mutation/site-counts/` holds each package's count of mutation sites, per
+definition and operator ([The site counts](#the-site-counts)). CI's job
+`checks` fails when they are not what the site finder gives on the
+commit, so a change to a package's source, other than to its tests, runs
+`python3 scripts/mutation/ratchet.py write` and commits what it writes.
 
 [`docs/ledgers/`](docs/ledgers/use-cases.md) holds the use-case and
 boundary ledgers of the test review
@@ -1111,9 +1121,10 @@ An equivalence claim reaches the maintainer in three steps:
 - **The mutator is governed too.** A ratchet on each package's number of
   sites, compared per definition: a package's sites may drop by at most
   as many as the base tree had in the definitions that a change deletes
-  or changes, and any other drop needs the maintainer's approval. A
-  forced-fail self-test: a mutant switched on must be observable, or the
-  run fails. A weekly canary replays the 250 mutants sampled at
+  or changes, and any other drop needs the maintainer's approval
+  ([The site counts](#the-site-counts)). A forced-fail self-test: a
+  mutant switched on must be observable, or the run fails
+  ([The self-test](#the-self-test)). A weekly canary replays the 250 mutants sampled at
   d953f320, whose verdicts are known, on that commit with the toolchain
   pinned there, and the maintainer accepts each difference once it is
   explained.
@@ -1721,6 +1732,85 @@ line shorter, and the other deletes a call over three lines. One compiles
 as another mutant does. Three are not compared: one in a constant, one in
 an implementation of a trait that no function of the package calls, and
 one that lets the compiler put a function into its caller.
+
+### The self-test
+
+Each run, in each package where it has a mutant to run, first switches
+on a mutant that the package's tests must see, and stops unless a test
+kills it. A runner that
+applies no mutant, builds or tests another tree, runs the binary of an
+earlier build, takes a failed test for a pass, or breaks every build
+would otherwise report each mutant as survived or as unviable, and the
+second is a "zero" that says nothing.
+
+The rule that chooses the mutant: it puts `abort("mutation self-test")`
+at the start of the body of every top-level function and method of the
+package's non-test source whose body is MoonBit. Foreign functions,
+`init` and `main` blocks, test blocks, test files and generated files are
+left as they are. The functions come from the compiler's parse tree, as
+the sites do, but not from the finder's lines. So the mutant depends on
+the package's source alone, never on the finder's output or on a run's
+outcome. The runner switches it on after the two runs without a mutant
+and before the first mutant, with the time limit they set, and switches
+it off again. Only a kill passes, by a test that gives kill credit in the
+run: a self-test that survives, times out or does not build stops the
+run, and so does a package with no function to change. The summary and the report give the self-test's record: the
+functions it changed and how many tests failed.
+
+A package whose own tests call none of its functions fails its
+self-test. `cookies` and `unicode` have no tests of their own, so a run of
+their own tests could see no mutant, and their self-test fails: it runs
+with the package's own tests only, and not again with its importers'
+tests as a surviving mutant does.
+
+`--self-test-only` runs, for each package, the runs without a mutant and
+the self-test, and no mutant; it takes no option that chooses mutants. CI's job `checks` runs it on the fixture
+module's packages that have tests, `calc` and `log`. The runner's tests
+break the runner on purpose, with a moon that never fails a test, one
+that tests another tree and one whose builds fail after the first, and
+check that the self-test stops the run before any mutant.
+
+### The site counts
+
+`mutation/site-counts/<package>.jsonl` holds, for each package of the
+workspace that has a site, one line per top-level definition that holds a
+site, as JSON: its file, its name, a hash of its text (the first 16
+hexadecimal digits of the SHA-256 of its lines, from the first to the
+last), and its count of sites of each operator in the pinned set and in
+the full set. `python3 scripts/mutation/ratchet.py write` writes them
+from the site finder's lines. The packages are every directory with a
+`moon.pkg` in the modules that `moon.work` lists; the runner's fixture
+module is not one of them.
+
+`python3 scripts/mutation/ratchet.py check --base origin/main`, in CI's
+job `checks`, fails:
+
+- when the committed counts are not what `write` writes on the commit,
+  with the pinned toolchain. So a change that alters sites updates them
+  in the same change. In the weekly run with the latest MoonBit, the same
+  difference shows a compiler that finds other sites, and fails that run
+  as its other checks do.
+- when a package's sites drop, against the counts committed at the merge
+  base with `main`, by more than the base's sites in the definitions that
+  the change deletes or changes. The comparison is per definition. A
+  definition that the change neither deletes nor changes is one whose
+  text the package still has, in any of its files: a definition moved
+  within its package is the same definition. For each such definition,
+  each operator and each set, a count below the base's is a drop that
+  only the list of approved drops allows. Such a drop comes from a change
+  to the finder, to operator set v1 or to the toolchain, or from moving a
+  definition out of STR's scope.
+
+`mutation/approved-drops.txt` is the list of approved drops. For each
+package, operator and set with such a drop, the change adds a line
+`<package> <operator> <pinned|full> <sites> <reason>`, with the number of
+sites that the check's message gives. Only the lines that a change adds
+approve its drops, and each must name a drop that the change makes. Both
+files are in `scripts/verdict-files.txt`, so the weakening report shows
+their changes, and the maintainer's acknowledgment of the report at the
+merge is the approval. A merge base with no committed counts, from before
+this check, is compared with nothing; on `main`, the merge base is the
+commit itself.
 
 ## The weakening report
 

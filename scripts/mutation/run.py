@@ -7,7 +7,7 @@ it, and writes one record per mutant, a summary per package and a report
 usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir>]
            [--set pinned|full] [--mutant <id>]... [--sites-only] [--workers <n>]
            [--list <file> [--totals-only]] [--sample <n> [--seed <s>]] [--shard <k>/<n>]
-           [--changed [--base <ref>]]
+           [--changed [--base <ref>]] [--self-test-only]
            [--flakes <file>] [--moon <moon>] [--finder <command>]
            [<package directory>...]
 
@@ -24,7 +24,8 @@ mutant with that id, which must be in the set, and may be given more than
 once; a package given that holds none of the ids is not run.
 --sites-only runs no mutant: it writes the counts of sites, positions and
 skipped sites of each package, in both sets, and the mutants a run would
-make, in chosen.jsonl.
+make, in chosen.jsonl. --self-test-only runs each package's self-test,
+and no mutant.
 
 Four more options choose the mutants: three for bulk runs (choice.py
 says how), and one for a contributor's branch (changed.py says how):
@@ -73,7 +74,13 @@ one was. <work> is <root>/_build/mutation unless it is given. For each
 package, the runner first builds the tests without a mutant and runs them
 twice: it stops if they do not build, or if a run fails without naming a
 test that failed, and a test that fails in either run gives no kill
-credit in this run. Then, for each mutant, it writes the mutated file into
+credit in this run. Then, when the package has a mutant to run, or with
+--self-test-only, it runs the package's forced-fail self-test
+(selftest.py): it switches on a mutant that puts an abort at the start of
+every function of the package, builds and runs the tests, switches it
+off, and stops unless a test that gives kill credit failed, so that a
+runner that could see no mutant never reports one. Then, for each
+mutant, it writes the mutated file into
 the tree, builds the package's tests (moon test --build-only), and runs
 them. It checks the build's exit status, so that a failed build never
 runs the binary of an earlier one, and it never passes -u.
@@ -153,7 +160,9 @@ It writes into <out> (<work>/out unless it is given):
                  ran again, how many they killed, and how many the tests
                  of each package killed; for the full set, the same
                  counts at the pinned alternatives and at the other
-                 alternatives apart;
+                 alternatives apart; and the self-test's record
+                 (self_test): the functions it changed, its outcome and
+                 how many of its tests failed;
   report.md      the operator set's version and the set, the summaries,
                  the counts with the package's own tests alone, its
                  importers and what their tests killed, the sites each
@@ -174,7 +183,7 @@ A position is the place of one or more sites: their file, operator, line
 and column.
 
 It exits with 0 when every mutant has an outcome, survivors or not, and
-with 1 when it cannot run them.
+with 1 when it cannot run them, a self-test that no test killed included.
 """
 
 import argparse
@@ -197,6 +206,7 @@ import choice
 import compare
 import confirm
 import importers
+import selftest
 
 HERE = Path(__file__).resolve().parent
 BACKEND = "wasm-gc"
@@ -485,11 +495,13 @@ def package_summary(root, directory, sites, skipped, chosen, operator_set):
     }
 
 
-def run_package(root, directory, sites, mutants, workers, log):
+def run_package(root, directory, sites, mutants, workers, log, self_test_only=False):
     """Runs the chosen mutants of one package, whose sites are given, with
     its own tests, and those that survive again with the tests of its
     importers that build on wasm-gc: its records, and its summary's counts
-    of the run, with its own tests alone and after its importers' tests."""
+    of the run, with its own tests alone and after its importers' tests.
+    The package's self-test runs first when it has a mutant to run, or
+    with self_test_only."""
     package = package_name(root, directory)
     first = workers[0]
     try:
@@ -497,14 +509,15 @@ def run_package(root, directory, sites, mutants, workers, log):
     except importers.ImportersError as error:
         raise RunnerError(str(error)) from error
     credit = importers.credit(packages, native_only)
-    records, baseline, limit = run_tests(workers, package, [package], mutants, log, f"{package}: {len(sites)} sites",
-                                         compare_in=directory)
+    records, baseline, limit, self_test = run_tests(workers, package, [package], mutants, log,
+                                                    f"{package}: {len(sites)} sites", own=directory,
+                                                    with_self_test=bool(mutants) or self_test_only)
     own = outcome_counts(records)
     for record in records:
         record["importers"] = []
     survivors = [i for i, r in enumerate(records) if r["outcome"] == "survived"]
     if packages and survivors:
-        again, again_baseline, again_limit = run_tests(
+        again, again_baseline, again_limit, _ = run_tests(
             workers, f"the importers of {package} ({', '.join(packages)})", packages,
             [mutants[i] for i in survivors], log, f"{package}: survivors again with the tests of {', '.join(packages)}")
         credit.update(baseline=again_baseline, limit_s=round(again_limit, 3))
@@ -519,21 +532,24 @@ def run_package(root, directory, sites, mutants, workers, log):
         **compare.counts(records),
         "own": own,
         "importers": credit,
+        **({"self_test": self_test} if self_test is not None else {}),
     }
     return records, summary
 
 
-def run_tests(workers, what, packages, mutants, log, header, compare_in=None):
+def run_tests(workers, what, packages, mutants, log, header, own=None, with_self_test=False):
     """Builds the tests of packages without a mutant in each worker's tree,
     and runs them twice in the first; then runs each mutant with them. It
     stops if they do not build, or if a run without a mutant fails without
     naming a test that failed; a test that fails in either run gives no
-    kill credit in this run. With compare_in, the directory of the one
-    package, each mutant's compiler output is compared before its tests
-    run (compare.py). It logs the runs without a mutant after header, and
-    each outcome. It gives the records, the baseline (the longer run's
-    seconds, both runs' seconds, the number of tests and the tests that
-    failed) and the time limit, which the longer run sets."""
+    kill credit in this run. With own, the directory of the one package,
+    this is the package's own pass: each mutant's compiler output is
+    compared before its tests run (compare.py), and, with with_self_test,
+    the self-test runs before any mutant (selftest.py). It logs the runs
+    without a mutant after header, and each outcome. It gives the records,
+    the baseline (the longer run's seconds, both runs' seconds, the number
+    of tests and the tests that failed), the time limit, which the longer
+    run sets, and the self-test's record (None when it did not run)."""
     first = workers[0]
     status, output, _ = first.build(packages)
     if status != 0:
@@ -558,9 +574,12 @@ def run_tests(workers, what, packages, mutants, log, header, compare_in=None):
         if status != 0:
             raise RunnerError(f"{what} does not build without a mutant in {worker.tree}:\n{output}")
     # The own pass compares each mutant's compiler output before its tests
-    # run (compare.py); the importers' pass reruns only survivors, which it
-    # compared already.
-    comparison = compare.Comparison(packages[0], compare_in, workers, log) if compare_in else None
+    # run (compare.py), and runs the self-test; the importers' pass reruns
+    # only survivors, which it compared already. The self-test comes after
+    # the comparison has linked the package without a mutant, since its
+    # build replaces that one in the first worker's target directory.
+    comparison = compare.Comparison(packages[0], own, workers, log) if own else None
+    self_test = run_self_test(first, packages[0], own, limit, log) if own and with_self_test else None
 
     # A record names its package; the records of the importers' run are
     # only read for what they found.
@@ -583,7 +602,29 @@ def run_tests(workers, what, packages, mutants, log, header, compare_in=None):
     with ThreadPoolExecutor(max_workers=len(workers)) as pool:
         for future in [pool.submit(work, w) for w in workers]:
             future.result()
-    return records, baseline, limit
+    return records, baseline, limit, self_test
+
+
+def run_self_test(worker, package, directory, limit, log):
+    """The forced-fail self-test of a package (selftest.py), before any
+    of its mutants: its record, or a RunnerError when no test saw it. Only
+    the tests that give kill credit in this run count (confirm.py): a
+    self-test whose failed tests all give none survived."""
+    uncredited = []
+
+    def credited(output):
+        tests, others = worker.judge.split(failed_tests(output))
+        uncredited[:] = others
+        return tests
+
+    record = selftest.run(worker, package, directory, limit, credited)
+    if record["outcome"] == "killed" and not record["failed_tests"] and uncredited:
+        record.update(outcome="survived", no_credit=uncredited)
+    problem = selftest.failure(package, record)
+    if problem:
+        raise RunnerError(problem)
+    log(f"  self-test killed, by {record['failed_tests']} tests ({len(record['definitions'])} functions changed)")
+    return record
 
 
 def run_mutant(worker, package, site, limit, comparison=None):
@@ -637,6 +678,8 @@ def report(operator_set, chosen, summaries, records):
         if "backend" in summary:
             out += [f"Backend {summary['backend']}, {summary['baseline']['tests']} tests, baseline run"
                     f" {summary['baseline']['run_s']:.2f} s, time limit {summary['limit_s']:.2f} s.", ""]
+        if "self_test" in summary:
+            out += [selftest.report_line(summary["self_test"]), ""]
         out += site_table(summary)
         if "backend" not in summary:
             continue
@@ -724,6 +767,8 @@ def main():
     parser.add_argument("--seed", default="0", help="the seed of --sample (0 unless given)")
     parser.add_argument("--shard", type=choice.shard_spec, metavar="K/N",
                         help="run only shard K of N of the mutants (K from 1)")
+    parser.add_argument("--self-test-only", action="store_true",
+                        help="run each package's self-test, and no mutant")
     parser.add_argument("--workers", type=int, default=1, help="how many mutants build and run at once")
     parser.add_argument("--flakes", help="the flake records of an earlier run (its flakes.json)")
     parser.add_argument("--moon", default="moon", help="the moon command")
@@ -746,6 +791,10 @@ def main():
         parser.error("--base goes with --changed")
     if args.totals_only and (not args.list or args.sites_only or args.shard):
         parser.error("--totals-only takes --list, and neither --sites-only nor --shard")
+    if args.self_test_only and (args.mutant or args.list or args.sample is not None or args.changed
+                                or args.sites_only):
+        parser.error("--self-test-only runs no mutant, so it takes no --mutant, --list, --sample, --changed"
+                     " or --sites-only")
     root = Path(args.root).resolve()
     work = Path(args.work).resolve() if args.work else root / "_build" / "mutation"
     out = Path(args.out).resolve() if args.out else work / "out"
@@ -771,6 +820,8 @@ def main():
             raise RunnerError(f"the packages' sites name several operator sets: {sorted(versions)}")
         operator_set = versions.pop() if versions else None
         sites, chosen = choose(found, args.set, args.mutant, args.packages)
+        if args.self_test_only:
+            chosen = {directory: [] for directory in args.packages}
         unapplied = {directory: [] for directory in args.packages}
         if entries is not None:
             chosen, unapplied = choice.resolve(root, args.list, entries, found, args.packages)
@@ -803,7 +854,7 @@ def main():
             summary["set"] = run_set
             if not args.sites_only:
                 package_records, counts = run_package(root, directory, sites[directory], chosen[directory],
-                                                      workers, log)
+                                                      workers, log, self_test_only=args.self_test_only)
                 for record in package_records:
                     record.update(set=run_set)
                 summary.update(counts)
