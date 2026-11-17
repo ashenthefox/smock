@@ -330,9 +330,12 @@ def snapshot_spans(item, names):
 
 def weakened(before, after, names):
     """The hunks in which after removes or changes a snapshot or an
-    assertion of before, or adds lines inside one: those of snapshots, and
-    those of other assertions. Lines are compared without their
-    indentation, so that a block moved deeper changes nothing."""
+    assertion of before, or adds lines inside a snapshot: those of
+    snapshots, and those of other assertions. Lines added inside another
+    assertion, such as a case added to the value an inspect shows, are not
+    listed: they change its snapshot when they change what it shows. Lines
+    are compared without their indentation, so that a block moved deeper
+    changes nothing."""
     snapshots = snapshot_spans(before, names)
     assertions = assertion_spans(before.lines)
     matcher = difflib.SequenceMatcher(
@@ -345,18 +348,14 @@ def weakened(before, after, names):
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
-        for kind, spans in (("snapshot", snapshots), ("assertion", assertions)):
-            if (i1 < i2 and touches(spans, i1, i2 - 1)) or (
-                i1 == i2 and i1 > 0 and inside(spans, i1 - 1, i1)
-            ):
-                hunk = Hunk(
-                    before.line + i1,
-                    before.lines[i1:i2],
-                    after.line + j1,
-                    after.lines[j1:j2],
-                )
-                found[kind].append(hunk)
-                break
+        hunk = Hunk(before.line + i1, before.lines[i1:i2], after.line + j1, after.lines[j1:j2])
+        if i1 == i2:
+            if i1 > 0 and inside(snapshots, i1 - 1, i1):
+                found["snapshot"].append(hunk)
+        elif touches(snapshots, i1, i2 - 1):
+            found["snapshot"].append(hunk)
+        elif touches(assertions, i1, i2 - 1):
+            found["assertion"].append(hunk)
     return found["snapshot"], found["assertion"]
 
 
@@ -377,10 +376,39 @@ def key(item):
     return (item.kind, item.name)
 
 
+def body(item):
+    """The lines of an item that say what it does: without its header,
+    blank lines and lines that only close brackets."""
+    lines = (line.strip() for line in item.lines[1:])
+    return [line for line in lines if line.strip(")]},;")]
+
+
+def overlap(before, after):
+    """The share of before's body that after's body holds."""
+    lines = body(before)
+    if not lines:
+        return 0.0
+    left = list(body(after))
+    held = 0
+    for line in lines:
+        if line in left:
+            left.remove(line)
+            held += 1
+    return held / len(lines)
+
+
+def likeness(before, after):
+    """How much two tests' names are alike, from 0 to 1."""
+    return difflib.SequenceMatcher(None, before.name or "", after.name or "").ratio()
+
+
 def pair(base_items, head_items):
     """The items of the base that the head still has, each with its head
     item; those it does not; and the head's new items. An item keeps its
-    key; one of several of the same key is matched in its file first."""
+    key; one of several of the same key is matched in its file first. A
+    test whose name is gone is the new test of its package that holds most
+    of its body, or whose name is much like its own: renamed, as when a
+    test is extended."""
     free = list(head_items)
     pairs, gone = [], []
     for item in base_items:
@@ -392,6 +420,18 @@ def pair(base_items, head_items):
         chosen = (same_file or candidates)[0]
         free.remove(chosen)
         pairs.append((item, chosen))
+    for item in [item for item in gone if item.kind == "test"]:
+        scored = [
+            (overlap(item, other) + likeness(item, other), other.path == item.path, -n, other)
+            for n, other in enumerate(free)
+            if other.kind == "test"
+            and (overlap(item, other) >= 0.6 or likeness(item, other) >= 0.75)
+        ]
+        if scored:
+            chosen = max(scored, key=lambda score: score[:3])[3]
+            free.remove(chosen)
+            gone.remove(item)
+            pairs.append((item, chosen))
     return pairs, gone, free
 
 

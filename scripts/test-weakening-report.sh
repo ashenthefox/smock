@@ -301,6 +301,32 @@ MBT
 report extended
 empty extended
 
+# A case added inside an assertion, as extending a test adds one, weakens
+# nothing.
+tree
+package
+timed
+branch
+sed -i 's/^    @add.add(took.to_int(), 1),$/    @add.add(took.to_int(), 1),\n    @add.add(1, 1),/' "$repo/add/timed_test.mbt"
+report case-added
+empty case-added
+
+# A test whose name is extended, with a case added, stays; one whose name
+# changes with an assertion is listed under its new name.
+tree
+package
+timed
+branch
+sed -i 's/test "answers in time"/test "answers in time, under 250 ms"/; s/^  inspect(fast, content="true")$/  inspect(fast, content="true")\n  inspect(took > 100L, content="true")/' "$repo/add/timed_test.mbt"
+sed -i 's/test "adds two numbers"/test "adds two positive numbers"/; s/assert_eq(@add.add(2, 3), 5)/assert_eq(@add.add(2, 3), 6)/' "$repo/add/add_test.mbt"
+report renamed
+lacks renamed "## Tests deleted"
+lacks renamed 'answers in time'
+mentions renamed '### `add/add_test.mbt:2`: test "adds two numbers"'
+mentions renamed 'Now `add/add_test.mbt:2`: test "adds two positive numbers".'
+mentions renamed '-  assert_eq(@add.add(2, 3), 5)'
+mentions renamed '+  assert_eq(@add.add(2, 3), 6)'
+
 # --- Snapshot lines changed ------------------------------------------------------
 
 # Snapshots: written in the call, over several lines, and in a constant and
