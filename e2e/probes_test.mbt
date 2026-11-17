@@ -135,6 +135,76 @@ async test "until the first definition set has loaded, /startupz and /readyz fai
 }
 
 ///|
+/// Opens the FIFO at `path` for writing, which waits until smock opens it
+/// for reading, and returns it. Fails the test when smock has not opened
+/// it in time.
+async fn fifo_writer(path : String) -> @fs.File {
+  let fifo = @async.with_timeout_opt(patience_ms, () => {
+    @fs.open(path, mode=WriteOnly)
+  })
+  guard fifo is Some(fifo) else { fail("smock did not open \{path} in time") }
+  fifo
+}
+
+///|
+async test "after the first definition set has loaded and before the plain and TLS ports open, /readyz fails with not_ready while /startupz passes" {
+  with_definitions([("users.json", users)], dir => {
+    with_certificates(certs => {
+      // A FIFO as the certificate file holds smock in that window: smock
+      // reads the file after the first definition set has loaded and
+      // before it opens the plain and TLS ports (#291), and the read lasts
+      // until the test has written the certificate and closed the FIFO.
+      let cert = "\{certs.dir}/fifo-chain.pem"
+      let (status, output) = @process.collect_output_merged("mkfifo", [cert])
+      guard status == 0 else { fail("mkfifo failed: \{output.text()}") }
+      @async.with_task_group(group => {
+        let serving = Serving::start(
+          group,
+          ["--dir", dir, "--port", "0", ..certs.args(cert~)],
+        )
+        // smock first opens the file to note its times, for the polls that
+        // rotate certificates, before its admin port opens: let it.
+        fifo_writer(cert).close()
+        guard serving.listening_on(["admin"]) is Some(ports) else {
+          fail("smock exited before it listened on its admin port")
+        }
+        let smock = serving.smock(ports)
+        // Then it opens the file to read it, once the first definition set
+        // has loaded.
+        let writer = fifo_writer(cert)
+        let during = smock.probes()
+        writer.write(@utf8.encode(@testcerts.rsa_chain + "\n"))
+        writer.close()
+        guard serving.listening_on(["plain", "tls"]) is Some(_) else {
+          fail("smock exited before it listened:\n\{serving.log().join("\n")}")
+        }
+        // The probes answer as docs/admin-api.md says, and with the error
+        // shape when they fail; not_ready's message is the one #291 gives.
+        inspect(
+          (
+            $|while smock reads the certificate file:
+            $|\{during}
+            $|once it listens on the plain and TLS ports:
+            $|\{smock.probes()}
+          ),
+          content=(
+            #|while smock reads the certificate file:
+            #|/startupz: 200 {"status":"ok","warnings":[]}
+            #|/readyz: 503 {"error":"not_ready","message":"the plain and TLS ports are not open yet","warnings":[]}
+            #|/livez: 200 {"status":"ok","warnings":[]}
+            #|once it listens on the plain and TLS ports:
+            #|/startupz: 200 {"status":"ok","warnings":[]}
+            #|/readyz: 200 {"status":"ok","warnings":[]}
+            #|/livez: 200 {"status":"ok","warnings":[]}
+          ),
+        )
+        let _ = serving.stop()
+      })
+    })
+  })
+}
+
+///|
 async test "after a failed reload, /readyz still passes and the previous definition set keeps serving" {
   with_definitions([("users.json", users)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
