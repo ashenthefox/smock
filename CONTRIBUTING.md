@@ -333,6 +333,8 @@ scripts/install-protoc.sh            # the pinned protoc, into ~/.local/bin, wit
 PROTOC=~/.local/bin/protoc scripts/gen-protobuf-fixtures.sh --check   # the protobuf fixtures are what their sources build
 PROTOC=~/.local/bin/protoc scripts/test-protobuf-fixtures.sh          # that check, on a copy of the working tree
 python3 -m unittest discover -s bench -p test_compare.py -v   # the benchmark's comparison of two runs, which the merge checklist reads
+python3 scripts/check-kept-tests.py   # every test that the keep list, mutation/kept-tests.toml, names is still there (needs Python 3.11 or later)
+scripts/test-check-kept-tests.sh     # that check, on small trees
 helm lint --strict charts/smock --set adminAuth.tokenSecret.name=smock-admin-token   # the Helm chart passes helm's lint (needs helm)
 scripts/test-helm-chart.sh           # rendering tests of the Helm chart (needs helm, yq and jq)
 python3 -m unittest discover -s bench -p test_gke_script.py -v   # scripts/gke-bench.sh against fake gcloud, kubectl and docker commands, about 5 minutes
@@ -384,6 +386,15 @@ one rule for each difference decided on purpose; any other difference
 fails the test. Adding a fixture file under
 `schema/v1/fixtures/` adds it to the cross-check; the README there says
 which directory a fixture belongs in.
+
+`mutation/kept-tests.toml` is the keep list of the test review
+([Removing a test](#removing-a-test)): the tests that
+removal rule (C) keeps for a reason that the kill matrix cannot see,
+each with its reason and the source of what it checks, and for each reason
+the searches that found its tests. A removal batch never proposes a test
+on it. `scripts/check-kept-tests.py` fails when a test that the list names
+is no longer there, so a change that renames, moves or removes a listed
+test changes the list in the same commit.
 
 `scripts/check-h2spec.sh` runs h2spec 2.6.0, the HTTP/2 conformance tool,
 against a smock binary: every case of its `generic`, `http2` and `hpack`
@@ -1060,7 +1071,8 @@ A test may go only under (A) or (B), and never when (C) holds.
     the engine's tests of seeded floating-point results;
   - a test of behaviour that a dependency provides.
 
-  The tests kept for the last four reasons are named in a list.
+  The tests kept for the last four reasons are named in the keep list,
+  [`mutation/kept-tests.toml`](mutation/kept-tests.toml).
 
 An e2e test goes only when operator-level mutants of the `server` code on
 its path are killed by the tests that remain, or when a named test at a

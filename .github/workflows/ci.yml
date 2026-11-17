@@ -250,6 +250,21 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 -m unittest discover -s bench -p test_compare.py -v
 
+      # --- The keep list ----------------------------------------------------
+
+      # mutation/kept-tests.toml names the tests that removal rule (C) keeps
+      # for a reason the kill matrix cannot see. This checks that each test
+      # it names is still there (scripts/check-kept-tests.py), so that a
+      # listed test cannot vanish unnoticed, and tests that check on small
+      # trees.
+      - name: Check that every test on the keep list is still there
+        if: ${{ !cancelled() }}
+        run: python3 scripts/check-kept-tests.py
+
+      - name: Test the check of the keep list
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-kept-tests.sh
+
       # --- The Helm chart ---------------------------------------------------
 
       # The chart on a cluster is tested in build-test.yml, with the image
