@@ -388,7 +388,8 @@ gets this one:
   its Host.
 - Its key is a new ECDSA P-256 key. Both are generated with OpenSSL and
   held only in memory; nothing is written to disk, so a read-only root
-  filesystem is fine. The certificate is valid for 365 days.
+  filesystem is fine. The certificate is valid from an hour before smock
+  generates it, for clocks a little behind, until 365 days after.
 - When a reload changes the set of Hosts, smock generates a new certificate
   for new connections; open connections keep theirs. A reload that keeps
   the Hosts, and a failed reload, keep the certificate.

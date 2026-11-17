@@ -160,17 +160,37 @@ async fn Smock::verify_for(
 }
 
 ///|
-async test "with neither certificate setting, smock serves HTTPS on the TLS port with a self-signed certificate it generated" {
+/// How long the certificate in the PEM file `file` is valid, from its
+/// notBefore to its notAfter, as the certificate itself says: `365 days and
+/// an hour` for that span or one second more, and the span in seconds
+/// otherwise. smock reads the clock once for each of the two bounds, so a
+/// second may pass between them.
+async fn validity(file : String) -> String {
+  let not_before = @string.parse_int64(validity_bound(file, "notBefore"))
+  let span = @string.parse_int64(not_after(file)) - not_before
+  match span - (365L * 24 * 60 * 60 + 60 * 60) {
+    0L | 1L => "365 days and an hour"
+    _ => "\{span} seconds"
+  }
+}
+
+///|
+async test "with neither certificate setting, smock serves HTTPS on the TLS port with a self-signed certificate it generated, valid from an hour before it was generated until 365 days after" {
   with_scratch(dir => {
     let _ = with_smock(["--port", "0"], smock => {
       let presented = smock.presented_certificate(dir)
       inspect(
         [
           "self-signed: \{presented.subject == presented.issuer}",
+          // The running guide (docs/running.md, The self-signed certificate):
+          // "The certificate is valid from an hour before smock generates
+          // it, for clocks a little behind, until 365 days after."
+          "valid for: \{validity(presented.file)}",
           smock.verify_for(dir, presented.file, "localhost"),
         ].join("\n"),
         content=(
           #|self-signed: true
+          #|valid for: 365 days and an hour
           #|localhost: status 0, verify 0 (ok), response 404 Not Found
         ),
       )
