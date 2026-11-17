@@ -219,6 +219,10 @@ the plain port and on the TLS port, each with its reason (see
 real gRPC client, and the calls grpcurl makes, each with what it prints
 (see [Build and test](#build-and-test)).
 
+`scripts/coverage-tests/` holds the small bisect reports, and the small
+source tree they describe, that test the coverage report of
+`scripts/coverage.sh` (see [Build and test](#build-and-test)).
+
 ## Toolchain
 
 The MoonBit toolchain version is pinned in `.moonbit-version`, and CI installs
@@ -250,6 +254,7 @@ moon test --target wasm-gc     # every package that does no I/O
 moon check --deny-warn --target all
 moon fmt --check
 moon bench -p smock/smock/engine --release   # match index lookups: 100 vs 10,000 Stubs
+scripts/coverage.sh            # point coverage of the in-process tests, per package (needs python3)
 scripts/check-no-io.sh         # no I/O in the protocol modules, the packages that decide a response and the OpenAPI converter
 scripts/check-no-c.sh          # the C boundary of ADR 0001, in smock and in the modules it resolves (after moon check; needs jq)
 scripts/check-moonhttp-pin.sh  # the build resolves the moonhttp that moon.mod names (needs jq)
@@ -278,6 +283,7 @@ scripts/test-latest-toolchain-plan.sh   # the plan that skips the weekly run wit
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
 scripts/test-check-schema.sh         # the JSON Schema cross-check, with a fake validator and a fake smock (needs jq)
+scripts/test-coverage-report.sh      # the coverage report, on small bisect reports (needs python3)
 python3 scripts/check-doc-links.py   # the documents' links into the repository lead to a file, and to a heading when they name one (needs git)
 scripts/test-check-doc-links.sh      # that check, on small trees (needs python3 and git)
 scripts/check-openapi.sh             # the Admin API document is valid OpenAPI 3.1
@@ -396,8 +402,24 @@ scripts/build-release.sh
 scripts/check-grpcurl.sh dist/smock
 ```
 
-CI runs all of these but `moon bench` and the tests of
-`scripts/gke-bench.sh` on each push to a branch and on each pull request
+`scripts/coverage.sh` runs every package's in-process tests with
+coverage, in a target directory of its own, `_coverage` unless
+`--target-dir` names another, and prints each package's points covered
+of all, its uncovered points with their file, line and definition, and
+line figures beside them; a line counts as covered only when every point
+on it is. A summary gives the totals inside and outside `server` and
+`cmd/smock`, which only the binary runs. The packages that build on
+wasm-gc run there, except `yaml`, whose deepest nesting test overflows
+wasm-gc's stack when instrumented; `yaml` and the native-only packages
+run natively, with at most two build jobs (`--jobs`). `e2e` does not run.
+`cmd/smock` has no tests, so its points come from an instrumented build
+that nothing runs. The first run builds everything with coverage and
+takes a few minutes; a later run rebuilds only what changed. It reads
+every trace source in the target directory, so remove the directory
+after removing a package.
+
+CI runs all of these but `moon bench`, `scripts/coverage.sh` and the tests
+of `scripts/gke-bench.sh` on each push to a branch and on each pull request
 (`.github/workflows/ci.yml`). It does not run on a pushed tag, since the
 release workflow checks that CI passed on the tagged commit
 ([What a tag does](docs/releasing.md#what-a-tag-does)), nor on a push to a
