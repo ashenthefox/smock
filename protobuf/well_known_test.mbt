@@ -627,7 +627,12 @@ test "is_well_known tells each well-known type the README lists, every wrapper i
   // indexes them (https://protobuf.dev/reference/protobuf/google.protobuf/),
   // are printed by ProtoJSON as ordinary messages and enums: its list of
   // "message types with special JSON encodings" holds none of them
-  // (https://protobuf.dev/programming-guides/json/). Nor does a type of
+  // (https://protobuf.dev/programming-guides/json/). The reference page is
+  // cited only for the list of the package's types. Its sentence that
+  // "Well-Known Types that end in “Value” are wrapper messages for other
+  // types, such as BoolValue and EnumValue" does not make EnumValue a
+  // wrapper here: the wrappers are the nine messages of wrappers.proto, and
+  // EnumValue is a message of type.proto. Nor does a type of
   // another package with a well-known type's name: "No message type outside
   // of the `google.protobuf` package has a special ProtoJSON handling". Nor
   // does a name without its package, since a type is known by its full name.
