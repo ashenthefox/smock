@@ -207,18 +207,18 @@ async test "h2c: two bodies larger than the windows, on one connection, both arr
 }
 
 ///|
-/// A predicate on frames that holds once each of `streams` has ended,
-/// counting from when it is made.
-fn all_ended(streams : Array[Int32]) -> (@http2.Frame) -> Bool {
-  let left = streams.copy()
+/// A predicate on frames that holds once `octets` of DATA have come, on
+/// any of the streams, counting from when it is made: all that a widening
+/// of the connection window by `octets` lets smock send. A share of the
+/// window that goes to the wrong stream then shows in what was read, where
+/// waiting for a stream to end would wait in vain.
+fn data_total(octets : Int32) -> (@http2.Frame) -> Bool {
+  let mut seen = 0
   frame => {
-    for i, stream in left {
-      if ends_stream(frame, stream) {
-        left.remove(i) |> ignore
-        break
-      }
+    if frame is Data(data~, ..) {
+      seen += data.length()
     }
-    left.is_empty()
+    seen >= octets
   }
 }
 
@@ -250,15 +250,28 @@ async test "h2c: streams waiting on the connection window get it in the order th
       out.push("--- the connection window widened by 500, and stream 5 opened")
       raw.send([WindowUpdate(stream_id=0, increment=500), raw.get(5, "/item")])
       out.push(raw.runs_until(data_seen(1, 500)))
-      out.push("--- the connection window widened by 250000")
-      raw.send([WindowUpdate(stream_id=0, increment=250_000)])
-      let rest = raw.runs_until(all_ended([1, 3, 5])).split("\n").collect()
-      // Stream 3 waited first; streams 1 and 5 began to wait again at about
-      // the same time.
-      out.push(rest[0].to_owned())
-      let after = rest[1:].iter().map(line => line.to_owned()).collect()
-      after.sort()
-      out.append(after)
+      // Stream 3 has waited longest: "When several streams wait for the
+      // connection window, they get it in the order they began to wait, and
+      // a stream that has sent what it was given waits behind the others"
+      // (docs/http2.md, Streams that wait). So a widening of the 83,965
+      // octets left of its body goes to it alone. Stream 5's task looks at
+      // the windows only once stream 1's DATA, queued before, has gone out
+      // (The output bound), and may not have looked when the widening comes.
+      // A wider one would leave a free part, which that task could then send
+      // from before stream 3's DATA.
+      out.push("--- the connection window widened by 83965")
+      raw.send([WindowUpdate(stream_id=0, increment=83_965)])
+      out.push(raw.runs_until(data_total(83_965)))
+      // Then the 149,505 octets left of the bodies of streams 1 and 5. The
+      // document does not say whether stream 5 began to wait when its
+      // HEADERS went out without its body, before stream 1 sent, or when its
+      // task looked at the windows, after: their order is not checked.
+      out.push("--- the connection window widened by 149505")
+      raw.send([WindowUpdate(stream_id=0, increment=149_505)])
+      let rest = raw.runs_until(data_total(149_505)).split("\n").collect()
+      let rest = rest.iter().map(line => line.to_owned()).collect()
+      rest.sort()
+      out.append(rest)
       inspect(
         out.join("\n"),
         content=(
@@ -272,8 +285,9 @@ async test "h2c: streams waiting on the connection window get it in the order th
           #|--- the connection window widened by 500, and stream 5 opened
           #|HEADERS 5 END_HEADERS [:status: 200, date: <now>, content-length: 5]
           #|DATA 1: 1 frames, 500 octets
-          #|--- the connection window widened by 250000
+          #|--- the connection window widened by 83965
           #|DATA 3 END_STREAM: 6 frames, 83965 octets
+          #|--- the connection window widened by 149505
           #|DATA 5 END_STREAM: 1 frames, 5 octets
           #|DATA 1 END_STREAM: 10 frames, 149500 octets
         ),
