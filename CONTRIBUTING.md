@@ -690,8 +690,9 @@ the rules for writing and removing tests apply already.
   `engine`, `grpc`, `http1`, `importopenapi`, `llm`, `log`, `metrics`,
   `prng`, `protobuf`, `re2`, `settings`, `template`, `unicode`, `usage`,
   `xml` and `yaml`. `serverparsers`, made since from the parsers of
-  `server`, is pure too, but it is not in the two stages that take the 19
-  to L4 (below): how far it climbs is the maintainer's decision.
+  `server`, is pure too. It goes to L4 as well, outside the two stages
+  that take the 19 there (below), and the maintainer reads every
+  exclusion in it, as in the protocol packages.
   `testcerts` builds there too, but it is data only, so it is not one.
   The native-only packages are `server`, `cmd/smock`, `defdir`, `watch`,
   `openssl`, `protobuf-conformance`, `yaml-test-suite`, `schema` and
@@ -814,7 +815,10 @@ A package climbs four levels:
 
 All 19 pure packages go to L4, in two stages: first `yaml`, `http1`,
 `xml`, `re2`, `grpc`, `cookies`, `settings`, `metrics`, `usage` and
-`prng`, then the other nine. `server` and `cmd/smock` get coverage through
+`prng`, then the other nine. `serverparsers` goes to L4 too, by a climb of
+its own ([#339](https://github.com/hirunefu/smock/issues/339)) that waits
+for the ladder's tooling and for the parsers still to move out of
+`server`, not for either stage. `server` and `cmd/smock` get coverage through
 e2e, a BODY audit and, if the measurements on CI's runners bear out the
 estimate, mutants at operator level through e2e, monthly and before each
 release.
@@ -844,9 +848,10 @@ maintainer's approval, and shows in the weekly report.
 - **INT**: an integer literal, with both n+1 and n-1 where it is an
   operand of a comparison or an index, and one replacement elsewhere.
 - **STR**: a string literal replaced by the empty string or with one
-  character changed, in the protocol packages, in `server` and in `log`'s
-  line writers. A mock server's behaviour is mostly strings: header
-  names, content types, JSON keys, status texts and log lines.
+  character changed, in the protocol packages, in `server` and the parsers
+  moved out of it (`serverparsers`), and in `log`'s line writers. A mock
+  server's behaviour is mostly strings: header names, content types, JSON
+  keys, status texts and log lines.
 
 The pinned set holds one mutant per position, two for INT in a comparison
 or an index, and a fixed rule chooses the alternative, so that a runner
@@ -875,7 +880,10 @@ The pinned set takes these alternatives, for the reasons that
 - **ROR** swaps only `<` and `<=`, and `>` and `>=`. It does not swap `==`
   and `!=`, in either set.
 
-Where an operator needs more detail, v1 has this:
+Where an operator needs more detail, v1 has this. The mutation runner's
+ticket ([#299](https://github.com/hirunefu/smock/issues/299)) settled these
+details, and the maintainer approved them as part of v1;
+[ADR 0006](docs/adr/0006-tests-are-judged-by-four-ledgers.md) records why:
 
 - **BODY** replaces the body of a top-level function or method, trait
   implementations included, not of `init`, `main`, a local function or a
@@ -909,8 +917,8 @@ Where an operator needs more detail, v1 has this:
   escape, such as `\t`, is one character. A literal that writes no
   character outside its interpolations gets `_` at the start of its text,
   as the empty literal does. STR's scope is the protocol packages,
-  `server` and `log`, but `log/target.mbt`, the reader of request
-  targets.
+  `server`, `serverparsers` and `log`, but `log/target.mbt`, the reader
+  of request targets.
 - **Not sites**: literals in patterns, ranges (`..<` and `..=`), and
   `not(...)` calls.
 - **Skipped sites.** A rule skips a site that cannot be a mutant, and the
@@ -928,7 +936,8 @@ Where an operator needs more detail, v1 has this:
 
 Sites come from a parser, not from a lexer. For each package, each report
 gives the number of sites that each rule skipped (no default value for
-BODY, a string outside STR's scope, FFI) beside the number of survivors,
+BODY, a string outside STR's scope, FFI, a name that a condition binds, a
+string operand) beside the number of survivors,
 so that a "zero" always says what it is zero of. Each mutant has a stable
 id: its file, its enclosing definition, its operator, its original text,
 its replacement text and its ordinal. A report, an exclusion and a commit
@@ -1011,8 +1020,8 @@ An equivalence claim reaches the maintainer in three steps:
 2. **Adversarial.** For each claim that remains, a separate agent context
    tries to write a test that kills the mutant, from the spec.
 3. **The maintainer.** What survives both goes to the maintainer: every
-   entry in the protocol packages, and one in five of the others, as a
-   sample. The maintainer draws the sample after the batch is frozen, so
+   entry in the protocol packages and in `serverparsers`, and one in five
+   of the others, as a sample. The maintainer draws the sample after the batch is frozen, so
    that its author cannot know which entries will be read. If a sampled
    entry is rejected, its author triages the whole batch again, and the
    maintainer draws a new sample.
@@ -1036,6 +1045,13 @@ An equivalence claim reaches the maintainer in three steps:
   survivor proves it redundant, and with the maintainer's approval.
   Outside the removal batches, no change deletes, skips or weakens an
   existing test: a test that should go is proposed for a removal batch.
+- **Commit subjects.** A commit's subject is a short summary in the
+  imperative that ends with the issue it belongs to in parentheses, such
+  as `(#275)`, or with each of them, such as `(#258, #43)`, when it
+  belongs to two. The trace links of the removal proof
+  ([Removing a test](#removing-a-test), `scripts/trace-links.py`) take a
+  test's tickets from the subject of the commit that introduced it: the
+  issues in that last parenthesis, or else every issue the subject names.
 - **The weakening report.** For each branch, against its merge base with
   `main`, it lists the tests deleted; the assertion lines removed or
   changed in tests that stay; the snapshot lines changed; the skip
@@ -1206,7 +1222,8 @@ A test may go only under (A) or (B), and never when (C) holds.
   - the covered points;
   - the trace links, derived mechanically: from the commit that
     introduced the test block (following moves and copies across files),
-    to the ticket in its subject, to that issue's acceptance criteria.
+    to the tickets in its subject (Commit subjects, above), to those
+    issues' acceptance criteria.
 - **(B) Negative value.** It pins an implementation detail that a
   refactor keeping the behaviour would break, or restates a constant that
   no spec, document or user fixes. The default is to rewrite it, not to
@@ -1222,7 +1239,9 @@ A test may go only under (A) or (B), and never when (C) holds.
     checker's own tests, the goldens, the in-process codec tests on
     protoc's fixtures, the settings boundary pairs, and the reload tests
     with symlinks;
-  - a test of a constant that a spec fixes;
+  - a test of a constant that a spec fixes, a vendor's published API
+    reference included, such as the stop reasons of OpenAI's and
+    Anthropic's APIs;
   - a test that the backends agree, or a test in a release build, such as
     the engine's tests of seeded floating-point results;
   - a test of behaviour that a dependency provides;

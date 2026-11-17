@@ -39,7 +39,13 @@ test "a text template that does not parse is reported with the file, the JSON Po
   // is the literal's first character. For a message that says what it
   // found, such as `expected } to end the ${, found "q"`, it is the
   // character found." The maintainer confirmed that rule on 2026-11-17
-  // (#275).
+  // (#275). The columns of the unknown names and helpers, and of the
+  // references and calls that are wrong as a whole (`${fake.int(1)}`,
+  // `${path.x}`, `${query.a.b}`, `${method.x}`, ...), follow the next
+  // sentence there: "For an unknown name or helper, or a reference or a
+  // call that is wrong as a whole, such as `${path.x}` or `${fake.int(1)}`,
+  // it is the first character of the reference or the call", which the
+  // maintainer confirmed too.
   let bodies = [
     "abc ${query.x", "${}", "${ }", "${query.}", "${query.x query.y}", "${user.id}",
     "${item.sku}", "${fake.phone()}", "${fake.int(1)}", "${now(1, 2)}", "${fake.int('a', 2)}",
@@ -251,7 +257,10 @@ test "a structured template that does not parse is reported at the JSON Pointer 
   // message has the form of a reference's error, `<reference>: <reason>`,
   // as `path.x` and `query.a.b` have in the text-template test: the code's
   // form, which the maintainer confirmed on 2026-11-17 (#275). Its column,
-  // 3, is where the reference starts, as in those messages.
+  // 3, is where the reference starts, as templates.md, Errors when loading,
+  // says: "For an unknown name or helper, or a reference or a call that is
+  // wrong as a whole, ..., it is the first character of the reference or
+  // the call".
   inspect(
     template_problems(
       (

@@ -78,6 +78,12 @@ refuses no-schedule \
   'del(.on.schedule)' \
   "it should run on a push, on a pull request, on a weekly schedule and by hand" \
   "not on: pull_request push workflow_dispatch"
+# It may also be started by hand: the maintainer confirmed the trigger on
+# 2026-11-17 (#275), beside #288's push, pull request and schedule.
+refuses no-start-by-hand \
+  'del(.on.workflow_dispatch)' \
+  "it should run on a push, on a pull request, on a weekly schedule and by hand" \
+  "not on: pull_request push schedule"
 
 # A push or a pull request runs the download only when it changes one of
 # the three files that the check reads or that say what it runs.

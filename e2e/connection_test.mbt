@@ -420,6 +420,9 @@ async test "read timeout: a request that has begun but has not all arrived withi
 
 ///|
 async test "read timeout: a request pipelined behind a slow response has the read timeout from when that response is written, since smock reads nothing while it writes" {
+  // docs/running.md, Settings, `--read-timeout-ms`: "a request must arrive
+  // whole within 30 s of its first byte, or, when it was pipelined behind a
+  // response, of that response".
   let defs =
     #|{ "mocks": [{ "name": "users" }],
     #|  "stubs": [
@@ -522,6 +525,11 @@ async test "idle timeout: a connection that receives no request bytes for the id
 
 ///|
 async test "timeouts: neither timeout runs while smock writes a response, however long it takes; the idle timeout starts after it" {
+  // docs/running.md, Limits and timeouts: "Over HTTP/1.1, neither the read
+  // nor the idle timeout runs while smock waits before a response, as for a
+  // delay, or writes one, however long that takes: the idle timeout runs
+  // from the end of the last response." The maintainer confirmed it on
+  // 2026-11-17 (#275).
   let stopped = on_both_ports(
     files=[("users.json", outlasting)],
     args=["--read-timeout-ms", "300", "--idle-timeout-ms", "500"],
@@ -561,6 +569,10 @@ async test "timeouts: neither timeout runs while smock writes a response, howeve
 
 ///|
 async test "timeouts: a read timeout longer than the idle timeout gives a request that has begun the whole read timeout to arrive" {
+  // docs/running.md, Limits and timeouts: "A request that has begun holds
+  // off the idle timeout, even a shorter one: from its first byte it has
+  // the whole read timeout to arrive." The maintainer confirmed it on
+  // 2026-11-17 (#275).
   let stopped = on_both_ports(
     files=[("users.json", any_method)],
     args=["--read-timeout-ms", "1500", "--idle-timeout-ms", "300"],

@@ -8,7 +8,9 @@
 #   branches locally and opens no pull requests, so a check on pull
 #   requests would never run on its work. Dependabot's pull requests keep
 #   their own path.
-# - It cancels an older run of the same branch, and no other run.
+# - It cancels an older run of the same branch, and no other run, as the
+#   maintainer confirmed on 2026-11-17 (#275): the report of a branch's
+#   head is the one read before a merge.
 # - One job writes the report: one of its steps runs
 #   `python3 scripts/weakening-report.py --base origin/main`, against the
 #   merge base with main, which needs the whole history (the checkout's

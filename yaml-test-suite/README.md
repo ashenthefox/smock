@@ -69,6 +69,13 @@ the suite's events or from the input:
 | A plain key that YAML 1.1 or 1.2 does not read as a string | the events | the safe subset | "quote this key" |
 | A plain value that is a number JSON cannot hold | the events | the mode for OpenAPI documents | "quote this value" |
 
+A message names a construct when it holds the construct's name, as the
+table gives it, as whole words, in the singular or the plural: "anchor"
+or "anchors" names an anchor, "multiple documents" several documents, and
+"empty" an empty value or key, while a longer word that holds the name,
+such as "unanchored", names nothing. The maintainer gave this reading of
+`parse`'s "each with a message naming it" on 2026-11-17 (#275).
+
 A plain scalar's type comes from the regular expressions of YAML 1.1's
 types ([yaml.org/type](https://yaml.org/type/): bool, int, float, null,
 timestamp, merge and value) and of the YAML 1.2 core schema (YAML 1.2.2,
@@ -91,9 +98,13 @@ and the reason:
 - `skipped`: the testee skips the case.
 - `#<issue>`: a bug, which fails until the issue is done.
 
-A case with one of the constructs of the table is never listed: it
+A case with one of the constructs of the table is not listed: it
 passes when smock refuses it as the documents say, and fails
-otherwise. The run fails on a case that fails or is skipped without being
+otherwise. One exception, which the maintainer allowed on 2026-11-17: a
+case that smock refuses first for one of the known differences, before
+it reaches the construct, is listed as `differs`, and its reason says
+that the case holds the construct too. UT92, a key of a flow mapping over
+several lines in a stream of two documents, is such a case. The run fails on a case that fails or is skipped without being
 listed so, on a listed case that passes, which must come off the list, and
 on a listed case that the suite does not have. Its output lists every
 listed case with its outcome and reason.

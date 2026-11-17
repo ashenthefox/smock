@@ -24,7 +24,10 @@ mutation/kept-tests.*                  the keep list: the tests kept for reasons
 docs/ledgers/                          the use-case and boundary ledgers, whose rows keep their tests under removal rule (C) (#286)
 scripts/mutation/                      the mutation runner and its site finder (#298), operator set v1 and its alternative rule, whose version every record carries (operators.py, #299), and the fixture module with its expected sites and verdicts (#298, #299)
 mutation/                              the mutation runner's committed data: the site counts and approved drops (#309), the flake threshold, and the flake rates if they are committed (#301), and the canary's mutants, recorded verdicts and explained differences (#308)
-coverage/                              the coverage wrapper and its committed data: the bisect parser (#296), the floors and approved raises (#297), and the scope's list of generated files
+scripts/coverage.sh                    the coverage wrapper, which runs the tests with coverage on and reports the uncovered points (#296)
+scripts/coverage-report.py             the coverage report: the bisect parser, which reads the points and their counters (#296)
+scripts/coverage-tests/                the coverage report's committed reports and tree, which its test judges it by (#296)
+coverage/                              the coverage ledger's committed data: the floors and approved raises (#297), and the scope's list of generated files
 scripts/check-merge.*                  the merge check (#312)
 scripts/check-weekly-run.*             the release's check of the latest weekly run (#316)
 .github/workflows/mutation*.yml        a mutation workflow: the bulk runs (#313), the weekly and monthly runs (#314), and server and cmd/smock through e2e (#344, #346)

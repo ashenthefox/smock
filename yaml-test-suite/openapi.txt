@@ -11,9 +11,11 @@
 #
 # A case that fails or is skipped without being listed so fails the run,
 # and so does a listed case that passes: it must come off. A case with one
-# of the constructs of yaml-test-suite/README.md's table is never listed
+# of the constructs of yaml-test-suite/README.md's table is not listed
 # here: it passes when smock refuses it with the message the documents
-# give for that construct. Before a branch merges into main, this list may
+# give for that construct. The one exception is a case that smock refuses
+# first for a known difference: it is listed as differs, and its reason
+# says that it holds the construct too. Before a branch merges into main, this list may
 # keep its bugs, each with its issue, until yaml's L4 ticket (#323) fixes
 # them (docs/merging-into-main.md).
 
@@ -44,7 +46,7 @@ QF4Y  differs  A flow sequence holds a key: value pair without braces, a single 
 9BXH     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
 9SA2     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
 NJ66     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
-UT92     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
+UT92     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line". The case also holds two documents, and the documents say that both modes refuse several documents; smock refuses the key first, in the first document, so the case is listed with the known difference (the maintainer's decision of 2026-11-17).
 VJP3/01  differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
 
 # Tabs in the white space at the start of a line.

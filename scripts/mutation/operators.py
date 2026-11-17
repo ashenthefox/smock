@@ -206,10 +206,11 @@ def integer_literal(text, in_comparison_or_index):
     return [Alternative(write_integer(v, prefix, suffix, digits), v in pinned) for v in candidates]
 
 
-# STR's scope: the protocol packages, server, and log's line and envelope
-# writers, but not log's reader of request targets. Paths are relative to
-# the workspace's root.
-STR_SCOPE = ("http1/", "grpc/", "yaml/", "re2/", "xml/", "protobuf/", "server/", "log/")
+# STR's scope: the protocol packages, server, serverparsers, which holds
+# the parsers moved out of server, and log's line and envelope writers, but
+# not log's reader of request targets. Paths are relative to the
+# workspace's root.
+STR_SCOPE = ("http1/", "grpc/", "yaml/", "re2/", "xml/", "protobuf/", "server/", "serverparsers/", "log/")
 STR_OUTSIDE = ("log/target.mbt",)
 
 

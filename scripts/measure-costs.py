@@ -344,13 +344,14 @@ def part_rebuild(out, args):
 # overflows wasm-gc's stack when it is instrumented (#275, step 2).
 NATIVE_ONLY = [
     "smock/smock/server", "smock/smock/defdir", "smock/smock/watch", "smock/smock/openssl",
-    "smock/smock/protobuf-conformance", "smock/smock/schema",
+    "smock/smock/protobuf-conformance", "smock/smock/yaml-test-suite", "smock/smock/schema",
 ]
 WASM_GC = [
     "smock/smock/buildinfo", "smock/smock/cookies", "smock/smock/definitions", "smock/smock/engine",
     "smock/smock/importopenapi", "smock/smock/llm", "smock/smock/log", "smock/smock/metrics",
-    "smock/smock/prng", "smock/smock/settings", "smock/smock/template", "smock/smock/unicode",
-    "smock/smock/usage", "smock/grpc", "smock/http1", "smock/protobuf", "smock/re2", "smock/xml",
+    "smock/smock/prng", "smock/smock/serverparsers", "smock/smock/settings", "smock/smock/template",
+    "smock/smock/unicode", "smock/smock/usage", "smock/grpc", "smock/http1", "smock/protobuf",
+    "smock/re2", "smock/xml",
 ]
 YAML_NATIVE = ["smock/yaml"]
 

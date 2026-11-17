@@ -216,7 +216,7 @@ links moved
 exits moved 0
 value moved 'test("b/b_test.mbt", "a total counts every request")["commit"]' "\"$introduced\""
 value moved 'test("b/b_test.mbt", "a total counts every request")["introduced_in"]' '"a/a_test.mbt"'
-value moved 'test("b/b_test.mbt", "a total counts every request")["issue"]' '12'
+value moved 'test("b/b_test.mbt", "a total counts every request")["tickets"]' '[12]'
 value moved 'out["issues"]["12"]["criteria"]' '["A total counts every request.","A new total is zero."]'
 
 # gh is asked once for every issue and pull request, in the checkout, so
@@ -365,7 +365,7 @@ commit "Remove the test of windows from a (#32)"
 links copied
 exits copied 0
 value copied 'test("b/b_test.mbt", "a total resets to zero when the window ends")["commit"]' "\"$introduced\""
-value copied 'test("b/b_test.mbt", "a total resets to zero when the window ends")["issue"]' '30'
+value copied 'test("b/b_test.mbt", "a total resets to zero when the window ends")["tickets"]' '[30]'
 
 # Tests that change places in their file, and a test that a later commit
 # extends with more lines, keep the commit that introduced them.
@@ -407,7 +407,7 @@ links in_place
 exits in_place 0
 value in_place 'test("a/a_test.mbt", "a total counts one request")["commit"]' "\"$introduced\""
 value in_place 'test("a/a_test.mbt", "a total counts no request")["commit"]' "\"$introduced\""
-value in_place '[t["issue"] for t in out["tests"]]' '[40,40]'
+value in_place '[t["tickets"] for t in out["tests"]]' '[[40],[40]]'
 
 # A test whose name changes is, for moon and for its header line, a new
 # test: its link is the commit that gave it the name it has, though that
@@ -438,7 +438,7 @@ commit "Name the file of the tests of totals after them (#53)"
 links renamed
 value renamed 'test("a/totals_test.mbt", "a total counts each request once")["commit"]' "\"$renamed\""
 value renamed 'test("a/totals_test.mbt", "a total counts each request once")["introduced_in"]' '"a/a_test.mbt"'
-value renamed 'test("a/totals_test.mbt", "a total counts each request once")["issue"]' '51'
+value renamed 'test("a/totals_test.mbt", "a total counts each request once")["tickets"]' '[51]'
 
 # A new test that takes the name of an older test in another package is
 # not a copy of it: blame takes its header line from the older file, but
@@ -480,10 +480,18 @@ commit "Check a path of one name (#67)"
 links same_name
 value same_name 'test("x/x_test.mbt", "a compile error position counts characters, not bytes")["commit"]' "\"$named\""
 value same_name 'test("x/x_test.mbt", "a compile error position counts characters, not bytes")["introduced_in"]' '"x/x_test.mbt"'
-value same_name 'test("x/x_test.mbt", "a compile error position counts characters, not bytes")["issue"]' '66'
-value same_name 'test("r/r_test.mbt", "a compile error position counts characters, not bytes")["issue"]' '12'
+value same_name 'test("x/x_test.mbt", "a compile error position counts characters, not bytes")["tickets"]' '[66]'
+value same_name 'test("r/r_test.mbt", "a compile error position counts characters, not bytes")["tickets"]' '[12]'
 
-# --- The ticket a subject names ---------------------------------------------
+# --- The tickets a subject names --------------------------------------------
+
+# CONTRIBUTING.md, Rules for the work, Commit subjects: a commit's subject
+# "ends with the issue it belongs to in parentheses, such as `(#275)`, or
+# with each of them, such as `(#258, #43)`, when it belongs to two", and
+# the trace links take a test's tickets from it: "the issues in that last
+# parenthesis, or else every issue the subject names". The maintainer
+# confirmed the rule on 2026-11-17 (#275): the ticket comes from the
+# trailing "(#N)", and a subject that names two tickets links to both.
 
 # subject <n> <subject>: commits a test file of its own, s/s<n>_test.mbt,
 # whose one test is named after <n>.
@@ -506,14 +514,25 @@ subject 5 "Raise moonc and the async runtime (#258, #43)"
 subject 6 "Work around moonbitlang/async#725 until it is released"
 subject 7 "Mention #12 in a fix that names its own ticket (#40)"
 subject 8 "Name an issue that GitHub does not know (#999)"
+subject 9 "Count #12's totals as #39 measured them, then check #12 again"
+subject 10 "Mention #12 in a change of two tickets (#258, #43)"
+subject 11 "Say what (#40) left open, for #39"
 issue 12 "Count requests in totals" closed </dev/null
 issue 39 "CPU between nodes" closed </dev/null
 issue 40 "A fix" closed </dev/null
+issue 43 "The async runtime" closed </dev/null
 issue 134 "Spec: gRPC unary calls" closed </dev/null
+issue 258 "Raise moonc" closed </dev/null
 links subjects
 exits subjects 0
-value subjects '[t["issue"] for t in out["tests"]]' '[12,39,134,null,null,null,40,999]'
-value subjects 'sorted(out["issues"])' '["12","134","39","40","999"]'
+value subjects '[test(f"s/s{n}_test.mbt", f"subject {n}")["tickets"] for n in range(1, 12)]' '[[12],[39],[134],[],[258,43],[],[40],[999],[12,39],[258,43],[40,39]]'
+if grep -qxF "trace-links: 11 tests, 9 with a ticket; 7 tickets, 7 of them without acceptance criteria" "$tmp/subjects.err"; then
+  pass "subjects: counts the tests with a ticket"
+else
+  fail "subjects: says $(cat "$tmp/subjects.err")"
+fi
+value subjects 'sorted(out["issues"])' '["12","134","258","39","40","43","999"]'
+value subjects '[out["issues"][n]["title"] for n in ["258","43"]]' '["Raise moonc","The async runtime"]'
 value subjects 'out["issues"]["999"]' '{"found":false}'
 value subjects 'out["issues"]["134"]["title"]' '"Spec: gRPC unary calls"'
 
@@ -693,7 +712,7 @@ links naming
 exits naming 0
 value naming '[[t["package"], t["file"], t["line"], t["index"], t["kind"], t["name"]] for t in out["tests"]]' \
   '[["fix/fix/a","a/a_test.mbt",7,0,"test","a plain test"],["fix/fix/a","a/a_test.mbt",13,1,"test","an \\\"escaped\\\" name, and a backslash \\\\ too"],["fix/fix/a","a/a_test.mbt",18,2,"test","a benchmark"],["fix/sub","sub/README.mbt.md",7,0,"test","the first example"],["fix/sub","sub/README.mbt.md",12,1,"test","the second example"],["fix/sub","sub/README.mbt.md",21,2,"test","the third example"],["fix/sub","sub/doc.mbt",5,0,"doc",null],["fix/sub","sub/doc.mbt",17,1,"doc",null]]'
-value naming '{t["issue"] for t in out["tests"]} == {70}' 'true'
+value naming 'all(t["tickets"] == [70] for t in out["tests"])' 'true'
 
 # A doc test moves with the function whose doc comment holds it: blame
 # reads it together with the rest of that item, since its own few lines
@@ -726,8 +745,8 @@ pub fn two() -> Int {
 EOF
 commit "Give the number two a file of its own (#71)"
 links doc_moved
-value doc_moved '[[t["file"], t["index"], t["issue"], t["introduced_in"]] for t in out["tests"] if t["kind"] == "doc"]' \
-  '[["sub/doc.mbt",0,70,"sub/doc.mbt"],["sub/two.mbt",0,70,"sub/doc.mbt"]]'
+value doc_moved '[[t["file"], t["index"], t["tickets"], t["introduced_in"]] for t in out["tests"] if t["kind"] == "doc"]' \
+  '[["sub/doc.mbt",0,[70],"sub/doc.mbt"],["sub/two.mbt",0,[70],"sub/doc.mbt"]]'
 
 echo
 echo "$passed passed, $failed failed"

@@ -17,10 +17,10 @@ A case passes when smock reads it as the suite does:
 - When the suite marks the input an error, smock refuses it.
 - Otherwise, when the input has a construct that the documents say the
   mode refuses, smock refuses it with the message the documents give for
-  that construct: one that names it, or "quote this value" or "quote this
-  key" for a plain scalar that YAML 1.1 or 1.2 types otherwise. A refusal
-  for another reason does not count. The constructs and where the
-  documents say so are under CONSTRUCTS below.
+  that construct: one that names it, holding its name as whole words, or
+  "quote this value" or "quote this key" for a plain scalar that YAML 1.1
+  or 1.2 types otherwise. A refusal for another reason does not count. The
+  constructs and where the documents say so are under CONSTRUCTS below.
 - Otherwise, when the suite gives the JSON it reads as, smock reads that
   JSON: the same values, and the members of each object in the same order.
 - Otherwise, the suite gives no JSON, and smock reads the input.
@@ -177,7 +177,12 @@ def read_list(path):
 #   mapping are read in the order they are written."
 #
 # Each construct is (what it is, in words; the pattern its message must
-# match; the words of that rule), by its kind.
+# match; the words of that rule), by its kind. A message names a construct
+# when it holds the construct's name as whole words, in the singular or the
+# plural, and "empty" for an empty value or key: the maintainer's reading
+# of `parse`'s "each with a message naming it" (2026-11-17, #275), which
+# yaml-test-suite/README.md states. So each pattern of a name is bounded by
+# \b on both sides.
 NAMES_IT = "a message that names it"
 CONSTRUCTS = {
     "anchor": ("an anchor", r"\banchors?\b", NAMES_IT),

@@ -49,7 +49,8 @@ rows it counts: see below.
 
 This ledger is not yet every limit the documents state. The import guide's
 [Limits](../importing-openapi.md#limits) alone list ten, and the gRPC
-guides and the template helpers more. Gap G3 is the rest.
+guides and the template helpers more. Gap G3 is the rest, which #375
+lists.
 
 ## Changes since the survey
 
@@ -102,16 +103,17 @@ Rows that the survey had wrong at d953f320, and that are unchanged since:
 
 ## Gaps that no ticket closes
 
-A gap that no ticket of the test review closes is filed as an issue. Until
-it has its number, its row names #286, the ticket that files it.
+A gap that no ticket of the test review closes is filed as an issue, which
+its row names.
 
-- **G3.** This ledger lists the survey's 40 limits and three more. The
-  documents state other limits that no row lists yet, such as the ten of
-  the import guide's [Limits](../importing-openapi.md#limits). Step 3's
+- **G3, #375.** This ledger lists the survey's 40 limits and three more.
+  The documents state other limits that no row lists yet, such as the ten
+  of the import guide's [Limits](../importing-openapi.md#limits). Step 3's
   tickets test the limits this ledger lists in their package, so a limit
   missing here is tested by no ticket. The gap is to list every limit the
-  documents state, each with its tests or a ticket.
-- **G4.** No test takes an `after` of 2^53 - 1, the largest the Admin
+  documents state, each with its tests or a ticket, and #375, which does
+  it, blocks the tickets that take a package to L4.
+- **G4, #376.** No test takes an `after` of 2^53 - 1, the largest the Admin
   API's guide allows, in the unmatched list's query string, which `server`
   reads (L15b). #333 tests the Journal query's body, which `engine`
   reads, as a limit of this ledger in `engine`.
@@ -144,7 +146,7 @@ it has its number, its row names #286, the ticket that files it.
 | L13 | The Journal's byte bound: a quarter of the memory limit, at least 1 MiB and at most 64 MiB | [Settings](../running.md#settings), [ADR 0004](../adr/0004-journal-byte-bound-follows-the-memory-limit.md) | `settings` | tested | `settings/journal_bound_test.mbt` "journal byte bound: a quarter of the memory limit when that is below 64 MiB"<br>`settings/journal_bound_test.mbt` "journal byte bound: at least 1 MiB, however small the memory limit" | `settings/journal_bound_test.mbt` "journal byte bound: 64 MiB when a quarter of the memory limit is 64 MiB or more"<br>`settings/journal_bound_test.mbt` "journal byte bound: at least 1 MiB, however small the memory limit" |
 | L14 | The state byte bound: an eighth of the memory limit, at least 1 MiB and at most 64 MiB; a write past it gets 507 | [The state bound](../definition-files/variables.md#the-state-bound) | `settings`, `engine` | tested | `settings/state_bound_test.mbt` "state byte bound: an eighth of the memory limit when that is below 64 MiB"<br>`settings/state_bound_test.mbt` "state byte bound: at least 1 MiB, however small the memory limit"<br>`engine/state_bound_test.mbt` "at the bound: a write that would take the count above it writes nothing and answers 507, with no response picked, after the Scenario move and with the Stub's delay" | `settings/state_bound_test.mbt` "state byte bound: 64 MiB when an eighth of the memory limit is 64 MiB or more"<br>`engine/state_bound_test.mbt` "at the bound: a write that would take the count above it writes nothing and answers 507, with no response picked, after the Scenario move and with the Stub's delay" |
 | L15a | A Journal query's or the unmatched list's `limit`, from 1 to 10000 | [The Journal](../admin-api.md#the-journal) | `server` | tested | `e2e/verify_test.mbt` "the unmatched requests come at most limit at a time; a limit that is not an integer from 1 to 10000 is refused with invalid_request" | `e2e/verify_test.mbt` "the unmatched requests come at most limit at a time; a limit that is not an integer from 1 to 10000 is refused with invalid_request" |
-| L15b | A Journal query's `after`, in its body or in the unmatched list's query string, from 0 to 2^53 - 1 | [The Journal](../admin-api.md#the-journal) | `engine`, `server` | partly | `e2e/verify_test.mbt` "a query and the unmatched requests page after the last entry of the page before; an after that is not an integer from 0 to 2^53 - 1 is refused with invalid_request" (0)<br>#333 tests 2^53 - 1 in a query's body<br>#286 files gap G4: no test takes 2^53 - 1 in the query string | `e2e/verify_test.mbt` "a query and the unmatched requests page after the last entry of the page before; an after that is not an integer from 0 to 2^53 - 1 is refused with invalid_request" (-1 and 2^53) |
+| L15b | A Journal query's `after`, in its body or in the unmatched list's query string, from 0 to 2^53 - 1 | [The Journal](../admin-api.md#the-journal) | `engine`, `server` | partly | `e2e/verify_test.mbt` "a query and the unmatched requests page after the last entry of the page before; an after that is not an integer from 0 to 2^53 - 1 is refused with invalid_request" (0)<br>#333 tests 2^53 - 1 in a query's body<br>#376 (gap G4): no test takes 2^53 - 1 in the query string | `e2e/verify_test.mbt` "a query and the unmatched requests page after the last entry of the page before; an after that is not an integer from 0 to 2^53 - 1 is refused with invalid_request" (-1 and 2^53) |
 | L17 | `dataWrites` holds 1 to 100 writes | [Writing buckets: `dataWrites`](../definition-files/data-buckets.md#writing-buckets-datawrites) | `definitions` | partly | #334 shows a Stub with exactly 100 writes loading | `definitions/data_writes_test.mbt` "dataWrites holds 1 to 100 writes, each an object with a known op, a bucket and the members its op takes" (101) |
 | L18 | A Variable's name is 1 to 128 characters | [Variables](../definition-files/variables.md#variables) | `definitions` | tested | `definitions/variables_test.mbt` "variables beside response or responses take any JSON value, a template or not, and names of 1 to 128 name characters" | `definitions/variables_test.mbt` "a name that is empty, too long or has other characters, variables that are not an object, and a value that does not parse are load errors at their JSON Pointer" |
 | L19 | A Variable's value takes at most 1 MiB as compact JSON | [When Variables are written](../definition-files/variables.md#when-variables-are-written), [Through the Admin API](../definition-files/variables.md#through-the-admin-api) | `engine` | tested | `engine/variable_admin_test.mbt` "set refuses a value above 1 MiB of compact JSON, the bound a Stub's write has, before the bound on per-Session state counts it, and writes nothing" | `engine/variable_admin_test.mbt` "set refuses a value above 1 MiB of compact JSON, the bound a Stub's write has, before the bound on per-Session state counts it, and writes nothing"<br>`e2e/variable_admin_test.mbt` "Admin API errors on Variables: an unknown Mock, a name that is not a Variable name, a body that is not JSON, is missing or takes more than 1 MiB, an unset Variable, and a method a path does not take" |

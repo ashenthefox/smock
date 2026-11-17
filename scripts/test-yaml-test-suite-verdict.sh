@@ -263,8 +263,8 @@ error() {
 # that mode when smock refuses it with the message the documents give for
 # it: a message that names it, or "quote this value" or "quote this key"
 # for a plain scalar that YAML 1.1 or 1.2 types otherwise. The messages
-# below are smock's (yaml/parser.mbt). A mode that reads the construct is
-# judged by the suite's JSON as usual.
+# below are smock's (yaml/parser.mbt and yaml/scalar.mbt). A mode that
+# reads the construct is judged by the suite's JSON as usual.
 constructs() {
   suite
   testcase ANCH "An anchor" 'a: &x 1\n' '+STR\n+DOC\n+MAP\n=VAL :a\n=VAL &x :1\n-MAP\n-DOC\n-STR' '{"a": 1}'
@@ -328,15 +328,22 @@ verdict constructs-refused-openapi openapi
 exits constructs-refused-openapi 0
 says constructs-refused-openapi "yaml-test-suite openapi: 19 cases, 19 passed, 0 skipped, 0 failed"
 
-# A refusal for another reason does not count, nor does reading it.
+# A refusal for another reason does not count, nor does reading it. A
+# message names a construct only when it holds the construct's name as
+# whole words (yaml-test-suite/README.md: "a longer word that holds the
+# name, such as "unanchored", names nothing", the maintainer's reading of
+# "each with a message naming it"), so "hashtags" names no tag.
 constructs
 sed -i 's|"anchors (&) are not supported; quote the value if it is text"|"bad indentation"|' "$tmp/answers"
 sed -i 's|{"error":{"pointer":"/a","message":"\\"yes\\" may be read as a boolean; quote this value"}}|{"value":{"a":"yes"}}|' "$tmp/answers"
 sed -i 's|quote this key|quote this value|' "$tmp/answers"
 sed -i 's|"directives (%) are not supported"|"multiple documents are not supported"|' "$tmp/answers"
+sed -i 's|"tags (!) are not supported; quote the value if it is text"|"hashtags are not supported"|' "$tmp/answers"
 verdict constructs-otherwise
 exits constructs-otherwise 1
-says constructs-otherwise "yaml-test-suite safe: 19 cases, 15 passed, 0 skipped, 4 failed"
+says constructs-otherwise "yaml-test-suite safe: 19 cases, 14 passed, 0 skipped, 5 failed"
+says constructs-otherwise "yaml-test-suite safe: TAGS failed, and is not listed: A tag"
+says constructs-otherwise "    smock refuses it: /a: hashtags are not supported"
 says constructs-otherwise "yaml-test-suite safe: ANCH failed, and is not listed: An anchor"
 says constructs-otherwise "    the documents say the safe subset refuses an anchor, with a message that names it"
 says constructs-otherwise "    smock refuses it: /a: bad indentation"
@@ -347,6 +354,18 @@ says constructs-otherwise "yaml-test-suite safe: KEY1 failed, and is not listed:
 says constructs-otherwise '    the documents say the safe subset refuses the plain key "1", which YAML 1.1 or 1.2 does not read as a string, with "quote this key"'
 says constructs-otherwise "yaml-test-suite safe: DIRE failed, and is not listed: A directive"
 says constructs-otherwise "    the documents say the safe subset refuses a directive, with a message that names it"
+
+# A case with a construct that smock refuses first for a known difference
+# may be listed as one, its reason saying that it holds the construct too
+# (yaml-test-suite/README.md, The lists: the exception the maintainer
+# allowed, such as UT92). It fails, and the run lists it.
+constructs
+sed -i 's|"multiple documents are not supported"|"a key must be on a single line"|' "$tmp/answers"
+list safe "DOCS  differs  A key over several lines, refused first; the case also holds two documents."
+verdict construct-listed-difference
+exits construct-listed-difference 0
+says construct-listed-difference "  DOCS failed, listed as a known difference: A key over several lines, refused first; the case also holds two documents."
+says construct-listed-difference "yaml-test-suite safe: every case passed or is listed"
 
 echo
 echo "test-yaml-test-suite-verdict: $passed passed, $failed failed"

@@ -43,6 +43,9 @@ be2b8e0b, against the code and the tests there.
 | Messages asserted by no test | 22, 20 of which a user can see | none of the 22: 20 asserted, 2 deleted |
 | The top-level help | never asserted | still open (#370) |
 
+Since be2b8e0b, #370's test asserts the top-level help, with the
+description it fixed: F12 is tested, and M23 asserted.
+
 The survey's rows give 92 features covered, not the 93 of its summary: six
 rows have no test (F12, F15, F39, F63, F98 and F99), and one is partly
 tested (F96).
@@ -61,7 +64,7 @@ Rows whose status changed between d953f320 and be2b8e0b, and why:
 - **F95**, the Helm chart's values: the survey counted it covered, but
   its evidence says that two documented values, `definitions.gitSync.depth`
   and `definitions.gitSync.extraArgs`, are rendered by no test. Still true
-  at be2b8e0b, so it is partly tested, with gap G1.
+  at be2b8e0b, so it is partly tested, with gap G1 (#373).
 - **M01 to M06** (YAML), **M09 to M13** (templates), **M14** (XML),
   **M15 to M18** (the Admin API), **M19 and M20** (definitions), **M21 and
   M22** (`smock import-openapi`): asserted since, by #280, #281, #283 and
@@ -77,16 +80,16 @@ Rows whose status changed between d953f320 and be2b8e0b, and why:
 
 ## Gaps that no ticket closes
 
-A gap that no ticket of the test review closes is filed as an issue. Until
-it has its number, its row names #286, the ticket that files it.
+A gap that no ticket of the test review closes is filed as an issue, which
+its row names.
 
-- **G1.** The Helm chart's rendering tests check no rendering of
+- **G1, #373.** The Helm chart's rendering tests check no rendering of
   `definitions.gitSync.depth` or `definitions.gitSync.extraArgs`, which the
   chart's README documents (F95).
-- **G2.** The Helm chart's git-sync and OCI-image modes are rendered and
-  admitted on kind, but never served. Serving them on kind is out of scope
-  for now (#275, decision 5), so the gap is filed to be kept in sight
-  (F96).
+- **G2, #374.** The Helm chart's git-sync and OCI-image modes are rendered
+  and admitted on kind, but never served. Serving them on kind is out of
+  scope for now (#275, decision 5), so the issue is deferred, filed to be
+  kept in sight (F96).
 
 ## Features
 
@@ -105,7 +108,7 @@ it has its number, its row names #286, the ticket that files it.
 | F09 | `smock check`: each problem with its file and JSON Pointer, exit status 1, and warnings | [`smock check`](../commands.md#smock-check), [Checking a definitions directory](../definition-files.md#checking-a-definitions-directory) | tested | `e2e/check_test.mbt` "smock check prints every problem, one line each with the file and JSON Pointer, and exits 1"<br>`e2e/check_test.mbt` "smock check warns about a Stub that can never match, one line with its file and JSON Pointer naming the Stub that shadows it, and still exits 0" |
 | F10 | `smock render`: a sample, `--time`, `--seed` and `--response`, and its exit statuses | [`smock render`](../commands.md#smock-render) | tested | `e2e/render_test.mbt` "smock render prints the named Stub's status, headers and body for a sample request, with no failed conditions when it meets them all"<br>`e2e/render_test.mbt` "the time and the seed can be given to smock render and to the Admin render operation; invalid values are rejected"<br>`e2e/render_test.mbt` "smock render --response and the Admin render operation's response parameter render the same given response, and refuse an index the Stub does not have" |
 | F11 | `smock import-openapi`: its flags, exit statuses 0, 1 and 2, `--overwrite`, and the write through a temporary file | [`smock import-openapi`](../commands.md#smock-import-openapi), [Importing OpenAPI](../importing-openapi.md#importing-openapi) | tested | `e2e/import_openapi_test.mbt` "smock import-openapi writes the Definition file, prints its summary line and exits 0"<br>`e2e/import_openapi_test.mbt` "smock import-openapi writes nothing and exits 1 when the document has an error or cannot be read, and says that it reads no URLs when the document names one"<br>`e2e/import_openapi_test.mbt` "smock import-openapi rejects bad arguments as usage errors, on stderr with exit status 2"<br>`e2e/import_openapi_test.mbt` "smock import-openapi --overwrite on replaces an existing --output, and leaves nothing else new in its directory"<br>`e2e/import_openapi_golden_test.mbt` "smock import-openapi imports the guide's example into its committed file, which the guide's quick start shows with its document, and smock check accepts with no warning" |
-| F12 | The top-level `smock`, `smock help` and `smock --help`, whose description should be the README's | [smock](../../README.md#smock), [Commands](../commands.md#commands) | open | #370 fixes the description, which leaves out gRPC; the help's test, written for #291, lands with that fix |
+| F12 | The top-level `smock`, `smock help` and `smock --help`, whose description should be the README's | [smock](../../README.md#smock), [Commands](../commands.md#commands) | tested | `e2e/serve_test.mbt` "smock, smock help and smock --help print one usage, which lists the commands docs/commands.md names and says what smock serves as the README's opening line does" (#370, which fixed the description) |
 | F13 | `smock --version` | [Status](../admin-api.md#status) | tested | `e2e/serve_test.mbt` "smock --version names the commit checked out and the toolchain in use, however long ago the binary was first built"<br>`scripts/smoke-test-image.sh` runs the image's `--version` |
 | F14 | The Definition-file JSON Schema agrees with smock | [The JSON Schema](../definition-files.md#the-json-schema) | tested | `scripts/check-schema.sh` validates each fixture with the Schema and with `smock check`<br>`schema/yaml_writer_test.mbt` "every Definition-file fixture, written as YAML, reads back as the same tree" |
 | F15 | Definition files from another configuration language, such as `docs/examples/users.jsonnet` | [Writing Definition files in another configuration language](../definition-files.md#writing-definition-files-in-another-configuration-language) | open | #287 runs the Jsonnet example if a pinned jsonnet is available, and otherwise records a manual check here |
@@ -223,8 +226,8 @@ it has its number, its row names #286, the ticket that files it.
 | ID | Feature | Source | Status | Checked by |
 |---|---|---|---|---|
 | F94 | The container image | [Container image](../installing.md#container-image) | tested | `scripts/smoke-test-image.sh` runs the image in CI and in the release |
-| F95 | The Helm chart's values, each rendered, and its ConfigMap mode served on kind | [Values](../../charts/smock/README.md#values) | partly | `scripts/test-helm-chart.sh` renders the chart for each delivery mode and option<br>`scripts/test-helm-chart-on-kind.sh` installs and upgrades the chart on kind<br>#286 files gap G1: no test renders `definitions.gitSync.depth` or `definitions.gitSync.extraArgs` |
-| F96 | The Helm chart's git-sync and OCI-image delivery modes, served | [From a Git repository (git-sync)](../../charts/smock/README.md#from-a-git-repository-git-sync), [From an OCI image](../../charts/smock/README.md#from-an-oci-image) | partly | `scripts/test-helm-chart-on-kind.sh` admits their Pods through Pod Security admission on kind<br>`e2e/reload_test.mbt` "a git-sync update, which points the symlink that --dir goes through at a new worktree and removes the old one, reloads the definitions"<br>#286 files gap G2: serving both modes on kind is out of scope for now (#275, decision 5) |
+| F95 | The Helm chart's values, each rendered, and its ConfigMap mode served on kind | [Values](../../charts/smock/README.md#values) | partly | `scripts/test-helm-chart.sh` renders the chart for each delivery mode and option<br>`scripts/test-helm-chart-on-kind.sh` installs and upgrades the chart on kind<br>#373 (gap G1): no test renders `definitions.gitSync.depth` or `definitions.gitSync.extraArgs` |
+| F96 | The Helm chart's git-sync and OCI-image delivery modes, served | [From a Git repository (git-sync)](../../charts/smock/README.md#from-a-git-repository-git-sync), [From an OCI image](../../charts/smock/README.md#from-an-oci-image) | partly | `scripts/test-helm-chart-on-kind.sh` admits their Pods through Pod Security admission on kind<br>`e2e/reload_test.mbt` "a git-sync update, which points the symlink that --dir goes through at a new worktree and removes the old one, reloads the definitions"<br>#374 (gap G2, deferred): serving both modes on kind is out of scope for now (#275, decision 5) |
 | F97 | Verifying the image's and the chart's signatures | [Verify the image](../installing.md#verify-the-image), [Verify the Helm chart](../installing.md#verify-the-helm-chart) | tested | `scripts/verify-image.sh` runs in the release, after it publishes<br>`scripts/verify-chart.sh` runs in the release, after it publishes |
 | F98 | The Mockoon migration guide's worked example | [A worked example](../migrating-from-mockoon.md#a-worked-example) | open | #287 runs the guide's `smock check` and `smock render` commands against what it prints |
 | F99 | Getting started on GKE | [Getting started on GKE](../getting-started-on-gke.md#getting-started-on-gke) | manual | Manual: checked by hand on a real GKE Autopilot cluster, which CI does not have |
@@ -261,5 +264,5 @@ gives: their code falls under the coverage ledger's FAULT category.
 | M20 | definitions: "it is a value of a google.protobuf.Value", for a number such a value cannot hold | [#283](https://github.com/hirunefu/smock/issues/283), [gRPC Stub conditions](../definition-files/grpc.md#grpc-stub-conditions) | user | asserted | `definitions/grpc_dynamic_test.mbt` "an Any's type that the set lacks, in a condition or a static reply, is a problem; so are members that do not fit the type it names, and values of the wrong form" |
 | M21 | `smock import-openapi`: "the temporary files ... all exist" | [#291](https://github.com/hirunefu/smock/issues/291), [Importing OpenAPI](../importing-openapi.md#importing-openapi) | user | asserted | `e2e/import_openapi_test.mbt` "smock import-openapi tries the temporary names .petstore.json.tmp and .petstore.json.tmp1 to .petstore.json.tmp99, touches none that exists, and writes nothing when all 100 exist" |
 | M22 | importopenapi: "the document was not given" | [#283](https://github.com/hirunefu/smock/issues/283) | package | asserted | `importopenapi/import_test.mbt` "the document must be UTF-8 JSON, an object without a repeated key; a leading byte order mark is skipped" |
-| M23 | The top-level help: `smock`, `smock help` and `smock --help` | [smock](../../README.md#smock), [Commands](../commands.md#commands) | user | open | #370 fixes its description, which leaves out gRPC; the help's test, written for #291, lands with that fix |
+| M23 | The top-level help: `smock`, `smock help` and `smock --help` | [smock](../../README.md#smock), [Commands](../commands.md#commands) | user | asserted | `e2e/serve_test.mbt` "smock, smock help and smock --help print one usage, which lists the commands docs/commands.md names and says what smock serves as the README's opening line does" (#370, which fixed its description) |
 | M24 | The log line `cannot reset the connection`, when the operating system refuses a reset | [Connection Faults](../definition-files/faults.md#connection-faults) | user | manual | Manual: only an operating-system failure shows it, and no C seam is added to inject one ([ADR 0001](../adr/0001-moonbit-with-c-only-for-tls.md)) |

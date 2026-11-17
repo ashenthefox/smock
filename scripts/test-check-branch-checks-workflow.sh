@@ -110,6 +110,8 @@ refuses paths \
 refuses tags \
   '.on.push.tags = ["v*"]' \
   "it should run on a push to every branch but main and dependabot/**"
+# The maintainer confirmed on 2026-11-17 (#275) that a newer push cancels
+# the run of an older one on the same branch, and no other run.
 refuses cancels-every-branch \
   '.concurrency.group = "branch-checks"' \
   "it should cancel an older run of the same branch, and no other run"
