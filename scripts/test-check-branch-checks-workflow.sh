@@ -4,8 +4,9 @@
 # workflow as it is. Each other test copies it, changes one thing in the
 # copy with yq, and expects the check to fail and to say what is wrong:
 # each change would let a branch reach the merge into main without its
-# weakening report, or would hold up or skip CI's keeping of main's
-# binaries.
+# weakening report or the report of the mutants on its changed lines, or
+# with a report that ran them by other rules, or would hold up or skip
+# CI's keeping of main's binaries.
 #
 # It needs what the check needs: yq (mikefarah/yq v4) and jq.
 #
@@ -92,9 +93,20 @@ fi
 refuses pull-request \
   '.on.pull_request = null' \
   "it should run on a push to every branch but main and dependabot/**, and on nothing else"
-refuses by-hand \
-  '.on.workflow_dispatch = null' \
+refuses schedule \
+  '.on.schedule = [{"cron": "0 4 * * 1"}]' \
   "it should run on a push to every branch but main and dependabot/**, and on nothing else"
+# #311: a diff too large for a push's shards runs whole in a run started by
+# hand, on 20 shards unless another number from 1 to 20 is given.
+refuses not-by-hand \
+  'del(.on.workflow_dispatch)' \
+  "it should also run when started by hand (workflow_dispatch), with one input, shards, a number whose default is 20"
+refuses other-width \
+  '.on.workflow_dispatch.inputs.shards.default = 3' \
+  "it should also run when started by hand (workflow_dispatch), with one input, shards, a number whose default is 20"
+refuses other-input \
+  '.on.workflow_dispatch.inputs.base = {"type": "string"}' \
+  "it should also run when started by hand (workflow_dispatch), with one input, shards, a number whose default is 20"
 refuses on-main \
   '.on.push.branches-ignore = ["dependabot/**"]' \
   "it should run on a push to every branch but main and dependabot/**"
@@ -164,6 +176,108 @@ refuses step-continues \
   "($report_step).continue-on-error = true" \
   "should not continue on error"
 
+# --- The mutants on the changed lines --------------------------------------------
+
+plan_job='.jobs.changed-lines-plan'
+plan_step="$plan_job.steps[] | select(.run // \"\" | test(\"changed-lines.py plan\"))"
+shard_job='.jobs.changed-lines'
+shard_step="$shard_job.steps[] | select(.run // \"\" | test(\"changed-lines.py shard\"))"
+report_job='.jobs.changed-lines-report'
+changed_report_step="$report_job.steps[] | select(.run // \"\" | test(\"changed-lines.py report\"))"
+
+refuses no-plan \
+  "del($plan_step)" \
+  "one job should plan the mutants on the changed lines, with a step that runs python3 scripts/changed-lines.py plan, not 0"
+refuses plan-other-base \
+  "($plan_step).run |= sub(\"--by-hand\"; \"--runner run.py --by-hand\")" \
+  "the plan's step should run python3 scripts/changed-lines.py plan --by-hand \"\$BY_HAND\" --out changed-lines-plan >>\"\$GITHUB_OUTPUT\""
+refuses plan-not-by-hand \
+  "($plan_step).env.BY_HAND = \"5\"" \
+  "the plan's step should take the shards of a run started by hand from the input (BY_HAND: \${{ inputs.shards }})"
+refuses plan-output \
+  "$plan_job.outputs.shards = \"[1]\"" \
+  "the plan's job should give the shards that its step plans as its output (shards: \${{ steps.<id>.outputs.shards }})"
+refuses plan-shallow \
+  "del(($plan_job.steps[] | select(.uses // \"\" | test(\"checkout\"))).with)" \
+  "the plan's job should check out the whole history (fetch-depth: 0), to find the merge base with main"
+refuses plan-no-moonbit \
+  "del($plan_job.steps[] | select(.run // \"\" | test(\"install-moonbit\")))" \
+  "the plan's job should install the pinned MoonBit (scripts/install-moonbit.sh pinned) before the plan, for the site finder"
+refuses plan-condition \
+  "$plan_job.if = \"github.event_name == 'push'\"" \
+  "the plan's job should run in every run and need no other job"
+refuses plan-artifact \
+  "($plan_job.steps[] | select(.uses // \"\" | test(\"upload-artifact\"))).with.name = \"plan\"" \
+  "the plan's job should keep the plan as the artifact changed-lines-plan"
+
+refuses no-shard \
+  "del($shard_step)" \
+  "one job should run the shards of the mutants on the changed lines, with a step that runs python3 scripts/changed-lines.py shard, not 0"
+refuses shard-other-runner \
+  "($shard_step).run |= sub(\"--plan\"; \"--runner run.py --plan\")" \
+  "the shards' step should run python3 scripts/changed-lines.py shard --plan changed-lines-plan --shard \"\$SHARD\" --out changed-lines-shard"
+refuses shard-condition \
+  "$shard_job.if = \"always()\"" \
+  "the shards' job should need the plan's job, run when it planned shards (if: needs.changed-lines-plan.outputs.shards != '[]'), one for each shard it planned"
+refuses shard-matrix \
+  "$shard_job.strategy.matrix.shard = [1, 2, 3]" \
+  "the shards' job should need the plan's job, run when it planned shards (if: needs.changed-lines-plan.outputs.shards != '[]'), one for each shard it planned"
+refuses shard-needs \
+  "$shard_job.needs = \"weakening\"" \
+  "the shards' job should need the plan's job"
+refuses shard-not-each \
+  "($shard_step).env.SHARD = \"1\"" \
+  "the shards' step should run the job's shard (SHARD: \${{ matrix.shard }})"
+refuses shard-arm64 \
+  "$shard_job.runs-on = \"ubuntu-24.04-arm\"" \
+  "the shards' job should run on amd64, where the native verdict decides (runs-on: ubuntu-24.04, and ./.github/actions/native-setup with machine: x86_64)"
+refuses shard-machine \
+  "($shard_job.steps[] | select(.uses // \"\" | test(\"native-setup\"))).with.machine = \"aarch64\"" \
+  "the shards' job should run on amd64, where the native verdict decides"
+refuses shard-shallow \
+  "del(($shard_job.steps[] | select(.uses // \"\" | test(\"checkout\"))).with)" \
+  "the shards' job should check out the whole history (fetch-depth: 0), where the plan's merge base is"
+refuses shard-no-plan \
+  "del($shard_job.steps[] | select(.uses // \"\" | test(\"download-artifact\")))" \
+  "the shards' job should take the plan (the artifact changed-lines-plan) before the shard runs"
+refuses shard-artifact \
+  "($shard_job.steps[] | select(.uses // \"\" | test(\"upload-artifact\"))).with.name = \"shard\"" \
+  "the shards' job should keep each shard's records as the artifact changed-lines-shard-\${{ matrix.shard }}"
+refuses shard-fails-fast \
+  "$shard_job.strategy.fail-fast = true" \
+  "the shards' job should let the other shards finish when one fails (fail-fast: false), so that a failed shard can run again alone"
+refuses shard-continues \
+  "$shard_job.continue-on-error = true" \
+  "job changed-lines should not continue on error"
+
+refuses no-changed-report \
+  "del($changed_report_step)" \
+  "one job should report the mutants on the changed lines, with a step that runs python3 scripts/changed-lines.py report, not 0"
+refuses changed-report-command \
+  "($changed_report_step).run |= sub(\"--shards changed-lines-shards \"; \"\")" \
+  "the report's step should run python3 scripts/changed-lines.py report --plan changed-lines-plan --shards changed-lines-shards --out changed-lines"
+refuses changed-report-no-summary \
+  "($changed_report_step).run |= sub(\"GITHUB_STEP_SUMMARY\"; \"GITHUB_OUTPUT\")" \
+  "the report's step should write the report to the job summary"
+refuses changed-report-needs \
+  "$report_job.needs = [\"changed-lines-plan\"]" \
+  "the report's job should need the plan's job and the shards' job, and run when the plan passed and the shards passed or did not run"
+refuses changed-report-always \
+  "$report_job.if = \"\${{ always() }}\"" \
+  "the report's job should need the plan's job and the shards' job, and run when the plan passed and the shards passed or did not run"
+refuses changed-report-no-shards \
+  "del($report_job.steps[] | select(.with.pattern // \"\" | test(\"changed-lines-shard-\")))" \
+  "the report's job should take the plan and the shards' records (the artifacts changed-lines-plan and changed-lines-shard-*, into changed-lines-shards)"
+refuses changed-report-artifact \
+  "($report_job.steps[] | select(.uses // \"\" | test(\"upload-artifact\"))).with.name = \"report\"" \
+  "the report's job should keep the report as the artifact changed-lines, for 90 days"
+refuses changed-report-kept-shortly \
+  "($report_job.steps[] | select(.uses // \"\" | test(\"upload-artifact\"))).with.retention-days = 7" \
+  "the report's job should keep the report as the artifact changed-lines, for 90 days"
+refuses changed-report-hidden-failure \
+  "($changed_report_step).run |= sub(\"--out changed-lines\"; \"--out changed-lines || true\")" \
+  "should fail when a command of it fails"
+
 # --- What it may do ------------------------------------------------------------
 
 refuses writes \
@@ -171,6 +285,9 @@ refuses writes \
   "its permissions should be read-only"
 refuses job-writes \
   "$job.permissions = {\"issues\": \"write\"}" \
+  "its permissions should be read-only"
+refuses shard-writes \
+  "$shard_job.permissions = {\"contents\": \"write\"}" \
   "its permissions should be read-only"
 refuses secrets \
   "($report_step).env.TOKEN = \"\${{ secrets.TOKEN }}\"" \
