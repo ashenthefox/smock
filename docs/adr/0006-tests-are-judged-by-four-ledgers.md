@@ -40,6 +40,10 @@ L4 is defined over the pinned set, and the weekly run executes exactly that set 
 
 The checks run on pushes to every branch but `main` (decision 3), because smock merges branches locally and opens no pull requests, so a gate on pull requests would never run on its own work. The stop is in the merge procedure: report-only at first, and once a package reaches L4, an unexplained survivor on lines of that package that a branch changes stops the merge into `main`.
 
+## `server` and `cmd/smock` through e2e
+
+`server` and `cmd/smock` get coverage through e2e, a BODY audit, and mutants at operator level through e2e, monthly and before each release (decision 6): one schema binary, only the positions that e2e covers, and kill confirmation. The spec made that run wait for step 0's measurement on CI's runners, and the maintainer confirmed it on 2026-11-17 with the measured figures. Every e2e test in one process took 39.0 s on an amd64 runner, within the 60 s that decision 6 allowed, so a mutant of `server` takes about 45 s through e2e, and the run at operator level about 1.7 hours on 20 jobs, within its 2.5 hours; the BODY audit takes about 17 minutes. Native mutation, e2e coverage and `server` through e2e run on amd64, because its native builds are about six times faster than arm64's: a rebuild of `cmd/smock` after one mutant in `engine` took 5.4 s there, against 42.0 s. Both architectures' builds call the system's C compiler. The spec had given another reason, that amd64's debug builds skip it, and the measurement showed that they do not.
+
 ## Agreement with ADRs 0001 and 0005
 
 - **ADR 0001 holds: no new C seam.** An uncovered point or a survivor that only an OpenSSL or file-system failure reaches is excluded in the category FAULT, which has nothing to do with a Stub's Fault. No C is written to inject such failures.

@@ -877,9 +877,16 @@ All 19 pure packages go to L4, in two stages: first `yaml`, `http1`,
 its own ([#339](https://github.com/hirunefu/smock/issues/339)) that waits
 for the ladder's tooling and for the parsers still to move out of
 `server`, not for either stage. `server` and `cmd/smock` get coverage through
-e2e, a BODY audit and, if the measurements on CI's runners bear out the
-estimate, mutants at operator level through e2e, monthly and before each
-release.
+e2e, a BODY audit, and mutants at operator level through e2e, monthly and
+before each release (decision 6). The maintainer confirmed that run on
+2026-11-17, with step 0's measurement on CI's runners: every e2e test in
+one process took 39.0 s on an amd64 runner, so a mutant of `server`
+takes about 45 s through e2e, the run at operator level about 1.7 hours on
+20 jobs, and the BODY audit about 17 minutes
+([Test costs on CI's runners](#test-costs-on-cis-runners)). Native
+mutation, e2e coverage and `server` through e2e run on amd64, whose native
+builds are about six times faster than arm64's: a rebuild of `cmd/smock`
+after one mutant in `engine` took 5.4 s there, against 42.0 s.
 
 L4 and a release read the pinned set alone. The monthly run over the full
 set is report-only: its survivors at the other alternatives are listed
@@ -1323,8 +1330,8 @@ A test may go only under (A) or (B), and never when (C) holds.
 An e2e test goes only when operator-level mutants of the `server` code on
 its path are killed by the tests that remain, or when a named test at a
 lower seam, together with one remaining e2e test, checks each of its
-claims about the wire. Without a run at operator level, only the second
-way is open. A batch that removes e2e tests runs
+claims about the wire. Until the first run at operator level, only the
+second way is open. A batch that removes e2e tests runs
 `scripts/check-e2e-helpers.py` first: no test file uses what another
 defines, so a test file can go whole without breaking another.
 
@@ -1896,9 +1903,8 @@ requests keep their own path
 cost model of the test review
 ([#275](https://github.com/hirunefu/smock/issues/275)) guesses. It runs on
 a linux/amd64 and a linux/arm64 runner, and only when started by hand. It
-sets no variable that gives moon another C compiler or flags: on amd64,
-moon's native debug builds skip the system's C compiler, and the
-measurement is of the builds as CI's test job makes them.
+sets no variable that gives moon another C compiler or flags, so that it
+measures the builds as CI's test job makes them.
 `scripts/measure-costs.py` measures in four parts:
 
 - `e2e`: every e2e test run in one process, three times by default, after
@@ -1937,6 +1943,18 @@ gh run download <run id> --dir measurements
 python3 scripts/estimate-costs.py --run-url <run link> \
   measurements/measurements-linux-amd64 measurements/measurements-linux-arm64
 ```
+
+The first run, on `main` at 3a8d6997
+([run 44078886586](https://github.com/hirunefu/smock/actions/runs/44078886586)),
+and the cost model recomputed from it are on
+[#275](https://github.com/hirunefu/smock/issues/275). On both
+architectures, moon planned the system's C compiler and no tcc for the
+native builds, plain and with coverage. So amd64's native builds call the
+system's C compiler as arm64's do, and are about six times faster: the
+binary from clean took 7.0 s, against 44.3 s. The single-process e2e run
+took 39.0 s on amd64, and the run at operator level came to 1.69 hours on
+20 jobs, both within decision 6's band, and the maintainer confirmed
+decision 6 ([The ladder](#the-ladder)).
 
 Each part also runs on a developer's machine:
 `python3 scripts/measure-costs.py <part> <out dir>`, with `--jobs` for
