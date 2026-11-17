@@ -159,6 +159,14 @@ jobs:
       - name: Check the site counts against this commit and the merge base with main
         run: python3 scripts/mutation/ratchet.py check --base origin/main
 
+      # The exclusion list (exclusions.toml): every entry is in a category
+      # of ADR 0006, with what its category needs, and the entries whose
+      # definition's text changed since they were made are listed as
+      # stale, for their triage. It reads the definitions with the
+      # compiler's parser, so it runs here, as the runner's tests do.
+      - name: Check the exclusion list
+        run: python3 scripts/mutation/exclusions.py check
+
       # What several e2e test files share lives in the harness files, so
       # that removing a test file breaks no other. The check runs the
       # compiler's front end on the harness files with each test file

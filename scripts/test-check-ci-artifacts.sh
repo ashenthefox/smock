@@ -330,15 +330,17 @@ refuses checks-with-the-latest-toolchain workflow \
   '(.jobs.checks.steps[] | select(.run == "scripts/install-moonbit.sh \"$TOOLCHAIN\"") | .env.TOOLCHAIN) = "latest"' \
   'job checks should install the toolchain of the call (scripts/install-moonbit.sh "$TOOLCHAIN" with TOOLCHAIN: ${{ inputs.toolchain }})'
 
-# --- What governs the mutation runner (#309) -------------------------------------
+# --- What governs the mutation runner (#309, #302) --------------------------------
 
-# The runner's tests, its self-test on the fixture module and the
-# site-count check run in job checks, which the weekly run with the latest
-# MoonBit runs too, once each.
+# The runner's tests, its self-test on the fixture module, the site-count
+# check and the check of the exclusion list run in job checks, which the
+# weekly run with the latest MoonBit runs too, once each.
 export SELF_TEST='python3 scripts/mutation/run.py --root scripts/mutation/fixture --self-test-only calc log'
 export SITE_COUNTS='python3 scripts/mutation/ratchet.py check --base origin/main'
 export RUNNER_TESTS='python3 -m unittest discover -s scripts/mutation -v'
-for named in "self-test|$SELF_TEST" "site-counts|$SITE_COUNTS" "runner-tests|$RUNNER_TESTS"; do
+export EXCLUSIONS_CHECK='python3 scripts/mutation/exclusions.py check'
+for named in "self-test|$SELF_TEST" "site-counts|$SITE_COUNTS" "runner-tests|$RUNNER_TESTS" \
+  "exclusions|$EXCLUSIONS_CHECK"; do
   export COMMAND="${named#*|}"
   refuses "no-${named%%|*}" workflow \
     'del(.jobs.checks.steps[] | select(.run == strenv(COMMAND)))' \
@@ -361,6 +363,12 @@ refuses the-site-counts-against-another-base workflow \
 refuses the-self-test-with-the-pinned-toolchain-only workflow \
   '(.jobs.checks.steps[] | select(.run == strenv(SELF_TEST)) | .if) = strenv(PINNED)' \
   "the step \"Run the mutation runner's self-test on its fixture\" of job checks should run whenever its job does, not if: inputs.toolchain =="
+
+# The check of the exclusion list reads the definitions with the compiler's
+# parser, so it runs where the toolchain is, in job checks, not elsewhere.
+refuses the-exclusion-list-in-another-job workflow \
+  '(.jobs.test.steps += [.jobs.checks.steps[] | select(.run == strenv(EXCLUSIONS_CHECK))]) | del(.jobs.checks.steps[] | select(.run == strenv(EXCLUSIONS_CHECK)))' \
+  "job checks should run $EXCLUSIONS_CHECK once, not 0 times"
 
 refuses checks-without-the-history workflow \
   'del(.jobs.checks.steps[] | select(.uses == "actions/checkout@v7") | .with)' \
