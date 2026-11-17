@@ -8,6 +8,9 @@ test "a counter renders its help, its type and one sample per label set, in the 
   )
   requests.labels(["users", "get-user"]).inc()
   requests.labels(["orders", ""]).inc(by=2)
+  // Prometheus's guidelines for client libraries: inc(double v) "MUST check
+  // that v >= 0", so 0 is allowed, and leaves the counter as it was.
+  requests.labels(["orders", ""]).inc(by=0)
   requests.labels(["users", "get-user"]).inc()
   inspect(
     registry.render(),
@@ -212,6 +215,34 @@ test "label values that run together the same way are still different series" {
     .filter(line => line.has_prefix("smock_requests_total{"))
     .count(),
     content="4",
+  )
+}
+
+///|
+test "a metric name is a Prometheus metric name: one with a colon, a capital Z or a 0 after the first character" {
+  // The Prometheus text exposition format 0.0.4 writes a metric name as an
+  // identifier with "the usual Prometheus expression language restrictions",
+  // which Prometheus's data model writes as `[a-zA-Z_:][a-zA-Z0-9_:]*`: `:`,
+  // as in a recording rule's name, letters up to `Z`, and digits from `0`
+  // after the first character.
+  let registry = @metrics.Registry()
+  for name in ["job:smock_requests:sum", "smock_A_Z", "smock_0_9"] {
+    let _ = registry.gauge(name, help="A name.")
+  }
+  inspect(
+    registry.render(),
+    content=(
+      #|# HELP job:smock_requests:sum A name.
+      #|# TYPE job:smock_requests:sum gauge
+      #|job:smock_requests:sum 0
+      #|# HELP smock_A_Z A name.
+      #|# TYPE smock_A_Z gauge
+      #|smock_A_Z 0
+      #|# HELP smock_0_9 A name.
+      #|# TYPE smock_0_9 gauge
+      #|smock_0_9 0
+      #|
+    ),
   )
 }
 

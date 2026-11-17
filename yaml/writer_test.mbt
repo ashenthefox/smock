@@ -388,6 +388,14 @@ test "a number with no text in JSON syntax is an error at its pointer" {
     written(Json::object({ "a~b/c": Json::number(16, repr="0x10") })),
     content="error /a~0b~1c: \"0x10\" is not a number in JSON syntax",
   )
+  // In JSON a point needs a digit after it (RFC 8259, section 6: `frac =
+  // decimal-point 1*DIGIT`), so `1.` is not a JSON number. `write` promises
+  // a document that `parse` reads back as the same tree, and `parse`
+  // refuses a plain `1.` as a number to quote, so it is an error here.
+  inspect(
+    written(Json::array([Json::number(1, repr="1.")])),
+    content="error /0: \"1.\" is not a number in JSON syntax",
+  )
   inspect(written(Json::number(infinity, repr="-1e999")), content="-1e999\n")
 }
 
