@@ -145,6 +145,19 @@ class RatchetTest(unittest.TestCase):
         self.assertEqual({c["file"] for c in counts}, {"calc/calc.mbt"})
         self.assertEqual([list(c) for c in counts], [["file", "definition", "text", "pinned", "full"]] * 4)
 
+    def test_a_definition_with_sites_of_the_full_set_alone_is_counted(self):
+        # By operator set v1 (CONTRIBUTING.md, "Operator set v1"), Pair has
+        # no default, so first's BODY site is skipped; its guard binds v,
+        # so IFC's true is skipped and only the full set's false remains;
+        # and calc is outside STR's scope.
+        (self.history.root / "calc" / "pair.mbt").write_text(
+            "///|\npub(all) struct Pair {\n  a : Int32\n}\n\n"
+            "///|\npub fn first(o : Int32?) -> Pair {\n  guard o is Some(v) else { abort(\"none\") }\n  { a: v }\n}\n")
+        self.history.ratchet("write")
+        self.assertEqual([(c["file"], c["definition"], c["pinned"], c["full"]) for c in self.history.counts("calc")
+                          if c["file"] == "calc/pair.mbt"],
+                         [("calc/pair.mbt", "first", {}, {"IFC": 1})])
+
     def test_the_check_passes_when_the_committed_counts_are_the_trees(self):
         self.history.ratchet("write")
         self.history.commit("counts")
@@ -243,11 +256,13 @@ class RatchetTest(unittest.TestCase):
         self.history.counted_base()
         narrowed = finder_without(self.tmp, 's["file"] == "calc/calc.mbt" and s["operator"] == "ROR"')
         self.history.ratchet("write", finder=narrowed)
-        self.history.drops("calc ROR pinned 2 too few", "calc ROR full 3 right", "log STR pinned 1 no such drop")
+        self.history.drops("calc ROR pinned 2 too few", "calc ROR full 4 too many", "log STR pinned 1 no such drop")
         self.history.commit("narrow the finder, recorded wrongly")
         result = self.history.ratchet("check", "--base", "main", finder=narrowed)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("ratchet: mutation/approved-drops.txt records 2 sites of ROR in the pinned set dropped in"
+                      " calc, but the change drops 3", result.stderr)
+        self.assertIn("ratchet: mutation/approved-drops.txt records 4 sites of ROR in the full set dropped in"
                       " calc, but the change drops 3", result.stderr)
         self.assertIn("ratchet: mutation/approved-drops.txt records 1 site of STR in the pinned set dropped in"
                       " log, but the change drops none there", result.stderr)
@@ -255,12 +270,14 @@ class RatchetTest(unittest.TestCase):
 
     def test_a_malformed_line_of_approved_drops_fails(self):
         self.history.counted_base()
-        self.history.drops("calc ROR pinned 3")
-        self.history.commit("no reason")
+        self.history.drops("calc ROR pinned 3", "calc ROR pinned three no number", "calc ROR pinned 0 no site",
+                           "calc XOR pinned 1 no such operator", "calc ROR some 1 no such set")
+        self.history.commit("malformed lines")
         result = self.history.ratchet("check", "--base", "main")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("mutation/approved-drops.txt:1: should be <package> <operator> <pinned|full> <sites>"
-                      " <reason>", result.stderr)
+        for number in range(1, 6):
+            self.assertIn(f"mutation/approved-drops.txt:{number}: should be <package> <operator> <pinned|full>"
+                          " <sites> <reason>", result.stderr)
 
     def test_a_definition_moved_to_another_file_is_the_same_definition(self):
         self.history.counted_base()
@@ -292,6 +309,31 @@ class RatchetTest(unittest.TestCase):
         result = self.history.ratchet("check", "--base", "main")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("has no committed site counts: nothing to compare with", result.stdout)
+
+    def test_the_base_is_the_merge_base_not_the_tip_of_main(self):
+        self.history.counted_base()
+        # main moves on: its finder finds each ROR site twice, so a
+        # definition the branch left as it was has more sites on main's
+        # tip than on the branch, which never had that finder.
+        self.history.git("checkout", "-q", "main")
+        wider = self.tmp / "wider.py"
+        wider.write_text(
+            "import json, subprocess, sys\n"
+            f"result = subprocess.run([sys.executable, {str(SITES)!r}, *sys.argv[1:]], capture_output=True, text=True)\n"
+            "for line in result.stdout.splitlines():\n"
+            "    print(line)\n"
+            "    if json.loads(line)['operator'] == 'ROR':\n"
+            "        print(line)\n"
+            "sys.exit(result.returncode)\n")
+        self.history.ratchet("write", finder=f"{sys.executable} {wider}")
+        self.history.commit("a wider finder")
+        self.history.git("checkout", "-q", "change")
+        self.history.edit("calc/calc.mbt", IS_ODD, "")
+        self.history.ratchet("write")
+        self.history.commit("delete is_odd")
+        result = self.history.ratchet("check", "--base", "main")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("the definitions that the change deletes or changes held 6 and 7", result.stdout)
 
     def test_a_base_that_git_does_not_know_cannot_be_judged(self):
         self.history.counted_base()
