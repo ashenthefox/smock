@@ -523,7 +523,10 @@ test "numbers order by value as json conditions compare them: exactly when a Dou
   // By value, exactly for the integers that keep their digits and for the
   // numbers beyond a 64-bit float's range, as crud-stubs.md's sentence
   // below says. Items that tie, 5, 7 and 18 (each 10^400) and 12 and 13
-  // (each 0), keep the bucket's order in either direction.
+  // (each 0), keep the bucket's order in either direction. Item 16, whose
+  // exponent is above 10^18, comes after every other item: "A positive
+  // number whose exponent is 10^18 or more comes after every number whose
+  // exponent is smaller" (crud-stubs.md).
   inspect(
     h.lists("/numbers", ["$sort=v", "$sort=-v"]),
     content=(

@@ -156,7 +156,10 @@ then, among items that tie, by `total`, descending.
   strings. Numbers order by value, compared as `json` conditions compare
   them, so large integers and numbers beyond a 64-bit float's range order
   exactly: `1e400` and a `1` followed by 400 zeros tie, and both come after
-  a `9` followed by 399 zeros. Strings order by Unicode code
+  a `9` followed by 399 zeros. A positive number whose exponent is 10^18
+  or more comes after every number whose exponent is smaller, and a
+  negative one before them; two such numbers of the same sign order as if
+  their exponents were the same. Strings order by Unicode code
   point, case-sensitive, with no locale rules: `B` comes before `a`.
   Descending reverses that whole order.
 - Items whose member is absent, an object or an array go last, in either
