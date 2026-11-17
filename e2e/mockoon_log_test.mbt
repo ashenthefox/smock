@@ -5,57 +5,6 @@
 // `timestamp` masked, once its form is checked.
 
 ///|
-/// Two Mocks, neither of them the Default Mock: `users`, at the Hosts
-/// `localhost` and `127.0.0.1`, with a Stub for `GET /users/1`, and
-/// `orders`, at `orders.example.com`. With `default=true`, `users` is the
-/// Default Mock.
-fn mockoon_mocks(default~ : Bool = false) -> Array[(String, String)] {
-  [
-    (
-      "users.json",
-      (
-        $|{ "mocks": [
-        $|    { "name": "users", "hosts": ["localhost", "127.0.0.1"], "default": \{default} },
-        $|    { "name": "orders", "hosts": ["orders.example.com"] }],
-        $|  "stubs": [{ "id": "get-user", "mock": "users",
-        $|    "request": { "method": "GET", "path": "/users/1" },
-        $|    "response": { "status": 200, "body": "Alice" } }] }
-      ),
-    ),
-  ]
-}
-
-///|
-/// `line` with the value of its `timestamp`, its last key, shown as
-/// `<timestamp>` when it has the form `YYYY-MM-DDTHH:mm:ss.sssZ`. A value of
-/// any other form stays, so that it shows.
-fn mask_timestamp(line : String) -> String {
-  let key = ",\"timestamp\":\""
-  guard line.rev_find(key) is Some(i) else { return line }
-  let start = i + key.length()
-  let rest = line[start:]
-  let form = "0000-00-00T00:00:00.000Z\"}"
-  guard rest.length() == form.length() else { return line }
-  for j, c in form {
-    let ok = if c == '0' {
-      rest[j] >= '0' && rest[j] <= '9'
-    } else {
-      rest[j] == c.to_int().to_uint16()
-    }
-    if !ok {
-      return line
-    }
-  }
-  "\{line[:start]}<timestamp>\"}"
-}
-
-///|
-/// `lines` with their timestamps masked, one per line.
-fn masked_lines(lines : Array[String]) -> String {
-  lines.map(mask_timestamp).join("\n")
-}
-
-///|
 async test "with SMOCK_LOG_FORMAT=mockoon, each request a Mock handles writes one Transaction recorded line to stdout, on the plain and the TLS port" {
   with_definitions(mockoon_mocks(), dir => {
     with_certificates(certs => {
@@ -391,29 +340,6 @@ async test "with the json log format, the default, smock writes nothing to stdou
 }
 
 ///|
-/// The Transaction recorded lines among `lines`.
-fn transactions(lines : Array[String]) -> Array[String] {
-  lines.filter(line => line.contains("\"message\":\"Transaction recorded\""))
-}
-
-///|
-/// Waits until smock has written `count` Transaction recorded lines to
-/// stdout, while it runs, and returns them all.
-async fn Smock::transaction_lines(self : Smock, count : Int32) -> Array[String] {
-  let written = @async.with_timeout_opt(patience_ms, () => {
-    while transactions(self.stdout).length() < count {
-      @async.sleep(10)
-    }
-  })
-  guard written is Some(_) else {
-    fail(
-      "smock wrote \{transactions(self.stdout).length()} of \{count} Transaction recorded lines in time:\n\{self.stdout.join("\n")}",
-    )
-  }
-  transactions(self.stdout)
-}
-
-///|
 async test "a reset or a close Fault logs fault and no responseStatus, and a partial Fault the status it wrote, on the plain and the TLS port" {
   let env = { "SMOCK_LOG_FORMAT": "mockoon" }
   let _ = on_both_ports(files=[("m.json", faults)], env~, (smock, over) => {
@@ -450,18 +376,6 @@ async test "a reset or a close Fault logs fault and no responseStatus, and a par
       ),
     )
   })
-}
-
-///|
-/// When smock wrote `line`, by its `timestamp`, in milliseconds since the
-/// Unix epoch, as `@async.now()` gives times.
-fn written_at(line : String) -> Int64 raise {
-  guard @json.parse(line) is Object(fields) &&
-    fields.get("timestamp") is Some(String(timestamp)) &&
-    @log.parse_time(timestamp) is Some(at) else {
-    fail("no timestamp in \{line}")
-  }
-  at
 }
 
 ///|
@@ -520,39 +434,6 @@ async test "a delayed response logs after its delay, and a Server-Sent Event str
       )
     })
   })
-}
-
-///|
-/// How the Journal says each request it holds ended, oldest first, one per
-/// line: `<method> <target>: <status>`, or `<method> <target>: fault
-/// <name>` for a reset or a close Fault.
-async fn Smock::journal_endings(self : Smock) -> String {
-  guard self.journal() is (200, Object({ "entries": Array(entries), .. })) else {
-    fail("no Journal")
-  }
-  let out = []
-  for entry in entries {
-    guard entry
-      is Object(
-        {
-          "request": Object(
-            { "method": String(meth), "target": String(target), .. }
-          ),
-          "status": status,
-          "fault": fault,
-          ..
-        }
-      ) else {
-      fail("unexpected entry: \{entry.stringify()}")
-    }
-    let ended = match (status, fault) {
-      (Number(status, ..), _) => status.to_int().to_string()
-      (_, String(fault)) => "fault \{fault}"
-      _ => "neither a status nor a Fault"
-    }
-    out.push("\{meth} \{target}: \{ended}")
-  }
-  out.join("\n")
 }
 
 ///|

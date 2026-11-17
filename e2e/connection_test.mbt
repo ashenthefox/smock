@@ -3,69 +3,6 @@
 // TLS port.
 
 ///|
-/// A Stub that answers `/users/1` whatever the method.
-let any_method : String =
-  #|{
-  #|  "mocks": [{ "name": "users" }],
-  #|  "stubs": [
-  #|    {
-  #|      "id": "user",
-  #|      "mock": "users",
-  #|      "request": { "path": "/users/1" },
-  #|      "response": {
-  #|        "status": 200,
-  #|        "headers": { "Content-Type": "application/json" },
-  #|        "body": "{\"id\":1,\"name\":\"Alice\"}"
-  #|      }
-  #|    }
-  #|  ]
-  #|}
-
-///|
-/// The log lines of a smock process, serving both ports, that wrote nothing
-/// between starting and draining when it was stopped.
-let startup_only : String =
-  #|{"level":"info","msg":"smock starting","version":"*","commit":"*","toolchain":"*","adminAuth":"on"}
-  #|{"level":"info","msg":"random seed","seed":"*"}
-  #|{"level":"info","msg":"journal byte bound","maxBytes":"*","source":"*","memoryLimit":"*"}
-  #|{"level":"info","msg":"state byte bound","maxBytes":"*","source":"*","memoryLimit":"*"}
-  #|{"level":"info","msg":"listening","listener":"admin","address":"0.0.0.0:*","protocols":["http/1.1"]}
-  #|{"level":"info","msg":"listening","listener":"plain","address":"0.0.0.0:*","protocols":["http/1.1","h2c"]}
-  #|{"level":"info","msg":"listening","listener":"tls","address":"0.0.0.0:*","protocols":["h2","http/1.1"],"certFile":"*/rsa-chain.pem","keyFile":"*/rsa-key.pem"}
-  #|{"level":"info","msg":"drain started","timeoutMs":20000}
-  #|{"level":"info","msg":"drain ended","connectionsCut":0}
-
-///|
-/// Reads a response head without a body, as sent for HEAD or for a 1xx
-/// status, and renders it with `\r\n` shown as `\n` and the current Date
-/// masked (`mask_date`), without the empty line that ends it.
-async fn read_head(conn : Conn) -> String {
-  let result = @async.with_timeout_opt(patience_ms, () => {
-    conn.read_until("\r\n\r\n")
-  })
-  guard result is Some(head) else { fail("no response head in time") }
-  match head {
-    Some(head) => mask_date(head.replace_all(old="\r\n", new="\n")) + "\n"
-    None => "closed"
-  }
-}
-
-///|
-/// The status line of `response`, as `read_response` renders it.
-fn status_line(response : String) -> String {
-  response[:response.find("\n").unwrap_or(response.length())].to_owned()
-}
-
-///|
-/// Waits until smock ends the connection, and returns how many milliseconds
-/// after `since` that was and what smock sent until then, with the current
-/// Date masked (`mask_date`). A reset ends the connection too.
-async fn ended(conn : Conn, since : Int64) -> (Int64, String) {
-  let (_, end, received) = received_until_end(conn, since)
-  (end, mask_date(@utf8.decode_lossy(received)))
-}
-
-///|
 async test "keep-alive: HTTP/1.1 keeps the connection open unless the request says Connection: close; HTTP/1.0 closes it unless the request says Connection: keep-alive" {
   let _ = on_both_ports(files=[("users.json", any_method)], (smock, over) => {
     let out = []
@@ -582,23 +519,6 @@ async test "idle timeout: a connection that receives no request bytes for the id
   )
   inspect(log_entries(stopped.logs), content=startup_only)
 }
-
-///|
-/// A Mock whose `/slow` answers after a delay of 1000 ms and whose
-/// `/events` streams three events over 1200 ms: both outlast the timeouts
-/// of the test below.
-let outlasting : String =
-  #|{ "mocks": [{ "name": "users" }],
-  #|  "stubs": [
-  #|    { "id": "slow", "mock": "users", "request": { "path": "/slow" },
-  #|      "response": { "status": 200, "body": "slow" },
-  #|      "fault": { "delay": { "fixed": 1000 } } },
-  #|    { "id": "stream", "mock": "users", "request": { "path": "/events" },
-  #|      "response": { "status": 200,
-  #|        "events": [
-  #|          { "delay": 400, "data": "first" },
-  #|          { "delay": 400, "data": "second" },
-  #|          { "delay": 400, "data": "last" } ] } } ] }
 
 ///|
 async test "timeouts: neither timeout runs while smock writes a response, however long it takes; the idle timeout starts after it" {

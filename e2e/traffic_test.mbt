@@ -3,74 +3,6 @@
 // requests served on the plain and TLS ports.
 
 ///|
-/// `/metrics`, fetched without a token and checked against the OpenAPI
-/// document, read as the Prometheus text format.
-async fn Smock::metrics(self : Smock) -> (String, Array[Sample]) {
-  let response = self.admin("GET", "/metrics", token=None)
-  (response.body, parse_prometheus(response.body))
-}
-
-///|
-/// The lines of `/metrics` about the metrics whose names start with
-/// `prefix`, as `metric_lines` picks them, one per line.
-async fn Smock::metric(
-  self : Smock,
-  prefix : String,
-  help~ : Bool = false,
-) -> String {
-  metric_lines(self.admin("GET", "/metrics").body, prefix, help~).join("\n")
-}
-
-///|
-/// Whether `name` is the name of a sample of the request traffic metrics.
-fn is_traffic(name : String) -> Bool {
-  name.has_prefix("smock_request_duration_seconds") ||
-  name == "smock_requests_total" ||
-  name == "smock_unmatched_requests_total"
-}
-
-///|
-/// The request traffic metrics in `/metrics`, `text`, with its `samples`:
-///
-/// - their `# TYPE` lines;
-/// - their samples, one per line, sorted, without the latency histogram's
-///   buckets and sum, whose values depend on timing;
-/// - the label names of each sample name, buckets and sum included.
-fn traffic(text : String, samples : Array[Sample]) -> String {
-  let out = []
-  for line in text.split("\n") {
-    if line.strip_prefix("# TYPE ") is Some(rest) &&
-      is_traffic(rest.split(" ").next().unwrap_or("").to_owned()) {
-      out.push(line.to_owned())
-    }
-  }
-  let lines = samples
-    .filter(sample => {
-      is_traffic(sample.name) &&
-      !sample.name.has_suffix("_bucket") &&
-      !sample.name.has_suffix("_sum")
-    })
-    .map(sample => sample.line())
-  lines.sort_by((a, b) => a.lexical_compare(b))
-  out.push_iter(lines.iter())
-  let labels : Map[String, Array[String]] = Map([])
-  for sample in samples {
-    if is_traffic(sample.name) {
-      let names = sample.labels.map(label => label.0).join(", ")
-      match labels.get(sample.name) {
-        Some(seen) if seen.contains(names) => ()
-        Some(seen) => seen.push(names)
-        None => labels[sample.name] = [names]
-      }
-    }
-  }
-  for name, names in labels {
-    out.push("labels of \{name}: \{names.join(" | ")}")
-  }
-  out.join("\n")
-}
-
-///|
 /// An Ephemeral Stub that answers `GET path` with 200.
 fn ephemeral_get(path : String) -> String {
   "{\"request\":{\"method\":\"GET\",\"path\":\"\{path}\"},\"response\":{\"status\":200,\"body\":\"ephemeral\"}}"
@@ -271,22 +203,6 @@ async test "Admin API, probe and /metrics requests on the admin port are not req
     })
   })
 }
-
-///|
-/// A Mock whose `/delayed` answers after a delay of 1 s, whose `/quick`
-/// answers at once, and whose `/stream` sends one event at once and the
-/// last one 1 s later.
-let slow : String =
-  #|{ "mocks": [{ "name": "slow" }],
-  #|  "stubs": [
-  #|    { "id": "delayed", "mock": "slow", "request": { "path": "/delayed" },
-  #|      "fault": { "delay": { "fixed": 1000 } },
-  #|      "response": { "status": 200, "body": "late" } },
-  #|    { "id": "quick", "mock": "slow", "request": { "path": "/quick" },
-  #|      "response": { "status": 200, "body": "quick" } },
-  #|    { "id": "stream", "mock": "slow", "request": { "path": "/stream" },
-  #|      "response": { "status": 200,
-  #|        "events": [{ "data": "first" }, { "delay": 1000, "data": "last" }] } } ] }
 
 ///|
 /// The latency of the requests to the Stub `stub` in `samples`: how many

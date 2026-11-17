@@ -1,22 +1,4 @@
 ///|
-let users : String =
-  #|{
-  #|  "mocks": [{ "name": "users" }],
-  #|  "stubs": [
-  #|    {
-  #|      "id": "get-user",
-  #|      "mock": "users",
-  #|      "request": { "method": "GET", "path": "/users/1" },
-  #|      "response": {
-  #|        "status": 200,
-  #|        "headers": { "Content-Type": "application/json", "X-Source": "smock" },
-  #|        "body": "{\"id\":1,\"name\":\"Alice\"}"
-  #|      }
-  #|    }
-  #|  ]
-  #|}
-
-///|
 async test "smock serve answers a request that matches a Stub with that Stub's response" {
   with_definitions([("users.json", users)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {

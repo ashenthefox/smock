@@ -5,35 +5,6 @@
 // OpenAPI document (contract_test.mbt).
 
 ///|
-/// The ticket's example: the Mock `shop` with the bucket `orders`, keyed by
-/// `id`, from `files/orders.json`, which holds three orders, and `visits`,
-/// without `key`; `GET /api/v1/orders` answers `orders`.
-let shop_orders : Array[(String, String)] = [
-  (
-    "shop.yaml",
-    (
-      #|mocks:
-      #|  - name: shop
-      #|data:
-      #|  - { mock: shop, name: orders, key: id, jsonFile: orders.json }
-      #|  - { mock: shop, name: visits, json: 0 }
-      #|stubs:
-      #|  - id: list-orders
-      #|    mock: shop
-      #|    request: { method: GET, path: /api/v1/orders }
-      #|    response: { status: 200, template: true, json: "${data.orders}" }
-    ),
-  ),
-  (
-    "files/orders.json",
-    (
-      #|[{ "id": 1, "status": "paid" }, { "id": 2, "status": "pending" },
-      #| { "id": 3, "status": "paid" }]
-    ),
-  ),
-]
-
-///|
 async test "over the authenticated Admin API, a test sets its Session's copy of a bucket, which its requests read, lists and reads the buckets, and drops the copy" {
   with_definitions(shop_orders, dir => {
     let stopped = with_smock(["--dir", dir, "--port", "0"], smock => {

@@ -55,17 +55,6 @@ let render_definitions : Array[(String, String)] = [
 ]
 
 ///|
-/// Runs `smock render <args>` until it exits, with only `env` as its
-/// environment, and renders its exit status, then what it wrote to stdout
-/// and, if anything, to stderr.
-async fn render(
-  args : Array[String],
-  env~ : Map[String, String] = Map([]),
-) -> String {
-  exit_report(render_output(args, env~))
-}
-
-///|
 /// `text`, a rendering as JSON, with the time and the seed it used, which
 /// change from run to run unless they are given, as `<time>` and `<seed>`.
 fn masked(text : String) -> String {
@@ -94,28 +83,6 @@ fn masked(text : String) -> String {
     text = "\{text[:from]}<seed>\{text[end:]}"
   }
   text
-}
-
-///|
-/// The time and the seed of a rendering: the values, when `given`, or
-/// `<time>` and `<seed>` when they change from run to run.
-fn time_and_seed(json : Json, time_given~ : Bool, seed_given~ : Bool) -> String {
-  guard json is { "time": String(time), "seed": Number(seed, ..), .. } else {
-    return "no time or seed"
-  }
-  let time = if time_given { time } else { "<time>" }
-  let seed = if seed_given { seed.to_int64().to_string() } else { "<seed>" }
-  "time \{time}, seed \{seed}"
-}
-
-///|
-/// Runs `smock render <args>` until it exits, with only `env` as its
-/// environment, and returns its exit status, stdout and stderr.
-async fn render_output(
-  args : Array[String],
-  env~ : Map[String, String] = Map([]),
-) -> (Int32, String, String) {
-  smock_output(["render", ..args], env~)
 }
 
 ///|
@@ -271,18 +238,6 @@ async test "smock render still renders the Stub when the sample fails its condit
 }
 
 ///|
-/// The body of the rendering `smock render` prints, without the replica
-/// and the warnings, as one line of JSON.
-fn rendered(json : Json) -> String {
-  guard json is Object(members) else { return "not an object" }
-  let out : Map[String, Json] = Map([])
-  for key in ["stub", "mock", "response", "failed"] {
-    out[key] = members.get(key).unwrap_or(Json::null())
-  }
-  Json::object(out).stringify()
-}
-
-///|
 async test "smock render reads the directory as smock serve does: body files from the body-file subdirectory, YAML files, and SMOCK_DIR" {
   with_definitions(render_definitions, dir => {
     write(dir, "bodies/users/1.json", "from bodies\n")
@@ -315,27 +270,6 @@ async test "smock render reads the directory as smock serve does: body files fro
       ),
     )
   })
-}
-
-///|
-/// Renders the Stub `id` for the sample in the file `sample` through the
-/// Admin API render operation, with `query` after the path, and checks the
-/// response against the OpenAPI document.
-async fn Smock::render(
-  self : Smock,
-  id : String,
-  sample? : String,
-  body? : String,
-  query~ : String = "",
-  token~ : String? = Some(test_token),
-) -> AdminResponse {
-  let body = match (sample, body) {
-    (Some(file), _) => Some(@fs.read_file(file).text())
-    (None, body) => body
-  }
-  let path = "/v1/stubs/\{@percent.encode(id)}/render\{query}"
-  let response = self.admin("POST", path, body?, token~)
-  response
 }
 
 ///|
@@ -1057,18 +991,6 @@ let pay_order_definitions : Array[(String, String)] = [
     ),
   ),
 ]
-
-///|
-/// What `rendering` says of data: the writes the Stub would make, the
-/// response and the template error, as one line of JSON.
-fn writes_response_and_error(rendering : Json) -> String {
-  guard rendering is Object(members) else { return "not an object" }
-  let out : Map[String, Json] = Map([])
-  for key in ["dataWrites", "response", "templateError"] {
-    out[key] = members.get(key).unwrap_or(Json::string("absent"))
-  }
-  Json::object(out).stringify()
-}
 
 ///|
 async test "smock render and the Admin render operation read the sample's data, show the same dataWrites and response, and neither read nor write a Session's data" {

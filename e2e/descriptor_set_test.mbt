@@ -4,14 +4,6 @@
 // those scripts/gen-protobuf-fixtures.sh builds with protoc.
 
 ///|
-/// The set protoc builds from gRPC's helloworld.proto.
-let greeter_set_path : String = "fixtures/protobuf/helloworld/greeter.binpb"
-
-///|
-/// The same set, rebuilt with one more field in HelloReply.
-let greeter_v2_set_path : String = "fixtures/protobuf/helloworld-v2/greeter.binpb"
-
-///|
 /// The set protoc builds from orders.proto without --include_imports: it
 /// lacks common.proto, which orders.proto imports.
 let orders_without_imports_path : String = "fixtures/protobuf/orders/orders-without-imports.binpb"
@@ -24,12 +16,6 @@ let random_octets : Bytes = b"\xcb\x2b\x6b\x43\xd2\xf6\xaa\x36\x50\xa7\xd3\x25\x
 /// The Mock `greeter`, whose set is `files/<path>`.
 fn greeter_mock(path : String) -> String {
   "{ \"mocks\": [{ \"name\": \"greeter\", \"grpc\": { \"descriptorSet\": \{path.escape()} } }] }"
-}
-
-///|
-/// Writes `bytes` to `dir/path`, replacing what is there.
-async fn write_bytes(dir : String, path : String, bytes : Bytes) -> Unit {
-  @fs.write_file("\{dir}/\{path}", bytes)
 }
 
 ///|

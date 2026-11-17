@@ -1,15 +1,4 @@
 ///|
-/// Runs `smock check <args>` with only `env` as its environment until it
-/// exits, and renders its exit status, then what it wrote to stdout and,
-/// if anything, to stderr.
-async fn check(
-  args : Array[String],
-  env~ : Map[String, String] = Map([]),
-) -> String {
-  exit_report(smock_output(["check", ..args], env~))
-}
-
-///|
 /// A Definition file that declares the Mock `users` and one Stub of it,
 /// `get-user`.
 let users_file : String =

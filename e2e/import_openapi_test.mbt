@@ -3,23 +3,6 @@
 // like any other.
 
 ///|
-/// Runs `smock import-openapi <args>` in the working directory `cwd` until
-/// it exits, and renders its exit status, then what it wrote to stdout and,
-/// if anything, to stderr, with `dir` written `<dir>`.
-async fn import_openapi(
-  args : Array[String],
-  dir~ : String = "",
-  cwd~ : String = ".",
-) -> String {
-  let report = exit_report(smock_output(["import-openapi", ..args], cwd~))
-  if dir == "" {
-    report
-  } else {
-    report.replace_all(old=dir, new="<dir>")
-  }
-}
-
-///|
 /// An OpenAPI document whose only operation is `listPets` on `GET /pets`,
 /// with a `200` response and no content.
 let petstore_document : String =
@@ -1012,27 +995,6 @@ async fn Smock::answered(self : Smock, session : String) -> Json {
 }
 
 ///|
-/// The entries of the Journal of `session`, in order, each an object.
-/// Fails when the Journal or an entry is not as smock writes it.
-async fn Smock::journal_entries(
-  self : Smock,
-  session : String,
-) -> Array[Map[String, Json]] {
-  let entries = match self.journal(session~) {
-    (200, Object({ "entries": Array(entries), .. })) => entries
-    (status, body) => fail("unexpected Journal: \{status} \{body.stringify()}")
-  }
-  let objects = []
-  for entry in entries {
-    guard entry is Object(entry) else {
-      fail("unexpected entry: \{entry.stringify()}")
-    }
-    objects.push(entry)
-  }
-  objects
-}
-
-///|
 async test "smock serves an imported file with Smock-Status: a request gets the main response without it, the response it names with it, and the main one when no Stub names its value; the Journal names the Stub that answered" {
   with_petstore(my_pet_document, dir => {
     serving_my_pet(dir, smock => {
@@ -1523,21 +1485,6 @@ async test "smock serves an imported file with Smock-Example: alone it selects t
       ])
     })
   })
-}
-
-///|
-/// What the Journal holds for `session`, in order: for each request, the
-/// Mock and the Stub that answered, and the status.
-async fn Smock::answered_by(self : Smock, session : String) -> Json {
-  let answered : Array[Json] = []
-  for entry in self.journal_entries(session) {
-    answered.push({
-      "mock": entry.get("mock").unwrap_or(Json::null()),
-      "stub": entry.get("stub").unwrap_or(Json::null()),
-      "status": entry.get("status").unwrap_or(Json::null()),
-    })
-  }
-  Json::array(answered)
 }
 
 ///|

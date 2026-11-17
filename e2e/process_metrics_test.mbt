@@ -16,19 +16,6 @@ async fn cpu_ticks(pid : Int32) -> Int32 {
 }
 
 ///|
-/// The resident set size of process `pid`, in bytes: VmRSS of
-/// /proc/<pid>/status, in KiB.
-async fn resident_set(pid : Int32) -> Double {
-  for line in @fs.read_file("/proc/\{pid}/status").text().split("\n") {
-    if line.strip_prefix("VmRSS:") is Some(rest) &&
-      rest.trim().strip_suffix(" kB") is Some(kib) {
-      return @string.parse_double(kib.trim()) * 1024.0
-    }
-  }
-  fail("no VmRSS in /proc/\{pid}/status")
-}
-
-///|
 /// The directory of the cgroup v2 of process `pid`, from the `0::` line of
 /// /proc/<pid>/cgroup; without `pid`, of the test process itself.
 async fn cgroup_of(pid? : Int32) -> String {

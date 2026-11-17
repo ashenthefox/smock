@@ -7,19 +7,6 @@
 // fixtures (scripts/gen-protobuf-fixtures.sh).
 
 ///|
-/// The Mock `greeter`, the Default Mock, with the set, and the gRPC Stub
-/// `hello` of #205's example.
-let greeter_example : String =
-  #|mocks:
-  #|  - name: greeter
-  #|    grpc: { descriptorSet: greeter.binpb }
-  #|stubs:
-  #|  - id: hello
-  #|    mock: greeter
-  #|    request: { path: /helloworld.Greeter/SayHello }
-  #|    response: { json: { message: Hello Tom } }
-
-///|
 async test "a call over h2c gets HEADERS, one DATA frame with the framed reply protoc encodes, and trailers with grpc-status 0, and is journaled with its decoded body" {
   with_greeter_set([("greeter.yaml", greeter_example)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {

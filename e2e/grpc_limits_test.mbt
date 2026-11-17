@@ -142,10 +142,6 @@ async test "the ticket's example: a message of 10 MiB of empty Items, whose JSON
 }
 
 ///|
-/// The directory of the limits fixtures.
-let limits_dir : String = "fixtures/protobuf/limits"
-
-///|
 /// Runs `f` with a definitions directory holding `limits.yaml`: the Mock
 /// `burrows`, with limits.proto's set, and a gRPC Stub on Dig, and the
 /// Mock `documents`, with dynamic.proto's set, and gRPC Stubs on Wrap,

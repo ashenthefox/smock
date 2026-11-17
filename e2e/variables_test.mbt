@@ -2,31 +2,6 @@
 // and read by the next, over real sockets, one connection per request.
 
 ///|
-/// The example of ticket #87: `POST /login` stores the user it is sent and
-/// the one stored before, and echoes both; `GET /me` reads the user back.
-let who_logged_in : String =
-  #|mocks:
-  #|  - name: shop
-  #|stubs:
-  #|  - id: login
-  #|    mock: shop
-  #|    request: { method: POST, path: /login }
-  #|    variables:
-  #|      user: ${body.user}
-  #|      previous: ${vars.user ?? null}
-  #|    response:
-  #|      status: 200
-  #|      template: true
-  #|      json: { user: "${vars.user}", previous: "${vars.previous}" }
-  #|  - id: whoami
-  #|    mock: shop
-  #|    request: { method: GET, path: /me }
-  #|    response:
-  #|      status: 200
-  #|      template: true
-  #|      json: { user: "${vars.user ?? null}" }
-
-///|
 async test "over HTTP, a POST stores a value that a GET of the same Session reads, and another Session does not see it" {
   with_definitions([("shop.yaml", who_logged_in)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {

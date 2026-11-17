@@ -4,63 +4,6 @@
 // checked against the OpenAPI document (contract_test.mbt).
 
 ///|
-/// The `baggage` header that carries `session`, among other members.
-fn baggage(session : String) -> (String, String) {
-  ("baggage", "userId=alice,smock-session=\{session};ttl=60")
-}
-
-///|
-/// The `baggage` header that carries `session`, when it is given; none
-/// without.
-fn session_headers(session : String?) -> Array[(String, String)] {
-  match session {
-    Some(session) => [baggage(session)]
-    None => []
-  }
-}
-
-///|
-/// Calls the Admin API with the test token, as `session` when it is given,
-/// checks the response against the document, and returns its status and
-/// body.
-async fn Smock::call(
-  self : Smock,
-  meth : String,
-  path : String,
-  session? : String,
-  body? : String,
-) -> String {
-  let response = self.admin(meth, path, headers=session_headers(session), body?)
-  "\{response.status} \{response.body}"
-}
-
-///|
-/// `GET /users/1` on the plain port, with the Session `session` when it is
-/// given: the status line, the `Smock-Near-Miss` header if any, and the
-/// body.
-async fn Smock::user(
-  self : Smock,
-  session? : String,
-  meth~ : String = "GET",
-) -> String {
-  let response = self.send(meth, "/users/1", headers=session_headers(session))
-  let lines = response.split("\n").collect()
-  let near_miss = lines
-    .iter()
-    .filter(line => line.has_prefix("Smock-Near-Miss:"))
-    .map(line => " [\{line}]")
-    .collect()
-    .join("")
-  "\{lines[0]}\{near_miss} \{lines[lines.length() - 1]}"
-}
-
-///|
-/// An Ephemeral Stub that answers `GET /users/1` with `status` and `body`.
-fn ephemeral_user(status : Int32, body : String) -> String {
-  "{\"request\":{\"method\":\"GET\",\"path\":\"/users/1\"},\"response\":{\"status\":\{status},\"body\":\"\{body}\"}}"
-}
-
-///|
 async test "over the authenticated Admin API, Ephemeral Stubs are added, listed, deleted and reset, and answer only the requests that carry their Session" {
   with_definitions([("users.json", users)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {

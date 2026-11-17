@@ -4,111 +4,6 @@
 // certificate.
 
 ///|
-/// Creates a temporary directory, runs `f` with its path and removes it.
-async fn with_scratch(f : async (String) -> Unit) -> Unit {
-  let dir = @fs.tmpdir(prefix="smock-e2e-scratch-")
-  defer @fs.rmdir(dir, recursive=true)
-  f(dir)
-}
-
-///|
-/// The certificate the TLS port presents to a new connection, as a client
-/// that does not verify it sees it.
-struct Presented {
-  /// A file that holds it in PEM.
-  file : String
-  /// Its SHA-256 fingerprint, as `openssl x509 -fingerprint -sha256`
-  /// prints it.
-  fingerprint : String
-  /// Its subject alternative names, as `openssl x509` prints them.
-  names : String
-  subject : String
-  issuer : String
-}
-
-///|
-/// Runs `openssl <args>` and returns its exit status and its standard
-/// output.
-async fn run_openssl(args : Array[String], stdin? : String) -> (Int32, String) {
-  let result = @async.with_timeout_opt(patience_ms, () => {
-    match stdin {
-      Some(path) =>
-        @process.collect_output(
-          "openssl",
-          args,
-          stdin=@process.redirect_from_file(path),
-        )
-      None => @process.collect_output("openssl", args)
-    }
-  })
-  guard result is Some((status, stdout, _)) else {
-    fail("openssl \{args.join(" ")} did not exit in time")
-  }
-  (status, stdout.text())
-}
-
-///|
-/// The first line of `text` that starts with `prefix`, without the prefix.
-fn line_after(text : String, prefix : String) -> String {
-  for line in text.split("\n") {
-    let line = line.trim(chars=" \r")
-    if line.has_prefix(prefix) {
-      return line[prefix.length():].to_owned()
-    }
-  }
-  "(none)"
-}
-
-///|
-/// The line of `text` that follows the first line that contains `title`.
-fn line_following(text : String, title : String) -> String {
-  let lines = text.split("\n").collect()
-  for i, line in lines {
-    if line.contains(title) && i + 1 < lines.length() {
-      return lines[i + 1].trim(chars=" \r").to_owned()
-    }
-  }
-  "(no \{title})"
-}
-
-///|
-/// Reads the certificate the TLS port presents to a new connection, as a
-/// client that does not verify it, and writes it to a new file in `dir`.
-async fn Smock::presented_certificate(self : Smock, dir : String) -> Presented {
-  write(dir, "empty.txt", "")
-  let (_, output) = run_openssl(
-    ["s_client", "-connect", "127.0.0.1:\{self.tls_port}"],
-    stdin="\{dir}/empty.txt",
-  )
-  let end = "-----END CERTIFICATE-----"
-  guard output.find("-----BEGIN CERTIFICATE-----") is Some(start) &&
-    output.find(end) is Some(stop) else {
-    fail("openssl s_client printed no certificate:\n\{output}")
-  }
-  let name = "presented-\{@fs.readdir(dir).length()}.pem"
-  write(dir, name, output[start:stop + end.length()].to_owned() + "\n")
-  let file = "\{dir}/\{name}"
-  // The fingerprint has a call of its own: OpenSSL 4.1.0 prints a wrong one
-  // when `-ext` is in the same call.
-  let (_, digest) = run_openssl([
-    "x509", "-in", file, "-noout", "-fingerprint", "-sha256",
-  ])
-  // RFC 2253 prints names the same in every OpenSSL version: OpenSSL 3.0's
-  // default writes `CN = name`, later versions `CN=name`.
-  let (_, text) = run_openssl([
-    "x509", "-in", file, "-noout", "-subject", "-issuer", "-nameopt", "RFC2253",
-    "-ext", "subjectAltName",
-  ])
-  {
-    file,
-    fingerprint: line_after(digest, "sha256 Fingerprint="),
-    names: line_following(text, "X509v3 Subject Alternative Name"),
-    subject: line_after(text, "subject="),
-    issuer: line_after(text, "issuer="),
-  }
-}
-
-///|
 /// Runs `openssl s_client` against the TLS port, trusting only the
 /// certificate in the file `ca` and checking it for `name`, a DNS name or an
 /// IP address, sends `GET path` with `name` as its Host once the handshake
@@ -333,26 +228,6 @@ async test "a log entry at startup says that a self-signed certificate is in use
       )
     })
   })
-}
-
-///|
-/// A Definition file that declares a Mock for each (name, Host) pair in
-/// `mocks`, with a Stub `GET /x` that answers with `status`.
-fn mocks_with_stubs(
-  mocks : Array[(String, String)],
-  status~ : Int32 = 200,
-) -> String {
-  let declared = mocks.map(mock => {
-    "{ \"name\": \"\{mock.0}\", \"hosts\": [\"\{mock.1}\"] }"
-  })
-  let stubs = mocks.map(mock => {
-    (
-      $|{ "id": "\{mock.0}-x", "mock": "\{mock.0}",
-      $|  "request": { "method": "GET", "path": "/x" },
-      $|  "response": { "status": \{status} } }
-    )
-  })
-  "{ \"mocks\": [\{declared.join(", ")}], \"stubs\": [\{stubs.join(", ")}] }"
 }
 
 ///|

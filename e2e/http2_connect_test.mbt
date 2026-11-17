@@ -35,56 +35,6 @@ let tunnels : String =
   #|      "response": { "status": 201, "body": "stored" } } ] }
 
 ///|
-/// The fields of a CONNECT to `authority`: `:method` and `:authority`
-/// alone, with no `:scheme` and no `:path` (RFC 9113, section 8.5), then
-/// `headers`.
-fn connect_fields(
-  authority : String,
-  headers~ : Array[(String, String)] = [],
-) -> Array[(String, String)] {
-  [(":method", "CONNECT"), (":authority", authority), ..headers]
-}
-
-///|
-/// A Journal entry as these tests show it: the method and target of its
-/// request, its Host, its Mock and Stub, its status, and how many octets of
-/// body its request had.
-fn connect_entry(entry : Json) -> String {
-  guard entry
-    is Object(
-      {
-        "host": host,
-        "mock": mock,
-        "stub": stub,
-        "status": status,
-        "request": Object(
-          {
-            "method": String(meth),
-            "target": target,
-            "version": String(version),
-            "body": Object({ "size": size, .. }),
-            ..
-          }
-        ),
-        ..
-      }
-    ) else {
-    return entry.stringify()
-  }
-  "\{version} \{meth} \{target.stringify()} host=\{host.stringify()} mock=\{mock.stringify()} stub=\{stub.stringify()} status=\{status.stringify()} body=\{size.stringify()} octets"
-}
-
-///|
-/// The Journal's entries as `connect_entry` shows them, one per line.
-async fn connect_journal(smock : Smock) -> String {
-  let (_, journal) = smock.journal()
-  guard journal is Object({ "entries": Array(entries), .. }) else {
-    fail("no entries: \{journal.stringify()}")
-  }
-  entries.map(connect_entry).join("\n")
-}
-
-///|
 async test "h2c: a CONNECT reaches its Stub when its HEADERS arrive, even when they do not end the stream, with :authority as its target and Host, and its 2xx ends the stream with no content-length and no DATA, where HTTP/1.1 sends both" {
   with_definitions([("tunnels.json", tunnels)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {

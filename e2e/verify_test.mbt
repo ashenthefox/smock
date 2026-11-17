@@ -4,20 +4,6 @@
 // OpenAPI document (contract_test.mbt).
 
 ///|
-/// Sends `GET <target>` to the Mock `users` of `journal_defs`, as
-/// `session`.
-async fn Smock::get_user(
-  self : Smock,
-  target : String,
-  session : String,
-) -> Unit {
-  let _ = self.request("GET", target, headers=[
-    ("Host", "localhost"),
-    baggage(session),
-  ])
-}
-
-///|
 async test "verify counts the calling Session's requests that pass the filter, and checks the count exactly, at least or at most N" {
   with_definitions([("users.json", journal_defs)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
@@ -204,22 +190,6 @@ async test "verification whose filter names a Mock whose Journal is off, or whil
       ),
     )
   })
-}
-
-///|
-/// The unmatched requests of `session`, at most `limit` of them when it is
-/// given, checked against the document: the status and the body.
-async fn Smock::unmatched(
-  self : Smock,
-  session : String,
-  limit? : String,
-) -> (Int32, Json) {
-  let path = match limit {
-    Some(limit) => "/v1/journal/unmatched?limit=\{limit}"
-    None => "/v1/journal/unmatched"
-  }
-  let response = self.admin("GET", path, headers=[baggage(session)])
-  (response.status, response.json())
 }
 
 ///|

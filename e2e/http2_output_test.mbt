@@ -7,39 +7,6 @@
 // response.
 
 ///|
-/// The body of `/large`: 131,072 octets (128 KiB).
-let large_body : String = numbered(16_384)
-
-///|
-/// The body of `/larger`: 524,288 octets (512 KiB).
-let larger_body : String = numbered(65_536)
-
-///|
-/// Mock `m`, for `localhost`, with Stubs that answer `/large` with
-/// `large_body`, `/small` with a short body, and `/late` with
-/// `larger_body` after a delay of 100 ms.
-fn output_definitions() -> Array[(String, String)] {
-  [
-    (
-      "m.json",
-      (
-        #|{ "mocks": [{ "name": "m", "hosts": ["localhost"] }],
-        #|  "stubs": [
-        #|    { "id": "large", "mock": "m", "request": { "path": "/large" },
-        #|      "response": { "status": 200, "bodyFile": "large.txt" } },
-        #|    { "id": "small", "mock": "m", "request": { "path": "/small" },
-        #|      "response": { "status": 200, "body": "hello" } },
-        #|    { "id": "late", "mock": "m", "request": { "path": "/late" },
-        #|      "response": { "status": 200, "bodyFile": "larger.txt" },
-        #|      "fault": { "delay": { "fixed": 100 } } } ] }
-      ),
-    ),
-    ("files/large.txt", large_body),
-    ("files/larger.txt", larger_body),
-  ]
-}
-
-///|
 /// The HEADERS frame of a request with method `meth` for `path` on
 /// `stream`, with no body: they end the stream.
 fn RawH2::ask(

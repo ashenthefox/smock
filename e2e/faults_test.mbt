@@ -2,56 +2,6 @@
 // closed without a response, a partial response, and replay from --seed.
 
 ///|
-/// Mock `m` with Stubs that answer `GET /slow` after a fixed delay of
-/// 1500 ms, `GET /fast` at once, `/reset` by resetting the connection,
-/// `GET /close` by closing the connection, `GET /partial` with half its
-/// body, `GET /coin` by closing the connection half of the time, as the
-/// process generator decides, and `GET /flaky` by resetting the connection
-/// half of the time, as the Stub's own generator, seeded, decides.
-let faults : String =
-  #|{ "mocks": [{ "name": "m" }],
-  #|  "stubs": [
-  #|    { "id": "slow", "mock": "m", "request": { "path": "/slow" },
-  #|      "response": { "status": 200, "body": "slow" },
-  #|      "fault": { "delay": { "fixed": 1500 } } },
-  #|    { "id": "fast", "mock": "m", "request": { "path": "/fast" },
-  #|      "response": { "status": 200, "body": "fast" } },
-  #|    { "id": "reset", "mock": "m", "request": { "path": "/reset" },
-  #|      "response": { "status": 200, "body": "never sent" },
-  #|      "fault": { "connection": { "kind": "reset" } } },
-  #|    { "id": "close", "mock": "m", "request": { "path": "/close" },
-  #|      "response": { "status": 200, "body": "never sent" },
-  #|      "fault": { "connection": { "kind": "close" } } },
-  #|    { "id": "partial", "mock": "m", "request": { "path": "/partial" },
-  #|      "response": { "status": 200, "headers": { "Content-Type": "text/plain" },
-  #|        "body": "0123456789" },
-  #|      "fault": { "connection": { "kind": "partial", "probability": 1 } } },
-  #|    { "id": "coin", "mock": "m", "request": { "path": "/coin" },
-  #|      "response": { "status": 200, "body": "heads" },
-  #|      "fault": { "connection": { "kind": "close", "probability": 0.5 } } },
-  #|    { "id": "flaky", "mock": "m", "request": { "path": "/flaky" },
-  #|      "response": { "status": 200, "body": "answered" },
-  #|      "fault": { "connection": { "kind": "reset", "probability": 0.5 },
-  #|        "seed": 2026 } } ] }
-
-///|
-/// Every byte smock sends on `conn` until it closes the connection with a
-/// FIN, with `\r\n` shown as `\n` and the current Date masked
-/// (`mask_date`). A reset fails the test.
-async fn read_to_end(conn : Conn) -> String {
-  let received = @buffer.Buffer()
-  let result = @async.with_timeout_opt(patience_ms, () => {
-    while conn.read_some() is Some(bytes) {
-      received.write_bytes(bytes)
-    }
-  })
-  guard result is Some(_) else { fail("the connection stayed open") }
-  mask_date(
-    @utf8.decode_lossy(received.to_bytes()).replace_all(old="\r\n", new="\n"),
-  )
-}
-
-///|
 async test "a delay holds back the status line, while smock keeps answering other connections" {
   with_definitions([("m.json", faults)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
@@ -119,41 +69,6 @@ async test "a close Fault ends the connection with a FIN, without a byte of resp
       ),
     )
   })
-}
-
-///|
-/// Whether `err` is the error a read gets when the peer resets the
-/// connection, ECONNRESET.
-fn is_reset(err : @os_error.OSError) -> Bool {
-  err.to_string().contains("Connection reset by peer")
-}
-
-///|
-/// How smock ends `conn`, waiting at most `within` milliseconds: how many
-/// bytes it sends first, then whether an RST (a connection-reset error) or
-/// a FIN (a clean end of stream) ends the connection, or it stays open.
-async fn how_it_ends(conn : Conn, within~ : Int32 = patience_ms) -> String {
-  let (received, ending) = sent_until_end(conn, within~)
-  "\{received.length()} bytes, then \{ending}"
-}
-
-///|
-/// Every byte smock sends on `conn` until the connection ends, waiting at
-/// most `within` milliseconds, and how it ends: `an RST`, `a FIN`, or
-/// `nothing yet: it is still open`.
-async fn sent_until_end(conn : Conn, within~ : Int32) -> (Bytes, String) {
-  let received = @buffer.Buffer()
-  let ending = @async.with_timeout_opt(within, () => {
-    for ;; {
-      let bytes = conn.read_some() catch {
-        @os_error.OSError(_, ..) as err if is_reset(err) => break "an RST"
-        err => break "an error: \{err}"
-      }
-      guard bytes is Some(bytes) else { break "a FIN" }
-      received.write_bytes(bytes)
-    }
-  })
-  (received.to_bytes(), ending.unwrap_or("nothing yet: it is still open"))
 }
 
 ///|
