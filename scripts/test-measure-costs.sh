@@ -64,6 +64,12 @@ if [ -n "${FAKE_FAIL_WITH_MUTANT-}" ] && [ -n "$mutant" ]; then exit 1; fi
 case $args in
 *" --build-only "*) exit 0 ;;
 esac
+# With -v, moon prints how it starts each test program: two executables,
+# and with coverage one program through tcc.
+case $args in
+*" --enable-coverage "*" -v "*) printf '%s\n' "/x/p.blackbox_test.exe p_test.mbt:0-5" "/opt/moon/bin/internal/tcc -run /x/q.c q_test.mbt:0-2" ;;
+*" -v "*) printf '%s\n' "/x/p.blackbox_test.exe p_test.mbt:0-5" "/x/q.blackbox_test.exe q_test.mbt:0-2" ;;
+esac
 # A run with coverage leaves what moon's runs leave in the target
 # directory: the compiler's trace of the sources, and one log of counters.
 case $args in
@@ -359,7 +365,7 @@ wasm_gc="smock/smock/buildinfo smock/smock/cookies smock/smock/definitions smock
 mode_calls="test --target native<cov> -p $native_only --build-only --dry-run --target-dir <plan1>
 build --target native<cov> cmd/smock --dry-run --target-dir <plan2>
 test --target native<cov> -p $native_only --build-only --target-dir <dir>
-test --target native<cov> -p $native_only --target-dir <dir>
+test --target native<cov> -p $native_only --target-dir <dir> -v
 test --target wasm-gc<cov> -p $wasm_gc --build-only --target-dir <dir>
 test --target wasm-gc<cov> -p $wasm_gc --target-dir <dir>
 test --target native<cov> -p smock/yaml --build-only --target-dir <dir>
@@ -419,6 +425,9 @@ holds coverage coverage.json '.coverage.plans.native_only | .system_cc == 1 and 
 holds coverage coverage.json '.coverage.report | .exit_status == 0 and .covered == 7 and .points == 9' \
   "the report's total of points covered"
 holds coverage coverage.json '.plain | has("report") | not' "no report of the plain mode"
+holds coverage coverage.json '.plain.native_only.started == {"executables": 2, "tcc": 0}
+  and .coverage.native_only.started == {"executables": 1, "tcc": 1}' \
+  "how moon started the native-only packages' test programs in each mode"
 
 FAKE_COVERAGE_FAILS=1 measure coverage-fails coverage
 exits coverage-fails 1

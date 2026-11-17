@@ -30,7 +30,8 @@ fail() {
 #   <coverage, plain then with coverage: native-only build, run, wasm-gc
 #   build, run, yaml build, run, binary> <report> <covered> <points>
 #   <C compiler commands planned, plain then with coverage: native-only
-#   system, tcc, binary system, tcc>
+#   system, tcc, binary system, tcc; then the native-only packages' test
+#   programs started, plain then with coverage: as executables, through tcc>
 # writes the four parts' files of one architecture into <dir>; the runs are
 # comma-separated, and a p90 of "-" leaves the part alone out.
 measurements() {
@@ -67,10 +68,11 @@ write("rebuild", {"clean": {"cmd": step(cmd_build), "engine_native": step(30), "
 times = [float(t) for t in coverage.split(",")]
 counts = [int(c) for c in plans.split(",")]
 result = {"ok": True}
-for mode, (nb, nr, wb, wr, yb, yr, b), (ns, nt, bs, bt) in (
-        ("plain", times[:7], counts[:4]), ("coverage", times[7:], counts[4:])):
+for mode, (nb, nr, wb, wr, yb, yr, b), (ns, nt, bs, bt), (se, st) in (
+        ("plain", times[:7], counts[:4], counts[8:10]), ("coverage", times[7:], counts[4:8], counts[10:])):
     result[mode] = {
-        "native_only": {"build": step(nb), "run": step(nr, 0, (300, 300, 0))},
+        "native_only": {"build": step(nb), "run": step(nr, 0, (300, 300, 0)),
+                        "started": {"executables": se, "tcc": st}},
         "wasm_gc": {"build": step(wb), "run": step(wr, 0, (1500, 1500, 0))},
         "yaml_native": {"build": step(yb), "run": step(yr, 0, (200, 200, 0))},
         "binary": step(b),
@@ -115,12 +117,12 @@ exits() {
 # coverage: native-only 30+10 plain, 40+15 coverage (run ratio 15/10 = 1.5),
 # wasm-gc 5+3 and 6+5, yaml 2+1 and 5+2, binary 40 and 60, report 3 s.
 measurements "$tmp/amd64" x86_64 30 50 100 40,44,42 2.0 8 2 9 4.5 \
-  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1
+  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1,0,6,0,6
 # arm64: setup 40, cmd/smock 150, e2e 250, runs 70, 71, 70 (E = 70), q = 3.0,
 # W = 5.1; coverage: native-only 90+12 and 110+18 (ratio 1.5), wasm-gc 6+4
 # and 7+6, yaml 4+1.5 and 6+2, binary 120 and 140, report 4 s.
 measurements "$tmp/arm64" aarch64 40 150 250 70,71,70 3.0 35 2.5 33 5.1 \
-  90,12,6,4,4,1.5,120,110,18,7,6,6,2,140 4 8 9 30,0,30,0,30,0,30,0
+  90,12,6,4,4,1.5,120,110,18,7,6,6,2,140 4 8 9 30,0,30,0,30,0,30,0,6,0,6,0
 
 estimate both --run-url https://github.com/hirunefu/smock/actions/runs/1 "$tmp/amd64" "$tmp/arm64"
 exits both 0
@@ -144,6 +146,7 @@ says both "| yaml's tests natively, built and run: plain, with coverage | 3.0 s,
 says both "| The binary, built from clean: plain, with coverage | 40.0 s, 60.0 s | 120.0 s, 140.0 s | 31.9 s, 40.1 s |"
 says both "| System C compiler commands planned, plain and with coverage: native-only packages' tests, binary | 0, 0 and 0, 0 | 30, 30 and 30, 30 | not measured |"
 says both "| tcc commands planned, plain and with coverage: native-only packages' tests, binary | 12, 1 and 12, 1 | 0, 0 and 0, 0 | not measured |"
+says both "| The native-only packages' test programs, started plain and with coverage: as executables, through tcc | 0, 6 and 0, 6 | 6, 0 and 6, 0 | not measured |"
 says both "| The coverage build works: its tests pass, and the points it covers | yes, 7 of 9 | yes, 8 of 9 | yes |"
 
 # --- The recomputed estimate -------------------------------------------------------------
@@ -184,7 +187,7 @@ says both "- The operator-level run on 20 jobs on linux/amd64: 1.85 h, within th
 # Runs 64, 66, 65: E = 65, T = 85.25, m = 65 + 3.096 + 5.456 = 73.552; each
 # job 30 + 50 + 100 + 130 = 310, + 131 x 73.552 = 9,945.312 s = 2.76 h.
 measurements "$tmp/slow" x86_64 30 50 100 64,66,65 2.0 8 2 9 4.5 \
-  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1
+  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1,0,6,0,6
 estimate slow "$tmp/slow" "$tmp/arm64"
 exits slow 0
 says slow "- The single-process e2e run on linux/amd64: 65.0 s, outside the band (60 s or less)."
@@ -194,11 +197,11 @@ says slow "- The operator-level run on 20 jobs on linux/amd64: 2.76 h, outside t
 
 # The e2e run at 60 s is within the band, and at 60.1 s outside.
 measurements "$tmp/at-60" x86_64 30 50 100 60,60,60 2.0 8 2 9 4.5 \
-  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1
+  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1,0,6,0,6
 estimate at-60 "$tmp/at-60"
 says at-60 "- The single-process e2e run on linux/amd64: 60.0 s, within the band (60 s or less)."
 measurements "$tmp/past-60" x86_64 30 50 100 60.1,60.1,60.1 2.0 8 2 9 4.5 \
-  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1
+  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1,0,6,0,6
 estimate past-60 "$tmp/past-60"
 says past-60 "- The single-process e2e run on linux/amd64: 60.1 s, outside the band (60 s or less)."
 
@@ -206,11 +209,11 @@ says past-60 "- The single-process e2e run on linux/amd64: 60.1 s, outside the b
 # besides its setup; a setup of 2,384.728 s makes the run 9,000 s, 2.50 h,
 # within the band, and 36 s more 9,036 s, 2.51 h, outside it.
 measurements "$tmp/at-2.5" x86_64 2384.728 50 100 40,44,42 2.0 8 2 9 4.5 \
-  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1
+  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1,0,6,0,6
 estimate at-2.5 "$tmp/at-2.5"
 says at-2.5 "- The operator-level run on 20 jobs on linux/amd64: 2.50 h, within the band (at most 2.5 h)."
 measurements "$tmp/past-2.5" x86_64 2420.728 50 100 40,44,42 2.0 8 2 9 4.5 \
-  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1
+  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1,0,6,0,6
 estimate past-2.5 "$tmp/past-2.5"
 says past-2.5 "- The operator-level run on 20 jobs on linux/amd64: 2.51 h, outside the band (at most 2.5 h)."
 
@@ -218,11 +221,11 @@ says past-2.5 "- The operator-level run on 20 jobs on linux/amd64: 2.51 h, outsi
 # native-only packages' coverage build at 201 s, 30 + 216 + 11 + 7 + 3 = 267
 # s; at 202 s, 268 s.
 measurements "$tmp/job-267" x86_64 30 50 100 40,44,42 2.0 8 2 9 4.5 \
-  30,10,5,3,2,1,40,201,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1
+  30,10,5,3,2,1,40,201,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1,0,6,0,6
 estimate job-267 "$tmp/job-267"
 says job-267 "The coverage job on every push takes 267 s on linux/amd64. At 267 s the job fits beside CI's longest job, the arm64 native tests (267 and 270 s in #273's two runs)."
 measurements "$tmp/job-268" x86_64 30 50 100 40,44,42 2.0 8 2 9 4.5 \
-  30,10,5,3,2,1,40,202,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1
+  30,10,5,3,2,1,40,202,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1,0,6,0,6
 estimate job-268 "$tmp/job-268"
 says job-268 "The coverage job on every push takes 268 s on linux/amd64. At 268 s the job takes longer than CI's longest job, the arm64 native tests (267 and 270 s in #273's two runs), so CI's wall time would grow."
 
@@ -231,7 +234,7 @@ says job-268 "The coverage job on every push takes 268 s on linux/amd64. At 268 
 # A kill's confirmation is then two whole runs: q = E, so m = 42 + 0.774 x 84
 # + 3.616 = 42 + 65.016 + 3.616 = 110.632.
 measurements "$tmp/no-alone" x86_64 30 50 100 40,44,42 - 8 2 9 4.5 \
-  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1
+  30,10,5,3,2,1,40,40,15,6,5,5,2,60 3 7 9 0,12,0,1,0,12,0,1,0,6,0,6
 estimate no-alone "$tmp/no-alone" "$tmp/arm64"
 exits no-alone 0
 says no-alone "| A server mutant through e2e | about 35 s locally | 110.6 s | 80.5 s |"

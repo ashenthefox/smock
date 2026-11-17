@@ -221,6 +221,13 @@ def measured_table(names, all_found):
     row("System C compiler commands planned, plain and with coverage: native-only packages' tests, binary",
         planned("system_cc"), "not measured")
     row("tcc commands planned, plain and with coverage: native-only packages' tests, binary", planned("tcc"), "not measured")
+    programs = []
+    for found in all_found:
+        coverage = found["coverage"]
+        how = [coverage[mode]["native_only"].get("started") for mode in ("plain", "coverage")] if coverage else [None]
+        programs.append("not measured" if None in how else " and ".join(f"{h['executables']}, {h['tcc']}" for h in how))
+    row("The native-only packages' test programs, started plain and with coverage: as executables, through tcc",
+        programs, "not measured")
     works = []
     for found in all_found:
         coverage = found["coverage"]

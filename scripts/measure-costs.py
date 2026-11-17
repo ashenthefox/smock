@@ -37,8 +37,9 @@ its start to its exit, measured here.
         yaml, yaml's natively, and the binary. For each mode it also counts,
         in moon's dry run of the native-only packages' tests and of the
         binary, the commands that run the system's C compiler and those
-        that run tcc: on amd64, moon's debug builds skip the system's C
-        compiler. With coverage, moon_cove reports the points covered, which
+        that run tcc, and how the native-only packages' test programs
+        started, as executables or through tcc: on amd64, moon's debug
+        builds skip the system's C compiler. With coverage, moon_cove reports the points covered, which
         tells that the coverage build works.
   summary
         Prints what the parts wrote, as Markdown, and writes it to
@@ -375,6 +376,19 @@ def compilers(plan):
     return counts
 
 
+def started(log):
+    """How moon started the test programs of a run with -v, which prints the
+    command of each: as an executable, or through tcc."""
+    counts = {"executables": 0, "tcc": 0}
+    for line in Path(log).read_text(errors="replace").splitlines():
+        words = [os.path.basename(word.strip("'\"")) for word in line.split()[:2]]
+        if words and words[0] == "tcc":
+            counts["tcc"] += 1
+        elif words and words[0].endswith(".exe"):
+            counts["executables"] += 1
+    return counts
+
+
 def planned(command, log):
     """The C compilers of the commands moon would run for command from
     clean: its dry run in an empty target directory."""
@@ -412,12 +426,18 @@ def coverage_mode(mode, out, args):
             ("wasm_gc", wasm_gc, WASM_GC),
             ("yaml_native", native, YAML_NATIVE),
         ):
+            # moon prints how it starts each test program with -v: what the
+            # native-only packages' run shows of the C compiler, if moon
+            # compiles their C as they start.
+            verbose = ["-v"] if name == "native_only" else []
             result[name] = {
                 "build": timed(
                     [*command, "-p", *packages, "--build-only", *in_target, *jobs(args)], logs / f"{mode}-{name}-build.log"
                 ),
-                "run": timed([*command, "-p", *packages, *in_target], logs / f"{mode}-{name}-run.log"),
+                "run": timed([*command, "-p", *packages, *in_target, *verbose], logs / f"{mode}-{name}-run.log"),
             }
+            if verbose:
+                result[name]["started"] = started(result[name]["run"]["log"])
         result["binary"] = timed([*binary, "--target-dir", str(target_binary), *jobs(args)], logs / f"{mode}-binary.log")
         if mode == "coverage":
             # moon coverage report reads _build alone, so moon_cove, which it
@@ -526,6 +546,10 @@ def part_summary(out, args):
                 row(f"{mode.capitalize()}: {label}, build", seconds(result[name]["build"]))
                 row(f"{mode.capitalize()}: {label}, run", seconds(result[name]["run"]))
             row(f"{mode.capitalize()}: the binary, build", seconds(result["binary"]))
+            if "started" in result["native_only"]:
+                how = result["native_only"]["started"]
+                row(f"{mode.capitalize()}: the native-only packages' test programs started as executables, through tcc",
+                    f"{how['executables']}, {how['tcc']}")
             for name, plan in result["plans"].items():
                 row(f"{mode.capitalize()}: C compiler commands planned for {name.replace('_', ' ')}: the system's, tcc's",
                     f"{plan['system_cc']}, {plan['tcc']}")
