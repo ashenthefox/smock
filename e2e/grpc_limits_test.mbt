@@ -116,21 +116,21 @@ async test "the ticket's example: a message of 10 MiB of empty Items, whose JSON
       // `{"name":"","sizes":[],"stock":{}}`, 16 times its size, so the
       // JSON would be 160 MiB.
       let body = framed(copies(b"\x52\x00", (default_body_limit - 5) / 2))
-      let start = @async.now()
+      // No document gives the answer a time ("at the end, as soon as it
+      // shows", docs/grpc/unmatched-and-refused-calls.md, Protocol checks
+      // and limits), and the peak RSS shows that smock never built the
+      // 160 MiB of JSON.
       let reply = client.call("/collections.Shelf/Fill", body~)
-      let took = @async.now() - start
       let called = peak_resident_set(smock.pid)
       inspect(
         [
           limits_reply(reply),
-          "answered within 5 s: \{took < 5000}",
           "peak RSS within the upload's, plus --body-limit for the JSON: \{called <= uploaded + default_body_limit.to_double()}",
           "journaled: \{journaled_targets(smock)}",
           smock.metric("smock_requests_total"),
         ].join("\n"),
         content=(
           #|:status: 200, grpc-status: 8, grpc-message: the decoded request message is over the body limit, 0 DATA (end)
-          #|answered within 5 s: true
           #|peak RSS within the upload's, plus --body-limit for the JSON: true
           #|journaled: /upload
           #|smock_requests_total{mock="shelf",stub="upload"} 1
