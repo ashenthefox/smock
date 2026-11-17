@@ -24,7 +24,6 @@ usage: python3 -m unittest discover -s scripts/mutation -v
 
 import json
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -319,7 +318,8 @@ class RatchetTest(unittest.TestCase):
         wider = self.tmp / "wider.py"
         wider.write_text(
             "import json, subprocess, sys\n"
-            f"result = subprocess.run([sys.executable, {str(SITES)!r}, *sys.argv[1:]], capture_output=True, text=True)\n"
+            f"result = subprocess.run([sys.executable, {str(SITES)!r}, *sys.argv[1:]],\n"
+            "                        capture_output=True, text=True)\n"
             "for line in result.stdout.splitlines():\n"
             "    print(line)\n"
             "    if json.loads(line)['operator'] == 'ROR':\n"
