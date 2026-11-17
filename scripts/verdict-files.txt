@@ -32,7 +32,7 @@ scripts/coverage-tests/                the coverage report's committed reports a
 coverage/                              the coverage ledger's committed data: the floors and approved raises (#297), and the scope's list of generated files
 scripts/check-merge.*                  the merge check (#312)
 scripts/check-weekly-run.*             the release's check of the latest weekly run (#316)
-.github/workflows/mutation*.yml        a mutation workflow: the bulk runs (#313), the weekly and monthly runs (#314), and server and cmd/smock through e2e (#344, #346)
+.github/workflows/mutation*.yml        a mutation workflow: the canary (#308), the bulk runs (#313), the weekly and monthly runs (#314), and server and cmd/smock through e2e (#344, #346)
 .github/workflows/coverage*.yml        a coverage workflow beside CI's coverage job, such as e2e's (#342)
 .github/workflows/ci.yml               the workflow that runs on every push, which holds the coverage job (#297)
 .github/workflows/build-test.yml       the workflow that builds and tests, which runs the mutation runner's own tests, its self-test and its site-count check (#298, #309)

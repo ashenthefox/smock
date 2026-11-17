@@ -743,13 +743,17 @@ fi
 # floors and scope" among the files that decide a verdict. The mutation
 # runner is scripts/mutation/ (#298, #299), and the coverage wrapper, its
 # bisect parser and the parser's test data are scripts/coverage.sh,
-# scripts/coverage-report.py and scripts/coverage-tests/ (#296).
+# scripts/coverage-report.py and scripts/coverage-tests/ (#296). #308:
+# "Changes to the list and to the recorded verdicts show in the weakening
+# report": the canary's mutants with their recorded verdicts, its list of
+# explained differences (mutation/canary/) and its workflow.
 tree
 package
 branch
 mkdir -p "$repo/scripts"
 cp "$list" "$repo/$list"
-git ls-files -- scripts/mutation scripts/coverage.sh scripts/coverage-report.py scripts/coverage-tests >"$tmp/tool-files"
+git ls-files -- scripts/mutation scripts/coverage.sh scripts/coverage-report.py scripts/coverage-tests \
+  mutation/canary .github/workflows/mutation-canary.yml >"$tmp/tool-files"
 tools=0
 while read -r path; do
   tools=$((tools + 1))
