@@ -234,7 +234,9 @@ class SelfTestTest(unittest.TestCase):
         # tests run first, and for the survivors the tests of every package
         # that imports it"; CONTRIBUTING, "The self-test": a self-test that
         # the package's own tests do not see runs again with those tests,
-        # as a mutant that survives them does.
+        # as a mutant that survives them does. The maintainer confirmed it
+        # on 2026-11-18 (#275): a package without tests of its own passes
+        # the self-test through its importers' tests.
         root = self.module_with_importer("through", "user")
         moon, log = moon_script(self.tmp, "through", 'exec "$moon" "$@"')
         result = self.run_module(root, "through", moon, "--self-test-only", "bare")
