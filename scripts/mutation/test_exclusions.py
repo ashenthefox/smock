@@ -248,5 +248,50 @@ class CategoriesTest(unittest.TestCase):
         self.assertIn("exclusions: 0 entries, none stale", result.stdout)
 
 
+class StaleTest(unittest.TestCase):
+    """An entry goes stale when the text of its definition changes, or the
+    definition is gone; the check lists it, and passes."""
+
+    def setUp(self):
+        need_moonc()
+        self.tmp = Path(tempfile.mkdtemp(prefix="test-exclusions-"))
+        self.tree = Tree(self.tmp)
+        self.tree.write(filled(self.tree.new(ABORT), category='"UNREACHABLE"', reason='"Never 0."'),
+                        filled(self.tree.new(NOT), category='"ARID"', reason='"A default."'))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def stale(self):
+        result = self.tree.run("check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return [line.split(": ", 2)[2] for line in result.stdout.splitlines() if line.startswith("exclusions: stale: ")]
+
+    def test_entries_whose_definitions_are_as_they_were_are_current(self):
+        # Another definition of the file changes, and white space between
+        # definitions: neither is the entries' definitions' text.
+        self.tree.edit("prng/prng.mbt", "self.state = self.state + 1", "self.state = self.state + 2")
+        self.tree.edit("calc/calc.mbt", "///|\n/// Whether `n` is odd.", "\n///|\n/// Whether `n` is odd.")
+        self.assertEqual(self.stale(), [])
+
+    def test_a_changed_definition_makes_its_entry_stale(self):
+        self.tree.edit("prng/prng.mbt", 'abort("count is 0")', 'abort("the count is 0")')
+        self.assertEqual(self.stale(), ["prng/prng.mbt,Generator::below,2:19 (UNREACHABLE): its definition's text"
+                                        " changed, or it is gone"])
+
+    def test_a_definition_that_is_gone_or_renamed_makes_its_entry_stale(self):
+        self.tree.edit("calc/calc.mbt", "pub fn is_blank(", "pub fn is_empty(")
+        (self.tree.root / "prng" / "prng.mbt").unlink()
+        self.assertEqual(sorted(self.stale()), [
+            "calc/calc.mbt,is_blank,NOT,!,,0 (ARID): its definition's text changed, or it is gone",
+            "prng/prng.mbt,Generator::below,2:19 (UNREACHABLE): its definition's text changed, or it is gone",
+        ])
+
+    def test_the_check_counts_the_stale_entries(self):
+        self.tree.edit("calc/calc.mbt", "if !spaces {", "if spaces == false {")
+        result = self.tree.run("check")
+        self.assertIn("exclusions: 2 entries, 1 stale", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -184,8 +184,9 @@ def definitions(root, files, moonc):
 
 
 def problems_of(entry, source):
-    """What is wrong with an entry, given the text of its file (None when
-    it is gone)."""
+    """What is wrong with an entry, given its file's definitions and text
+    (None when the entry is stale: whether a stale point is at an abort is
+    for its triage to say)."""
     fields, key = entry.fields, entry.key
     allowed = set(COMMON) | ({"mutant"} if entry.mutant else set(POINT))
     allowed |= set(NEEDS.get(entry.category, ()))
@@ -227,7 +228,7 @@ def problems_of(entry, source):
         if not (isinstance(issue, int) and not isinstance(issue, bool) and issue > 0):
             problems.append(f"{key}: a DEFERRED entry should carry its issue's number (issue = <n>)")
     if entry.category == "UNREACHABLE" and not str(fields.get("argument", "")).strip():
-        if not (entry.is_point() and at_abort(entry, source)):
+        if not (entry.is_point() and (source is None or at_abort(entry, source))):
             problems.append(f"{key}: an UNREACHABLE entry should be an arm that an invariant guards with an abort,"
                             " or carry its written argument (argument = \"...\")")
     return problems
@@ -267,9 +268,11 @@ def check(root, moonc):
         if entry.key in seen:
             problems.append(f"{LIST}: {entry.key}: a second entry for it")
         seen.add(entry.key)
-        problems += [f"{LIST}: {problem}" for problem in problems_of(entry, sources.get(entry.file))]
-        if stale(entry, found):
+        is_stale = stale(entry, found)
+        if is_stale:
             stale_entries.append(entry)
+        source = None if is_stale else sources.get(entry.file)
+        problems += [f"{LIST}: {problem}" for problem in problems_of(entry, source)]
     for problem in problems:
         print(f"exclusions: {problem}", file=sys.stderr)
     for entry in stale_entries:
