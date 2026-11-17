@@ -192,7 +192,9 @@ cat >>"$root/docs/ledgers/use-cases.md" <<'MD'
 |---|---|---|---|---|
 | F02 | Kinds | [Run](../../README.md#run) | manual | `server/reset_wbtest.mbt` "a reset is sent" (white-box)<br>`scripts/smoke-test-image.sh`<br>#287 adds the rest<br>Manual: only an operating-system failure shows it |
 | F03 | Not tests | [Run](../../README.md#run) | tested | `e2e/serve_test.mbt` "a test in a comment"<br>`e2e/serve_test.mbt` "a test in a string"<br>`e2e/serve_test.mbt` "a name"<br>`e2e/serve_test.mbt` "a name with \"quotes\""<br>`e2e/missing_test.mbt` "a test"<br>`scripts/missing.sh` runs<br>the image runs<br>Manual:<br>#<br> |
+| F04 | Paths | [Run](../../README.md#run) | tested | `e2e/serve_test.mbt`<br>`../outside.sh` |
 MD
+touch "$tmp/outside.sh"
 check kinds
 exits kinds 1
 says kinds 'docs/ledgers/use-cases.md:18: F03: e2e/serve_test.mbt: no test named "a test in a comment"'
@@ -206,8 +208,10 @@ says kinds 'docs/ledgers/use-cases.md:18: F03: "Manual:" is not a test, a check,
 says kinds 'docs/ledgers/use-cases.md:18: F03: "#" is not a test, a check, a ticket or a manual check'
 says kinds 'docs/ledgers/use-cases.md:18: F03: an entry of Checked by is empty'
 says kinds 'docs/ledgers/use-cases.md:13: M01: e2e/serve_test.mbt: 2 tests are named "a name with \"quotes\""'
-says kinds "check-ledgers: 3 features, 1 message and 1 limit, 11 problems"
-lines kinds 12
+says kinds 'docs/ledgers/use-cases.md:19: F04: "`e2e/serve_test.mbt`" is not a test, a check, a ticket or a manual check'
+says kinds 'docs/ledgers/use-cases.md:19: F04: ../outside.sh: no such file or directory'
+says kinds "check-ledgers: 4 features, 1 message and 1 limit, 13 problems"
+lines kinds 14
 
 # --- Ids and sources -----------------------------------------------------------
 
@@ -255,6 +259,7 @@ cat >>"$root/docs/ledgers/use-cases.md" <<'MD'
 | F17 | Asserted | #1 | asserted | `scripts/smoke-test-image.sh` |
 | F18 | Manual | #1 | manual | Manual: only an operating-system failure shows it |
 | F19 | Open | #1 | open | #287 adds it |
+| F20 | Partly with a manual check | #1 | partly | `scripts/smoke-test-image.sh`<br>#287<br>Manual: by hand |
 
 | ID | Message | Source | Seen by | Status | Checked by |
 |---|---|---|---|---|---|
@@ -271,6 +276,7 @@ cat >>"$root/docs/ledgers/boundaries.md" <<'MD'
 | L12 | Open | #1 | `http1` | open | #324 | #324 |
 | L13 | Partly with nothing on one side | #1 | `http1` | partly | `scripts/smoke-test-image.sh` | Manual: by hand |
 | L14 | Open with a test | #1 | `http1` | open | `scripts/smoke-test-image.sh` | #324 |
+| L15 | Tested with nothing past it | #1 | `http1` | tested | `scripts/smoke-test-image.sh` | none |
 MD
 check statuses
 exits statuses 1
@@ -282,14 +288,17 @@ says statuses "docs/ledgers/use-cases.md:21: F14: a manual row names a manual ch
 says statuses "docs/ledgers/use-cases.md:22: F15: an open row names tickets alone"
 says statuses "docs/ledgers/use-cases.md:23: F16: an open row names tickets alone"
 says statuses "docs/ledgers/use-cases.md:24: F17: the status is not tested, partly, manual or open"
-says statuses "docs/ledgers/use-cases.md:30: M10: an asserted row names tests and checks alone"
-says statuses "docs/ledgers/use-cases.md:31: M11: a deleted row names tickets alone: the one that deleted it"
-says statuses "docs/ledgers/use-cases.md:32: M12: seen by is not user, package or nobody"
+says statuses "docs/ledgers/use-cases.md:31: M10: an asserted row names tests and checks alone"
+says statuses "docs/ledgers/use-cases.md:32: M11: a deleted row names tickets alone: the one that deleted it"
+says statuses "docs/ledgers/use-cases.md:33: M12: seen by is not user, package or nobody"
 says statuses "docs/ledgers/boundaries.md:6: L10: a tested row names tests and checks alone"
 says statuses "docs/ledgers/boundaries.md:9: L13: a partly tested row names tests, checks and tickets alone, with at least one ticket and one test or check"
 says statuses "docs/ledgers/boundaries.md:10: L14: an open row names tickets alone"
-says statuses "check-ledgers: 11 features, 7 messages and 6 limits, 14 problems"
-lines statuses 15
+says statuses "docs/ledgers/use-cases.md:27: F20: a partly tested row names tests, checks and tickets alone, with at least one ticket and one test or check"
+says statuses 'docs/ledgers/boundaries.md:11: L15: "none" is not a test, a check, a ticket or a manual check'
+says statuses "docs/ledgers/boundaries.md:11: L15: a tested row names tests and checks alone"
+says statuses "check-ledgers: 12 features, 7 messages and 7 limits, 17 problems"
+lines statuses 18
 
 # --- Packages and tables -------------------------------------------------------
 
