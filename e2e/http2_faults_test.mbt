@@ -44,7 +44,8 @@ async test "h2c: a partial Fault sends HEADERS with the whole content-length and
       // reset comes in place of an event: `partial` sends half the events,
       // "each after its delay. Then RST_STREAM", and an event stream of a
       // single event "sends its HEADERS without ending the HTTP/2 stream,
-      // then the reset" (docs/http2.md, Faults).
+      // then the reset" (docs/http2.md, Faults). Nothing else competes with
+      // a reset, so the others have no time bound.
       for
         request in [
           ("GET", "/partial", None),
@@ -65,10 +66,8 @@ async test "h2c: a partial Fault sends HEADERS with the whole content-length and
         out.push("\{request.0} \{request.1}:")
         out.push(raw.frames_until_stream_ends(stream))
         let ms = @async.now() - start
-        match request.2 {
-          Some(next) =>
-            out.push("reset before the next event was due: \{ms < next}")
-          None => out.push("reset before 1000 ms: \{ms < 1000}")
+        if request.2 is Some(next) {
+          out.push("reset before the next event was due: \{ms < next}")
         }
         stream += 2
       }
@@ -81,19 +80,15 @@ async test "h2c: a partial Fault sends HEADERS with the whole content-length and
           #|HEADERS 1 END_HEADERS [:status: 200, content-type: text/plain, smock-mock: m; via=default, date: <now>, content-length: 10]
           #|DATA 1 5 octets
           #|RST_STREAM 1 INTERNAL_ERROR
-          #|reset before 1000 ms: true
           #|HEAD /partial:
           #|HEADERS 3 END_HEADERS [:status: 200, content-type: text/plain, smock-mock: m; via=default, date: <now>, content-length: 10]
           #|RST_STREAM 3 INTERNAL_ERROR
-          #|reset before 1000 ms: true
           #|GET /empty:
           #|HEADERS 5 END_HEADERS [:status: 200, smock-mock: m; via=default, date: <now>, content-length: 0]
           #|RST_STREAM 5 INTERNAL_ERROR
-          #|reset before 1000 ms: true
           #|GET /no-content:
           #|HEADERS 7 END_HEADERS [:status: 204, smock-mock: m; via=default, date: <now>]
           #|RST_STREAM 7 INTERNAL_ERROR
-          #|reset before 1000 ms: true
           #|GET /ticks:
           #|HEADERS 9 END_HEADERS [:status: 200, content-type: text/event-stream, smock-mock: m; via=default, date: <now>]
           #|DATA 9 11 octets
@@ -107,7 +102,6 @@ async test "h2c: a partial Fault sends HEADERS with the whole content-length and
           #|HEAD /ticks:
           #|HEADERS 13 END_HEADERS [:status: 200, content-type: text/event-stream, smock-mock: m; via=default, date: <now>]
           #|RST_STREAM 13 INTERNAL_ERROR
-          #|reset before 1000 ms: true
           #|---
           #|GET /partial: status 200, fault "partial"
           #|HEAD /partial: status 200, fault "partial"
