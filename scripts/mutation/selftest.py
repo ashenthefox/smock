@@ -135,6 +135,8 @@ def report_line(record):
     stops the test program, as it does on wasm-gc when a package's
     initialisation calls a changed function, so moon names no failed
     test."""
-    killed = (f"killed by {record['failed_tests']} tests" if record["failed_tests"] else
-              "killed: the test program stopped before it named a failed test")
+    # A self-test that only the importers' tests saw names them.
+    by = f" of its importers ({', '.join(record['importers'])})" if record.get("importers") else ""
+    killed = (f"killed by {record['failed_tests']} tests{by}" if record["failed_tests"] else
+              f"killed: the test program{by} stopped before it named a failed test")
     return f"Self-test: `{STATEMENT}` at the start of {len(record['definitions'])} functions, {killed}."

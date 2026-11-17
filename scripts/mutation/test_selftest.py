@@ -212,6 +212,56 @@ class SelfTestTest(unittest.TestCase):
             "rule/rule.mbt,impl Show for Box with output"])
         self.assertEqual((package["self_test"]["outcome"], package["self_test"]["failed_tests"]), ("killed", 1))
 
+    def module_with_importer(self, label, importer, native=False):
+        """A copy of the fixture module with a package bare, which has a
+        function and no tests, and a package that imports it and whose test
+        calls it, as template's tests call cookies."""
+        root = self.tmp / f"module-{label}"
+        shutil.copytree(FIXTURE, root, ignore=shutil.ignore_patterns("_build", "target", ".mooncakes"))
+        (root / "bare").mkdir()
+        (root / "bare" / "moon.pkg").write_text("")
+        (root / "bare" / "bare.mbt").write_text("///|\npub fn double(n : Int) -> Int {\n  n * 2\n}\n")
+        (root / importer).mkdir()
+        targets = '\nsupported_targets = "native"\n' if native else ""
+        (root / importer / "moon.pkg").write_text(f'import {{\n  "mutation/fixture/bare",\n}}\n{targets}')
+        (root / importer / f"{importer}_test.mbt").write_text(
+            '///|\ntest "double 2 is 4" {\n  inspect(@bare.double(2), content="4")\n}\n')
+        return root
+
+    def test_a_package_without_tests_of_its_own_is_seen_through_its_importers_tests(self):
+        # #308's canary runs cookies' mutants, and cookies has no tests of
+        # its own. #275, kill credit for pure packages: "the package's own
+        # tests run first, and for the survivors the tests of every package
+        # that imports it"; CONTRIBUTING, "The self-test": a self-test that
+        # the package's own tests do not see runs again with those tests,
+        # as a mutant that survives them does.
+        root = self.module_with_importer("through", "user")
+        moon, log = moon_script(self.tmp, "through", 'exec "$moon" "$@"')
+        result = self.run_module(root, "through", moon, "--self-test-only", "bare")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        package = json.loads((self.tmp / "out-through" / "summary.json").read_text())["packages"][0]
+        self_test = package["self_test"]
+        self.assertEqual((self_test["outcome"], self_test["failed_tests"], self_test["importers"]),
+                         ("killed", 1, ["mutation/fixture/user"]))
+        self.assertEqual(self_test["definitions"], ["bare/bare.mbt,double"])
+        report = (self.tmp / "out-through" / "report.md").read_text()
+        self.assertIn('Self-test: `abort("mutation self-test")` at the start of 1 functions, killed by 1 tests'
+                      " of its importers (mutation/fixture/user).", report)
+        self.assertEqual((self.tmp / "work-through" / "tree-0" / "bare" / "bare.mbt").read_text(),
+                         (root / "bare" / "bare.mbt").read_text())
+        # The package's baseline and self-test, then its importers' baseline
+        # and the self-test again with their tests.
+        self.assertEqual(len(builds(log)), 4)
+
+    def test_a_package_whose_only_importer_builds_natively_still_fails_its_self_test(self):
+        # #275: "e2e kills give no credit for a pure package"; nor do the
+        # tests of any importer that builds only natively.
+        root = self.module_with_importer("native", "far", native=True)
+        moon, _ = moon_script(self.tmp, "native", 'exec "$moon" "$@"')
+        result = self.run_module(root, "native", moon, "--self-test-only", "bare")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("the self-test of mutation/fixture/bare survived: no test saw", result.stderr)
+
     def test_a_package_with_no_function_fails_its_self_test(self):
         root = self.module_with("bare", {
             "bare.mbt": "///|\npub let answer : Int = 42\n",

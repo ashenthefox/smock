@@ -156,6 +156,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-weakening-report.sh
 
+      # The mutation canary is replayed only by hand (mutation-canary.yml),
+      # with the toolchain its commit pins. This checks when that workflow
+      # runs and how it installs that toolchain before the replay.
+      - name: Check the mutation canary workflow
+        if: ${{ !cancelled() }}
+        run: scripts/check-mutation-canary-workflow.sh
+
+      - name: Test the check of the mutation canary workflow
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-mutation-canary-workflow.sh
+
       # --- The scripts that build-test.yml runs --------------------------------
 
       # build-test.yml makes and checks the SBOM of the image it builds.

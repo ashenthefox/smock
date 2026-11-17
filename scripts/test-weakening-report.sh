@@ -830,13 +830,16 @@ mentions floors '+prng 1 the abort arm waits for the exclusion list (#302)'
 # bisect parser and the parser's test data are scripts/coverage.sh,
 # scripts/coverage-report.py and scripts/coverage-tests/ (#296); the
 # ratchet that holds the floors is scripts/coverage-ratchet.py (#297).
+# #308: "Changes to the list and to the recorded verdicts show in the
+# weakening report": the canary's mutants with their recorded verdicts,
+# its list of explained differences (mutation/canary/) and its workflow.
 tree
 package
 branch
 mkdir -p "$repo/scripts"
 cp "$list" "$repo/$list"
 git ls-files -- scripts/mutation scripts/coverage.sh scripts/coverage-report.py scripts/coverage-tests \
-  scripts/coverage-ratchet.py >"$tmp/tool-files"
+  scripts/coverage-ratchet.py mutation/canary .github/workflows/mutation-canary.yml >"$tmp/tool-files"
 tools=0
 while read -r path; do
   tools=$((tools + 1))
