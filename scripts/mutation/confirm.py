@@ -23,9 +23,17 @@ among them. The threshold and the number of recent runs are the
 maintainer's, in mutation/flakes.toml.
 
 A test is named by its package, its file and its name, as moon names it.
+
+usage: python3 scripts/mutation/confirm.py merge <flakes.json>...
+
+merges the flake records that the shards of one run wrote, each with the
+records of the same earlier runs, into one: the earlier runs, and this
+run's counts summed over the shards. It prints them, as the runner writes
+flakes.json.
 """
 
 import json
+import sys
 import threading
 import tomllib
 from pathlib import Path
@@ -96,7 +104,8 @@ class Judge:
             runs = data["runs"]
         return cls(runs, threshold, recent, failed_tests, error)
 
-    def rates(self, runs):
+    @staticmethod
+    def rates(runs):
         """Each test's flaky results, runs and flake rate over runs, for the
         tests with a flaky result."""
         suites, tests = {}, {}
@@ -219,15 +228,7 @@ class Judge:
     def records(self):
         """The flake records to keep for the next run: the latest runs, this
         one included, and each test's rate over them."""
-        runs = (self.runs + [self.this_run()])[-self.recent:]
-        rates = self.rates(runs)
-        return {
-            "version": VERSION,
-            "threshold": self.threshold,
-            "recent_runs": self.recent,
-            "runs": runs,
-            "rates": [dict(named(k), **r) for k, r in sorted(rates.items(), key=lambda i: (-i[1]["rate"], str(i[0])))],
-        }
+        return records_of((self.runs + [self.this_run()])[-self.recent:], self.threshold, self.recent)
 
     def summary(self):
         """What the summary says of flaky tests: the threshold, the runs read,
@@ -271,3 +272,56 @@ class Judge:
             if tests:
                 out += [""]
         return out
+
+
+def records_of(runs, threshold, recent):
+    """The flake records of runs, as flakes.json holds them, with each
+    test's rate over them."""
+    rates = Judge.rates(runs)
+    return {
+        "version": VERSION,
+        "threshold": threshold,
+        "recent_runs": recent,
+        "runs": runs,
+        "rates": [dict(named(k), **r) for k, r in sorted(rates.items(), key=lambda i: (-i[1]["rate"], str(i[0])))],
+    }
+
+
+def merge(shards):
+    """One run's flake records, from those its shards wrote: the earlier
+    runs, which every shard read alike, and this run's counts summed."""
+    first = shards[0]
+    for shard in shards:
+        if shard.get("version") != VERSION:
+            raise ValueError(f"a shard holds no flake records of version {VERSION}")
+        if (shard["runs"][:-1], shard["threshold"], shard["recent_runs"]) != (
+                first["runs"][:-1], first["threshold"], first["recent_runs"]):
+            raise ValueError("the shards did not read the same flake records, so they are not one run")
+    suites, tests = {}, {}
+    for shard in shards:
+        mine = shard["runs"][-1]
+        for package, n in mine["suites"].items():
+            suites[package] = suites.get(package, 0) + n
+        for test in mine["tests"]:
+            counts = tests.setdefault(key(test), [0, 0])
+            counts[0] += test["flaked"]
+            counts[1] += test["reruns"]
+    this = {"suites": dict(sorted(suites.items())),
+            "tests": [dict(named(k), flaked=c[0], reruns=c[1]) for k, c in sorted(tests.items(), key=str)]}
+    return records_of(first["runs"][:-1] + [this], first["threshold"], first["recent_runs"])
+
+
+def main():
+    if len(sys.argv) < 3 or sys.argv[1] != "merge":
+        print("usage: python3 scripts/mutation/confirm.py merge <flakes.json>...", file=sys.stderr)
+        sys.exit(2)
+    try:
+        shards = [json.loads(Path(path).read_text(encoding="utf-8")) for path in sys.argv[2:]]
+        print(json.dumps(merge(shards), indent=2, ensure_ascii=False))
+    except (OSError, ValueError, KeyError) as problem:
+        print(f"confirm: {problem}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

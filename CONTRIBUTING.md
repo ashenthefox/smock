@@ -1392,6 +1392,10 @@ it with `--flakes <file>`. The records live in the report artifact of the
 latest weekly run on GitHub Actions, which the next weekly run downloads
 and passes to the runner; the weekly workflow
 ([#314](https://github.com/hirunefu/smock/issues/314)) does both. A run
+made of shards, as the weekly run is, keeps one file: its shards each
+read the same records, and
+`python3 scripts/mutation/confirm.py merge <flakes.json>...` sums their
+counts of this run into one record. A run
 without `--flakes`, as on a laptop, starts with no records, so only its
 own two runs without a mutant take credit away.
 

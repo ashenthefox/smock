@@ -919,6 +919,52 @@ os.execv(real, [real, *args])
 '''
 
 
+class FlakeRecordsTest(unittest.TestCase):
+    """The flake records of one run made of shards, each of which writes
+    its own (#301: a weekly run on Actions is sharded, and the next run
+    reads one file)."""
+
+    def test_the_shards_of_a_run_make_one_run(self):
+        earlier = {"suites": {"p/a": 4}, "tests": [{"package": "p/a", "file": "a_test.mbt", "name": "x",
+                                                      "flaked": 1, "reruns": 0}]}
+        shards = [
+            {"suites": {"p/a": 2, "p/b": 3},
+             "tests": [{"package": "p/a", "file": "a_test.mbt", "name": "x", "flaked": 1, "reruns": 2}]},
+            {"suites": {"p/a": 2},
+             "tests": [{"package": "p/a", "file": "a_test.mbt", "name": "x", "flaked": 0, "reruns": 1},
+                       {"package": "p/b", "file": "b_test.mbt", "name": "y", "flaked": 1, "reruns": 0}]},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for n, mine in enumerate(shards):
+                path = Path(tmp) / f"shard-{n}.json"
+                path.write_text(json.dumps({"version": 1, "threshold": 0.01, "recent_runs": 10,
+                                            "runs": [earlier, mine], "rates": []}))
+                paths.append(str(path))
+            result = subprocess.run([sys.executable, str(HERE / "confirm.py"), "merge", *paths],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            merged = json.loads(result.stdout)
+            self.assertEqual(merged["runs"], [earlier, {
+                "suites": {"p/a": 4, "p/b": 3},
+                "tests": [{"package": "p/a", "file": "a_test.mbt", "name": "x", "flaked": 1, "reruns": 3},
+                          {"package": "p/b", "file": "b_test.mbt", "name": "y", "flaked": 1, "reruns": 0}]}])
+            # x: 2 flaky results in 4 + 4 runs of p/a and 3 reruns; y: 1 in 3.
+            self.assertEqual(merged["rates"], [
+                {"package": "p/b", "file": "b_test.mbt", "name": "y", "flaked": 1, "observed": 3,
+                 "rate": round(1 / 3, 6)},
+                {"package": "p/a", "file": "a_test.mbt", "name": "x", "flaked": 2, "observed": 11,
+                 "rate": round(2 / 11, 6)}])
+            # Shards that read different records are not one run.
+            other = Path(tmp) / "other.json"
+            other.write_text(json.dumps({"version": 1, "threshold": 0.01, "recent_runs": 10,
+                                         "runs": [shards[0]], "rates": []}))
+            result = subprocess.run([sys.executable, str(HERE / "confirm.py"), "merge", paths[0], str(other)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("did not read the same flake records", result.stderr)
+
+
 class ConfirmationTest(unittest.TestCase):
     """Runs of one or two of calc's mutants each, with a moon that answers
     from a script, so that a flaky failure, a time-out that does not repeat
