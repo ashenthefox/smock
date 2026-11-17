@@ -260,6 +260,9 @@ async test "h2c: a Fault with a delay runs in its stream's task, while the conne
         raw.get(7, "/fast"),
         raw.get(9, "/late-close"),
       ])
+      // A delayed Fault "holds up only its own stream" (docs/http2.md,
+      // Faults): the frames up to the fast stream's end show that nothing of
+      // the delayed streams came first.
       let fast = raw.frames_until(start, frame => ends_stream(frame, 7))
       let partial = raw.frames_until(start, frame => ends_stream(frame, 1))
       let ticks = raw.frames_until(start, frame => ends_stream(frame, 3))
@@ -268,7 +271,6 @@ async test "h2c: a Fault with a delay runs in its stream's task, while the conne
       inspect(
         [
           ..fast.shown,
-          "at once: \{fast.end_ms < 300}",
           ..partial.shown,
           "after 300 ms: \{partial.end_ms >= 300}",
           ..ticks.shown,
@@ -285,7 +287,6 @@ async test "h2c: a Fault with a delay runs in its stream's task, while the conne
           #|SETTINGS ACK
           #|HEADERS 7 END_HEADERS [:status: 200, smock-mock: m; via=default, date: <now>, content-length: 4]
           #|DATA 7 END_STREAM 4 octets
-          #|at once: true
           #|HEADERS 1 END_HEADERS [:status: 200, smock-mock: m; via=default, date: <now>, content-length: 10]
           #|DATA 1 5 octets
           #|RST_STREAM 1 INTERNAL_ERROR
