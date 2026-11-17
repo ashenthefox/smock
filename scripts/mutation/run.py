@@ -41,6 +41,21 @@ runs the binary of an earlier one, and it never passes -u. The outcome is
               survived;
   survived    every test passed.
 
+Before the tests run, compare.py compares the compiler's output for the
+mutated package with the output without a mutant and with the earlier
+mutants' outputs; the mutant keeps the lines of the source. Where it
+finds the same output, the mutant runs no tests, and the outcome is
+
+  equivalent  the output is the same as without a mutant;
+  duplicate   the output is the same as an earlier mutant's, which the
+              record names (duplicate_of).
+
+Each record of a mutant that built gives what the comparison found
+(compiler_output) and its time (compare_s). summary.json and report.md
+count the equivalent mutants, the duplicates and the mutants not
+compared per package, apart from the other outcomes, and report.md lists
+the equivalent mutants and the duplicates.
+
 It writes into <out> (<work>/out unless it is given):
 
   mutants.jsonl  one record per mutant: the site's fields (its operator
@@ -85,6 +100,8 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import compare
 
 HERE = Path(__file__).resolve().parent
 BACKEND = "wasm-gc"
@@ -250,7 +267,7 @@ def apply(text, site):
     if text[offset:end] != site["original"]:
         raise RunnerError(f"{site['id']}: {site['file']}:{line}:{column} holds {text[offset:end]!r},"
                           f" not {site['original']!r}")
-    return text[:offset] + site["replacement"] + text[end:]
+    return text[:offset] + compare.with_line_breaks(site["original"], site["replacement"]) + text[end:]
 
 
 def definition_diff(site, text, mutated):
@@ -383,6 +400,7 @@ def run_package(root, directory, sites, mutants, workers, log):
         status, output, _ = worker.build(package)
         if status != 0:
             raise RunnerError(f"{package} does not build without a mutant in {worker.tree}:\n{output}")
+    comparison = compare.Comparison(package, directory, workers, log)
 
     records = [None] * len(mutants)
     queue = list(enumerate(mutants))
@@ -394,7 +412,7 @@ def run_package(root, directory, sites, mutants, workers, log):
                 if not queue:
                     return
                 index, site = queue.pop(0)
-            records[index] = run_mutant(worker, package, site, limit)
+            records[index] = run_mutant(worker, package, site, limit, comparison)
             record = records[index]
             log(f"  {record['outcome']:9} {site['id']}  (build {record['timings']['build_s']:.2f} s,"
                 f" run {record['timings']['run_s']:.2f} s)")
@@ -408,12 +426,14 @@ def run_package(root, directory, sites, mutants, workers, log):
         "baseline": {"run_s": round(baseline_s, 3), "tests": tests},
         "limit_s": round(limit, 3),
         **outcome_counts(records),
+        **compare.counts(records),
     }
     return records, summary
 
 
-def run_mutant(worker, package, site, limit):
-    """Builds and tests one mutant in a worker's tree: its record."""
+def run_mutant(worker, package, site, limit, comparison):
+    """Builds and tests one mutant in a worker's tree, unless the compiler's
+    output shows it equivalent or a duplicate: its record."""
     path = worker.tree / site["file"]
     text = path.read_text(encoding="utf-8")
     mutated = apply(text, site)
@@ -426,6 +446,8 @@ def run_mutant(worker, package, site, limit):
             messages = diagnostics(output, worker.tree)
             record.update(outcome="unviable", killing_tests=[], timings=timings,
                           message="\n".join(messages) if messages else output[-2000:])
+        elif comparison.judge(worker, site, record, timings):
+            record.update(killing_tests=[], timings=timings)
         else:
             status, output, run_s, timed_out = worker.moon_test(package, limit, build_only=False)
             timings["run_s"] = round(run_s, 3)
@@ -474,6 +496,7 @@ def report(operator_set, chosen, summaries, records):
                      counts["unviable"], score]
             out += ["| " + " | ".join(([label] if chosen == "full" else []) + [str(c) for c in cells]) + " |"]
         out += [""]
+        out += compare.report(mine)
         timed_out = [r for r in mine if r["outcome"] == "timed out"]
         if timed_out:
             out += ["### Timed out, not yet confirmed", ""]
