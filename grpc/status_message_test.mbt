@@ -73,6 +73,11 @@ test "an empty message stays empty" {
 
 ///|
 test "a lone surrogate, which UTF-8 cannot hold, is encoded as U+FFFD" {
+  // docs/grpc/metadata-and-status.md, The message: "A lone surrogate, such
+  // as U+D800 with no low surrogate after it, has no UTF-8 form, so smock
+  // encodes U+FFFD in its place: it goes out as `%EF%BF%BD`." The
+  // maintainer confirmed it on 2026-11-17 (#275). RFC 3629, section 3:
+  // UTF-8 prohibits "encoding character numbers between U+D800 and U+DFFF".
   let high = (0xD83D).unsafe_to_char()
   let low = (0xDE08).unsafe_to_char()
   inspect(
