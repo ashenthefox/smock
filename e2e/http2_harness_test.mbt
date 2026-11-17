@@ -332,6 +332,21 @@ async fn H2Client::stream_event(
 }
 
 ///|
+/// How many of the events `client` has read and kept for later are about
+/// `stream`. Once the client has read a stream's response with
+/// `stream_event`, this tells whether anything of another stream came
+/// before that response ended.
+fn H2Client::kept_for(self : H2Client, stream : Int32) -> Int32 {
+  let mut n = 0
+  for event in self.events {
+    if event_stream(event) == Some(stream) {
+      n += 1
+    }
+  }
+  n
+}
+
+///|
 /// The stream an event is about, if it is about one.
 fn event_stream(event : @http2.Event) -> Int32? {
   match event {

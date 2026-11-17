@@ -218,6 +218,10 @@ runners when started by hand, with `scripts/measure-costs.py`, and
 `scripts/estimate-costs.py` recomputes the test review's cost model from
 it (see [Test costs on CI's runners](#test-costs-on-cis-runners)).
 
+`.github/workflows/e2e-repeat.yml`, started by hand, runs the e2e tests
+many times on one runner, to show that a timing test holds on CI's
+runners (see [Build and test](#build-and-test)).
+
 `scripts/h2spec/` holds the Definition file that CI serves to h2spec, the
 HTTP/2 conformance tool, and the lists of h2spec's cases that do not pass on
 the plain port and on the TLS port, each with its reason (see
@@ -283,6 +287,9 @@ scripts/check-measure-costs-workflow.sh   # the workflow that measures the tests
 scripts/test-check-measure-costs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-measure-costs.sh        # the measurement of the tests' costs, against a fake moon (needs python3 and jq)
 scripts/test-estimate-costs.sh       # the cost model recomputed from made-up measurements (needs python3)
+scripts/check-e2e-repeat-workflow.sh       # the e2e repeat workflow runs only by hand, as many times as asked, on the architecture asked for (needs yq and jq)
+scripts/test-check-e2e-repeat-workflow.sh  # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
+scripts/test-repeat-e2e.sh           # the script that runs the e2e tests again and again, with a fake moon
 scripts/check-ci-artifacts.sh        # when CI's jobs and steps run, and that it keeps the release binaries only from a run whose every job passed (needs yq and jq)
 scripts/test-check-ci-artifacts.sh   # that check, on copies of the workflows changed one thing at a time (needs yq and jq)
 scripts/test-ci-plan.sh              # the plan that skips the tests on main of a tree that already passed (needs git and jq)
@@ -523,6 +530,21 @@ which appends one piece at a time. The harness writes a large file 1 MiB
 at a time. A check that must compute for longer, and needs no `smock`,
 goes in a package of its own, whose tests get a process of their own, as
 `schema` does.
+
+A timing test that fails once in ten runs passes most single runs of CI.
+The e2e repeat workflow (`.github/workflows/e2e-repeat.yml`) runs the e2e
+tests a given number of times, one run after another, on one runner of the
+architecture asked for, and keeps what each run printed, with a summary of
+the runs that failed and the tests that failed in each, as the artifact
+`e2e-repeat-linux-<arch>`. It runs only when started by hand, from the
+Actions tab or with:
+
+```sh
+gh workflow run e2e-repeat.yml -f arch=amd64 -f runs=30
+```
+
+`scripts/repeat-e2e.sh <runs> <directory>` does the same on a machine, once
+the e2e tests and `cmd/smock` are built.
 
 `SMOCK_VERSION` and `SMOCK_COMMIT` set the version and the commit that a
 native build, such as `scripts/build-release.sh`, records in the binary.

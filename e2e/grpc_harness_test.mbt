@@ -68,6 +68,43 @@ async fn H2Client::call(
 }
 
 ///|
+/// Starts a call to SayHello for each of `calls`, in order, and sends them
+/// all in one write, without reading their replies. Each is a POST of the
+/// framed HelloRequest `{name: "Tom"}` with `content-type: application/grpc`
+/// and `te: trailers`, as `H2Client::call` makes it, then the call's own
+/// headers. smock reads the calls together, so the order of their replies
+/// is smock's alone: it does not depend on how soon the test got round to
+/// sending each. Returns the calls' streams, in order.
+async fn H2Client::start_calls(
+  self : H2Client,
+  calls : Array[Array[(String, String)]],
+) -> Array[Int32] {
+  let body = framed(@fs.read_file(hello_request_path).binary())
+  let streams = calls.map(headers => {
+    let fields = [
+      @header.Header::of(":method", "POST"),
+      @header.Header::of(":scheme", "http"),
+      @header.Header::of(":path", "/helloworld.Greeter/SayHello"),
+      @header.Header::of(":authority", "localhost"),
+      @header.Header::of("content-type", "application/grpc"),
+      @header.Header::of("te", "trailers"),
+    ]
+    for header in headers {
+      fields.push({
+        name: @utf8.encode(header.0),
+        value: @utf8.encode(header.1),
+      })
+    }
+    let stream = self.conn.next_stream()
+    self.conn.headers(stream, fields)
+    self.conn.data(stream, body, end=true)
+    stream
+  })
+  self.flush()
+  streams
+}
+
+///|
 /// Reads the reply on `stream` until the stream ends, is reset or the
 /// connection closes.
 async fn H2Client::reply(self : H2Client, stream : Int32) -> GrpcReply {
