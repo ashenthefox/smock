@@ -71,6 +71,9 @@ BASE = "origin/main"
 PER_SHARD = 50
 MOST_SHARDS = 3
 BUDGET = 600
+# A run started by hand runs on at most this many shards, the account's
+# concurrent jobs.
+MOST_BY_HAND = 20
 OUTCOMES = ("killed", "timed out", "survived", "unviable", "unconfirmed", "equivalent", "duplicate")
 STATUSES = ("unexplained", "stale-covered", "accepted")
 
@@ -97,14 +100,32 @@ def run_runner(runner, root, out, *args):
     return json.loads((out / "summary.json").read_text(encoding="utf-8"))
 
 
-def shard_count(mutants):
-    """How many shards a push runs for a count of mutants."""
+def by_hand(value):
+    """The shards of a run started by hand, from --by-hand: None for a
+    push, whose value is empty."""
+    if value == "":
+        return None
+    if not value.isdigit() or not 1 <= int(value) <= MOST_BY_HAND:
+        raise argparse.ArgumentTypeError(f"a run started by hand takes from 1 to {MOST_BY_HAND} shards, not {value!r}")
+    return int(value)
+
+
+def shard_count(mutants, width):
+    """How many shards run for a count of mutants: on a push (width None),
+    one for each PER_SHARD mutants and at most MOST_SHARDS, or none when
+    they are more than the budget; in a run started by hand, width, or one
+    for each mutant when there are fewer."""
+    if width is not None:
+        return min(width, mutants)
+    if mutants > BUDGET:
+        return 0
     return min(MOST_SHARDS, math.ceil(mutants / PER_SHARD))
 
 
-def plan(root, runner, out):
-    """Counts the mutants on the changed lines and plans the shards: the
-    plan, which it also writes into out."""
+def plan(root, runner, width, out):
+    """Counts the mutants on the changed lines and plans the shards for a
+    push, or for a run started by hand on width shards: the plan, which it
+    also writes into out."""
     out.mkdir(parents=True, exist_ok=True)
     changed = run_runner(runner, root, out / "sites", "--changed", "--base", BASE, "--sites-only")["changed"]
     mutants = changed["mutants"]
@@ -112,11 +133,12 @@ def plan(root, runner, out):
         "head": git(root, "rev-parse", "HEAD"),
         "base": BASE,
         "merge_base": changed["merge_base"],
-        "event": "push",
+        "event": "push" if width is None else "workflow_dispatch",
         "lines": sum(len(n) for n in changed["lines"].values()),
         "packages": sorted({posixpath.dirname(f) for f in changed["lines"]}),
         "mutants": mutants,
-        "shards": shard_count(mutants),
+        "covered": width is not None or mutants <= BUDGET,
+        "shards": shard_count(mutants, width),
     }
     (out / "plan.json").write_text(json.dumps(found, indent=2) + "\n", encoding="utf-8")
     return found
@@ -180,7 +202,7 @@ def report(planned, shards):
     """The report's JSON and Markdown, from the plan and its shards'
     output directories."""
     records = [r for k in sorted(shards) for r in records_of(shards[k])]
-    if len(records) != planned["mutants"]:
+    if planned["shards"] and len(records) != planned["mutants"]:
         raise JobError(f"the shards ran {len(records)} mutants, and the plan has {planned['mutants']}")
     counts = {}
     for record in records:
@@ -200,8 +222,7 @@ def report(planned, shards):
                           "definition": record["definition"], "status": status_of(record),
                           "entry": exclusion.get("entry"),
                           **({"issue": exclusion["issue"]} if "issue" in exclusion else {})})
-    found = dict(planned, covered=True, ran=len(records), counts=dict(sorted(counts.items())),
-                 survivors=survivors)
+    found = dict(planned, ran=len(records), counts=dict(sorted(counts.items())), survivors=survivors)
     return found, markdown(found, records)
 
 
@@ -211,10 +232,18 @@ def markdown(found, records):
            f"Head `{found['head'][:12]}`, against `{found['base']}`, merge base `{found['merge_base'][:12]}`,"
            f" {'on a push' if found['event'] == 'push' else 'in a run started by hand'}.", ""]
     lines = found["lines"]
-    packages = ", ".join(found["packages"])
-    out += [f"**The whole diff is covered**: {lines} changed non-test {'line' if lines == 1 else 'lines'} in the"
-            f" pure packages ({packages}), with {found['mutants']} mutants of the pinned set on them, all run on"
-            f" {found['shards']} {'shard' if found['shards'] == 1 else 'shards'}.", ""]
+    on_lines = (f"{lines} changed non-test {'line' if lines == 1 else 'lines'} in the pure packages"
+                f" ({', '.join(found['packages'])}), with {found['mutants']} mutants of the pinned set on them")
+    if not found["covered"]:
+        return "\n".join(out + [
+            f"**The diff is not covered**: {on_lines}, more than the {BUDGET} that the {MOST_SHARDS} shards of a"
+            " push run, so none ran. To run them all, start the branch checks by hand on this branch, which runs"
+            f" them on {MOST_BY_HAND} shards unless you give another number from 1 to {MOST_BY_HAND}"
+            " (CONTRIBUTING.md, \"The changed-lines job\"):", "", "```sh",
+            "gh workflow run branch-checks.yml --ref <branch>",
+            "gh workflow run branch-checks.yml --ref <branch> -f shards=<n>", "```", ""])
+    out += [f"**The whole diff is covered**: {on_lines}, all run on {found['shards']}"
+            f" {'shard' if found['shards'] == 1 else 'shards'}.", ""]
     columns = ("mutants", *OUTCOMES, *STATUSES)
     out += ["| package | " + " | ".join(columns) + " |", "|---|" + "---:|" * len(columns)]
     for package, counts in found["counts"].items():
@@ -263,7 +292,7 @@ def main():
         step.add_argument("--root", default=".", help="the checkout")
         step.add_argument("--runner", help="the mutation runner's command (default: scripts/mutation/run.py)")
         step.add_argument("--out", required=True, help="where the step writes")
-    steps.choices["plan"].add_argument("--by-hand", default="",
+    steps.choices["plan"].add_argument("--by-hand", type=by_hand, default=None,
                                        help="the shards of a run started by hand, from 1 to 20 (empty for a push)")
     steps.choices["shard"].add_argument("--plan", required=True, help="the plan step's directory")
     steps.choices["shard"].add_argument("--shard", type=int, required=True, help="the shard's number, from 1")
@@ -279,7 +308,7 @@ def main():
         runner = shlex.split(args.runner) if args.runner else [sys.executable, str(HERE / "mutation" / "run.py")]
         root = Path(args.root)
         if args.step == "plan":
-            found = plan(root, runner, Path(args.out))
+            found = plan(root, runner, args.by_hand, Path(args.out))
             print("shards=" + json.dumps(list(range(1, found["shards"] + 1)), separators=(",", ":")))
         else:
             shard(root, runner, read_plan(args.plan), args.shard, Path(args.out))

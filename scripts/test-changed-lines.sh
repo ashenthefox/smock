@@ -341,6 +341,73 @@ for kept in plan.json report.md report.json shard-1/summary.json shard-2/mutants
   fi
 done
 
+# --- A diff too large for the shards, and a run started by hand -----------------
+
+# 601 mutants: more than the 600 that three shards run on a push. The plan
+# runs no shard, and the report says that the diff is not covered and how
+# to run it whole.
+history
+lines calc/calc.mbt 601 killed
+git -C "$repo" commit --quiet -am "601 lines"
+job large
+
+status large plan 0
+outputs large 'shards=[]'
+calls large "--root <tmp>/repo --out <tmp>/large/plan/sites --changed --base origin/main --sites-only"
+status large report 0
+json large '[.event, .covered, .lines, .mutants, .shards, .ran, .survivors, .counts]' \
+  '["push",false,601,601,0,0,[],{}]'
+says large "**The diff is not covered**: 601 changed non-test lines in the pure packages (calc), with 601 mutants of the pinned set on them, more than the 600 that the 3 shards of a push run, so none ran."
+says large "gh workflow run branch-checks.yml --ref <branch>"
+
+# The same diff in a run started by hand, on 20 shards: every mutant runs,
+# and the whole diff is covered.
+job by-hand 20
+
+status by-hand plan 0
+outputs by-hand 'shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]'
+status by-hand shard-20 0
+status by-hand report 0
+json by-hand '[.event, .covered, .mutants, .shards, .ran, .counts.calc.killed]' \
+  '["workflow_dispatch",true,601,20,601,601]'
+says by-hand ", in a run started by hand."
+says by-hand "**The whole diff is covered**: 601 changed non-test lines in the pure packages (calc), with 601 mutants of the pinned set on them, all run on 20 shards."
+if grep -q -- '--shard 20/20$' "$tmp/by-hand/runner.log"; then
+  pass "by-hand: the runner ran shard 20/20"
+else
+  fail "by-hand: the runner did not run shard 20/20"
+fi
+
+# The budget's edges. planned <count> <by hand> <outputs>: with <count>
+# changed lines, one mutant each, the plan prints <outputs>.
+planned() {
+  history
+  lines calc/calc.mbt "$1" killed
+  git -C "$repo" commit --quiet -am "$1 lines"
+  mkdir -p "$tmp/planned-$1-$2"
+  export FAKE_RUNNER_LOG="$tmp/planned-$1-$2/runner.log"
+  step "planned-$1-$2" plan plan --root "$repo" --runner "$runner" --by-hand "$2" --out "$tmp/planned-$1-$2/plan" ||
+    true
+  status "planned-$1-$2" plan 0
+  outputs "planned-$1-$2" "$3"
+}
+planned 1 '' 'shards=[1]'
+planned 50 '' 'shards=[1]'
+planned 51 '' 'shards=[1,2]'
+planned 101 '' 'shards=[1,2,3]'
+planned 600 '' 'shards=[1,2,3]'
+planned 3 5 'shards=[1,2,3]'
+planned 3 1 'shards=[1]'
+
+# A run started by hand takes from 1 to 20 shards, the account's
+# concurrent jobs.
+for width in 0 21 x; do
+  mkdir -p "$tmp/width-$width"
+  step "width-$width" plan plan --root "$repo" --runner "$runner" --by-hand "$width" --out "$tmp/width-$width/plan" ||
+    true
+  status "width-$width" plan 2
+done
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]
