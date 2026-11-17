@@ -761,16 +761,25 @@ render grace-no-sleep --values "$tmp/values-token.yaml" --set terminationGracePe
 check grace-no-sleep "without the sleep, a grace period 1 s above the drain timeout is kept" \
   'pod.terminationGracePeriodSeconds == 21'
 
+# The last three are beyond what smock takes: 2^63, 10^21 and a fraction of
+# a million or more. The chart writes them in full all the same, whatever
+# their size (#377), and leaves the range to smock.
 cat >"$tmp/values-env.yaml" <<'YAML'
 env:
   SMOCK_IDLE_TIMEOUT_MS: "120000"
   SMOCK_SEED: 9007199254740991
   SMOCK_BODY_LIMIT: 10485760
+  SMOCK_JOURNAL_MAX_BYTES: 9223372036854775808
+  SMOCK_STATE_MAX_BYTES: 1000000000000000000000
+  SMOCK_WRITE_TIMEOUT_MS: 1234567.5
 YAML
 render env --values "$tmp/values-token.yaml" --values "$tmp/values-env.yaml"
 check env "other smock settings are set as SMOCK_<NAME> variables, numbers written out in full" \
   'env("SMOCK_IDLE_TIMEOUT_MS").value == "120000" and env("SMOCK_SEED").value == "9007199254740991"
-   and env("SMOCK_BODY_LIMIT").value == "10485760"'
+   and env("SMOCK_BODY_LIMIT").value == "10485760"
+   and env("SMOCK_JOURNAL_MAX_BYTES").value == "9223372036854775808"
+   and env("SMOCK_STATE_MAX_BYTES").value == "1000000000000000000000"
+   and env("SMOCK_WRITE_TIMEOUT_MS").value == "1234567.5"'
 check env "each variable is set once" 'envs | length == (unique | length)'
 # The chart's README sets the mockoon log format this way: through env,
 # with no value of the chart's own.

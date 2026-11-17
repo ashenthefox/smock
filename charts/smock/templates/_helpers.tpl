@@ -177,15 +177,19 @@ the JSON object smock reads.
 {{- end -}}
 
 {{/*
-A value as the text of an environment variable. Numbers from values files
-reach templates as floating point, which Go would write as 1.048576e+07;
-whole ones are written out in full.
+A value as text, such as an environment variable's. Numbers from values
+files reach templates as floating point, which Go would write as
+1.048576e+07; they are written out in full, whatever their size: a whole
+one with all its digits, a fraction as JSON writes it, which is in full
+from a millionth up.
 */}}
 {{- define "smock.string" -}}
-{{- if and (kindIs "float64" .) (eq (float64 (int64 .)) .) -}}
-{{- int64 . -}}
-{{- else -}}
+{{- if not (kindIs "float64" .) -}}
 {{- toString . -}}
+{{- else if eq (floor .) . -}}
+{{- printf "%.0f" . -}}
+{{- else -}}
+{{- toJson . -}}
 {{- end -}}
 {{- end -}}
 
