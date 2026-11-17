@@ -11,8 +11,8 @@ vulnerability privately, as [SECURITY.md](SECURITY.md) says.
 This document is for people who work on smock itself. It describes the
 repository's layout, the pinned MoonBit toolchain, how to build and test
 smock, how its tests are judged, the mutation runner, the weakening
-report, how to measure the tests' costs on CI's runners, and the
-release benchmark, and says where making a release is described. The
+report, the changed-lines job, how to measure the tests' costs on CI's
+runners, and the release benchmark, and says where making a release is described. The
 [Contributing to smock](docs/README.md#contributing-to-smock) list in
 docs/README.md names the other documents for contributors: the
 architecture decisions (ADRs), the glossary and the maintainer's
@@ -26,6 +26,7 @@ checklists.
 - [How tests are judged](#how-tests-are-judged)
 - [Mutation runner](#mutation-runner)
 - [The weakening report](#the-weakening-report)
+- [The changed-lines job](#the-changed-lines-job)
 - [Test costs on CI's runners](#test-costs-on-cis-runners)
 - [Benchmark](#benchmark)
 - [Making a release](#making-a-release)
@@ -357,6 +358,7 @@ scripts/check-branch-checks-workflow.sh   # the branch checks workflow writes th
 scripts/test-check-branch-checks-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 python3 scripts/weakening-report.py --base origin/main   # what this branch weakens, against its merge base with main (needs git)
 scripts/test-weakening-report.sh     # the weakening report, on small git histories (needs python3 and git)
+scripts/test-changed-lines.sh        # the changed-lines job of the branch checks, with a fake mutation runner on small git histories (needs python3, git and jq)
 scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs only by hand, and installs its commit's toolchain before the replay (needs yq and jq)
 scripts/test-check-mutation-canary-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
@@ -1826,7 +1828,9 @@ Package directories given limit the run to them. With `--sites-only`, it
 counts the mutants on the changed lines and runs none, and with `--shard`
 the shards merge as above. A change of 460 such lines, about the 75th
 percentile of merges into `main`, had 174 mutants, which ran in 3.5
-minutes on wasm-gc on an arm64 laptop with 8 cores.
+minutes on wasm-gc on an arm64 laptop with 8 cores. On each push, the
+branch checks run the same mutants on GitHub's runners
+([The changed-lines job](#the-changed-lines-job)).
 
 **The compiler's output.** Before a mutant's tests run, the runner
 compares the compiler's output for the mutated package with the output
@@ -2344,6 +2348,76 @@ own branches: before merging it, the maintainer pushes its branch to a
 branch here, so that the branch checks run on it. Dependabot's pull
 requests keep their own path
 ([Before merging into main](docs/merging-into-main.md)).
+
+## The changed-lines job
+
+On each push to a branch other than `main` and Dependabot's, the branch
+checks workflow (`.github/workflows/branch-checks.yml`) also runs every
+mutant of the pinned set on the non-test lines that the branch changes in
+the [pure packages](#terms), against its merge base with `main`, as
+`python3 scripts/mutation/run.py --changed` does on a laptop
+([Mutation runner](#mutation-runner)). The runner's rules all apply: the
+package's own tests first, then, for the survivors, the tests of every
+package that imports it and builds on wasm-gc; the compiler-output
+comparison; kill confirmation; the native verdict for a site whose
+definition uses an unchecked array access, which decides there, since the
+mutants run on amd64; and the exclusion list. The job only reports, for
+now: it passes whatever survives, and fails only when the mutants cannot
+run or the report cannot be written. Once a package reaches L4, the merge
+check makes an unexplained survivor on its changed lines stop the merge
+into `main` ([Rules for the work](#rules-for-the-work), "Where the checks
+run"). The job is not part of `ci.yml`, so neither CI's wall time nor
+`keep` waits for it.
+
+`scripts/changed-lines.py` runs it in three jobs:
+
+- **The plan** (`changed-lines-plan`) counts the mutants on the changed
+  lines (`run.py --changed --sites-only`) and plans the shards. On a push,
+  a shard runs for each 50 mutants, and at most 3 run, so that a run
+  leaves room among the account's 20 concurrent jobs beside CI's own. A
+  diff with more than 600 mutants, as the merge of an integration branch
+  can have, is not covered: no shard runs, and the report says so.
+- **The shards** (`changed-lines`), one job each, run their parts of the
+  mutants on amd64 (`run.py --changed --shard k/n`), against the plan's
+  merge base, so that every shard runs on the plan's lines.
+- **The report** (`changed-lines-report`) reads the shards' records,
+  writes the report to the job summary, and keeps it as the artifact
+  `changed-lines` for 90 days, with the plan and each shard's output. The
+  report names the head, the base and the merge base, says whether the
+  run was on a push or started by hand and whether it covered the whole
+  diff, and counts each package's mutants, their outcomes, and the
+  survivors that the exclusion list leaves unexplained, finds
+  stale-covered and accepts. It lists each unexplained survivor, with its
+  package, its enclosing definition and its diff, and each stale-covered
+  one, with the id of its stale entry. `report.json` gives the same to
+  the merge check.
+
+The numbers are estimates from #275's cost model: the 75th-percentile
+change to `main`, about 190 mutants, takes about 8.5 minutes of runner
+time, about 2.7 s a mutant. So a shard of 50 mutants takes about as long
+as its setup (the checkout, MoonBit and the runs without a mutant), and a
+full shard of 200 about 9 minutes. The job reads no flake records yet, so
+only each shard's own runs without a mutant take kill credit from a
+flaky test.
+
+**A run started by hand** runs the whole diff, however large, on 20
+shards unless another number from 1 to 20 is given:
+
+```sh
+gh workflow run branch-checks.yml --ref <branch>
+gh workflow run branch-checks.yml --ref <branch> -f shards=<n>
+```
+
+It writes the weakening report too, and its report says that it was
+started by hand. The merge check reads whichever run on the branch head
+covered the whole diff. As for any workflow, GitHub starts it by hand only
+once `main` holds it, and a newer push to the branch cancels it, as it
+cancels an older push's run.
+
+`scripts/test-changed-lines.sh`, in CI's scripts job, runs the three steps
+with a fake runner on small git histories, and
+`scripts/check-branch-checks-workflow.sh` checks the jobs' commands,
+conditions, runner and artifacts.
 
 ## Test costs on CI's runners
 
