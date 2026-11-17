@@ -178,6 +178,11 @@ Packages of `smock/smock`:
   that the module fails (native). smock's image does not hold it.
   `scripts/check-conformance.sh` runs the suite on it
   ([protobuf-conformance/README.md](protobuf-conformance/README.md)).
+- `yaml-test-suite`: the testee of the YAML test suite, a program built on
+  `smock/yaml` that reads each case in both of the parser's modes, with
+  each mode's list of the suite's cases that do not pass (native). smock's
+  image does not hold it. `scripts/check-yaml-test-suite.sh` runs the
+  suite on it ([yaml-test-suite/README.md](yaml-test-suite/README.md)).
 - `schema`: a test over every Definition-file fixture in
   `schema/v1/fixtures/` that needs no `smock` binary: each, written as YAML
   by `smock/yaml`, reads back as the same tree (native).
@@ -277,6 +282,7 @@ scripts/test-ci-plan.sh              # the plan that skips the tests on main of 
 scripts/test-latest-toolchain-plan.sh   # the plan that skips the weekly run with the latest MoonBit when it would repeat CI (needs jq)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
+scripts/test-yaml-test-suite-verdict.sh   # how a run of yaml-test-suite is judged against its lists of cases
 scripts/test-check-schema.sh         # the JSON Schema cross-check, with a fake validator and a fake smock (needs jq)
 python3 scripts/check-doc-links.py   # the documents' links into the repository lead to a file, and to a heading when they name one (needs git)
 scripts/test-check-doc-links.sh      # that check, on small trees (needs python3 and git)
@@ -291,6 +297,8 @@ scripts/test-helm-chart.sh           # rendering tests of the Helm chart (needs 
 python3 -m unittest discover -s bench -p test_gke_script.py -v   # scripts/gke-bench.sh against fake gcloud, kubectl and docker commands, about 5 minutes
 scripts/build-conformance-runner.sh  # protobuf's conformance runner, from the pinned release, into ~/.local/bin (needs CMake and a C++17 compiler)
 scripts/check-conformance.sh         # protobuf's conformance suite against smock/protobuf, judged by protobuf-conformance/failure_list.txt
+scripts/fetch-yaml-test-suite.sh     # the pinned release of the YAML test suite, into _build/yaml-test-suite
+scripts/check-yaml-test-suite.sh     # the YAML test suite against smock/yaml in both modes, judged by yaml-test-suite/safe.txt and openapi.txt (fetches the suite first)
 scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, read smock's LLM responses (needs python3 and PyPI)
 ```
 
@@ -406,7 +414,10 @@ branch or a pull request cancels the run of the older one; on `main`,
 every commit keeps its run. The job `scripts` runs the commands from
 `scripts/check-release-workflow.sh` to `scripts/test-helm-chart.sh`, which
 need no build of smock, on linux/amd64; a step that fails does not stop
-the steps after it, so that one run shows every failure.
+the steps after it, so that one run shows every failure. The job
+`yaml-test-suite` runs `scripts/check-yaml-test-suite.sh` beside it, on
+linux/amd64: it fetches the suite and builds the testee
+([yaml-test-suite/README.md](yaml-test-suite/README.md)).
 `.github/workflows/build-test.yml` runs the rest, in jobs that run side by
 side:
 
@@ -441,9 +452,10 @@ side:
 
 `release` hands each release binary over as the workflow artifact
 `release-linux-<arch>`. Then the job `keep` of `ci.yml`, which runs after
-the jobs of `build-test.yml` and the job `scripts`, and only when each of
-them that ran has passed and the run was not cancelled, keeps the binary of
-each architecture for 7 days as `smock-linux-amd64` and `smock-linux-arm64`,
+the jobs of `build-test.yml` and the jobs `scripts` and `yaml-test-suite`,
+and only when each of them that ran has passed and the run was not
+cancelled, keeps the binary of each architecture for 7 days as
+`smock-linux-amd64` and `smock-linux-arm64`,
 for a machine that cannot build it
 ([On GKE Autopilot](bench/README.md#on-gke-autopilot)). A run in which a
 job failed keeps none; re-running its failed jobs within 7 days of the
@@ -455,8 +467,9 @@ head's and a CI run on a push of that head, to a branch other than
 `main`, succeeded and was last updated within 24 hours
 (`scripts/ci-plan.sh`). That run tested the same tree, the workflows and
 scripts included. `release`, `protobuf-conformance`, `llm-sdks` and the
-job `scripts` run in every run, so `main`'s binaries are built and checked
-from `main`'s own commit, and `keep` keeps them once every job has passed.
+jobs `scripts` and `yaml-test-suite` run in every run, so `main`'s
+binaries are built and checked from `main`'s own commit, and `keep` keeps
+them once every job has passed.
 Every other run, and a run whose plan fails, runs every job.
 
 `.github/workflows/bench-tests.yml` runs the tests of `scripts/gke-bench.sh`
