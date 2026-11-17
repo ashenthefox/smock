@@ -121,9 +121,9 @@ class Comparison:
     mutant compared so far, which the workers share."""
 
     def __init__(self, package, directory, workers, log):
-        """Links the package without a mutant in each worker, whose tree and
-        target directory hold the package's tests as the runner built them
-        without a mutant."""
+        """Finds the link command of each worker, whose tree and target
+        directory hold the package's tests as the runner built them without
+        a mutant, and links the package without a mutant in the first."""
         self.package = package
         self.lock = threading.Lock()
         self.first = {}
