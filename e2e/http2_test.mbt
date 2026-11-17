@@ -45,14 +45,6 @@ async test "h2c: a request is answered by the Stub of the Mock its :authority na
 }
 
 ///|
-/// A Mock that answers every Host, with a Stub that takes uploads.
-let uploads : String =
-  #|{ "mocks": [{ "name": "files" }],
-  #|  "stubs": [{ "id": "upload", "mock": "files",
-  #|    "request": { "method": "POST", "path": "/upload" },
-  #|    "response": { "status": 201, "body": "stored" } }] }
-
-///|
 async test "h2c: a request body larger than the initial windows arrives in full, since smock hands back the DATA octets it takes" {
   with_definitions([("files.json", uploads)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {

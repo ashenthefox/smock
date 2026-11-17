@@ -4,44 +4,10 @@
 // the shapes of h2spec's http2/5.1.1/2 and http2/5.1/12.
 
 ///|
-/// The fields of a request with the method `meth` for `path` to
-/// `authority`.
-fn request_fields(
-  meth : String,
-  path : String,
-  authority : String,
-) -> Array[(String, String)] {
-  [
-    (":method", meth),
-    (":scheme", "http"),
-    (":path", path),
-    (":authority", authority),
-  ]
-}
-
-///|
 /// The fields of a request for `GET /x` to `orders.example.com`.
 let get_x : Array[(String, String)] = request_fields(
   "GET", "/x", "orders.example.com",
 )
-
-///|
-/// A HEADERS frame on `stream` that carries all of `block`, and ends the
-/// stream unless `end_stream` is false.
-fn headers_frame(
-  stream : Int32,
-  block : Bytes,
-  end_stream~ : Bool = true,
-) -> @http2.Frame {
-  Headers(
-    stream_id=stream,
-    fragment=block,
-    end_stream~,
-    end_headers=true,
-    priority=None,
-    padding=0,
-  )
-}
 
 ///|
 async test "h2c: HEADERS on a stream ID already used, whose stream smock did not reset, end the connection with GOAWAY PROTOCOL_ERROR, and a fresh connection is served" {

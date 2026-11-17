@@ -43,8 +43,13 @@ A `json` condition is a subset match:
 - any other value must be equal: strings exactly, numbers by their value
   (`1` and `1.0` are equal), and `true`, `false` and `null` themselves.
   Integers are compared exactly however many digits they have, so a 64-bit
-  ID such as `9007199254740993` matches only itself; a number with a
-  fraction or an exponent is compared as closely as a 64-bit float holds it.
+  ID such as `9007199254740993` matches only itself. A number beyond a
+  64-bit float's range is compared exactly too, by its value: `1e400`
+  matches `10e399` and a `1` followed by 400 zeros, but not `1e401` or a
+  `9` followed by 399 zeros. The one exception is an exponent of 10^18 or
+  more: a number with such an exponent matches only a number with the same
+  exponent. Any other number with a fraction or an exponent is compared as
+  closely as a 64-bit float holds it.
 
 A body that does not parse as JSON never meets a `json` condition.
 

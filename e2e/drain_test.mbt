@@ -3,38 +3,6 @@
 // still running when the drain timeout expires, and exits with status 0.
 
 ///|
-/// Mock `m`, whose Stubs answer `GET /fast` at once, `GET /slow` after a
-/// delay of 1000 ms, `GET /stalled` after a delay of 60 s, `GET /ticks` with
-/// a stream of 100 events, one every 100 ms, and `GET /brief` with a stream
-/// of 10 such events.
-let drain_defs : String = {
-  let tick = "{ \"delay\": 100, \"data\": \"tick\" }"
-  let ticks = Array::make(100, tick)
-  let brief = Array::make(10, tick)
-  let defs =
-    $|{ "mocks": [{ "name": "m" }],
-    $|  "stubs": [
-    $|    { "id": "fast", "mock": "m", "request": { "path": "/fast" },
-    $|      "response": { "status": 200, "body": "fast" } },
-    $|    { "id": "slow", "mock": "m", "request": { "path": "/slow" },
-    $|      "response": { "status": 200, "body": "slow" },
-    $|      "fault": { "delay": { "fixed": 1000 } } },
-    $|    { "id": "stalled", "mock": "m", "request": { "path": "/stalled" },
-    $|      "response": { "status": 200, "body": "stalled" },
-    $|      "fault": { "delay": { "fixed": 60000 } } },
-    $|    { "id": "ticks", "mock": "m", "request": { "path": "/ticks" },
-    $|      "response": { "status": 200, "events": [\{ticks.join(", ")}] } },
-    $|    { "id": "brief", "mock": "m", "request": { "path": "/brief" },
-    $|      "response": { "status": 200, "events": [\{brief.join(", ")}] } } ] }
-  defs
-}
-
-///|
-/// How long a test waits after sending a request before it sends SIGTERM,
-/// so that smock has received the request by then.
-let settle_ms : Int32 = 300
-
-///|
 /// Whether a new connection to `port` is accepted or refused.
 async fn connection_to(port : Int32) -> String {
   try @socket.Tcp::connect(@socket.Addr::parse("127.0.0.1:\{port}")) catch {
@@ -50,23 +18,6 @@ async fn connection_to(port : Int32) -> String {
       "accepted"
     }
   }
-}
-
-///|
-/// The log entries about the drain, without their time.
-fn drain_entries(logs : Array[String]) -> String {
-  let out = []
-  for line in logs {
-    let entry = @json.parse(line) catch { _ => continue }
-    guard entry is Object(fields) &&
-      fields.get("msg") is Some(String(msg)) &&
-      msg.contains("drain") else {
-      continue
-    }
-    fields.remove("time")
-    out.push(Json::object(fields).stringify())
-  }
-  out.join("\n")
 }
 
 ///|
@@ -162,15 +113,6 @@ async test "on SIGTERM, smock refuses new connections, closes idle ones at once,
       )
     })
   })
-}
-
-///|
-/// Reads `conn` until smock ends it, and returns when the last bytes came
-/// and when the end came, in milliseconds after `since`, and every byte
-/// received, with `\r\n` shown as `\n`.
-async fn until_end(conn : Conn, since : Int64) -> (Int64, Int64, String) {
-  let (last, end, received) = received_until_end(conn, since)
-  (last, end, @utf8.decode_lossy(received).replace_all(old="\r\n", new="\n"))
 }
 
 ///|

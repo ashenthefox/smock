@@ -4,111 +4,6 @@
 // certificate.
 
 ///|
-/// Creates a temporary directory, runs `f` with its path and removes it.
-async fn with_scratch(f : async (String) -> Unit) -> Unit {
-  let dir = @fs.tmpdir(prefix="smock-e2e-scratch-")
-  defer @fs.rmdir(dir, recursive=true)
-  f(dir)
-}
-
-///|
-/// The certificate the TLS port presents to a new connection, as a client
-/// that does not verify it sees it.
-struct Presented {
-  /// A file that holds it in PEM.
-  file : String
-  /// Its SHA-256 fingerprint, as `openssl x509 -fingerprint -sha256`
-  /// prints it.
-  fingerprint : String
-  /// Its subject alternative names, as `openssl x509` prints them.
-  names : String
-  subject : String
-  issuer : String
-}
-
-///|
-/// Runs `openssl <args>` and returns its exit status and its standard
-/// output.
-async fn run_openssl(args : Array[String], stdin? : String) -> (Int32, String) {
-  let result = @async.with_timeout_opt(patience_ms, () => {
-    match stdin {
-      Some(path) =>
-        @process.collect_output(
-          "openssl",
-          args,
-          stdin=@process.redirect_from_file(path),
-        )
-      None => @process.collect_output("openssl", args)
-    }
-  })
-  guard result is Some((status, stdout, _)) else {
-    fail("openssl \{args.join(" ")} did not exit in time")
-  }
-  (status, stdout.text())
-}
-
-///|
-/// The first line of `text` that starts with `prefix`, without the prefix.
-fn line_after(text : String, prefix : String) -> String {
-  for line in text.split("\n") {
-    let line = line.trim(chars=" \r")
-    if line.has_prefix(prefix) {
-      return line[prefix.length():].to_owned()
-    }
-  }
-  "(none)"
-}
-
-///|
-/// The line of `text` that follows the first line that contains `title`.
-fn line_following(text : String, title : String) -> String {
-  let lines = text.split("\n").collect()
-  for i, line in lines {
-    if line.contains(title) && i + 1 < lines.length() {
-      return lines[i + 1].trim(chars=" \r").to_owned()
-    }
-  }
-  "(no \{title})"
-}
-
-///|
-/// Reads the certificate the TLS port presents to a new connection, as a
-/// client that does not verify it, and writes it to a new file in `dir`.
-async fn Smock::presented_certificate(self : Smock, dir : String) -> Presented {
-  write(dir, "empty.txt", "")
-  let (_, output) = run_openssl(
-    ["s_client", "-connect", "127.0.0.1:\{self.tls_port}"],
-    stdin="\{dir}/empty.txt",
-  )
-  let end = "-----END CERTIFICATE-----"
-  guard output.find("-----BEGIN CERTIFICATE-----") is Some(start) &&
-    output.find(end) is Some(stop) else {
-    fail("openssl s_client printed no certificate:\n\{output}")
-  }
-  let name = "presented-\{@fs.readdir(dir).length()}.pem"
-  write(dir, name, output[start:stop + end.length()].to_owned() + "\n")
-  let file = "\{dir}/\{name}"
-  // The fingerprint has a call of its own: OpenSSL 4.1.0 prints a wrong one
-  // when `-ext` is in the same call.
-  let (_, digest) = run_openssl([
-    "x509", "-in", file, "-noout", "-fingerprint", "-sha256",
-  ])
-  // RFC 2253 prints names the same in every OpenSSL version: OpenSSL 3.0's
-  // default writes `CN = name`, later versions `CN=name`.
-  let (_, text) = run_openssl([
-    "x509", "-in", file, "-noout", "-subject", "-issuer", "-nameopt", "RFC2253",
-    "-ext", "subjectAltName",
-  ])
-  {
-    file,
-    fingerprint: line_after(digest, "sha256 Fingerprint="),
-    names: line_following(text, "X509v3 Subject Alternative Name"),
-    subject: line_after(text, "subject="),
-    issuer: line_after(text, "issuer="),
-  }
-}
-
-///|
 /// Runs `openssl s_client` against the TLS port, trusting only the
 /// certificate in the file `ca` and checking it for `name`, a DNS name or an
 /// IP address, sends `GET path` with `name` as its Host once the handshake
@@ -160,17 +55,37 @@ async fn Smock::verify_for(
 }
 
 ///|
-async test "with neither certificate setting, smock serves HTTPS on the TLS port with a self-signed certificate it generated" {
+/// How long the certificate in the PEM file `file` is valid, from its
+/// notBefore to its notAfter, as the certificate itself says: `365 days and
+/// an hour` for that span or one second more, and the span in seconds
+/// otherwise. smock reads the clock once for each of the two bounds, so a
+/// second may pass between them.
+async fn validity(file : String) -> String {
+  let not_before = @string.parse_int64(validity_bound(file, "notBefore"))
+  let span = @string.parse_int64(not_after(file)) - not_before
+  match span - (365L * 24 * 60 * 60 + 60 * 60) {
+    0L | 1L => "365 days and an hour"
+    _ => "\{span} seconds"
+  }
+}
+
+///|
+async test "with neither certificate setting, smock serves HTTPS on the TLS port with a self-signed certificate it generated, valid from an hour before it was generated until 365 days after" {
   with_scratch(dir => {
     let _ = with_smock(["--port", "0"], smock => {
       let presented = smock.presented_certificate(dir)
       inspect(
         [
           "self-signed: \{presented.subject == presented.issuer}",
+          // The running guide (docs/running.md, The self-signed certificate):
+          // "The certificate is valid from an hour before smock generates
+          // it, for clocks a little behind, until 365 days after."
+          "valid for: \{validity(presented.file)}",
           smock.verify_for(dir, presented.file, "localhost"),
         ].join("\n"),
         content=(
           #|self-signed: true
+          #|valid for: 365 days and an hour
           #|localhost: status 0, verify 0 (ok), response 404 Not Found
         ),
       )
@@ -313,26 +228,6 @@ async test "a log entry at startup says that a self-signed certificate is in use
       )
     })
   })
-}
-
-///|
-/// A Definition file that declares a Mock for each (name, Host) pair in
-/// `mocks`, with a Stub `GET /x` that answers with `status`.
-fn mocks_with_stubs(
-  mocks : Array[(String, String)],
-  status~ : Int32 = 200,
-) -> String {
-  let declared = mocks.map(mock => {
-    "{ \"name\": \"\{mock.0}\", \"hosts\": [\"\{mock.1}\"] }"
-  })
-  let stubs = mocks.map(mock => {
-    (
-      $|{ "id": "\{mock.0}-x", "mock": "\{mock.0}",
-      $|  "request": { "method": "GET", "path": "/x" },
-      $|  "response": { "status": \{status} } }
-    )
-  })
-  "{ \"mocks\": [\{declared.join(", ")}], \"stubs\": [\{stubs.join(", ")}] }"
 }
 
 ///|
@@ -492,14 +387,22 @@ async test "the generated certificate and its key stay in memory: smock serves H
 }
 
 ///|
-/// When the certificate in the PEM file `file` expires, its notAfter, in
-/// seconds since the Unix epoch, as `openssl x509` and `date` read it.
-async fn not_after(file : String) -> String {
-  let (_, text) = run_openssl(["x509", "-in", file, "-noout", "-enddate"])
-  let date = line_after(text, "notAfter=")
+/// A bound of the validity of the certificate in the PEM file `file`, its
+/// notBefore or its notAfter as `bound` names it, in seconds since the Unix
+/// epoch, as `openssl x509` and `date` read it.
+async fn validity_bound(file : String, bound : String) -> String {
+  let (_, text) = run_openssl(["x509", "-in", file, "-noout", "-dates"])
+  let date = line_after(text, "\{bound}=")
   let (status, out) = @process.collect_stdout("date", ["-u", "-d", date, "+%s"])
   guard status == 0 else { fail("date cannot read \{date}") }
   out.text().trim().to_owned()
+}
+
+///|
+/// When the certificate in the PEM file `file` expires, its notAfter, in
+/// seconds since the Unix epoch, as `openssl x509` and `date` read it.
+async fn not_after(file : String) -> String {
+  validity_bound(file, "notAfter")
 }
 
 ///|

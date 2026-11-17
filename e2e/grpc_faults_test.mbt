@@ -440,19 +440,31 @@ async test "a Fault with a delay comes in its call's task once the delay is over
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let client = smock.h2c()
       defer client.close()
+      let faults = ["late-reset", "late-partial", "late-close"]
+      // The calls with Faults, then the one without, in one write: smock
+      // reads them together, so their replies come in the order smock gives
+      // them, however late the test sends the calls or reads the replies.
+      // While a call's delay runs, "the other calls of the connection are
+      // answered meanwhile" (docs/grpc/state-and-faults.md, Faults), so the
+      // call without a Fault is answered before the first delay, 300 ms, is
+      // over, and nothing of the other calls comes before its reply.
       let start = @async.now()
-      let late = []
-      for fault in ["late-reset", "late-partial", "late-close"] {
-        late.push((fault, client.start_call(headers=[("x-fault", fault)])))
-      }
-      let fast = client.call("/helloworld.Greeter/SayHello")
+      let streams = client.start_calls(
+        [..faults.map(fault => [("x-fault", fault)]), []],
+      )
+      let fast = client.reply(streams[faults.length()])
+      // Whatever came of the other calls while the client read this reply
+      // was kept for later.
+      let first = faults
+        .mapi((i, _) => client.kept_for(streams[i]))
+        .iter()
+        .all(kept => kept == 0)
       let out = [
-        "fast, at once: \{derived_status(fast)}, before 300 ms: \{@async.now() - start < 300}",
+        "fast, at once: \{derived_status(fast)}, before anything of the calls with Faults: \{first}",
       ]
       let delays = [300L, 450, 700]
-      for i, called in late {
-        let (fault, stream) = called
-        let reply = client.reply(stream)
+      for i, fault in faults {
+        let reply = client.reply(streams[i])
         out.push("x-fault: \{fault}:")
         out.push(reply.render())
         out.push(
@@ -462,7 +474,7 @@ async test "a Fault with a delay comes in its call's task once the delay is over
       inspect(
         [..out, "Journal:", fault_answers(smock)].join("\n"),
         content=(
-          #|fast, at once: OK, before 300 ms: true
+          #|fast, at once: OK, before anything of the calls with Faults: true
           #|x-fault: late-reset:
           #|HEADERS
           #|(reset INTERNAL_ERROR)

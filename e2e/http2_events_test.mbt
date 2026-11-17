@@ -116,77 +116,6 @@ let h2_news_late : String =
   #|      "response": { "status": 200, "body": "hello" } } ] }
 
 ///|
-/// Reads events until each stream of `due` has ended, been reset, or the
-/// connection has closed, and shows, for each stream in the order of
-/// `due`, what came on it, a line each: its HEADERS with their fields, each
-/// DATA with its octets as text, as `data` shows them, and how it ended.
-/// `due` gives, for each stream, when its HEADERS are due and then when
-/// each DATA is, in milliseconds after `start`, and each line says whether
-/// it came then (`arrival`).
-async fn H2Client::timeline(
-  self : H2Client,
-  start~ : Int64,
-  due~ : Array[(Int32, Array[Int32])],
-  data~ : (String) -> String = text => text.escape(),
-) -> String {
-  let seen : Map[Int32, Array[String]] = Map([])
-  for stream in due {
-    seen[stream.0] = []
-  }
-  let mut open = due.length()
-  let when = (stream : Int32, ms : Int64) => {
-    let lines = seen.get(stream).unwrap()
-    let times = due.filter(entry => entry.0 == stream)[0].1
-    if lines.length() < times.length() {
-      arrival(ms, times[lines.length()])
-    } else {
-      "at \{ms} ms, after the frames due"
-    }
-  }
-  while open > 0 {
-    let event = self.read_event()
-    let ms = @async.now() - start
-    match event {
-      Response(stream~, fields~) if seen.contains(stream) => {
-        let shown = fields.map(field => {
-          shown_field(
-            @utf8.decode_lossy(field.name),
-            @utf8.decode_lossy(field.value),
-          )
-        })
-        let at = when(stream, ms)
-        seen.get(stream).unwrap().push("HEADERS \{at}: \{shown.join(", ")}")
-      }
-      Data(stream~, data=octets) if seen.contains(stream) => {
-        let at = when(stream, ms)
-        seen
-        .get(stream)
-        .unwrap()
-        .push("DATA \{at}: \{data(@utf8.decode_lossy(octets))}")
-      }
-      End(stream~) if seen.contains(stream) => {
-        seen.get(stream).unwrap().push("end")
-        open -= 1
-      }
-      Reset(stream~, code~, ..) if seen.contains(stream) => {
-        seen.get(stream).unwrap().push("reset \{error_name(code)}")
-        open -= 1
-      }
-      Closed => break
-      _ => ()
-    }
-  }
-  let out = []
-  for stream in due {
-    out.push("stream \{stream.0}:")
-    for line in seen.get(stream.0).unwrap() {
-      out.push("  \{line}")
-    }
-  }
-  out.join("\n")
-}
-
-///|
 async test "h2c: several event streams on one connection each stream their events at their own times, one delayed by its Stub among them, while a fast stream on the connection is answered at once" {
   with_definitions([("m.json", h2_news_late)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
@@ -256,44 +185,6 @@ fn h2_ticks() -> String {
     $|    { "id": "hello", "mock": "m", "request": { "path": "/hello" },
     $|      "response": { "status": 200, "body": "hello" } } ] }
   )
-}
-
-///|
-/// The Journal's entries, each shown as its target, its Stub, its status
-/// and whether its `durationMs` is below `below`, once there are `count`
-/// of them, or as they are after `within` milliseconds.
-async fn Smock::journal_durations(
-  self : Smock,
-  count : Int32,
-  below~ : Int32,
-  within~ : Int32,
-) -> Array[String] {
-  let start = @async.now()
-  for ;; {
-    let (_, journal) = self.journal()
-    guard journal is Object({ "entries": Array(entries), .. }) else {
-      fail("no entries: \{journal.stringify()}")
-    }
-    if entries.length() >= count || @async.now() - start >= within.to_int64() {
-      return entries.map(entry => {
-        guard entry
-          is Object(
-            {
-              "request": Object({ "target": String(target), .. }),
-              "stub": stub,
-              "status": status,
-              "durationMs": Number(duration, ..),
-              ..
-            }
-          ) else {
-          return entry.stringify()
-        }
-        let short = duration < below.to_double()
-        "\{target}: stub \{stub.stringify()}, status \{status.stringify()}, durationMs below \{below}: \{short}"
-      })
-    }
-    @async.sleep(20)
-  }
 }
 
 ///|

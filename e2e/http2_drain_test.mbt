@@ -12,20 +12,6 @@ fn is_ping(frame : @http2.Frame) -> Bool {
 }
 
 ///|
-/// Reads frames from smock as `frames_until` does, until smock's PING, and
-/// acknowledges it, as a client does.
-async fn RawH2::frames_until_ping_acked(self : RawH2, since : Int64) -> Frames {
-  let payload = Ref(b"")
-  let frames = self.frames_until(since, frame => {
-    guard frame is Ping(payload=p, ack=false) else { return false }
-    payload.val = p
-    true
-  })
-  self.send([Ping(payload=payload.val, ack=true)])
-  frames
-}
-
-///|
 async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY NO_ERROR naming 2^31-1 and a PING; then the final GOAWAY, naming the last stream received, once the client acknowledges the PING, or a second later when it does not; and a FIN a second after that, well before the drain timeout" {
   with_definitions([("m.json", drain_defs)], dir => {
     let stopped = with_smock(

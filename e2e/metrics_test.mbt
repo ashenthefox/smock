@@ -2,24 +2,6 @@
 // is checked against the OpenAPI document (contract_test.mbt).
 
 ///|
-/// The version, the commit and the toolchain in a `smock --version` line,
-/// such as `smock 1.2.3 (commit 0123456789ab, moonc v0.10.20+65efd5b93)`.
-fn version_parts(line : String) -> (String, String, String) raise {
-  let line = line.trim()
-  guard line.strip_prefix("smock ") is Some(rest) &&
-    rest.find(" (commit ") is Some(i) &&
-    rest[i + " (commit ".length():].strip_suffix(")") is Some(inner) &&
-    inner.find(", ") is Some(j) else {
-    fail("not a version line: \{line}")
-  }
-  (
-    rest[:i].to_owned(),
-    inner[:j].to_owned(),
-    inner[j + ", ".length():].to_owned(),
-  )
-}
-
-///|
 async test "the build-info metric carries the version, commit and toolchain smock --version prints, as labels" {
   let (_, version_line) = smock_stdout(["--version"])
   let (version, commit, toolchain) = version_parts(version_line)

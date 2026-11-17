@@ -1,0 +1,1199 @@
+# The keep list of the test review (#275): the tests that removal rule (C)
+# keeps for a reason that the kill matrix cannot see. Under rule (A) alone,
+# such a test may kill no mutant that another test does not kill as well,
+# and so look redundant: it pins a value that a spec fixes, checks that the
+# targets and builds agree, checks what a dependency does, is one of the
+# deliberate overlaps, or checks what smock's own C decides. A removal
+# batch starts from this list, and never proposes a test on it.
+#
+# Each reason says where it comes from, the searches that found its tests,
+# and how their hits were judged, so that the searches can be reviewed as
+# well as the names. A test is named by its file and by its name as the
+# file writes it between the quotes, escapes included, which is how moon's
+# test metadata names it. A change that renames, moves or removes a listed
+# test changes this list in the same commit: scripts/check-kept-tests.py,
+# in CI's job scripts, fails when a listed test is no longer there. Its
+# docstring describes this format.
+#
+# The searches were run at the commit that wrote this list. A change that
+# adds a test for one of these reasons adds it here.
+
+# The keep reasons of rule (C) that are not listed here: a removal batch
+# derives them, from the ledgers and the trace links (#352, #353, #355).
+[derived]
+reasons = [
+  'the only test of a feature, of an acceptance criterion, of a rule of an ADR or of a documented limit: from the boundary and use-case ledgers and the trace links',
+  "the only test that gets an Admin API reply of some endpoint and status, which the contract checker then checks: from the endpoints and statuses that each e2e test's run alone records (#355)",
+  'the only regression test of a closed bug: from the trace links',
+  'the only e2e test of a feature a user sees: from the use-case ledger and the trace links',
+  'a documented example that nothing else runs: from the use-case ledger',
+]
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'spec-constant'
+rule = 'spec constant'
+title = 'A test of a constant that a spec fixes'
+source = """
+#275, The removal rule and its proof, (C): spec-constant tests. #275, Step
+1: the tests that pin protocol constants (gRPC status codes 13 and 0, the
+content type application/grpc) are kept as spec oracles. User stories 42 and
+66.
+"""
+search = [
+  '''git grep -n -i -E '^(async )?test "([^"\\]|\\.)*(status codes?|code is|reason phrases?|content type (of|is)|reserves|reserved|numbers and names|wire types?|error codes?|is application/)' -- '*_test.mbt' '*_wbtest.mbt' '*.mbt.md'''',
+  '''git grep -n -E '(inspect|assert_eq)\(\s*@[a-z0-9_]+\.[a-z_][a-z0-9_]*\s*(,|\))' -- '*_test.mbt' '*_wbtest.mbt' '*.mbt.md'''',
+  '''git grep -n -i 'spec oracle' -- '*_test.mbt' '*_wbtest.mbt' '*.mbt.md'''',
+]
+found = """
+The first search, over test names, finds 21 tests; the second, a test that
+inspects a package's constant itself, finds grpc's content type; the third
+finds the doc comments of two of the tests below, which say "A spec oracle."
+
+Listed: a test whose name says that its subject is a value a spec fixes, a
+code, a name or a content type, and whose every expected value comes from
+that spec. Left out: the tests whose subject is a rule of reading or writing
+(a content subtype, the wire types of a tag, the reason phrase of an unknown
+status, the names refused in a Definition file), whose mutants show their
+worth; grpc/metadata_test.mbt's test of the names gRPC reserves, since
+PROTOCOL-HTTP2 reserves only the names that start with grpc- ("Header names
+starting with grpc- but not listed here are reserved for future GRPC use"),
+and content-type and te come from smock's own reading; and the e2e tests
+that see these values on the wire, which a removal batch judges.
+"""
+
+[[reason.test]]
+file = 'grpc/status_test.mbt'
+name = "the seventeen status codes have gRPC's numbers and names, in order"
+source = "gRPC's status codes (https://grpc.github.io/grpc/core/md_doc_statuscodes.html): the codes 0 to 16 and their names, in order"
+
+[[reason.test]]
+file = 'grpc/status_test.mbt'
+name = "a status's code is the decimal text grpc-status carries"
+source = "PROTOCOL-HTTP2 (https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md), Responses: Status is grpc-status 1*DIGIT; gRPC's status codes: INTERNAL is 13 and OK is 0"
+
+[[reason.test]]
+file = 'grpc/content_type_test.mbt'
+name = 'the content type of gRPC calls and replies is application/grpc'
+source = 'PROTOCOL-HTTP2, Requests: Content-Type is content-type application/grpc, with an optional +proto, +json or custom subtype'
+
+[[reason.test]]
+file = 'http1/response_test.mbt'
+name = 'the status line carries the reason phrase RFC 9110 gives each status it defines, and RFC 6585 gives 429 and 431'
+source = "RFC 9110, sections 15.2 to 15.6, the heading of each status's section, and RFC 6585, sections 4 and 5, for 429 and 431"
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'backend-agreement'
+rule = 'backend agreement'
+title = 'A test that a seeded floating-point result is the same on every target and in a release build'
+source = """
+#275, The removal rule and its proof, (C): backend-agreement and
+release-mode tests (engine tests of seeded floating-point results).
+CONTRIBUTING.md, Build and test: "A release build on arm64 fuses
+floating-point multiply-adds unless it is told not to, and a seeded delay
+could then differ from the one wasm-gc draws. moon passes -ffp-contract=off
+to each C compile itself, so nothing in this repository adds it. The engine
+test "Fault arithmetic is never fused into multiply-adds, so a seeded delay
+is the same on every target" (engine/faults_test.mbt) fails if they are
+fused, and CI runs the engine's tests in a release build on amd64 and on
+arm64 to check it." CI reruns every engine test in a release build
+(build-test.yml's job release-test), but only the tests below are kept for
+that reason.
+"""
+search = [
+  '''git grep -n -i -E '\bfused\b|multiply-add|fp-contract|on every target' -- 'engine/*_test.mbt'''',
+  '''git grep -l -E 'lognormal|example_timing|slow_hello' -- 'engine/*_test.mbt'''',
+  '''git grep -n -E 'lognormal|Lognormal|@math\.(exp|ln)|\.sqrt\(' -- 'engine/*.mbt' ':!engine/*_test.mbt' ':!engine/*_wbtest.mbt'''',
+]
+found = """
+engine/fault.mbt draws a log-normal delay or wait with exp, ln and sqrt and
+the products of Marsaglia's polar method, the one floating-point computation
+of a seeded result (the third search); uniform draws and Fault decisions use
+whole numbers and a double compared with a probability, which no target
+rounds differently.
+
+The first search finds the fused multiply-add test and three tests that pin
+draws on every target: engine/llm_timing_test.mbt's draws of seed 7, which
+hold a log-normal wait, and engine/faults_test.mbt's decisions of seeds 2026
+and 42, which hold none. The second finds engine/faults_test.mbt,
+engine/llm_render_test.mbt and engine/llm_timing_test.mbt. Listed: the tests
+of those files whose expected values hold a wait or a delay drawn through
+the log-normal sampler. Left out: the tests that compare two runs on one
+target, the statistical bounds of engine/faults_test.mbt's log-normal test
+and its sigma 0 and median 0 (exact on every target), and the tests with
+fixed waits. Also left out: the e2e tests whose Stubs draw seeded log-normal
+waits (in e2e/llm_test.mbt and e2e/llm_conversation_test.mbt), which run a
+debug build and which a removal batch judges, and prng's tests, which pin
+its sequence on every target but are prng's own tests, whose mutants show
+their worth, and none of which runs in a release build.
+
+Checked on aarch64 on 2026-11-17: with every C compile of the engine's tests
+forced to fuse multiply-adds (a compiler wrapper given as MOON_CC that adds
+-ffp-contract=fast last), moon test --target native --release -p
+smock/smock/engine fails the fused multiply-add test alone, 683 of 684
+passing. The seeds the log-normal tests pin round to the same milliseconds
+either way, so they guard the sampler's results on each target and build,
+not the fusing itself.
+"""
+
+[[reason.test]]
+file = 'engine/faults_test.mbt'
+name = 'Fault arithmetic is never fused into multiply-adds, so a seeded delay is the same on every target'
+source = "IEEE 754 rounding: 1 + 2^-30 squared rounds to 1 + 2^-29, so a * a - c is 0 unless the multiply and the subtract are fused, as CONTRIBUTING.md's sentence says an aarch64 release build would"
+
+[[reason.test]]
+file = 'engine/llm_timing_test.mbt'
+name = 'each distribution is drawn from the waits generator, one wait per piece, and the draws of seed 7 are pinned on every target'
+source = 'the waits seed 7 draws, a log-normal first wait among them, the same on wasm-gc, natively and in a release build'
+
+[[reason.test]]
+file = 'engine/llm_timing_test.mbt'
+name = 'adding timing changes no id, no Fault decision, no pick and no helper output'
+source = "the sum of each request's waits under the spec's example timing, with its log-normal first wait, the same on wasm-gc, natively and in a release build"
+
+[[reason.test]]
+file = 'engine/llm_timing_test.mbt'
+name = "render shows each event with the wait that the first request of the Stub's seed gets"
+source = "the waits of the first request of a Stub's seed under the spec's example timing, with its log-normal first wait, the same on wasm-gc, natively and in a release build"
+
+[[reason.test]]
+file = 'engine/llm_render_test.mbt'
+name = "render shows a streamed sample's events, each with its wait, with the ids and the waits the given seed fixes and the rendering's time as created"
+source = 'the waits seed 7 gives a rendering, with its log-normal first wait, the same on wasm-gc, natively and in a release build'
+
+[[reason.test]]
+file = 'engine/llm_render_test.mbt'
+name = 'the same seed renders the same ids and waits, for the stream and the JSON body alike, and another seed renders others'
+source = 'the waits seeds 7 and 8 give a rendering, with their log-normal first waits, the same on wasm-gc, natively and in a release build'
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'dependency-moonhttp'
+rule = 'dependency'
+title = "A test of a rule or a bound that moonhttp's HTTP/2 connection enforces"
+source = """
+#275, The removal rule and its proof, (C): the HTTP/2 rules of ADR 0005, and
+tests of behaviour a dependency provides. ADR 0005, Consequences, Tests from
+outside: the e2e tests "check the limits and rules moonhttp enforces as well
+as smock's own, so an upgrade that drops one fails them."
+server/http2_defences.mbt, H2Connection::flooded: "smock keeps no count of
+its own for the bound: the e2e tests check moonhttp's from outside, so that
+an upgrade that drops it fails them." No mutant reaches moonhttp's code, so
+the kill matrix cannot see these checks.
+"""
+search = [
+  '''git grep -n -i -E '^(async )?test "([^"\\]|\\.)*moonhttp' -- '*_test.mbt' '*_wbtest.mbt' '*.mbt.md'''',
+  '''git grep -n -E '^(async )?test "([^"\\]|\\.)*(COMPRESSION_ERROR|PROTOCOL_ERROR|FRAME_SIZE_ERROR|REFUSED_STREAM|ENHANCE_YOUR_CALM|FLOW_CONTROL_ERROR|STREAM_CLOSED)' -- 'e2e/*_test.mbt'''',
+  '''the test blocks of e2e/*_test.mbt and server/*_wbtest.mbt whose text matches moonhttp|twice --header-size-limit|COMPRESSION_ERROR''',
+  '''git grep -n -E 'Conn|moonhttp' -- 'server/http2*.mbt'''',
+]
+found = """
+The first search finds 11 tests, the second 24, the third 20 test blocks;
+the fourth shows which answers are moonhttp's. smock sends some HTTP/2
+errors itself: GOAWAY PROTOCOL_ERROR for a stream ID used again
+(H2Connection::judge), GOAWAY FRAME_SIZE_ERROR for a frame larger than it
+advertises (FrameReader), REFUSED_STREAM past
+--http2-max-concurrent-streams, which it also sends itself so that the bound
+holds whatever moonhttp enforces, RST_STREAM PROTOCOL_ERROR after its own
+400, and GOAWAY ENHANCE_YOUR_CALM for its own defences. Everything else of
+RFC 9113 and RFC 7541 is enforced by moonhttp's Conn: the field rules,
+stream states and flow control errors, HPACK decoding, and its bounds on a
+decoded header list and on a header block as received, twice
+--header-size-limit.
+
+Listed: a test that sends what breaks one of moonhttp's rules, or passes one
+of its bounds, and asserts moonhttp's answer or what follows from it. Left
+out: the tests of smock's own errors above, whose worth server mutants show,
+and the tests that name moonhttp but assert only what smock does: its cap on
+SETTINGS_HEADER_TABLE_SIZE, its own 431 for a header list past moonhttp's
+wrapped count, the SETTINGS it advertises, its mockoon log lines for refused
+streams, and how it decodes moonhttp's fields
+(server/decoded_fields_wbtest.mbt).
+"""
+
+[[reason.test]]
+file = 'e2e/http2_bodies_test.mbt'
+name = 'h2c: a content-length over --body-limit gets 413 at once, then RST_STREAM NO_ERROR, or 413 alone when the request has ended, frames that later arrive on that stream are ignored, the other streams go on, and the stream counts as rejected traffic with no Journal entry'
+source = 'RFC 9113, section 8.1.1: HEADERS that end the stream and declare a content-length make a malformed request, which moonhttp resets before smock sees it'
+
+[[reason.test]]
+file = 'e2e/http2_checks_test.mbt'
+name = 'h2c: a stream refused with 400 counts as rejected traffic, with mock=\"\" and stub=\"\", and is not journaled, while a stream moonhttp resets, such as HEADERS that end the stream with content-length: 5, has no status, no Journal entry, no Scenario move and no metric'
+source = 'RFC 9113, section 8.1.1: HEADERS that end the stream with content-length: 5 make a malformed request, which moonhttp resets, so it gets no status, no Journal entry and no metric'
+
+[[reason.test]]
+file = 'e2e/http2_checks_test.mbt'
+name = "h2c: a stream that breaks one of RFC 9113's field rules h2spec does not test is reset with PROTOCOL_ERROR by moonhttp, while another stream on the connection is answered"
+source = 'RFC 9113, section 8.2: the field rules h2spec does not test, which moonhttp enforces with a stream error, PROTOCOL_ERROR'
+
+[[reason.test]]
+file = 'e2e/http2_connect_test.mbt'
+name = 'h2c: a CONNECT reaches its Stub when its HEADERS arrive, even when they do not end the stream, with :authority as its target and Host, and its 2xx ends the stream with no content-length and no DATA, where HTTP/1.1 sends both'
+source = 'RFC 9113, section 8.1.1: a CONNECT whose content-length is not what its stream carried is reset by moonhttp with PROTOCOL_ERROR, and never reaches the Mocks'
+
+[[reason.test]]
+file = 'e2e/http2_continuation_test.mbt'
+name = "h2c: a header block that passes moonhttp's bound as received, twice --header-size-limit, with large CONTINUATION frames gets GOAWAY ENHANCE_YOUR_CALM and one log line naming a CONTINUATION flood, while a block at the bound is taken, padding and priority aside; a fresh connection is served"
+source = "ADR 0005 and server/http2_defences.mbt: moonhttp's bound on a header block as received, twice --header-size-limit, ends the connection with GOAWAY ENHANCE_YOUR_CALM"
+
+[[reason.test]]
+file = 'e2e/http2_events_test.mbt'
+name = "h2c: an event stream that the client resets, or that moonhttp resets for the client's frames, ends at once: its entry is committed then, its duration up to the reset, and no more of its events is sent"
+source = 'RFC 9113, section 6.9: a WINDOW_UPDATE of 0 is a stream error, for which moonhttp resets the event stream'
+
+[[reason.test]]
+file = 'e2e/http2_header_limits_test.mbt'
+name = "h2c: a decoded header list over twice --header-size-limit, moonhttp's bound, gets RST_STREAM ENHANCE_YOUR_CALM from moonhttp, with no status, no Journal entry and no metric, while one at the bound gets 431 and a concurrent stream is answered"
+source = "ADR 0005: moonhttp's bound on a decoded header list, twice --header-size-limit, resets the stream with ENHANCE_YOUR_CALM"
+
+[[reason.test]]
+file = 'e2e/http2_header_limits_test.mbt'
+name = 'h2c: a header block over twice --header-size-limit as received gets GOAWAY ENHANCE_YOUR_CALM, which ends every stream of the connection, smock logs it as a CONTINUATION flood, even when its HEADERS frame alone passes the bound, and a fresh connection is served'
+source = "ADR 0005 and server/http2_defences.mbt: moonhttp's bound on a header block as received, twice --header-size-limit, ends the connection with GOAWAY ENHANCE_YOUR_CALM"
+
+[[reason.test]]
+file = 'e2e/http2_hpack_test.mbt'
+name = 'h2c: an HPACK bomb, a block that names a large table entry over and over, gets 431 while its decoded list is within twice --header-size-limit, else RST_STREAM ENHANCE_YOUR_CALM with no status, too many fields named over and over get 431, and the connection goes on'
+source = "ADR 0005: moonhttp's bound on a decoded header list, twice --header-size-limit, resets an HPACK bomb's stream with ENHANCE_YOUR_CALM"
+
+[[reason.test]]
+file = 'e2e/http2_hpack_test.mbt'
+name = "h2c: a header block that does not decode, with a Huffman code with EOS or bad padding, an index that names no entry, or a table size update past 4,096 octets, the size of smock's decoding table, gets GOAWAY COMPRESSION_ERROR, and a fresh connection is served; the table keeps an entry of 4,096 octets and not one larger"
+source = "RFC 7541, sections 2.3.3, 4.2 and 5.2, and RFC 9113, section 4.3: a header block that does not decode is a connection error, COMPRESSION_ERROR, which moonhttp's decoder raises"
+
+[[reason.test]]
+file = 'e2e/http2_rapid_reset_test.mbt'
+name = "h2c: streams that moonhttp refuses at open count toward the bound: 101 with an upper-case field name get GOAWAY ENHANCE_YOUR_CALM; REFUSED_STREAM past the concurrent-streams limit counts only once the client has acknowledged smock's SETTINGS"
+source = 'RFC 9113, sections 8.2.1 and 5.1.2: moonhttp refuses at open a stream with an upper-case field name, and one past the concurrent-streams limit'
+
+[[reason.test]]
+file = 'e2e/http2_rapid_reset_test.mbt'
+name = 'h2c: MadeYouReset: delayed and event streams whose requests have ended, reset by moonhttp for a WINDOW_UPDATE of 0, a window overflow, DATA or HEADERS after END_STREAM, or PRIORITY on the stream itself, end their tasks at once; the connection goes on, and a fresh connection is served at once'
+source = 'RFC 9113, sections 6.9, 6.9.1 and 5.1, and RFC 7540, section 5.3.1: moonhttp resets a stream for a WINDOW_UPDATE of 0, a window overflow, DATA or HEADERS after END_STREAM, and a PRIORITY that makes it depend on itself'
+
+[[reason.test]]
+file = 'e2e/http2_rapid_reset_test.mbt'
+name = "h2c: MadeYouReset past the bound: 100 delayed and event streams that moonhttp resets for the client's frames, of the five kinds in turn, leave the connection open, and the 101st gets GOAWAY ENHANCE_YOUR_CALM; smock logs one line, and a fresh connection is served"
+source = 'RFC 9113, sections 6.9, 6.9.1 and 5.1, and RFC 7540, section 5.3.1: the five kinds of stream error for which moonhttp resets a stream'
+
+[[reason.test]]
+file = 'e2e/http2_stream_ids_test.mbt'
+name = 'h2c: HEADERS on a stream that moonhttp refused at open, or reset after its HEADERS, for a field rule are ignored, and the connection serves the next stream'
+source = 'RFC 9113, section 8.2: moonhttp refuses at open, or resets after its HEADERS, a stream that breaks a field rule'
+
+[[reason.test]]
+file = 'e2e/http2_streams_test.mbt'
+name = "h2c: a stream reset during its delay, by the client or by smock for the client's frames, ends its task at once: its entry is committed then, and no response is written"
+source = 'RFC 9113, section 6.9: a WINDOW_UPDATE of 0 is a stream error, for which moonhttp resets the delayed stream'
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'dependency-async'
+rule = 'dependency'
+title = 'A test of what the async runtime, moonbitlang/async, does'
+source = """
+#275, The removal rule and its proof, (C): tests of behaviour a dependency
+provides, the async runtime among them.
+"""
+search = [
+  '''git grep -n -i -E '^(async )?test "([^"\\]|\\.)*(runtime|event loop|moonbitlang/async)' -- '*_test.mbt' '*_wbtest.mbt' '*.mbt.md'''',
+  '''git grep -n -i -E 'async runtime|moonbitlang/async|async#[0-9]|the runtime' -- '*_test.mbt' '*_wbtest.mbt' '*.mbt.md'''',
+]
+found = """
+No test found. The first search finds one test, of a runtime error of
+protobuf's conformance testee, which is smock's own. The second finds three
+comments, each on a helper that works around something the runtime lacks or
+did wrong: its file watcher, which aborted a process (#264, so watch/
+polls), its TLS client, which offers no ALPN, and its lack of a way to set a
+file's times. No test asserts an outcome that the runtime alone decides;
+smock's handling of cancelled tasks and of timeouts is smock's code, whose
+worth server mutants show.
+"""
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'dependency-openssl'
+rule = 'dependency'
+title = "A test of what OpenSSL does, through smock's bindings"
+source = """
+#275, The removal rule and its proof, (C): tests of behaviour a dependency
+provides, OpenSSL among them. ADR 0001: OpenSSL is the one C library smock
+binds. No mutant reaches OpenSSL's code, nor smock's C in openssl/openssl.c.
+"""
+search = [
+  '''git grep -n -E '^(async )?test "' -- 'openssl/*_test.mbt'''',
+  '''git grep -n -i -E '^(async )?test "([^"\\]|\\.)*(openssl|handshake|key update|close_notify|alert|trusts)' -- '*_test.mbt' '*_wbtest.mbt' '*.mbt.md'''',
+]
+found = """
+The first search finds the bindings' own 13 tests; the second finds 16
+tests, 5 of the bindings' among them, the e2e TLS tests whose names speak of
+a handshake or a key update, and server's test of a task cancelled as its
+TLS handshake ends. Listed: a test whose asserted outcome OpenSSL decides,
+the bindings only passing the input in and the outcome out: a client's
+verification of a chain without its intermediate, and when a server answers
+a key update. Left out: the bindings' tests of what smock's own code decides
+(loading and refusing a configuration and the message it gives, the ALPN
+callback in openssl/openssl.c, the alert code read, close_notify read as
+Closed, the self-signed certificate's names and keys, and the handshakes
+with each kind of chain, whose first step is the bindings' loading), and the
+e2e TLS tests, whose outcomes smock's server decides and which a removal
+batch judges. Those of these tests whose subject smock's C decides are
+kept under own-c.
+"""
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'the intermediate sent with the leaf is what lets the client verify it'
+source = "OpenSSL's path validation (RFC 5280, section 6): a client that trusts only the root CA cannot build a path to a leaf sent without its intermediate"
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = "a key update the client asks for is answered with the server's next write, not by the read that brings it, and both sides go on with the new keys"
+source = "OpenSSL's handling of a TLS 1.3 KeyUpdate (RFC 8446, section 4.6.3: the receiver of update_requested sends a KeyUpdate of its own before its next Application Data record): the server answers with its next write, not with the read that brings the request"
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'dependency-core-json'
+rule = 'dependency'
+title = "A test of what core's JSON, @json, does"
+source = """
+#275, The removal rule and its proof, (C): tests of behaviour a dependency
+provides, core's JSON among them.
+"""
+search = [
+  '''git grep -n -i -E '^(async )?test "([^"\\]|\\.)*(malformed json|invalid json|json text|json parser|not json|nest|lone surrogate|duplicate key|repeated key|1e400|json number)' -- '*_test.mbt' '*_wbtest.mbt'''',
+  '''git grep -n -E '^\s*//.*(@json|json\.parse|JSON parser|preserve_number_repr)' -- '*_test.mbt' '*_wbtest.mbt'''',
+]
+found = """
+No test found. The first search finds 66 tests and the second 4 comments.
+Each tests smock's own code on JSON or beside it: its duplicate-key check,
+the conditions, templates and CRUD lists that compare numbers, the YAML
+parser's depth and number typing, which follow core's parser, the
+converters' depth limits, the Admin API's errors for a body that is not
+JSON, and protobuf's and the other packages' nesting limits. None asserts an
+outcome that core's @json alone decides.
+"""
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'overlap-contract-checker'
+rule = 'deliberate overlap'
+title = 'A test of the Admin API contract checker itself'
+source = """
+#275, The removal rule and its proof, (C): the deliberate overlaps, the
+contract checker's own tests. CONTRIBUTING.md, Build and test: "The Admin
+API tests in e2e/ check every response against openapi/admin.json
+(e2e/contract_test.mbt)." The checker is test code, which no mutant reaches.
+"""
+search = [
+  '''git grep -n -E '^(async )?test "' -- e2e/contract_test.mbt''',
+  '''git grep -n -i 'contract checker' -- '*_test.mbt' '*_wbtest.mbt'''',
+]
+found = """
+The first search finds the three tests of the checker's file; the second
+finds no other file. Listed: all three. Two test the checker's verdicts; the
+third checks that every reference of the document the checker reads
+resolves.
+"""
+
+[[reason.test]]
+file = 'e2e/contract_test.mbt'
+name = 'every reference in the Admin API document resolves'
+source = 'openapi/admin.json and the Schemas it refers to: each reference resolves, as the checker needs'
+
+[[reason.test]]
+file = 'e2e/contract_test.mbt'
+name = 'the contract checker rejects responses that break the document'
+source = "the checker's own rules: a response that breaks openapi/admin.json is rejected, with each keyword the document uses"
+
+[[reason.test]]
+file = 'e2e/contract_test.mbt'
+name = "the contract checker applies then where if holds and else where it does not, as the Schema narrows an llm's stop reason by its api"
+source = "JSON Schema 2020-12's if, then and else, which openapi/admin.json uses to narrow an llm's stop reason by its api"
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'overlap-goldens'
+rule = 'deliberate overlap'
+title = 'A golden test, or a test of the comparison the goldens use'
+source = """
+#275, The removal rule and its proof, (C): the deliberate overlaps, the
+goldens. CONTRIBUTING.md, Build and test, names them:
+e2e/import_openapi_golden_test.mbt, the goldens in
+engine/llm_golden_*_test.mbt with the comparison in
+engine/llm_golden_test.mbt, and e2e/mockoon_golden_test.mbt.
+"""
+search = [
+  '''git grep -l -i golden -- '*_test.mbt' '*_wbtest.mbt' '*.mbt.md'''',
+  '''git grep -n -E '^(async )?test "' -- e2e/import_openapi_golden_test.mbt e2e/mockoon_golden_test.mbt 'engine/llm_golden*_test.mbt'''',
+]
+found = """
+The first search finds the six files CONTRIBUTING.md names, and the second
+their 29 tests. Listed: the 21 tests that compare with a golden file or a
+copied example, and the 7 tests of the comparison that
+engine/llm_golden_*_test.mbt use, which is test code no mutant reaches. Left
+out: e2e/import_openapi_golden_test.mbt's test that smock serves the guide's
+example as its quick start says, which compares with no golden file; it is a
+documented example, a keep reason a removal batch derives.
+"""
+
+[[reason.test]]
+file = 'e2e/import_openapi_golden_test.mbt'
+name = "smock import-openapi imports the Admin API's own document, with references into the Definition-file Schema, into its golden file, which smock check accepts with no warning"
+source = 'e2e/golden/admin.yaml, the committed import of openapi/admin.json'
+
+[[reason.test]]
+file = 'e2e/import_openapi_golden_test.mbt'
+name = "smock import-openapi imports the OAI's Petstore into its golden file, which smock check accepts with no warning"
+source = "e2e/golden/petstore.yaml, the committed import of the OAI's Petstore, e2e/golden/documents/petstore.yaml"
+
+[[reason.test]]
+file = 'e2e/import_openapi_golden_test.mbt'
+name = "smock import-openapi imports the guide's example into its committed file, which the guide's quick start shows with its document, and smock check accepts with no warning"
+source = "docs/examples/from-openapi/defs/petstore.yaml, the committed import of the guide's example, which docs/importing-openapi.md's quick start shows"
+
+[[reason.test]]
+file = 'e2e/mockoon_golden_test.mbt'
+name = "smock's Mockoon-equivalent lines for the Mock probe equal the lines Mockoon v9.10.0 wrote, adapted by one rule per decided difference"
+source = 'e2e/golden/mockoon/probe.log, lines that the Mockoon CLI v9.10.0 wrote (e2e/golden/mockoon/README.md)'
+
+[[reason.test]]
+file = 'e2e/mockoon_golden_test.mbt'
+name = "the assertions of Mockoon's own logging test hold for smock's lines: the started message, then a Transaction recorded line for GET /api/test with status 200 and no transaction, and stdout holds the texts Mockoon's tests look for"
+source = "the assertions of the Mockoon CLI's own logging test"
+
+[[reason.test]]
+file = 'engine/llm_golden_chat_test.mbt'
+name = "the Chat Completions JSON reply equals the reference's Default example"
+source = "OpenAI's API reference, the Default example of Chat Completions, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_chat_test.mbt'
+name = "the Chat Completions stream equals the reference's Streaming example, but for system_fingerprint"
+source = "OpenAI's API reference, the Streaming example of Chat Completions, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_chat_test.mbt'
+name = "the Chat Completions JSON reply with a tool call equals the reference's Functions example, but for the members smock writes in every reply"
+source = "OpenAI's API reference, the Functions example of Chat Completions, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_messages_test.mbt'
+name = "the Messages stream equals the streaming guide's basic stream, but for the ping event and output_tokens in message_start"
+source = "Anthropic's streaming guide, its basic stream, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_messages_test.mbt'
+name = "the Messages stream with a tool call equals the streaming guide's tool-use stream, but for the ping event and output_tokens in message_start"
+source = "Anthropic's streaming guide, its tool-use stream, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_messages_test.mbt'
+name = "the Messages JSON reply equals the messages guide's Hello! reply"
+source = "Anthropic's messages guide, its Hello! reply, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_messages_test.mbt'
+name = "the Messages JSON reply with the stop reason max_tokens equals the messages guide's max_tokens reply"
+source = "Anthropic's messages guide, its max_tokens reply, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_messages_test.mbt'
+name = "the Messages JSON reply with a tool call equals the tool-use guide's reply on the members it shows"
+source = "Anthropic's tool-use guide, its reply, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_messages_test.mbt'
+name = "the Messages mid-stream error equals the streaming guide's error event"
+source = "Anthropic's streaming guide, its error event, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_messages_test.mbt'
+name = "the Messages JSON reply with the stop reason refusal equals the refusals page's reply, but for category, explanation and stop_sequence"
+source = "Anthropic's refusals page, its reply, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_responses_test.mbt'
+name = "the Responses stream equals the reference's Streaming example, but for completed_at and service_tier"
+source = "OpenAI's API reference, the Streaming example of Responses, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_responses_test.mbt'
+name = "the Responses JSON reply equals the reference's Text input example, but for completed_at and service_tier"
+source = "OpenAI's API reference, the Text input example of Responses, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_responses_test.mbt'
+name = "the Responses JSON reply with a function call equals the reference's Functions example, but for completed_at, service_tier and the tool's strict"
+source = "OpenAI's API reference, the Functions example of Responses, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_responses_test.mbt'
+name = "the Responses stream with a function call equals the function-calling guide's events, but for response_id, sequence_number and the item's status"
+source = "OpenAI's function-calling guide, its events, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_responses_test.mbt'
+name = "the Responses stream with a stop reason ends with the reference's response.incomplete event, but for output, usage, the reasoning settings, service_tier and sequence_number"
+source = "OpenAI's API reference, the response.incomplete event, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_responses_test.mbt'
+name = "the Responses mid-stream error equals the reference's error event, but for sequence_number"
+source = "OpenAI's API reference, the error event of Responses, copied in the file with its source"
+
+[[reason.test]]
+file = 'engine/llm_golden_test.mbt'
+name = 'the comparison reports each difference that is not listed, with its event and pointer, and a listed one that does not differ'
+source = "the comparison's own rules (engine/llm_golden_test.mbt), which the goldens rely on"
+
+[[reason.test]]
+file = 'engine/llm_golden_test.mbt'
+name = 'the comparison reports a value that differs, and a JSON body where the example is a stream or the other way round'
+source = "the comparison's own rules (engine/llm_golden_test.mbt), which the goldens rely on"
+
+[[reason.test]]
+file = 'engine/llm_golden_test.mbt'
+name = "a gap matches any number of smock's events, none included, and events between two gaps go where they first match"
+source = "the comparison's own rules (engine/llm_golden_test.mbt), which the goldens rely on"
+
+[[reason.test]]
+file = 'engine/llm_golden_test.mbt'
+name = 'an event listed as absent by its name is left out of the example, and must be in it'
+source = "the comparison's own rules (engine/llm_golden_test.mbt), which the goldens rely on"
+
+[[reason.test]]
+file = 'engine/llm_golden_test.mbt'
+name = 'an example printed without SSE framing is read as JSON values one after another and compared by their data alone, a comment line being a gap'
+source = "the comparison's own rules (engine/llm_golden_test.mbt), which the goldens rely on"
+
+[[reason.test]]
+file = 'engine/llm_golden_test.mbt'
+name = "an id listed as unfixed matches smock's when it has the same prefix and is the same in every event where it appears"
+source = "the comparison's own rules (engine/llm_golden_test.mbt), which the goldens rely on"
+
+[[reason.test]]
+file = 'engine/llm_golden_test.mbt'
+name = 'argument fragments listed by pointer are compared by their join, whatever their number, and an empty first piece on its own'
+source = "the comparison's own rules (engine/llm_golden_test.mbt), which the goldens rely on"
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'overlap-protoc-codec'
+rule = 'deliberate overlap'
+title = "An in-process codec test on protoc's fixtures"
+source = """
+#275, The removal rule and its proof, (C): the deliberate overlaps, the
+in-process codec tests on protoc's fixtures, protobuf's, definitions' and
+engine's. The e2e tests that send protoc's fixtures are not listed: a
+removal batch judges them (#275, Step 6: the 53 e2e candidates include gRPC
+codec cases on protoc's fixtures).
+"""
+search = [
+  '''the test blocks of protobuf/*_test.mbt, protobuf/*_wbtest.mbt and protobuf/README.mbt.md whose text matches fixture\(|protoc, where fixture(<value>) reads a message protoc encoded, one of the values scripts/gen-protobuf-fixtures.sh writes''',
+  '''the test blocks of definitions/*_test.mbt, definitions/*_wbtest.mbt, engine/*_test.mbt and engine/*_wbtest.mbt whose text matches protoc encodes|protoc's|as protoc|fixtures/protobuf/[a-z/-]+\.binpb''',
+  '''git grep -l '^// Generated by scripts/gen-protobuf-fixtures.sh' -- '*.mbt'''',
+]
+found = """
+The third search lists the values protoc wrote: definitions and engine hold
+only Descriptor sets, and protobuf holds the messages as well. The first
+search finds 62 test blocks, the second 6. Listed: a test whose input is a
+message protoc encoded, or a Descriptor set protoc built, and whose expected
+value is what protoc gives (the decoded form its text format writes, its
+bytes, its JSON names), or the refusal of what protoc's own parsers refuse.
+Left out: protobuf/README.mbt.md's 4 examples, which are documented
+examples, a keep reason a removal batch derives; the tests that change every
+prefix or every octet of a protoc-built set
+(protobuf/descriptor_adversarial_test.mbt), and those of sets with problems
+(protobuf/descriptor_checks_test.mbt), whose expected values are smock's own
+verdicts; the 2 tests of protobuf/limits_test.mbt, whose subject is a limit
+smock documents, a keep reason a removal batch derives; and the test of the
+JSON names of fields, whose set is written by hand, not built by protoc.
+"""
+
+[[reason.test]]
+file = 'protobuf/canonical_test.mbt'
+name = 'each scalar type: 64-bit integers as strings, at their largest and smallest values'
+source = "protoc's encoding of fixtures/protobuf/scalars/every-max.binpb, fixtures/protobuf/scalars/every-min.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/canonical_test.mbt'
+name = 'repeated fields and maps: 64-bit elements as strings, map keys as in the decoded form'
+source = "protoc's encoding of fixtures/protobuf/replies/lists.txtpb, fixtures/protobuf/replies/maps.txtpb, fixtures/protobuf/collections/tagged.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/canonical_test.mbt'
+name = 'a repeated field or a map that holds no element is left out, a packed record of no values and numbers a closed enum does not define included'
+source = "protoc's encoding of fixtures/protobuf/replies/choice.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/canonical_test.mbt'
+name = 'the well-known types in their ProtoJSON forms: 64-bit wrappers as strings, wrappers at their defaults printed'
+source = "protoc's encoding of fixtures/protobuf/wellknown/known.binpb, fixtures/protobuf/wellknown/known-defaults.binpb, fixtures/protobuf/wellknown/lease.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/canonical_test.mbt'
+name = 'Struct, Value, ListValue, NullValue and Any in their ProtoJSON forms'
+source = "protoc's encoding of fixtures/protobuf/wellknown/document.binpb, fixtures/protobuf/wellknown/document-nulls.binpb, fixtures/protobuf/wellknown/any-missing.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/canonical_test.mbt'
+name = 'proto2: fields with presence printed whenever set, extensions under their full names in brackets, and groups as messages'
+source = "protoc's encoding of fixtures/protobuf/extensions/order-full.binpb, fixtures/protobuf/extensions/itinerary.binpb, fixtures/protobuf/shipping/parcel.binpb, fixtures/protobuf/shipping/parcel-unknown.binpb, fixtures/protobuf/shipping/parcel-not-utf8.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/collections_test.mbt'
+name = "the ticket's example: two encodings of one message, one with its fields in reverse order and its map entries shuffled, print one text"
+source = "protoc's encoding of fixtures/protobuf/collections/tagged.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/collections_test.mbt'
+name = 'repeated fields print as arrays: packed and unpacked scalars alike, strings, bytes and messages, each in order'
+source = "protoc's encoding of fixtures/protobuf/collections/lists.binpb, fixtures/protobuf/collections/lists-on-the-wire.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/collections_test.mbt'
+name = 'map entries print in key order: signed, unsigned and zigzag integers by value, bools false then true, and strings by their text'
+source = "protoc's encoding of fixtures/protobuf/collections/maps.txtpb, fixtures/protobuf/collections/maps.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/collections_test.mbt'
+name = "a oneof and a proto3 optional field of one message, as protoc builds them: each prints only when set, and the oneof's later member wins"
+source = 'the Descriptor set protoc builds from fixtures/protobuf/oneofs/oneofs.proto (scripts/gen-protobuf-fixtures.sh), with its oneof and its proto3 optional field as protoc builds them'
+
+[[reason.test]]
+file = 'protobuf/descriptor_test.mbt'
+name = "the set protoc builds from gRPC's helloworld.proto gives its file, messages, fields, service and methods"
+source = "the Descriptor set protoc builds from gRPC's helloworld.proto, fixtures/protobuf/helloworld/greeter.binpb, read back as the .proto declares it"
+
+[[reason.test]]
+file = 'protobuf/dynamic_test.mbt'
+name = "the ticket's example: an Any prints its type URL as @type, then the fields of a message it holds, or its printed form as value; one that holds an Empty prints @type alone"
+source = "protoc's encoding of fixtures/protobuf/wellknown/any-hello.txtpb, fixtures/protobuf/wellknown/any-duration.txtpb, fixtures/protobuf/wellknown/any-empty.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/dynamic_test.mbt'
+name = 'an Any that holds a type the set lacks, or whose type URL names no type, cannot be printed; an empty Any prints as {}'
+source = "protoc's encoding of fixtures/protobuf/wellknown/any-missing.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/dynamic_test.mbt'
+name = 'every type at every place: a Struct in key order with values of each kind, Values, ListValues, NullValues as null, and Anys that hold a message, a Duration, an Empty, a Value, a Struct and an Any'
+source = "protoc's encoding of fixtures/protobuf/wellknown/document.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/dynamic_test.mbt'
+name = "replies of every type have protoc's bytes, Struct entries sorted by key, in either spelling of a field and with NullValue by name or number"
+source = "protoc's encoding of fixtures/protobuf/wellknown/document.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/dynamic_test.mbt'
+name = "a reply's null sets null_value in a Value, in a Struct's and a ListValue's values and in a NullValue field, and leaves other fields unset"
+source = "protoc's encoding of fixtures/protobuf/wellknown/document-nulls.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/dynamic_test.mbt'
+name = "the ticket's example: an Any is read with its type from the set, a message's fields beside @type, and a well-known type's form as value; an Empty may give value {} or no value"
+source = "protoc's encoding of fixtures/protobuf/wellknown/any-hello.txtpb, fixtures/protobuf/wellknown/any-duration.txtpb, fixtures/protobuf/wellknown/any-empty.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/encode_test.mbt'
+name = "a reply with an int64 written as a string, an enum by its number and a repeated string has protoc's bytes"
+source = "protoc's encoding of fixtures/protobuf/replies/user.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/encode_test.mbt'
+name = "every scalar type at its largest value, in either spelling and either form of a number, has protoc's bytes"
+source = "protoc's encoding of fixtures/protobuf/replies/maxima.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/encode_test.mbt'
+name = "every signed scalar type at its smallest value, and the smallest positive double and float, have protoc's bytes"
+source = "protoc's encoding of fixtures/protobuf/replies/minima.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/encode_test.mbt'
+name = "NaN, the infinities and -0 have protoc's bytes"
+source = "protoc's encoding of fixtures/protobuf/replies/specials.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/encode_test.mbt'
+name = 'repeated fields are packed, unless a field says packed = false, and strings, bytes and messages are not'
+source = "protoc's encoding of fixtures/protobuf/replies/lists.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/encode_test.mbt'
+name = 'map entries are sorted by key, each with its key and its value, as protoc writes them'
+source = "protoc's encoding of fixtures/protobuf/replies/maps.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/encode_test.mbt'
+name = 'a message, a proto3 optional field and a oneof member are written at their defaults, and null leaves a field unset'
+source = "protoc's encoding of fixtures/protobuf/replies/choice.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/encode_test.mbt'
+name = 'a oneof member that is a message holds a message of the type that holds it'
+source = "protoc's encoding of fixtures/protobuf/replies/inner.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/encode_test.mbt'
+name = "messages of other sets have protoc's bytes, whatever the order of their keys"
+source = "protoc's encoding of fixtures/protobuf/helloworld/hello-reply.binpb, fixtures/protobuf/catalog/count-reply.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/extensions_test.mbt'
+name = "the ticket's example: an Order with the id 7 and the extension shop.priority set to 3 decodes as {\\\"id\\\":7,\\\"[shop.priority]\\\":3}"
+source = "protoc's encoding of fixtures/protobuf/extensions/order.txtpb, which the test's comment gives (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/extensions_test.mbt'
+name = 'extensions print in field-number order among the fields, once set: a repeated one, a group and one declared in a message under its full name'
+source = "protoc's encoding of fixtures/protobuf/extensions/order-full.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/extensions_test.mbt'
+name = 'groups decode as messages, repeated and nested in one another'
+source = "protoc's encoding of fixtures/protobuf/extensions/itinerary.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/extensions_test.mbt'
+name = 'a group whose end does not match, or that the message ends inside, does not parse'
+source = "protoc's encoding of fixtures/protobuf/extensions/itinerary.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/extensions_test.mbt'
+name = "a reply that sets extensions under their [full.name] keys has protoc's bytes, extensions in field-number order among the fields"
+source = "protoc's encoding of fixtures/protobuf/extensions/order.txtpb and order-full.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/extensions_test.mbt'
+name = "a reply with groups, repeated and nested, has protoc's bytes"
+source = "protoc's encoding of fixtures/protobuf/extensions/itinerary.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/message_test.mbt'
+name = "the ticket's example: an int64, a float, an enum, an empty string and a nested message"
+source = "protoc's encoding of fixtures/protobuf/scalars/order.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/message_test.mbt'
+name = 'each scalar type at its largest value, and the enum through its alias'
+source = "protoc's encoding of fixtures/protobuf/scalars/every-max.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/message_test.mbt'
+name = 'each signed scalar type at its smallest value, and the others at their defaults'
+source = "protoc's encoding of fixtures/protobuf/scalars/every-min.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/message_test.mbt'
+name = 'a message is decoded into compact JSON, each field under its JSON name'
+source = "protoc's encoding of fixtures/protobuf/helloworld/hello-request.binpb, fixtures/protobuf/catalog/count-request.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/message_test.mbt'
+name = 'an int32 is a number, a negative one read from its 10-octet varint, and a bool true or false'
+source = "protoc's encoding of fixtures/protobuf/catalog/count-reply.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/proto2_test.mbt'
+name = "the ticket's example: an Order with the id 7 and no note decodes as {\\\"id\\\":7}"
+source = "protoc's encoding of fixtures/protobuf/shipping/order.txtpb, which the test's comment gives (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/proto2_test.mbt'
+name = "a message without a required field does not parse, nested ones and a map's values included, as protobuf's parsers refuse it"
+source = "protoc's encodings of fixtures/protobuf/shipping/draft.txtpb and parcel-without-ids.txtpb, which protobuf's parsers refuse for a missing required field (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/proto2_test.mbt'
+name = 'proto2 fields print only when set, at their defaults too, and repeated fields and maps print [] and {}'
+source = "protoc's encoding of fixtures/protobuf/shipping/parcel.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/proto2_test.mbt'
+name = 'an unknown value of a closed enum is kept as an unknown field: the field keeps its value, a list drops it, a map drops its entry, and a oneof keeps its member'
+source = "protoc's encoding of fixtures/protobuf/shipping/parcel-unknown.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/proto2_test.mbt'
+name = 'a proto2 string that is not UTF-8 is valid protobuf, and prints with U+FFFD for each bad sequence, as smock reads header values'
+source = "protoc's encoding of fixtures/protobuf/shipping/parcel-not-utf8.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/proto2_test.mbt'
+name = "a Parcel has protoc's bytes: proto2 fields written whenever set, at their defaults too, and repeated scalars packed only with packed = true"
+source = "protoc's encoding of fixtures/protobuf/shipping/parcel.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/status_test.mbt'
+name = "the ticket's example: NOT_FOUND, its message and an ErrorInfo, as protoc encodes them"
+source = "protoc's encoding of fixtures/protobuf/details/error-info.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/status_test.mbt'
+name = "a RetryInfo's Duration and a BadRequest's list are read as ProtoJSON reads them, in either spelling"
+source = "protoc's encoding of fixtures/protobuf/details/retry-info.txtpb, fixtures/protobuf/details/bad-request.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/status_test.mbt'
+name = "details go in the order given, a map's entries sorted, and any type of the set is a detail; the message is UTF-8"
+source = "protoc's encoding of fixtures/protobuf/details/several.txtpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/well_known_test.mbt'
+name = "the ticket's example: a Timestamp 1.5 s after the epoch and a Duration of 1.5 s"
+source = "protoc's encoding of fixtures/protobuf/wellknown/lease.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/well_known_test.mbt'
+name = 'every type in its printed form: Timestamp, Duration, FieldMask, each wrapper as its value, Empty as {}, and Timestamps and Durations in a list and a map, at the ends of their ranges'
+source = "protoc's encoding of fixtures/protobuf/wellknown/known.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/well_known_test.mbt'
+name = 'a message of a well-known type is printed when it is set, even at its default; one left out is not'
+source = "protoc's encoding of fixtures/protobuf/wellknown/known-defaults.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/well_known_test.mbt'
+name = "replies in the printed forms have protoc's bytes, and so do replies in every other form ProtoJSON reads: offsets, other fraction lengths, numbers as strings, URL-safe base64 and proto names"
+source = "protoc's encoding of fixtures/protobuf/wellknown/known.binpb, fixtures/protobuf/wellknown/known-defaults.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'protobuf/well_known_test.mbt'
+name = "null leaves a field of a well-known type unset, and the ticket's example has protoc's bytes"
+source = "protoc's encoding of fixtures/protobuf/wellknown/lease.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'definitions/grpc_details_test.mbt'
+name = "the ticket's example: an error's details as written go out in google.rpc.Status, encoded at load, in base64 without padding; templated ones are kept to render"
+source = "protoc's encoding of fixtures/protobuf/details/error-info.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'definitions/grpc_dynamic_test.mbt'
+name = "the ticket's example: conditions on an Any that holds a HelloRequest and one that holds a Duration are kept, and their replies encoded"
+source = "protoc's encoding of fixtures/protobuf/wellknown/any-hello.binpb and any-duration.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'definitions/grpc_dynamic_test.mbt'
+name = "conditions on Struct, Value, ListValue and NullValue: a Struct's keys are data, kept as written; a Value's numbers print as doubles; a NullValue's name or number becomes null; an Any's members are checked against its type; patterns and operators go anywhere"
+source = "protoc's encoding of fixtures/protobuf/wellknown/document-nulls.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'definitions/grpc_stubs_test.mbt'
+name = "a static reply is encoded when the files load, with every proto3 field type its output type has; a templated one is encoded once rendered, and an HTTP Stub's reply never"
+source = "protoc's encoding of a reply of fixtures/protobuf/catalog/catalog.proto, which the test's comment gives as protoc writes it"
+
+[[reason.test]]
+file = 'definitions/grpc_well_known_test.mbt'
+name = "the ticket's example: a condition in the printed forms is kept, and {ttl: \\\"1.5s\\\"} is a problem that suggests \\\"1.500s\\\""
+source = "protoc's encoding of fixtures/protobuf/wellknown/lease.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+[[reason.test]]
+file = 'engine/grpc_details_test.mbt'
+name = "the ticket's example: an error's details as written are the gRPC part's, with google.rpc.Status encoded at load"
+source = "protoc's encoding of fixtures/protobuf/details/error-info.binpb (scripts/gen-protobuf-fixtures.sh)"
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'overlap-settings-bounds'
+rule = 'deliberate overlap'
+title = 'A settings test on one side of a bound, whose twin runs the same code on the other side'
+source = """
+#275, The removal rule and its proof, (C): the deliberate overlaps, the
+settings boundary pairs: settings' tests that run the same code on the two
+sides of a bound, such as the Journal's and the state's byte bounds at 64
+MiB and at 1 MiB, which look alike to text similarity. ADR 0004: a quarter
+of the memory limit for the Journal, an eighth for the state, at least 1 MiB
+and at most 64 MiB.
+"""
+search = [
+  '''git grep -n -E '^(async )?test "([^"\\]|\\.)*(below|or more|at least|at most|above|up to|past|over|under)\b' -- 'settings/*_test.mbt' 'settings/*_wbtest.mbt'''',
+]
+found = """
+The search finds 8 tests. Listed: the 6 that hold one side of the 64 MiB or
+the 1 MiB bound of the Journal's or the state's byte bound. Left out: the 2
+tests in which an explicit flag wins over the variable, whose over names no
+bound. A test that holds both sides of a bound in itself, such as the state
+bound's range of values, is no pair.
+"""
+
+[[reason.test]]
+file = 'settings/journal_bound_test.mbt'
+name = 'journal byte bound: a quarter of the memory limit when that is below 64 MiB'
+source = 'ADR 0004: a quarter of the memory limit, below 64 MiB; its twin is the next test'
+
+[[reason.test]]
+file = 'settings/journal_bound_test.mbt'
+name = 'journal byte bound: 64 MiB when a quarter of the memory limit is 64 MiB or more'
+source = 'ADR 0004: at most 64 MiB; its twin is the test of a quarter below 64 MiB'
+
+[[reason.test]]
+file = 'settings/journal_bound_test.mbt'
+name = 'journal byte bound: at least 1 MiB, however small the memory limit'
+source = 'ADR 0004: at least 1 MiB; its twin is the test of a quarter below 64 MiB'
+
+[[reason.test]]
+file = 'settings/state_bound_test.mbt'
+name = 'state byte bound: an eighth of the memory limit when that is below 64 MiB'
+source = "ADR 0004's note on the state bound: an eighth of the memory limit, below 64 MiB; its twin is the next test"
+
+[[reason.test]]
+file = 'settings/state_bound_test.mbt'
+name = 'state byte bound: 64 MiB when an eighth of the memory limit is 64 MiB or more'
+source = "ADR 0004's note on the state bound: at most 64 MiB; its twin is the test of an eighth below 64 MiB"
+
+[[reason.test]]
+file = 'settings/state_bound_test.mbt'
+name = 'state byte bound: at least 1 MiB, however small the memory limit'
+source = "ADR 0004's note on the state bound: at least 1 MiB; its twin is the test of an eighth below 64 MiB"
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'overlap-reload-symlinks'
+rule = 'deliberate overlap'
+title = 'A test that a change made through a symlink is seen by the poll and reloaded'
+source = """
+#275, The removal rule and its proof, (C): the deliberate overlaps, the
+reload symlink tests. docs/definition-files.md, Reloading: a ConfigMap
+update swaps the ..data symlink and keeps the visible names, and git-sync
+points the symlink that --dir goes through at a new directory for each
+commit. The in-process tests of the stamps and the poll and the e2e tests of
+reloads check the same changes on purpose.
+"""
+search = [
+  '''the test blocks of every *_test.mbt, *_wbtest.mbt and *.mbt.md whose text matches (?i)symlink|symbolic link|ln -s|@fs\.symlink|\.\.data''',
+]
+found = """
+The search finds 25 test blocks. Listed: the 16 that change something
+through a symlink, or swap one, and check that the poll's stamp or glance
+sees it or that smock reloads it: the definitions directory's and the
+certificates' reloads in e2e, and the stamps and the poll of defdir and
+watch. Left out: the tests of how smock loads or checks a directory with
+symlinks, which is no reload (e2e/check_test.mbt, e2e/directory_test.mbt,
+e2e/descriptor_set_test.mbt), and the 5 of smock import-openapi's paths and
+help.
+"""
+
+[[reason.test]]
+file = 'e2e/reload_test.mbt'
+name = 'a ConfigMap update, which swaps the ..data symlink and keeps the visible names, reloads the definitions'
+source = 'a ConfigMap update swaps the ..data symlink and keeps the visible names (docs/definition-files.md, Reloading)'
+
+[[reason.test]]
+file = 'e2e/reload_test.mbt'
+name = 'a git-sync update, which points the symlink that --dir goes through at a new worktree and removes the old one, reloads the definitions'
+source = 'a git-sync update points the symlink that --dir goes through at a new worktree (docs/definition-files.md, Reloading)'
+
+[[reason.test]]
+file = 'e2e/reload_test.mbt'
+name = 'a body file edited through a symlink that leads out of the definitions directory is found by the next poll'
+source = 'a body file edited through a symlink that leads out of the definitions directory (docs/definition-files.md, Reloading)'
+
+[[reason.test]]
+file = 'e2e/reload_test.mbt'
+name = 'a body file added under a symlink that leads out of the definitions directory is found by the next poll'
+source = 'a body file added under a symlink that leads out of the definitions directory (docs/definition-files.md, Reloading)'
+
+[[reason.test]]
+file = 'e2e/reload_test.mbt'
+name = 'a body file removed under a symlink that leads out of the definitions directory is found by the next poll'
+source = 'a body file removed under a symlink that leads out of the definitions directory (docs/definition-files.md, Reloading)'
+
+[[reason.test]]
+file = 'e2e/reload_test.mbt'
+name = 'a ConfigMap-style ..data swap behind a symlink that leads out of the definitions directory is found by the next poll'
+source = 'a ConfigMap-style ..data swap behind a symlink that leads out of the definitions directory (docs/definition-files.md, Reloading)'
+
+[[reason.test]]
+file = 'e2e/reload_test.mbt'
+name = 'a symlink outside the definitions directory pointed at a file with the very same times is found by the next poll'
+source = 'a symlink pointed at a file with the very same times (docs/definition-files.md, Reloading)'
+
+[[reason.test]]
+file = 'e2e/certificates_test.mbt'
+name = 'a Secret-style update, which swaps the ..data symlink and keeps the visible file names, rotates the certificate'
+source = 'a Secret-style update swaps the ..data symlink and keeps the visible file names, and the certificate rotates'
+
+[[reason.test]]
+file = 'e2e/certificates_test.mbt'
+name = 'a Secret-style update behind symlinks that lead out of the certificate directory is found by the next poll'
+source = 'a Secret-style update behind symlinks that lead out of the certificate directory, and the certificate rotates'
+
+[[reason.test]]
+file = 'defdir/stamp_test.mbt'
+name = 'the stamp of a definitions directory changes with each change a read could see, and not otherwise'
+source = "the definitions directory's stamp, with a ..data swap and a symlink pointed at a file with the very same times"
+
+[[reason.test]]
+file = 'defdir/stamp_test.mbt'
+name = 'a glance after the stamp of a definitions directory looks at each file it would read, each directory it would list and each path it found missing, so it differs with each change a read could see that changes a time'
+source = "the glance after a definitions directory's stamp, with a ..data swap and a symlink that leads to a missing file"
+
+[[reason.test]]
+file = 'watch/stamp_test.mbt'
+name = 'a stamp changes when a noted file is written again, replaced through a symlink or removed, or other names are noted'
+source = 'a stamp, with a noted file replaced through a symlink'
+
+[[reason.test]]
+file = 'watch/stamp_test.mbt'
+name = 'a stamp notes where a file really is, so that a symlink pointed at another file with the very same times shows'
+source = 'a stamp notes where a file really is, so a symlink pointed at another file with the very same times shows'
+
+[[reason.test]]
+file = 'watch/stamp_test.mbt'
+name = 'a glance looks at the change time of each file its stamp noted and each path it was told to, following symlinks, and differs when one is written, replaced through a symlink or removed, gains an entry, or appears'
+source = 'a glance follows symlinks, and sees a file replaced through one'
+
+[[reason.test]]
+file = 'watch/watch_wbtest.mbt'
+name = 'a change that only a full stamp sees, such as a symlink pointed at a file with the very same times, is seen 10 s after the full stamp before'
+source = "the poll's full stamp, every 10 s, sees a symlink pointed at a file with the very same times"
+
+[[reason.test]]
+file = 'watch/watch_wbtest.mbt'
+name = "a change made right after a poll's glance is seen by the full stamp after it, and one made right after the full stamp by the next poll's glance, though both point a symlink at a file written long before"
+source = 'the poll sees a symlink pointed at a file written long before, made right after a glance or a full stamp'
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'own-c'
+rule = "smock's own C"
+title = "A test of what smock's own C decides, which no MoonBit mutant reaches"
+source = """
+#351: the maintainer's decision of 2026-11-17 adds this reason to #275's
+removal rule (C): the tests of smock's own C, the OpenSSL glue in
+openssl/openssl.c and the reset helper in server/reset.c. ADR 0001: these
+are smock's only C sources, and scripts/check-no-c.sh allows no other. The
+mutation runner makes mutants of MoonBit alone: its site finder reads .mbt
+files (scripts/mutation/sites.py), and it skips the sites of FFI (#275, Step
+2; CONTRIBUTING.md, Mutation runner). So no mutant reaches this C, and under
+rule (A) alone a test of it may look redundant. A test of what OpenSSL
+decides is under dependency-openssl instead, and one of what a MoonBit
+mutant reaches is judged by rule (A).
+"""
+search = [
+  '''git ls-files '*.c' '*.h'''',
+  '''git grep -n -E 'extern "C"' -- '*.mbt'''',
+  '''git grep -n -E '^(async )?test "' -- 'openssl/*_test.mbt'''',
+  '''git grep -n -i -E '^(async )?test "([^"\\]|\\.)*(alpn|no_application_protocol|alert|close_notify|self-signed|IP address|an RST|connection resets?|valid from)' -- '*_test.mbt' '*_wbtest.mbt' '*.mbt.md'''',
+  '''the test blocks of e2e/*_test.mbt and server/*_wbtest.mbt whose text matches an RST|is_reset|alpn_offer|alert_received|alpn_protocol|presented_certificate|s_client|SelfSigned''',
+]
+found = """
+The first search finds smock's two C files; the second, the 27 bindings
+that call into them, in openssl/openssl.mbt, openssl/client.mbt and
+server/reset.mbt. With the C's own comments, they show what the C decides
+beyond handing a call to OpenSSL: how a PEM read ends (no block, a block
+that does not parse, with the earliest reason on OpenSSL's error queue, or
+a key of another certificate); the chain sent after the leaf; the protocol
+ALPN picks, h2 left out over a TLS 1.2 suite that RFC 9113 prohibits, and
+the fatal alert when none fits; the last alert a client read; close_notify
+read as the end; the self-signed certificate's names, each an IP address or
+a DNS name, its validity from an hour before, and a new key and serial
+number for each; and the RST that SO_LINGER makes a reset Fault send. The
+third search finds the bindings' 13 tests; the fourth, 21 tests whose names
+speak of ALPN, an alert, close_notify, a self-signed certificate, IP
+addresses, an RST or a connection reset; the fifth, 23 e2e test blocks that
+look at a reset, at what ALPN picked, at an alert, at the certificate smock
+presents or at what s_client saw. 40 tests in all.
+
+Listed: a test whose subject, as its name says, is an outcome that smock's
+C decides, so that a change to that C fails it while no mutant does. Left
+out: the bindings' tests of what OpenSSL decides, a leaf sent without its
+intermediate and a key update, which are under dependency-openssl; their
+tests of what their MoonBit decides, the messages of a refused
+configuration and the names a self-signed certificate refuses; and the
+ECDSA chain's handshake, which runs the RSA chain's C and differs only in
+what OpenSSL does with the key. Also left out: the e2e tests that use a
+reset, ALPN or the self-signed certificate to see what smock's MoonBit
+decides (the 100 Continue before a Fault, the seeded draws of a reset
+Fault, the Journal entry committed before the RST, the Scenario each reset
+moves, the log lines of a Fault, the --tls-http2 setting, the server's
+choice of protocol after ALPN, SNI, the set of names in the certificate,
+its log entry, its reloads and its expiry metric); the test that the
+certificate stays in memory, a documented feature that both the MoonBit
+and the C keep, and whose keep reason a removal batch derives; and the
+tests of Definition files' hosts and of HTTP/2's drain, which reach no C.
+No test checks the C's other settings: TLS 1.2 at least, no renegotiation,
+and no session cache on a server.
+"""
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'a client that trusts only the root CA completes a handshake with a server presenting an RSA leaf and its intermediate'
+source = "smock_openssl_ctx_use_chain adds each certificate after the leaf to the chain the server sends, so a client that trusts only the root CA verifies the leaf through its intermediate (ServerConfig's documentation: the certificates that issued the leaf are sent with it; RFC 5280, section 6)"
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'a configuration that cannot be used is refused with the reason'
+source = "smock_openssl_ctx_use_chain and smock_openssl_ctx_use_key tell a block that does not parse, with the earliest reason on OpenSSL's error queue (smock_openssl_take_error), from a key of another certificate (their -2, or smock_openssl_ctx_check_key); the reasons are OpenSSL's, such as bad base64 decode, and the bindings' TlsError"
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'ALPN: a server accepting http/1.1 picks it from h2 and http/1.1, serves a client without ALPN, and refuses a client offering only h2'
+source = "smock_alpn_select picks the first protocol of the server's list that the client offers, and fails the handshake when it offers none of them (RFC 7301, section 3.2; ServerConfig's documentation); a client without ALPN never reaches it"
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'a client that a server refuses by ALPN learns the alert the server sent by its code, 120 for no_application_protocol, whatever text OpenSSL has for it'
+source = 'smock_keep_alert keeps the last alert a client connection reads, and smock_openssl_ssl_alert gives its description: 120, no_application_protocol (RFC 8446, section 6), once smock_alpn_select has refused'
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'ALPN skips h2 over a TLS 1.2 suite that RFC 9113 prohibits, anything but ECDHE or DHE with an AEAD cipher, and not over TLS 1.3'
+source = 'smock_suite_allows_h2: over TLS 1.2, h2 only with ECDHE or DHE and an AEAD cipher, and over TLS 1.3 with any suite (RFC 9113, section 9.2.2 and Appendix A; docs/http2.md, TLS 1.2)'
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'a close_notify from the peer reads as Closed'
+source = "smock_result reads OpenSSL's SSL_ERROR_ZERO_RETURN as -2, the end of the connection, which the bindings give as Closed, and smock_openssl_ssl_shutdown writes the close_notify (RFC 8446, section 6.1)"
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'a generated self-signed certificate serves TLS, and a client that trusts it verifies it for each of its names, IP addresses included, and for no other name'
+source = "add_name makes a name that OpenSSL reads as an IPv4 or IPv6 address an IP address name and every other name a DNS name, so a client verifies the certificate for each name and no other (SelfSigned::generate's documentation)"
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'each generated certificate has a new key and its own SHA-256 fingerprint'
+source = "smock_openssl_self_signed_new makes a new key and a random serial number for each certificate, and smock_openssl_self_signed_sha256 gives its SHA-256 digest, 32 octets (SelfSigned's documentation: no two share a fingerprint)"
+
+[[reason.test]]
+file = 'e2e/faults_test.mbt'
+name = 'a reset Fault reads the whole request, body included, then ends the connection with an RST, without a byte of response'
+source = 'smock_reset_on_close sets SO_LINGER with a zero timeout, so that closing the connection sends an RST, on the plain and the TLS port (docs/definition-files/faults.md: smock resets the connection, an RST, without writing anything; ADR 0001)'
+
+[[reason.test]]
+file = 'e2e/tls_test.mbt'
+name = 'ALPN: a client offering h2 and http/1.1, or h2 alone, gets h2 and is served over HTTP/2; one offering http/1.1 alone, or no ALPN, gets HTTP/1.1; one offering neither fails the handshake'
+source = 'smock_alpn_select on the TLS port, which offers h2, then http/1.1 (docs/http2.md, h2 on the TLS port: a client that offers neither fails the handshake, with the no_application_protocol alert)'
+
+[[reason.test]]
+file = 'e2e/tls_http2_test.mbt'
+name = 'over TLS 1.2, ALPN skips h2 when the suite is one RFC 9113 prohibits: with only a CBC suite, h2 and http/1.1 get http/1.1 and h2 alone fails; the mandatory ECDHE-RSA-AES128-GCM-SHA256 with P-256 gets h2'
+source = 'smock_suite_allows_h2 in the binary, against openssl s_client (docs/http2.md, TLS 1.2; RFC 9113, section 9.2.2 and Appendix A)'
+
+[[reason.test]]
+file = 'e2e/self_signed_test.mbt'
+name = 'with neither certificate setting, smock serves HTTPS on the TLS port with a self-signed certificate it generated, valid from an hour before it was generated until 365 days after'
+source = 'smock_openssl_self_signed_new signs the certificate with its own subject as issuer, and sets its notBefore an hour back (docs/running.md, The self-signed certificate: valid from an hour before smock generates it until 365 days after)'
+
+[[reason.test]]
+file = 'e2e/self_signed_test.mbt'
+name = 'the certificate also covers every Mock Host, IP addresses as IP addresses and the rest as DNS names, so a client that trusts it can call each Mock by its Host'
+source = 'add_name in smock_openssl_self_signed_new (docs/running.md, The self-signed certificate: Hosts that are IP addresses are IP address names, the others DNS names)'

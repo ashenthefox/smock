@@ -57,6 +57,11 @@ test "a status is found by its name, in upper case only" {
 }
 
 ///|
+/// A spec oracle. The numbers are those of the table in gRPC's "Status
+/// codes and their use in gRPC" (doc/statuscodes.md): OK is 0 and INTERNAL
+/// is 13. The text is the Status rule of PROTOCOL-HTTP2's Responses
+/// section, `"grpc-status" 1*DIGIT`, "a decimal-encoded integer as an
+/// ASCII string, without any leading zeros".
 test "a status's code is the decimal text grpc-status carries" {
   inspect(@grpc.Status::Internal.code().to_string(), content="13")
   inspect(@grpc.Status::Ok.code().to_string(), content="0")

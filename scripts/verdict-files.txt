@@ -1,0 +1,39 @@
+# The files that decide a verdict: of the four ledgers, of the merge and
+# release checks that read them, and of the suites that run against a list
+# of cases that may fail (CONTRIBUTING.md, "The weakening report"). On
+# each push to a branch other than main, the weakening report
+# (scripts/weakening-report.py) lists every change to them, for the
+# maintainer to read before merging the branch.
+#
+# A line is a path, spaces, and what the file is. A path that ends in /
+# names every file under that directory, and a * stands for any text
+# without a /. The first line whose path names a file says what it is. A
+# change to a path that the base's list or the head's names is listed, and
+# so is any change to this list.
+#
+# A change that adds a file that decides a verdict puts it at a path named
+# here, or adds its path here, in the same change. Most of these files do
+# not exist yet: the issue named in a line creates them.
+
+scripts/verdict-files.txt              the list of the files that decide a verdict
+scripts/weakening-report.py            the weakening report, which reads this list
+.github/workflows/branch-checks.yml    the branch checks workflow: the weakening report, and the mutants on the changed lines (#311)
+exclusions.*                           the exclusion list of surviving mutants and uncovered points, with each entry's category, reason and reviewer (#302)
+mutation/l4-packages.txt               the list of packages at L4 (#312)
+mutation/kept-tests.*                  the keep list: the tests kept for reasons the kill matrix cannot see (#351)
+docs/ledgers/                          the use-case and boundary ledgers, whose rows keep their tests under removal rule (C) (#286)
+scripts/mutation/                      the mutation runner and its site finder (#298), operator set v1 and its alternative rule, whose version every record carries (operators.py, #299), and the fixture module with its expected sites and verdicts (#298, #299)
+mutation/                              the mutation runner's committed data: the site counts and approved drops (#309), the flake threshold, and the flake rates if they are committed (#301), and the canary's mutants, recorded verdicts and explained differences (#308)
+coverage/                              the coverage wrapper and its committed data: the bisect parser (#296), the floors and approved raises (#297), and the scope's list of generated files
+scripts/check-merge.*                  the merge check (#312)
+scripts/check-weekly-run.*             the release's check of the latest weekly run (#316)
+.github/workflows/mutation*.yml        a mutation workflow: the bulk runs (#313), the weekly and monthly runs (#314), and server and cmd/smock through e2e (#344, #346)
+.github/workflows/coverage*.yml        a coverage workflow beside CI's coverage job, such as e2e's (#342)
+.github/workflows/ci.yml               the workflow that runs on every push, which holds the coverage job (#297)
+.github/workflows/build-test.yml       the workflow that builds and tests, which runs the mutation runner's own tests, its self-test and its site-count check (#298, #309)
+.github/workflows/release.yml          the release workflow, which runs the release's check of the latest weekly run (#316)
+docs/adr/0006-*                        ADR 0006, which pins operator set v1 and its alternative rule (#277)
+protobuf-conformance/failure_list.txt  the cases of protobuf's conformance suite that may fail
+scripts/h2spec/                        the cases of h2spec that may fail or be skipped on each port
+yaml-test-suite/safe.txt               the cases of the YAML test suite that may fail or be skipped in the safe subset
+yaml-test-suite/openapi.txt            the cases of the YAML test suite that may fail or be skipped in the mode for OpenAPI documents

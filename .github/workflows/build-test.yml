@@ -131,6 +131,24 @@ jobs:
       - name: Test every no-I/O package on wasm-gc
         run: moon test --target wasm-gc
 
+      # The mutation runner and its site finder (scripts/mutation/), on a
+      # fixture module whose sites and outcomes are known. They need moon
+      # and moonc, so they run here, where the weekly run with the latest
+      # MoonBit runs them too: the finder reads the compiler's parse tree,
+      # whose format a new toolchain may change.
+      - name: Test the mutation runner on its fixture
+        run: python3 -m unittest discover -s scripts/mutation -v
+
+      # What several e2e test files share lives in the harness files, so
+      # that removing a test file breaks no other. The check runs the
+      # compiler's front end on the harness files with each test file
+      # alone, and its test does the same on small modules.
+      - name: Check that no e2e test file uses what another test file defines
+        run: python3 scripts/check-e2e-helpers.py
+
+      - name: Test the check of the e2e test files
+        run: scripts/test-check-e2e-helpers.sh
+
   test:
     name: test (linux/${{ matrix.arch }})
     needs: plan
@@ -187,8 +205,9 @@ jobs:
           toolchain: ${{ inputs.toolchain }}
 
       # A release build may fuse floating-point multiply-adds, so that a
-      # seeded log-normal delay differs from the one wasm-gc draws.
-      # prebuild.py turns that off, and the engine's tests check it.
+      # seeded log-normal delay differs from the one wasm-gc draws. moon
+      # passes -ffp-contract=off to each C compile, and the engine's tests
+      # check that nothing is fused.
       - name: Test the engine in a release build
         run: moon test --target native --release -p smock/smock/engine
 

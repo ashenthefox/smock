@@ -314,6 +314,11 @@ users.yaml: /stubs/0/response/json/id: template: column 3: unknown helper "fake.
 users.yaml: /stubs/1/response/bodyFile: template: line 3, column 5: unknown helper "fake.nickname": not one of the helpers smock has
 ```
 
+For a literal that is not well-formed, such as the number `1e` in
+`${1e}`, the column is the literal's first character. For a message that
+says what it found, such as `expected } to end the ${, found "q"`, it is
+the character found.
+
 These are checked when the files are loaded:
 
 - every name, loop variable and helper;

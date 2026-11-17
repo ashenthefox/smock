@@ -14,16 +14,6 @@ fn is_server_line(line : String) -> Bool {
 }
 
 ///|
-/// The `message` of the log line `line`, or `line` itself when it has none.
-fn message_of(line : String) -> String {
-  let entry = @json.parse(line) catch { _ => return line }
-  match entry {
-    Object({ "message": String(message), .. }) => message
-    _ => line
-  }
-}
-
-///|
 /// Waits until smock has written `count` `Server started on port …` lines
 /// to stdout, while it runs, and returns every line of stdout so far.
 async fn Smock::started_lines(self : Smock, count : Int32) -> Array[String] {
@@ -44,16 +34,6 @@ async fn Smock::started_lines(self : Smock, count : Int32) -> Array[String] {
     )
   }
   self.stdout.copy()
-}
-
-///|
-/// The ports of `smock` as placeholders, for `masked_line`.
-fn port_placeholders(smock : Smock) -> Array[(String, String)] {
-  [
-    ("0.0.0.0:\{smock.port}\"", "0.0.0.0:<plain port>\""),
-    ("0.0.0.0:\{smock.tls_port}\"", "0.0.0.0:<TLS port>\""),
-    ("on port \{smock.port}\"", "on port <plain port>\""),
-  ]
 }
 
 ///|

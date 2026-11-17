@@ -279,6 +279,31 @@ async test "every Admin API response, errors included, names the replica that ha
 }
 
 ///|
+/// Sends one request to the Admin API as exact bytes, `head`, with the
+/// empty line that ends it, then `body`, and reads the whole response. As
+/// `Smock::admin` does, it fails the test unless the response conforms to
+/// the OpenAPI document as the answer to `meth path`.
+async fn Smock::admin_bytes(
+  self : Smock,
+  meth : String,
+  path : String,
+  head~ : String,
+  body~ : Bytes = b"",
+) -> AdminResponse {
+  let conn = PlainConn(
+    @socket.Tcp::connect(@socket.Addr::parse("127.0.0.1:\{self.admin_port}")),
+  )
+  defer conn.close()
+  conn.write(@utf8.encode(head))
+  if body.length() > 0 {
+    conn.write(body)
+  }
+  let response = read_admin_response(conn)
+  conforms(meth, path, response)
+  response
+}
+
+///|
 async test "errors take the form {error, message, warnings}: a missing token, an unknown operation or method, malformed JSON, a request over a limit" {
   let _ = with_smock(["--port", "0"], smock => {
     let out = []
@@ -286,6 +311,27 @@ async test "errors take the form {error, message, warnings}: a missing token, an
       let (meth, path, response) = call
       out.push("\{meth} \{path}: \{summary(response)}")
     }
+    // JSON text is UTF-8 (RFC 8259, section 8.1), so a body that would be
+    // valid JSON but for one byte that is not UTF-8, é in Latin-1, is
+    // malformed JSON (openapi/admin.json, ErrorCode). The reason is the one
+    // #291 gives: "it is not UTF-8".
+    let body = b"{\"scope\":\"\xe9\"}"
+    let not_utf8 = smock.admin_bytes(
+      "POST",
+      "/v1/reset",
+      head="POST /v1/reset HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer \{test_token}\r\nContent-Length: \{body.length()}\r\n\r\n",
+      body~,
+    )
+    out.push("POST /v1/reset, a body that is not UTF-8: \{summary(not_utf8)}")
+    // Whitespace between a field name and its colon gets 400 (RFC 9112,
+    // section 5.1): the request is malformed, bad_request
+    // (openapi/admin.json, ErrorCode), with the message #291 gives.
+    let not_http = smock.admin_bytes(
+      "GET",
+      "/v1/status",
+      head="GET /v1/status HTTP/1.1\r\nHost : localhost\r\nAuthorization: Bearer \{test_token}\r\n\r\n",
+    )
+    out.push("GET /v1/status, whitespace before a colon: \{summary(not_http)}")
     inspect(
       out.join("\n"),
       content=(
@@ -301,6 +347,10 @@ async test "errors take the form {error, message, warnings}: a missing token, an
         #|{"error":"malformed_json","message":"the body is not valid JSON: Unexpected end of file","warnings":[]}
         #|GET /v1/status: 431
         #|{"error":"header_fields_too_large","message":"the request head is over the header limits (--header-size-limit, --header-count-limit)","warnings":[]}
+        #|POST /v1/reset, a body that is not UTF-8: 400
+        #|{"error":"malformed_json","message":"the body is not valid JSON: it is not UTF-8","warnings":[]}
+        #|GET /v1/status, whitespace before a colon: 400
+        #|{"error":"bad_request","message":"the request is not valid HTTP/1.1","warnings":[]}
       ),
     )
   })

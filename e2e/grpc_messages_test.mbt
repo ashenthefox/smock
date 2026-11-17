@@ -33,32 +33,6 @@ async fn with_scalars_set(yaml : String, f : async (String) -> Unit) -> Unit {
 }
 
 ///|
-/// Each Journal entry, oldest first, one per line: the Stub that answered
-/// it, or `null`, then its body as the Stubs saw it.
-async fn Smock::bodies(self : Smock) -> String {
-  guard self.journal() is (200, Object({ "entries": Array(entries), .. })) else {
-    fail("no Journal")
-  }
-  let lines = []
-  for entry in entries {
-    guard entry
-      is Object(
-        {
-          "stub": stub,
-          "request": Object(
-            { "body": Object({ "data": String(data), .. }), .. }
-          ),
-          ..
-        }
-      ) else {
-      fail("not an entry: \{entry.stringify()}")
-    }
-    lines.push("\{stub.stringify()}: \{data}")
-  }
-  lines.join("\n")
-}
-
-///|
 async test "the ticket's example: an Order with the largest int64, a float of 9.99, an enum, an empty string and a nested message is journaled in smock's decoded form, meets a Stub whose condition is written so, never one whose int64 is one less, and is what templates and the Near miss read" {
   let yaml =
     #|mocks:

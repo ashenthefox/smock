@@ -2,38 +2,6 @@
 // the Content-Length of what they send, and a partial Fault on a 206.
 
 ///|
-/// Mock `media` with `GET /video.mp4`, which answers 200 from the body file
-/// `video.mp4`, and `GET /cut.mp4`, which answers the same with a partial
-/// Fault.
-let media_definitions : String =
-  #|mocks:
-  #|  - name: media
-  #|stubs:
-  #|  - id: get-video
-  #|    mock: media
-  #|    request: { method: GET, path: /video.mp4 }
-  #|    response:
-  #|      status: 200
-  #|      headers: { Content-Type: video/mp4 }
-  #|      bodyFile: video.mp4
-  #|  - id: cut-video
-  #|    mock: media
-  #|    request: { method: GET, path: /cut.mp4 }
-  #|    response:
-  #|      status: 200
-  #|      headers: { Content-Type: video/mp4 }
-  #|      bodyFile: video.mp4
-  #|    fault: { connection: { kind: partial } }
-
-///|
-/// The definitions directory of `media_definitions`, with the 26 letters
-/// as `video.mp4`.
-let media_files : Array[(String, String)] = [
-  ("media.yaml", media_definitions),
-  ("files/video.mp4", "abcdefghijklmnopqrstuvwxyz"),
-]
-
-///|
 async test "a byte range gets 206 and an unsatisfiable one 416, each framed by the Content-Length of what it sends, on one connection" {
   let _ = on_both_ports(files=media_files, (smock, over) => {
     let conn = smock.connect(over~)

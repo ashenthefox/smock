@@ -23,28 +23,6 @@ let slow_greeter : String =
   #|    fault: { delay: { fixed: 3000 } }
 
 ///|
-/// Starts a call to SayHello with the framed HelloRequest `{name: "Tom"}`,
-/// as `H2Client::call` sends it, with `grpc-timeout: <timeout>` when given,
-/// then `headers`, and returns its stream without reading the reply.
-async fn H2Client::start_call(
-  self : H2Client,
-  timeout? : String,
-  headers~ : Array[(String, String)] = [],
-) -> Int32 {
-  let fields = [("content-type", "application/grpc"), ("te", "trailers")]
-  if timeout is Some(timeout) {
-    fields.push(("grpc-timeout", timeout))
-  }
-  self.send(
-    "POST",
-    "/helloworld.Greeter/SayHello",
-    authority="localhost",
-    headers=[..fields, ..headers],
-    body=framed(@fs.read_file(hello_request_path).binary()),
-  )
-}
-
-///|
 async test "the ticket's example: a Stub with a delay of 3000 ms answers a call with grpc-timeout 5S after 3 s, and a call with grpc-timeout 1S gets Trailers-Only DEADLINE_EXCEEDED about 1 s after its HEADERS, journaled with status 200 and grpcStatus DEADLINE_EXCEEDED" {
   with_greeter_set([("greeter.yaml", slow_greeter)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {

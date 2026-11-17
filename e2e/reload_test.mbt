@@ -4,64 +4,6 @@
 // response is checked against the OpenAPI document (contract_test.mbt).
 
 ///|
-/// The status, checked against the document.
-async fn Smock::status(self : Smock) -> Map[String, Json] {
-  let response = self.admin("GET", "/v1/status")
-  guard response.json() is Object(status) else { fail(response.body) }
-  status
-}
-
-///|
-/// Waits until status shows another last reload than `before` does, at
-/// most `within` milliseconds, and returns that status.
-async fn Smock::reloaded(
-  self : Smock,
-  before : Map[String, Json],
-  within~ : Int32 = reload_patience_ms,
-) -> Map[String, Json] {
-  let previous = before.get("lastReload")
-  let status = wait_for(within, () => {
-    let status = self.status()
-    if status.get("lastReload") != previous {
-      Some(status)
-    } else {
-      None
-    }
-  })
-  guard status is Some(status) else {
-    fail("no reload in time; status: \{Json::object(before).stringify()}")
-  }
-  status
-}
-
-///|
-/// The status and the body of the response to `GET path`, on one line.
-async fn Smock::brief(self : Smock, path : String) -> String {
-  let client = @http.Client("http://127.0.0.1:\{self.port}")
-  defer client.close()
-  let response = client.get(path)
-  "\{response.code} \{client.read_all().text()}"
-}
-
-///|
-/// The last reload of `status`: its result, then its errors, if any.
-fn last_reload(status : Map[String, Json]) -> String {
-  match status.get("lastReload") {
-    Some(Object(reload)) => {
-      let out = StringBuilder()
-      out.write_string(reload.get("result").map_or("?", r => r.stringify()))
-      if reload.get("errors") is Some(Array(errors)) {
-        for error in errors {
-          out.write_string("\n  \{error.stringify()}")
-        }
-      }
-      out.to_string()
-    }
-    other => other.map_or("missing", r => r.stringify())
-  }
-}
-
-///|
 /// One Mock, `m`, in its own Definition file, so that the files that add
 /// and remove Stubs never change which Mock answers.
 let reload_mock : String = "{ \"mocks\": [{ \"name\": \"m\" }] }"
@@ -135,33 +77,6 @@ async test "adding, editing, renaming or removing a Definition file or a body fi
       })
     },
   )
-}
-
-///|
-/// The log entries about reloads, without their time, with each digest in
-/// `digests` shown as its name.
-fn reload_entries(
-  logs : Array[String],
-  digests : Array[(String, Json?)],
-) -> String {
-  let out = []
-  for line in logs {
-    let entry = @json.parse(line) catch { _ => continue }
-    guard entry is Object(fields) &&
-      fields.get("msg") is Some(String(msg)) &&
-      msg.contains("reload") else {
-      continue
-    }
-    fields.remove("time")
-    let mut text = Json::object(fields).stringify()
-    for digest in digests {
-      if digest.1 is Some(String(value)) {
-        text = text.replace_all(old=value, new=digest.0)
-      }
-    }
-    out.push(text)
-  }
-  out.join("\n")
 }
 
 ///|
@@ -534,27 +449,6 @@ fn warnings_and_reloads(logs : Array[String]) -> String {
 }
 
 ///|
-/// Writes `files` into `dir` the way a ConfigMap volume does: into a new
-/// timestamped directory `..<version>`, then points `..data` at it with an
-/// atomic rename of a symlink, then removes the version it replaced, if
-/// any. The visible names are symlinks into `..data`, made once.
-async fn configmap_update(
-  dir : String,
-  version : String,
-  files : Array[(String, String)],
-  replaces? : String,
-) -> Unit {
-  for file in files {
-    write(dir, "..\{version}/\{file.0}", file.1)
-  }
-  @fs.symlink(target="..\{version}", "\{dir}/..data_tmp")
-  @fs.rename("\{dir}/..data_tmp", "\{dir}/..data")
-  if replaces is Some(old) {
-    @fs.rmdir("\{dir}/..\{old}", recursive=true)
-  }
-}
-
-///|
 async test "a ConfigMap update, which swaps the ..data symlink and keeps the visible names, reloads the definitions" {
   with_definitions([], dir => {
     configmap_update(dir, "2026_10_13_01", [
@@ -912,8 +806,8 @@ let large_body_file_bytes : Int32 = 16 * 1024 * 1024
 /// pauses. The tests of this package share one event loop, so a test that
 /// computes meanwhile delays the reply as it reaches this test, and this
 /// allows as much as the other timing tests do, such as `lateness` in
-/// sse_test.mbt. It stays under the 400 ms it takes to hash the file at
-/// once.
+/// harness_test.mbt. It stays under the 400 ms it takes to hash the file
+/// at once.
 let while_reloading_ms : Int64 = 250
 
 ///|

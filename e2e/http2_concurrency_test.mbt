@@ -5,49 +5,6 @@
 // stream past it gets REFUSED_STREAM and never reaches the Mocks.
 
 ///|
-/// Reads smock's SETTINGS, the first frame it sends on a connection,
-/// acknowledges them, and shows them as `render_frame` does.
-async fn RawH2::acknowledge_settings(self : RawH2) -> String {
-  guard self.read_frame() is Some(Settings(ack=false, ..) as frame) else {
-    fail("smock's SETTINGS did not come first")
-  }
-  self.send([Settings(params=[], ack=true)])
-  self.render_frame(frame)
-}
-
-///|
-/// The Journal's entries, one per line, as `<method> <target> <body>
-/// <status>`.
-async fn uploads_journaled(smock : Smock) -> String {
-  let (_, journal) = smock.journal()
-  guard journal is Object({ "entries": Array(entries), .. }) else {
-    fail("no entries: \{journal.stringify()}")
-  }
-  let out = []
-  for entry in entries {
-    guard entry
-      is Object(
-        {
-          "request": Object(
-            {
-              "method": String(meth),
-              "target": String(target),
-              "body": Object({ "data": String(body), .. }),
-              ..
-            }
-          ),
-          "status": status,
-          ..
-        }
-      ) else {
-      fail("an entry without a request: \{entry.stringify()}")
-    }
-    out.push("\{meth} \{target} \{body} \{status.stringify()}")
-  }
-  out.join("\n")
-}
-
-///|
 async test "h2c: with --http2-max-concurrent-streams 3, three unfinished uploads hold the streams, a fourth gets REFUSED_STREAM and never reaches the Mocks, its later frames are ignored, and the three complete" {
   with_definitions([("files.json", uploads)], dir => {
     let _ = with_smock(

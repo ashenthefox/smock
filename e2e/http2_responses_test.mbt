@@ -73,23 +73,6 @@ fn framed_responses() -> Array[(String, String)] {
 }
 
 ///|
-/// Reads frames until the acknowledgement of a PING, and shows each frame
-/// before it as `render_frame` does, one per line. smock answers frames in
-/// order, so the frames of the streams the client ended before its PING
-/// come first.
-async fn RawH2::frames_until_ping_ack(self : RawH2) -> String {
-  let out = []
-  while self.read_frame() is Some(frame) {
-    if frame is Ping(ack=true, ..) {
-      return out.join("\n")
-    }
-    out.push(self.render_frame(frame))
-  }
-  out.push("closed")
-  out.join("\n")
-}
-
-///|
 async test "h2c: HEAD gets the headers with the length and no DATA, even for a body past the windows, 204 and 304 get neither, a GET gets both, and no response has a connection field or a PUSH_PROMISE" {
   with_definitions(framed_responses(), dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
@@ -139,16 +122,6 @@ async test "h2c: HEAD gets the headers with the length and no DATA, even for a b
       )
     })
   })
-}
-
-///|
-/// The status of an HTTP/1.1 response and its body, read from `conn`.
-async fn http1_status_and_body(conn : Conn) -> (Int32, Bytes) {
-  guard read_framed(conn) is Some((head, body)) else {
-    fail("the connection closed without a response")
-  }
-  let status_line = head[:head.find("\r\n").unwrap_or(head.length())]
-  (@string.parse_int(status_line.split(" ").nth(1).unwrap()), body)
 }
 
 ///|

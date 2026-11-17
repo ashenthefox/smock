@@ -1,43 +1,4 @@
 ///|
-/// A Mock that answers Chat Completions requests with an LLM response, its
-/// seed fixing the reply's id.
-let openai_chat : String =
-  #|{ "mocks": [{ "name": "openai" }],
-  #|  "stubs": [{ "id": "chat", "mock": "openai",
-  #|    "request": { "method": "POST", "path": "/v1/chat/completions" },
-  #|    "response": { "status": 200,
-  #|      "headers": { "x-ratelimit-remaining-requests": "59" },
-  #|      "llm": { "api": "openai-chat", "text": "Hello! 天気は晴れ 👍" } },
-  #|    "fault": { "seed": 7 } }] }
-
-///|
-/// `text` with the value of each of its `"created":` members shown as
-/// `<received>` when it is a second from `from` to `to` (milliseconds since
-/// the Unix epoch). Any other value stays as it is.
-fn mask_created(text : String, from~ : Int64, to~ : Int64) -> String {
-  let key = "\"created\":"
-  let out = StringBuilder()
-  let mut rest = text
-  while rest.find(key) is Some(start) {
-    let digits = start + key.length()
-    let mut end = digits
-    while end < rest.length() && rest[end] >= '0' && rest[end] <= '9' {
-      end += 1
-    }
-    let seconds = @string.parse_int64(rest[digits:end]) catch { _ => -1L }
-    out.write_string(rest[:digits].to_owned())
-    if seconds >= from / 1000L && seconds <= to / 1000L {
-      out.write_string("<received>")
-    } else {
-      out.write_string(rest[digits:end].to_owned())
-    }
-    rest = rest[end:].to_owned()
-  }
-  out.write_string(rest)
-  out.to_string()
-}
-
-///|
 async test "POST /v1/chat/completions to an llm Stub gets one chat.completion JSON body over a real socket" {
   with_definitions([("openai.json", openai_chat)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
@@ -68,13 +29,6 @@ async test "POST /v1/chat/completions to an llm Stub gets one chat.completion JS
       )
     })
   })
-}
-
-///|
-/// The JSON body of a Chat Completions request for `gpt-6-astra` whose
-/// `stream` member is `stream`, given as JSON text.
-fn chat_request(stream : String) -> String {
-  "{\"model\":\"gpt-6-astra\",\"stream\":\{stream},\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}"
 }
 
 ///|

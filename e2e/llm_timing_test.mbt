@@ -3,43 +3,6 @@
 // head, a client that leaves mid-stream, and a drain during a stream.
 
 ///|
-/// A Mock `openai` whose Stub `paced` streams `Hi there!` in three pieces,
-/// the first 400 ms after the head and each later one 300 ms after the one
-/// before, its seed fixing its request id. `/v1/ticks` streams 200 pieces, one every 50 ms, which would
-/// last 10 s, and `/hello` answers at once.
-let paced_openai : String =
-  $|{ "mocks": [{ "name": "openai" }],
-  $|  "stubs": [
-  $|    { "id": "paced", "mock": "openai",
-  $|      "request": { "method": "POST", "path": "/v1/chat/completions" },
-  $|      "response": { "status": 200,
-  $|        "llm": { "api": "openai-chat", "text": "Hi there!",
-  $|          "timing": { "first": { "fixed": 400 }, "interval": { "fixed": 300 } } } },
-  $|      "fault": { "seed": 7 } },
-  $|    { "id": "ticks", "mock": "openai",
-  $|      "request": { "method": "POST", "path": "/v1/ticks" },
-  $|      "response": { "status": 200,
-  $|        "llm": { "api": "openai-chat", "text": "\{"tick".repeat(200)}",
-  $|          "timing": { "first": { "fixed": 50 }, "interval": { "fixed": 50 } } } } },
-  $|    { "id": "hello", "mock": "openai", "request": { "path": "/hello" },
-  $|      "response": { "status": 200, "body": "hello" } } ] }
-
-///|
-/// What the Chat Completions chunk `event`, as read from the wire, carries:
-/// the opening chunk, a piece, the closing chunk or the end marker.
-fn chunk_carries(event : String) -> String {
-  let data = event[event.find("data: ").unwrap_or(0) + 6:].to_owned()
-  let json = @json.parse(data) catch { _ => return data.trim().to_owned() }
-  match json {
-    { "choices": [{ "delta": { "role": _, .. }, .. }], .. } => "opening chunk"
-    { "choices": [{ "delta": { "content": String(piece), .. }, .. }], .. } =>
-      "piece \{piece.escape()}"
-    { "choices": [{ "finish_reason": String(_), .. }], .. } => "closing chunk"
-    _ => data
-  }
-}
-
-///|
 /// Sends a streamed Chat Completions request to `path` on `conn`, as
 /// `session` when it is given.
 async fn ask_stream(conn : Conn, path : String, session? : String) -> Unit {

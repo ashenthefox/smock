@@ -538,6 +538,12 @@ of each GitHub release include its section
   connection. So a head that fits over HTTP/1.1 can get 431 over HTTP/2
   ([Header lists](docs/http2.md#header-lists)). A request that does not
   arrive in time resets its stream instead of closing the connection.
+- The help texts of `--replicas`, `--header-count-limit` and
+  `--journal-max-entries` give their ranges, as the help text of
+  `--http2-max-concurrent-streams` does: `--replicas` from 1 to 10000, and
+  the other two from 1 to 1073741824 (2^30). These are the values smock
+  already took. The running guide's [Settings](docs/running.md#settings)
+  table gives the same ranges.
 - The Definition-file Schema's description of a connection Fault's `kind`
   gives its HTTP/2 form beside its HTTP/1.1 one: RST_STREAM on the
   request's stream for `reset`, half the response then RST_STREAM for
@@ -680,6 +686,10 @@ of each GitHub release include its section
   [moonbitlang/async#725](https://github.com/moonbitlang/async/issues/725)),
   so smock no longer uses it: it polls every second instead of using file
   events, until a release of the runtime fixes that.
+- The usage that `smock`, `smock help` and `smock --help` print now names
+  gRPC in its description of smock, as the README's opening line does: "A
+  mock server for HTTP/1.1, HTTP/2, HTTPS, Server-Sent Events and gRPC
+  unary calls." It left gRPC out.
 
 ## [0.4.0] - 2026-11-01
 

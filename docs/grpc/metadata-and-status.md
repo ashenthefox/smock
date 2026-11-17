@@ -281,6 +281,10 @@ goes out as:
 grpc-message: %09%0Atest with whitespace%0D%0Aand Unicode BMP %E2%98%BA and non-BMP %F0%9F%98%88%09%0A
 ```
 
+A lone surrogate, such as U+D800 with no low surrogate after it, has no
+UTF-8 form, so smock encodes U+FFFD in its place: it goes out as
+`%EF%BF%BD`.
+
 With `template: true`, the message is a text template, rendered after the
 reply message, in the same rendering, so it can name what the call asked
 for:

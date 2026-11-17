@@ -110,6 +110,10 @@ test "the subtype is a view of the value, which nothing copies" {
 }
 
 ///|
+/// A spec oracle. The value is the Content-Type rule of PROTOCOL-HTTP2's
+/// Requests section, `"content-type" "application/grpc"`, with no
+/// subtype; its Responses section has replies carry the same Content-Type,
+/// in Response-Headers and in Trailers-Only.
 test "the content type of gRPC calls and replies is application/grpc" {
   inspect(@grpc.content_type, content="application/grpc")
 }

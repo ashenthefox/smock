@@ -598,6 +598,12 @@ smock import-openapi api/petstore.yaml --mock petstore --output defs/petstore.ya
   file or the new one, never half a file. The temporary file is removed
   when anything fails. The command reads, creates and changes no other
   file in the directory.
+- A temporary file that exists already, such as one another run is
+  writing, is never touched: the command tries the next name instead,
+  `.petstore.yaml.tmp1`, then `.petstore.yaml.tmp2`, and so on up to
+  `.petstore.yaml.tmp99`. When all 100 names exist, nothing is written:
+  the error about `--output` says `the temporary files .petstore.yaml.tmp
+  to .petstore.yaml.tmp99 all exist`, and the exit status is 1.
 - Some outputs are refused even with `--overwrite on`: a directory, a
   symlink (even to a regular file), and the document itself or a file
   its references name, which would be replaced by its own conversion. A

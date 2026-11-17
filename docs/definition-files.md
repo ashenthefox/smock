@@ -626,9 +626,26 @@ only a safe subset of YAML (`yaml/`):
   plain scalar is a string.
 - Anchors, aliases, tags, merge keys, duplicate keys and multiple documents
   are rejected.
+- Some valid YAML is rejected too, on purpose: a file with no document,
+  such as an empty file or one of comments only; a key that is a
+  collection, such as `[a, b]: 1`; a `key: value` pair in a flow sequence
+  without braces, such as `[a: 1]` (write `[{a: 1}]`); a key of a flow
+  mapping written over several lines, such as a plain key whose `:` is on
+  the next line; and a tab in the white space at the start of a line, even
+  where YAML would read it as a separator rather than as indentation.
 
 A JSON file with a key repeated in one object is rejected too, at the later
 key: JSON parsers disagree on which of the two values counts.
+
+The YAML parser also holds to these rules:
+
+- An empty value, as in `body:` with nothing after it, is rejected: write
+  `null`, or `""` for an empty string. A key with nothing written, as in
+  `: value`, is rejected as an empty value is, with "a key must not be
+  empty".
+- A key that repeats in a mapping is rejected at the later key, with
+  "duplicate key". `id:` and `"id":` are the same key.
+- The members of a mapping are read in the order they are written.
 
 Every problem is reported with the file and the JSON Pointer of the value,
 such as `users.yaml: /stubs/0/request/method: "on" may be read as a boolean;

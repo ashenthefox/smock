@@ -575,6 +575,10 @@ test "a json condition compares numbers by their exact value, even integers abov
       #|  "response": { "status": 200 } }
     ),
   ])
+  // matching.md: "Integers are compared exactly however many digits they
+  // have, so a 64-bit ID such as `9007199254740993` matches only itself. A
+  // number beyond a 64-bit float's range is compared exactly too, by its
+  // value".
   inspect(
     winners(h, [
       ("POST", "/", [], "{\"id\":9007199254740993}"),
@@ -593,6 +597,40 @@ test "a json condition compares numbers by their exact value, even integers abov
       #|POST / "{\"v\":10E+399}" -> huge
       #|POST / "{\"v\":1e401}" -> none
       #|POST / "{\"v\":-1e400}" -> none
+    ),
+  )
+  // The value 10^400 in other notations, each beyond a 64-bit float's
+  // range, which matching.md compares exactly: "A number beyond a 64-bit
+  // float's range is compared exactly too, by its value: `1e400` matches
+  // `10e399` and a `1` followed by 400 zeros, but not `1e401` or a `9`
+  // followed by 399 zeros." The values come from #281's acceptance
+  // criteria: a `1` followed by 400 zeros, `1e0000000000000000000400` and a
+  // `1` followed by 500 zeros and `e-100` each equal `1e400`; the near
+  // misses are 9 * 10^399, 10^401 and 10^399, which differ in value.
+  let zeros = (n : Int32) => "0".repeat(n)
+  let notations = [
+    ("1 and 400 zeros", "1\{zeros(400)}"),
+    ("9 and 399 zeros", "9\{zeros(399)}"),
+    ("1e0000000000000000000400", "1e0000000000000000000400"),
+    ("1e0000000000000000000401", "1e0000000000000000000401"),
+    ("1 and 500 zeros, e-100", "1\{zeros(500)}e-100"),
+    ("1 and 500 zeros, e-101", "1\{zeros(500)}e-101"),
+  ]
+  inspect(
+    notations
+    .map(notation => {
+      let (label, v) = notation
+      let winner = matched_id(h.send("POST", "/", body="{\"v\":\{v}}"))
+      "\{label} -> \{winner.unwrap_or("none")}"
+    })
+    .join("\n"),
+    content=(
+      #|1 and 400 zeros -> huge
+      #|9 and 399 zeros -> none
+      #|1e0000000000000000000400 -> huge
+      #|1e0000000000000000000401 -> none
+      #|1 and 500 zeros, e-100 -> huge
+      #|1 and 500 zeros, e-101 -> none
     ),
   )
 }

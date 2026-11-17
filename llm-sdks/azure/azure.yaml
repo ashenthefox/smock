@@ -1,0 +1,20 @@
+# The Azure OpenAI example of docs/definition-files/llm-responses.md
+# (#paths-and-compatible-endpoints), as written: the SDK job
+# (llm-sdks/README.md) serves it on its own, so that its one Mock is the
+# Default Mock. llm-sdks/check.py calls it through openai-python's
+# AzureOpenAI client, configured as the docs configure it, and checks that
+# the docs still show this file, without these comment lines. A change to
+# the docs' example changes this file too.
+mocks:
+  - name: azure
+stubs:
+  - id: azure-chat
+    mock: azure
+    request:
+      method: POST
+      path: { pattern: "/openai/deployments/[^/]+/chat/completions" }
+    response:
+      status: 200
+      llm:
+        api: openai-chat
+        text: Hello! How can I assist you today?

@@ -39,9 +39,28 @@ test "process RSS: the VmRSS line of /proc/<pid>/status, from KiB to bytes" {
       @usage.resident_bytes("VmRSS:\t    6896 MB\n"),
       @usage.resident_bytes("VmRSS:\t\n"),
       @usage.resident_bytes(""),
+      // The range of a 64-bit count: Linux writes VmRSS in kB of 1024 bytes,
+      // and the bytes are a signed 64-bit count, at most 2^63 - 1 =
+      // 9223372036854775807. 9007199254740991 kB is the most whose bytes it
+      // holds, 9223372036854774784; one kB more is 2^63 bytes, past it.
+      // #278's acceptance criterion fixes both values, and with them the
+      // 1024 bytes of a kB, which the kernel's documents do not define: "a
+      // `VmRSS` line of 9,007,199,254,740,991 kB, the largest whose count of
+      // bytes a signed 64-bit count holds, is read, and one kB more gives
+      // nothing".
+      @usage.resident_bytes("VmRSS:\t9007199254740991 kB\n"),
+      @usage.resident_bytes("VmRSS:\t9007199254740992 kB\n"),
     ],
     content=(
-      #|[Some(7061504), None, None, None, None]
+      #|[
+      #|  Some(7061504),
+      #|  None,
+      #|  None,
+      #|  None,
+      #|  None,
+      #|  Some(9223372036854774784),
+      #|  None,
+      #|]
     ),
   )
 }
@@ -147,13 +166,26 @@ test "cgroup memory: memory.peak holds a number of bytes" {
     [
       @usage.memory_peak("44040192\n"),
       @usage.memory_peak("0\n"),
+      // The range of a 64-bit count: a signed one holds at most
+      // 2^63 - 1 = 9223372036854775807, 19 digits.
       @usage.memory_peak("9223372036854775807\n"),
       @usage.memory_peak("9223372036854775808\n"),
+      // 2^64, 20 digits, is past even an unsigned 64-bit count, which would
+      // wrap it round to 0: it is refused, as #278 asks.
+      @usage.memory_peak("18446744073709551616\n"),
       @usage.memory_peak("max\n"),
       @usage.memory_peak(""),
     ],
     content=(
-      #|[Some(44040192), Some(0), Some(9223372036854775807), None, None, None]
+      #|[
+      #|  Some(44040192),
+      #|  Some(0),
+      #|  Some(9223372036854775807),
+      #|  None,
+      #|  None,
+      #|  None,
+      #|  None,
+      #|]
     ),
   )
 }
@@ -168,13 +200,28 @@ test "scheduling delay: the run_delay of /proc/<pid>/schedstat, from nanoseconds
       // A thread that never waited.
       @usage.scheduling_delay_seconds("65958 0 2\n"),
       @usage.scheduling_delay_seconds("2034567890123 987654321 41234\n"),
+      // The waiting time is the second of the three fields that the kernel's
+      // sched-stats document gives the file. A line of exactly two fields
+      // holds it, and is read, as #278's acceptance criterion asks and the
+      // maintainer confirmed on 2026-11-17 (#275): "Only the second field
+      // is read, so a line of two fields is read too, though the kernel
+      // writes three" (`scheduling_delay_seconds`).
+      @usage.scheduling_delay_seconds("65958000 1500000\n"),
       // Too few fields, a field that is not a number, and no line.
       @usage.scheduling_delay_seconds("65958\n"),
       @usage.scheduling_delay_seconds("65958 -1 2\n"),
       @usage.scheduling_delay_seconds(""),
     ],
     content=(
-      #|[Some(0.0015), Some(0), Some(0.987654321), None, None, None]
+      #|[
+      #|  Some(0.0015),
+      #|  Some(0),
+      #|  Some(0.987654321),
+      #|  Some(0.0015),
+      #|  None,
+      #|  None,
+      #|  None,
+      #|]
     ),
   )
 }

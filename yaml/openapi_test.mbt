@@ -42,10 +42,11 @@ test "an OpenAPI document with an unquoted status key and a date reads in the Op
 
 ///|
 /// Plain scalars that the YAML 1.2 core schema types as null, booleans or
-/// numbers.
+/// numbers. Its hexadecimal integers are `0x[0-9a-fA-F]+` (YAML 1.2.2,
+/// section 10.3.2), so `0x1f` is 31 as `0x1F` is.
 let core_typed : Array[String] = [
   "null", "Null", "NULL", "~", "true", "True", "TRUE", "false", "False", "FALSE",
-  "0x1F", "0o17", "+1", ".5", "007",
+  "0x1F", "0x1f", "0o17", "+1", ".5", "007",
 ]
 
 ///|
@@ -64,6 +65,7 @@ test "in the OpenAPI mode, plain scalars are typed by the YAML 1.2 core schema" 
       #|False -> {"a":false}
       #|FALSE -> {"a":false}
       #|0x1F -> {"a":31}
+      #|0x1f -> {"a":31}
       #|0o17 -> {"a":15}
       #|+1 -> {"a":1}
       #|.5 -> {"a":0.5}
@@ -467,6 +469,14 @@ test "every input the OpenAPI mode accepts here, the safe subset rejects, or rea
     }
     safe.push("\{text.escape()} -> \{result}")
   }
+  // The safe subset refuses `0x1f`, which #280 added: YAML 1.1 reads it as
+  // an integer, by the base-16 form `[-+]?0x[0-9a-fA-F_]+`
+  // (yaml.org/type/int.html), and docs/definition-files.md says "Any other
+  // plain scalar that YAML 1.1 or 1.2 would type, such as `yes`, `on`, `~`,
+  // `True`, `0x1F`, `007`, `1_000`, `.inf` or `2001-12-14`, is rejected
+  // with "quote this value"". The words "may be read as a number; quote
+  // this value" are the code's, which the maintainer confirmed on
+  // 2026-11-17 (#275).
   inspect(
     safe.join("\n"),
     content=(
@@ -482,6 +492,7 @@ test "every input the OpenAPI mode accepts here, the safe subset rejects, or rea
       #|"a: False" -> error /a: "False" may be read as a boolean; quote this value
       #|"a: FALSE" -> error /a: "FALSE" may be read as a boolean; quote this value
       #|"a: 0x1F" -> error /a: "0x1F" may be read as a number; quote this value
+      #|"a: 0x1f" -> error /a: "0x1f" may be read as a number; quote this value
       #|"a: 0o17" -> error /a: "0o17" may be read as a number; quote this value
       #|"a: +1" -> error /a: "+1" may be read as a number; quote this value
       #|"a: .5" -> error /a: ".5" may be read as a number; quote this value

@@ -20,31 +20,6 @@ fn with_messages(
 }
 
 ///|
-/// `line` with the value of its `timestamp`, wherever the key stands, shown
-/// as `<timestamp>` when it has the form `YYYY-MM-DDTHH:mm:ss.sssZ`, and each
-/// text of `replace` written as the placeholder it comes with. A value of
-/// any other form stays, so that it shows.
-fn masked_line(
-  line : String,
-  replace~ : Array[(String, String)] = [],
-) -> String {
-  let key = ",\"timestamp\":\""
-  let mut line = line
-  if line.find(key) is Some(i) {
-    let start = i + key.length()
-    let end = start + "0000-00-00T00:00:00.000Z".length()
-    if end <= line.length() && time_has_form(line[start:end].to_owned()) {
-      line = "\{line[:start]}<timestamp>\{line[end:]}"
-    }
-  }
-  for pair in replace {
-    let (text, placeholder) = pair
-    line = line.replace_all(old=text, new=placeholder)
-  }
-  line
-}
-
-///|
 async test "with SMOCK_LOG_FORMAT=mockoon, smock's own lines go to stdout in Mockoon's envelope, keeping their messages and fields, and stderr stays empty" {
   with_definitions(mockoon_mocks(), dir => {
     with_certificates(certs => {
@@ -104,24 +79,6 @@ fn envelope_problem(line : String) -> String? {
     return Some("keys not sorted: \{keys}")
   }
   None
-}
-
-///|
-/// Whether `time` has the form `YYYY-MM-DDTHH:mm:ss.sssZ`.
-fn time_has_form(time : String) -> Bool {
-  let form = "0000-00-00T00:00:00.000Z"
-  guard time.length() == form.length() else { return false }
-  for j, c in form {
-    let ok = if c == '0' {
-      time[j] >= '0' && time[j] <= '9'
-    } else {
-      time[j] == c.to_int().to_uint16()
-    }
-    if !ok {
-      return false
-    }
-  }
-  true
 }
 
 ///|

@@ -6,8 +6,8 @@
 # It installs the SDKs pinned in llm-sdks/requirements.txt, and every
 # package they need, into a new virtual environment, each checked against
 # its pinned hashes and only from a wheel, so nothing is built. Then
-# llm-sdks/check.py serves llm-sdks/definitions/ with the given binary,
-# calls it through the SDKs and checks what they read.
+# llm-sdks/check.py serves llm-sdks/definitions/, then llm-sdks/azure/, with
+# the given binary, calls them through the SDKs and checks what they read.
 #
 # It runs with the Python that $PYTHON names, python3 by default. CI sets
 # up the version pinned in llm-sdks/.python-version; another version gets

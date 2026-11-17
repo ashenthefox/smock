@@ -3,23 +3,6 @@
 // like any other.
 
 ///|
-/// Runs `smock import-openapi <args>` in the working directory `cwd` until
-/// it exits, and renders its exit status, then what it wrote to stdout and,
-/// if anything, to stderr, with `dir` written `<dir>`.
-async fn import_openapi(
-  args : Array[String],
-  dir~ : String = "",
-  cwd~ : String = ".",
-) -> String {
-  let report = exit_report(smock_output(["import-openapi", ..args], cwd~))
-  if dir == "" {
-    report
-  } else {
-    report.replace_all(old=dir, new="<dir>")
-  }
-}
-
-///|
 /// An OpenAPI document whose only operation is `listPets` on `GET /pets`,
 /// with a `200` response and no content.
 let petstore_document : String =
@@ -350,6 +333,78 @@ async test "smock import-openapi --overwrite on replaces an existing --output, a
     inspect(
       @fs.read_file("\{dir}/defs/other.yaml").text(),
       content="version: 1\n",
+    )
+  })
+}
+
+///|
+/// What the directory `dir` holds beside the output `petstore.json`:
+/// whether it is there, and how many other files there are, and how many
+/// of them still hold `content`.
+async fn beside_output(dir : String, content~ : String) -> String {
+  let names = @fs.readdir(dir, sort=true)
+  let others = names.filter(name => name != "petstore.json")
+  let mut kept = 0
+  for name in others {
+    if @fs.read_file("\{dir}/\{name}").text() == content {
+      kept += 1
+    }
+  }
+  let output = if names.contains("petstore.json") { "there" } else { "absent" }
+  "petstore.json: \{output}; \{others.length()} other files, \{kept} as they were"
+}
+
+///|
+async test "smock import-openapi tries the temporary names .petstore.json.tmp and .petstore.json.tmp1 to .petstore.json.tmp99, touches none that exists, and writes nothing when all 100 exist" {
+  // The import guide (docs/importing-openapi.md, Regenerating): "A
+  // temporary file that exists already, such as one another run is
+  // writing, is never touched: the command tries the next name instead,
+  // `.petstore.yaml.tmp1`, then `.petstore.yaml.tmp2`, and so on up to
+  // `.petstore.yaml.tmp99`. When all 100 names exist, nothing is written:
+  // the error about `--output` says `the temporary files .petstore.yaml.tmp
+  // to .petstore.yaml.tmp99 all exist`, and the exit status is 1." The
+  // maintainer confirmed those names on 2026-11-17 (#275).
+  with_petstore(petstore_document, dir => {
+    let defs = "\{dir}/defs"
+    let taken = [".petstore.json.tmp"]
+    for n in 1..<100 {
+      taken.push(".petstore.json.tmp\{n}")
+    }
+    for name in taken {
+      @fs.write_file("\{defs}/\{name}", "another run's")
+    }
+    let args = [
+      "\{dir}/api/petstore.json",
+      "--mock",
+      "petstore",
+      "--output",
+      "\{defs}/petstore.json",
+    ]
+    let all_taken = import_openapi(args, dir~)
+    let after_refusal = beside_output(defs, content="another run's")
+    // One name free, the last of the 100, is enough.
+    @fs.remove("\{defs}/.petstore.json.tmp99")
+    let one_free = import_openapi(args, dir~)
+    inspect(
+      (
+        $|all 100 taken: \{all_taken}
+        $|\{after_refusal}
+        $|.petstore.json.tmp99 free: \{one_free}
+        $|\{beside_output(defs, content="another run's")}
+        $|.petstore.json.tmp99: \{@fs.exists("\{defs}/.petstore.json.tmp99")}
+      ),
+      content=(
+        #|all 100 taken: status 1
+        #|<dir>/defs/petstore.json: cannot be written: the temporary files .petstore.json.tmp to .petstore.json.tmp99 all exist
+        #|nothing written: 1 errors
+        #|
+        #|petstore.json: absent; 100 other files, 100 as they were
+        #|.petstore.json.tmp99 free: status 0
+        #|wrote <dir>/defs/petstore.json: 1 Stubs from 1 operations, 0 warnings
+        #|
+        #|petstore.json: there; 99 other files, 99 as they were
+        #|.petstore.json.tmp99: false
+      ),
     )
   })
 }
@@ -940,27 +995,6 @@ async fn Smock::answered(self : Smock, session : String) -> Json {
 }
 
 ///|
-/// The entries of the Journal of `session`, in order, each an object.
-/// Fails when the Journal or an entry is not as smock writes it.
-async fn Smock::journal_entries(
-  self : Smock,
-  session : String,
-) -> Array[Map[String, Json]] {
-  let entries = match self.journal(session~) {
-    (200, Object({ "entries": Array(entries), .. })) => entries
-    (status, body) => fail("unexpected Journal: \{status} \{body.stringify()}")
-  }
-  let objects = []
-  for entry in entries {
-    guard entry is Object(entry) else {
-      fail("unexpected entry: \{entry.stringify()}")
-    }
-    objects.push(entry)
-  }
-  objects
-}
-
-///|
 async test "smock serves an imported file with Smock-Status: a request gets the main response without it, the response it names with it, and the main one when no Stub names its value; the Journal names the Stub that answered" {
   with_petstore(my_pet_document, dir => {
     serving_my_pet(dir, smock => {
@@ -1451,21 +1485,6 @@ async test "smock serves an imported file with Smock-Example: alone it selects t
       ])
     })
   })
-}
-
-///|
-/// What the Journal holds for `session`, in order: for each request, the
-/// Mock and the Stub that answered, and the status.
-async fn Smock::answered_by(self : Smock, session : String) -> Json {
-  let answered : Array[Json] = []
-  for entry in self.journal_entries(session) {
-    answered.push({
-      "mock": entry.get("mock").unwrap_or(Json::null()),
-      "stub": entry.get("stub").unwrap_or(Json::null()),
-      "status": entry.get("status").unwrap_or(Json::null()),
-    })
-  }
-  Json::array(answered)
 }
 
 ///|

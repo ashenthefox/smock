@@ -23,6 +23,24 @@ stubs:
         text: "Hi! こんにちは。 👋🏽 How can I help?"
         usage: { input: 19, output: 10 }
 
+  # Chat Completions through Gemini's OpenAI-compatible base URL: chat-text's
+  # reply, at the path that the table of
+  # docs/definition-files/llm-responses.md#paths-and-compatible-endpoints
+  # gives Gemini's Stub. openai-python sends it there when its base URL is
+  # smock's with Gemini's path, /v1beta/openai/.
+  - id: gemini-text
+    mock: llm
+    request:
+      method: POST
+      path: /v1beta/openai/chat/completions
+      body: { json: { model: gemini-text } }
+    response:
+      status: 200
+      llm:
+        api: openai-chat
+        text: "Hi! こんにちは。 👋🏽 How can I help?"
+        usage: { input: 19, output: 10 }
+
   # Chat Completions: text and two tool calls, with every id fixed, so
   # that the reply the stream helper builds can equal the JSON reply,
   # ids included. The arguments nest an object and hold CJK text and a

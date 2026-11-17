@@ -14,18 +14,6 @@ let slow_uploads : String =
   #|      "response": { "status": 200, "body": "fast" } } ] }
 
 ///|
-/// A response in one line: its status and its body, or that none came, and
-/// how its stream ended.
-fn H2Response::brief(self : H2Response) -> String {
-  let response = if self.status == 0 {
-    "no response"
-  } else {
-    "\{self.status} \{@utf8.decode_lossy(self.body)}"
-  }
-  "\{response} (\{self.ended})"
-}
-
-///|
 async test "h2c: a stream whose request does not arrive within the read timeout is reset with CANCEL, alone: the other streams are answered, and a stream that began later has the read timeout from its own first frame" {
   with_definitions([("m.json", slow_uploads)], dir => {
     let _ = with_smock(
@@ -88,78 +76,6 @@ async test "h2c: a stream whose request does not arrive within the read timeout 
       },
     )
   })
-}
-
-///|
-/// The log lines of a smock process started with `--port 0` and no
-/// certificate, that wrote nothing between starting and draining when it
-/// was stopped: timeouts are not logged.
-let startup_only_h2c : String =
-  #|{"level":"info","msg":"smock starting","version":"*","commit":"*","toolchain":"*","adminAuth":"on"}
-  #|{"level":"info","msg":"random seed","seed":"*"}
-  #|{"level":"info","msg":"journal byte bound","maxBytes":"*","source":"*","memoryLimit":"*"}
-  #|{"level":"info","msg":"state byte bound","maxBytes":"*","source":"*","memoryLimit":"*"}
-  #|{"level":"info","msg":"listening","listener":"admin","address":"0.0.0.0:*","protocols":["http/1.1"]}
-  #|{"level":"info","msg":"self-signed certificate in use","sha256Fingerprint":"*","names":["localhost","127.0.0.1","::1"]}
-  #|{"level":"info","msg":"listening","listener":"plain","address":"0.0.0.0:*","protocols":["http/1.1","h2c"]}
-  #|{"level":"info","msg":"listening","listener":"tls","address":"0.0.0.0:*","protocols":["h2","http/1.1"]}
-  #|{"level":"info","msg":"drain started","timeoutMs":20000}
-  #|{"level":"info","msg":"drain ended","connectionsCut":0}
-
-///|
-/// The frames smock sent, as `RawH2::frames_until` read them.
-struct Frames {
-  /// Each frame, as `render_frame` shows it.
-  shown : Array[String]
-  /// How they ended: `open` when a frame met the condition, else how
-  /// smock ended the connection, `a FIN` for a clean end of stream or `an
-  /// RST` for a reset.
-  how : String
-  /// When the last frame came or the connection ended, in milliseconds
-  /// after the time the caller gave.
-  end_ms : Int64
-}
-
-///|
-/// Reads frames from smock until one meets `stop`, or smock ends the
-/// connection, timing the last from `since`, and, over TCP, tells a FIN
-/// from a reset.
-async fn RawH2::frames_until(
-  self : RawH2,
-  since : Int64,
-  stop : (@http2.Frame) -> Bool,
-) -> Frames {
-  let shown = []
-  let result = @async.with_timeout_opt(patience_ms, () => {
-    for ;; {
-      let (frame, used) = @http2.decode(self.received) catch {
-        Incomplete => {
-          let n = self.wire.read(self.buf) catch {
-            @os_error.OSError(_, ..) as err if is_reset(err) => break "an RST"
-            err => break "an error: \{err}"
-          }
-          guard n > 0 else { break "a FIN" }
-          self.received = self.received +
-            self.buf.unsafe_reinterpret_as_bytes()[:n].to_owned()
-          continue
-        }
-        err => fail("smock sent a frame that does not decode: \{err}")
-      }
-      self.received = self.received[used:].to_owned()
-      shown.push(self.render_frame(frame))
-      if stop(frame) {
-        break "open"
-      }
-    }
-  })
-  guard result is Some(how) else { fail("no frame and no end in time") }
-  { shown, how, end_ms: @async.now() - since, }
-}
-
-///|
-/// Whether `frame` is a GOAWAY.
-fn is_goaway(frame : @http2.Frame) -> Bool {
-  frame is GoAway(..)
 }
 
 ///|
