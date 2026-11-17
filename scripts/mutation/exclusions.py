@@ -281,6 +281,40 @@ def check(root, moonc):
     return not problems
 
 
+class Points:
+    """What the list says of the uncovered points: the places it accepts,
+    each with its category, by (file, line, column); the places of its
+    DEFERRED entries, each with its issue; and its stale point entries."""
+
+    def __init__(self, accepted, deferred, stale_entries):
+        self.accepted = accepted
+        self.deferred = deferred
+        self.stale = stale_entries
+
+
+def points(root, moonc="moonc"):
+    """The points of the list at root: a current entry other than DEFERRED
+    accepts its place, and a stale or a DEFERRED one accepts none."""
+    entries, problems = read_list(root)
+    if problems and not entries:
+        raise ExclusionError("; ".join(problems))
+    mine = [e for e in entries if e.is_point() and e.position() is not None and isinstance(e.file, str)]
+    found = definitions(root, {e.file for e in mine}, moonc) if mine else {}
+    accepted, deferred, stale_entries = {}, {}, []
+    for entry in mine:
+        if stale(entry, found):
+            stale_entries.append(entry)
+            continue
+        first = next(d[1] for d in found[entry.file] if d[0] == entry.definition and d[3] == entry.fields["text"])
+        line, column = entry.position()
+        place = (entry.file, first + line - 1, column)
+        if entry.category == "DEFERRED":
+            deferred[place] = entry.fields.get("issue")
+        elif entry.category in CATEGORIES:
+            accepted[place] = entry.category
+    return Points(accepted, deferred, stale_entries)
+
+
 def new(root, what, moonc):
     """The stanza of a new entry for a mutant's id or a point."""
     place = PLACE.match(what)

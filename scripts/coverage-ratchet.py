@@ -248,7 +248,7 @@ def fenced(lines):
 def check(root, report, base, summary_file=None):
     """Checks the uncovered points of each package against its floor, and
     the floors against the base: whether it passed."""
-    packages = report_module.read_packages(report, root)
+    packages, exclusions = report_module.read_coverage(report, root)
     merge_base = git(root, "merge-base", "HEAD", base).strip()
     problems, notes, at_floor = [], [], []
     floors = read_floors(read_file(root, FLOORS), problems)
@@ -269,6 +269,10 @@ def check(root, report, base, summary_file=None):
             notes.append(f"{name}: {points(count)}, below its floor of {floor}: lower it to {count} in this"
                          f" change (python3 scripts/coverage-ratchet.py write {report})")
     compare_with_base(root, base, merge_base, floors, problems, notes)
+    if exclusions is not None and exclusions.stale:
+        found = ("stale entries of the exclusion list, which accept nothing: "
+                 + ", ".join(entry.key for entry in exclusions.stale))
+        (problems if problems else notes).append(found)
     for note in at_floor + notes:
         print(f"coverage-ratchet: {note}")
     for problem in problems:
@@ -281,7 +285,7 @@ def check(root, report, base, summary_file=None):
 
 def write(root, report):
     """Writes each package's uncovered points as its floor."""
-    packages = report_module.read_packages(report, root)
+    packages, _ = report_module.read_coverage(report, root)
     path = root / FLOORS
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     header = []

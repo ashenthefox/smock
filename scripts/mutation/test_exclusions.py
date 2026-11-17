@@ -293,5 +293,93 @@ class StaleTest(unittest.TestCase):
         self.assertIn("exclusions: 2 entries, 1 stale", result.stdout)
 
 
+REPORT = REPO / "scripts" / "coverage-report.py"
+RATCHET = REPO / "scripts" / "coverage-ratchet.py"
+BISECTS = REPO / "scripts" / "coverage-tests"
+
+
+class CoverageTest(unittest.TestCase):
+    """The coverage report and the coverage ratchet count the uncovered
+    points that no current entry accepts, on the small tree's report
+    partly.bisect, whose one uncovered point is the abort of
+    Generator::below; a stale or a DEFERRED entry accepts nothing."""
+
+    def setUp(self):
+        need_moonc()
+        self.tmp = Path(tempfile.mkdtemp(prefix="test-exclusions-"))
+        self.tree = Tree(self.tmp)
+        self.entry = filled(self.tree.new(ABORT), category='"UNREACHABLE"', reason='"The count is never 0."')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def report(self, bisect="partly.bisect"):
+        result = subprocess.run([sys.executable, str(REPORT), "--root", str(self.tree.root), str(BISECTS / bisect)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return [" ".join(line.split()) for line in result.stdout.splitlines()]
+
+    def ratchet(self, floor):
+        root = self.tree.root
+        (root / "coverage").mkdir(exist_ok=True)
+        (root / "coverage" / "floors.txt").write_text(f"prng {floor}\n")
+        git = ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
+               "-C", str(root)]
+        if not (root / ".git").exists():
+            subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "a change"], check=True)
+        return subprocess.run([sys.executable, str(RATCHET), "--root", str(root), "check", "--base", "main",
+                               str(BISECTS / "partly.bisect")], capture_output=True, text=True)
+
+    def test_an_accepted_point_is_not_uncovered(self):
+        self.tree.write(self.entry)
+        lines = self.report()
+        # The table's uncovered points leave it out; the points covered and
+        # the lines stay as they are.
+        self.assertIn("prng 3 of 4 75.0% 0 1 of 2", lines)
+        self.assertNotIn("prng: 1 of 4 points uncovered", lines)
+        self.assertIn("prng: 1 point accepted by the exclusion list", lines)
+        self.assertIn("prng/prng.mbt:16:19 Generator::below UNREACHABLE", lines)
+        self.assertIn("All packages: 3 of 4 points covered (75.0%), 0 uncovered, 1 accepted by the exclusion list;"
+                      " lines 1 of 2", lines)
+
+    def test_a_stale_entry_accepts_nothing(self):
+        self.tree.write(self.entry)
+        # A change after the report's last point, which keeps its points
+        # where they are.
+        self.tree.edit("prng/prng.mbt", "self.next() % count", "self.next() % (count)")
+        lines = self.report()
+        self.assertIn("prng: 1 of 4 points uncovered", lines)
+        self.assertIn("prng 3 of 4 75.0% 1 1 of 2", lines)
+        self.assertIn("Stale entries of the exclusion list, which accept nothing: prng/prng.mbt,Generator::below,2:19",
+                      lines)
+
+    def test_a_deferred_entry_accepts_nothing(self):
+        self.tree.write(filled(self.tree.new(ABORT), category='"DEFERRED"', reason='"A test later."', issue="123"))
+        lines = self.report()
+        self.assertIn("prng: 1 of 4 points uncovered", lines)
+        self.assertIn("prng/prng.mbt:16:19 Generator::below (DEFERRED to #123)", lines)
+
+    def test_without_a_list_the_report_is_as_it_was(self):
+        lines = self.report()
+        self.assertIn("prng: 1 of 4 points uncovered", lines)
+        self.assertIn("All packages: 3 of 4 points covered (75.0%), 1 uncovered; lines 1 of 2", lines)
+
+    def test_the_ratchet_counts_the_points_after_the_list(self):
+        self.tree.write(self.entry)
+        result = self.ratchet(0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("prng: 0 uncovered points, at its floor of 0", result.stdout)
+        # Once stale, the entry accepts nothing, and the point is above the
+        # floor again.
+        self.tree.edit("prng/prng.mbt", 'abort("count is 0")', 'abort("the count is 0")')
+        result = self.ratchet(0)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("prng: 1 uncovered point, above its floor of 0", result.stderr)
+        self.assertIn("stale entries of the exclusion list, which accept nothing:"
+                      " prng/prng.mbt,Generator::below,2:19", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
