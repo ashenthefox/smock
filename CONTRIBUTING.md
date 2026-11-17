@@ -568,13 +568,17 @@ The native build links OpenSSL 3 (on Debian and Ubuntu, `libssl-dev`).
 `prebuild.py`, which `moon` runs with `python3` before every native build,
 adds `-lssl -lcrypto` to every executable that uses the bindings, tests
 included, because link flags in a library's own `moon.pkg` do not reach the
-packages that import it. It also compiles every executable that holds the
-engine with `-ffp-contract=off`, so that a release build on arm64 does not
-fuse floating-point multiply-adds and a seeded delay is the same as on
-wasm-gc; CI tests the engine in a release build to check it. And it brings
-the build information that `smock --version` reports up to date, so every
-native build, release or not, names the commit checked out and the
-toolchain in use.
+packages that import it. It also brings the build information that
+`smock --version` reports up to date, so every native build, release or
+not, names the commit checked out and the toolchain in use.
+
+A release build on arm64 fuses floating-point multiply-adds unless it is
+told not to, and a seeded delay could then differ from the one wasm-gc
+draws. `moon` passes `-ffp-contract=off` to each C compile itself, so
+nothing in this repository adds it. The engine test "Fault arithmetic is
+never fused into multiply-adds, so a seeded delay is the same on every
+target" (`engine/faults_test.mbt`) fails if they are fused, and CI runs the
+engine's tests in a release build on amd64 and on arm64 to check it.
 
 Most tests drive the engine through its public interface, with in-memory
 Definition files, a fixed clock and a seeded random source

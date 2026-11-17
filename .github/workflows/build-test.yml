@@ -195,8 +195,9 @@ jobs:
           toolchain: ${{ inputs.toolchain }}
 
       # A release build may fuse floating-point multiply-adds, so that a
-      # seeded log-normal delay differs from the one wasm-gc draws.
-      # prebuild.py turns that off, and the engine's tests check it.
+      # seeded log-normal delay differs from the one wasm-gc draws. moon
+      # passes -ffp-contract=off to each C compile, and the engine's tests
+      # check that nothing is fused.
       - name: Test the engine in a release build
         run: moon test --target native --release -p smock/smock/engine
 
