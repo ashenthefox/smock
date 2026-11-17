@@ -395,3 +395,25 @@ test "ranges: --header-size-limit, by its flag or SMOCK_HEADER_SIZE_LIMIT, takes
     ),
   )
 }
+
+///|
+test "ranges: --body-limit, by its flag or SMOCK_BODY_LIMIT, takes 0 and 1073741824, and refuses -1, 1073741825 and a value that is not a decimal integer" {
+  // No document gives this range: docs/running.md's Settings table and the
+  // help give the default alone, and only the refusal names the range. It
+  // is the code's, a finding that #320 takes to the maintainer.
+  inspect(
+    each_by_flag_and_variable(
+      "--body-limit",
+      "SMOCK_BODY_LIMIT",
+      ["0", "1073741824", "-1", "1073741825", "10MiB"],
+      settings => settings.body_limit.to_string(),
+    ),
+    content=(
+      #|0: 0
+      #|1073741824: 1073741824
+      #|-1: invalid value "-1" for --body-limit (SMOCK_BODY_LIMIT): must be an integer from 0 to 1073741824
+      #|1073741825: invalid value "1073741825" for --body-limit (SMOCK_BODY_LIMIT): must be an integer from 0 to 1073741824
+      #|10MiB: invalid value "10MiB" for --body-limit (SMOCK_BODY_LIMIT): must be an integer from 0 to 1073741824
+    ),
+  )
+}
