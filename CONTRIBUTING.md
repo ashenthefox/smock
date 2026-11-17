@@ -2390,8 +2390,8 @@ gh run download <run id> --name mutation-report --dir mutation-report
 
 **The weekly run**, every Friday at 20:23 UTC, runs the pinned set over
 the pure packages, the set over which L4 is defined, so it verifies L4.
-Its shards run as any run does: each package's self-test first, then its
-own tests and its importers' tests, kill confirmation, the comparison of
+Its shards run as any run does: each package's runs without a mutant
+and its self-test first, then its own tests and its importers' tests, kill confirmation, the comparison of
 the compiler's output, the exclusion list, and the native verdicts of the
 mutants at an unchecked access. They run the properties with their
 committed seeds, and read the flake records of the latest weekly run,
