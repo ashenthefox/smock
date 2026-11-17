@@ -25,6 +25,11 @@ let build : @async.Lazy[Unit] = @async.Lazy(() => {
 })
 
 ///|
+/// The environment variable that makes smock write its coverage counters
+/// to stdout as it exits, when it is set and not empty (`cmd/smock`).
+let coverage_variable : String = "SMOCK_COVERAGE_DUMP"
+
+///|
 /// How long a test waits for smock to start listening or to exit.
 let patience_ms : Int32 = 20_000
 
@@ -739,13 +744,20 @@ async fn smock_stdout(args : Array[String]) -> (Int32, String) {
 /// Runs `smock <args>` with only `env` as its environment, in the working
 /// directory `cwd` (by default the test's own), until it exits by itself,
 /// and returns its exit status and what it wrote to stdout and to stderr.
+/// With `dump`, smock is asked for its coverage counters, which stay in
+/// what it wrote to stdout.
 async fn smock_output(
   args : Array[String],
   env~ : Map[String, String] = Map([]),
   cwd~ : String = ".",
+  dump~ : Bool = false,
 ) -> (Int32, String, String) {
   build.wait()
   let smock = @fs.realpath(binary)
+  let env = Map::from_iter(env.iter())
+  if dump {
+    env[coverage_variable] = "1"
+  }
   let result = @async.with_timeout_opt(patience_ms, () => {
     @process.collect_output(smock, args, extra_env=env, inherit_env=false, cwd~)
   })
