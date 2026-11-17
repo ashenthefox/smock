@@ -11,16 +11,23 @@ usage: python3 scripts/trace-links.py [--repo <dir>] [--rev <rev>]
                                       [--jobs <n>] [<path>...]
 
 <dir> is the checkout, this one unless given, and <rev> the commit whose
-tests are read, HEAD unless given. The script reads the tests of every
-MoonBit file at <rev> (.mbt, and the mbt blocks of .mbt.md), or of the
-files under the paths given.
+tests are read, HEAD unless given. The script reads the tests of the
+workspace's modules at <rev> (the modules moon.work lists, or the module
+at the root when there is none), or of their files under the paths
+given: the test blocks of .mbt files and of the mbt blocks of .mbt.md
+documents, and the doc tests in the mbt blocks of doc comments.
 
 The commit that introduced a test block is the commit that git blame
 gives for the block's header line (`test "..." {`), when it blames the
-block with -w -M -C -C -C: across whitespace changes, and following lines
-moved or copied within a file, from other files of the same commit, and
-from any file of any commit. A test moved to another file keeps the
-commit that wrote it there first.
+top-level item that holds it with -w -M -C -C -C: across whitespace
+changes, and following lines moved or copied within a file, from other
+files of the same commit, and from any file of any commit. A test moved
+or copied to another file keeps the commit that first wrote it, and so
+does a test that a later commit extends. A test whose name changed is
+linked to the commit that gave it the name, which wrote its header line.
+A doc test is read with the item its doc comment belongs to, and moves
+with it. git follows a moved block only when it holds at least 40
+letters and digits (20 within one file).
 
 The ticket is the issue number in the commit's subject: the one in a
 trailing "(#N)", or else the only #N the subject names. A subject that
@@ -28,16 +35,24 @@ names none, or several and no trailing one, gives no ticket.
 
 The issues come from gh (`gh api` on the checkout's repository). An
 issue's acceptance criteria are the items of the list under its heading
-"Acceptance criteria", without their check boxes, each with the lines
-indented under it.
+"Acceptance criteria", or under a line that is only that label in bold,
+as a bug's Agent Brief has: each item without its check box, ticked or
+not, and with the lines indented under it.
 
 What it prints is one JSON object:
 
   rev     the commit read.
   tests   one record a test, in the order of their files and lines:
-            file          the file, from the root;
+            package       its package, as moon names it: the module's
+                          name and the directory within the module;
+            file          its file, from the root;
             line          the line of its header;
-            name          its name, as moon test gives it;
+            index         its index among the test blocks of its file,
+                          from 0, as moon test --index takes it; doc
+                          tests are numbered on their own;
+            kind          test, or doc for a doc test;
+            name          its name as moon test gives it, the text of its
+                          literal with any escapes, or null;
             commit        the commit that introduced it;
             introduced_in the file that commit wrote it in;
             subject       that commit's subject;
@@ -45,7 +60,8 @@ What it prints is one JSON object:
   issues  for each ticket that a test's issue names, by its number:
             title, state, labels, pull_request (whether it is a pull
             request), and criteria: its acceptance criteria, a list of
-            texts, or null when its body has no such heading.
+            texts, or null when its body has no such heading or label.
+            A number that GitHub does not know has only "found": false.
 
 It exits with 2 when git or gh cannot answer, such as when <rev> is not a
 commit.
@@ -53,6 +69,7 @@ commit.
 
 import argparse
 import json
+import posixpath
 import re
 import subprocess
 import sys
@@ -86,43 +103,112 @@ def git(repo, *args):
 # --- Tests --------------------------------------------------------------------
 
 TEST_HEADER = re.compile(r'(?:async\s+)?test(?:\s+("(?:[^"\\]|\\.)*"))?\s*[({]')
+# A line of a doc comment, and its text after /// and one space.
+DOC_LINE = re.compile(r"\s*/// ?(.*)$")
 
 
 @dataclass
 class Block:
-    """A test block of a file: its name, and the lines of its header and of
-    its end, counted from 1."""
+    """A test block of a file: its kind (test, or doc for a doc test), its
+    name or None, its index among the blocks of its kind in its file, the
+    line of its header, and the first and last lines of the top-level item
+    that holds it, all counted from 1."""
 
+    kind: str
     name: str
+    index: int
     header: int
+    start: int
     end: int
 
 
-def unquote(literal):
-    """The text of a MoonBit string literal."""
-    return literal[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+def name_of(match):
+    """The name of the test whose header matched, as moon test gives it:
+    the text between the quotes of its literal, escapes and all; or None
+    for a test without a name."""
+    return match.group(1)[1:-1] if match.group(1) else None
 
 
-def blocks_of(text):
-    """The test blocks of a file. moon fmt starts each top-level item with
-    a line of ///|; a test block runs from its header to its last line
-    before the next item."""
-    lines = text.split("\n")
-    marks = [i for i, line in enumerate(lines) if line.rstrip() == "///|"]
+def code_regions(path, lines):
+    """The ranges of lines that hold code: the whole of a .mbt file, and
+    the mbt blocks of a .mbt.md document."""
+    if not path.endswith(".mbt.md"):
+        return [(0, len(lines))]
+    regions = []
+    start = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if start is None and stripped.startswith("```mbt"):
+            start = i + 1
+        elif start is not None and stripped.startswith("```"):
+            regions.append((start, i))
+            start = None
+    return regions
+
+
+def test_blocks(path, lines):
+    """The test blocks of a file's code, in the order moon test numbers
+    them. moon fmt starts each top-level item with a line of ///|, and the
+    item runs to its last line before the next one."""
     blocks = []
-    for start, end in zip([0] + [m + 1 for m in marks], marks + [len(lines)]):
-        first = next(
-            (i for i in range(start, end)
-             if lines[i].strip() and not lines[i].lstrip().startswith(("//", "#"))),
-            None,
-        )
-        if first is None or not (match := TEST_HEADER.match(lines[first])):
-            continue
-        last = end - 1
-        while last > first and not lines[last].strip():
-            last -= 1
-        blocks.append(Block(unquote(match.group(1)), first + 1, last + 1))
+    for lo, hi in code_regions(path, lines):
+        marks = [i for i in range(lo, hi) if lines[i].rstrip() == "///|"]
+        for start, end in zip([lo] + [m + 1 for m in marks], marks + [hi]):
+            first = next(
+                (i for i in range(start, end)
+                 if lines[i].strip() and not lines[i].lstrip().startswith(("//", "#"))),
+                None,
+            )
+            if first is None or not (match := TEST_HEADER.match(lines[first])):
+                continue
+            last = end - 1
+            while last > first and not lines[last].strip():
+                last -= 1
+            blocks.append(
+                Block("test", name_of(match), len(blocks), first + 1, start + 1, last + 1)
+            )
     return blocks
+
+
+def item_of(lines, i):
+    """The first and the last lines, from 0, of the top-level item that
+    holds line i: from the line after the last line of ///| before it, to
+    the last line that is not blank before the next one."""
+    start = next((j + 1 for j in range(i - 1, -1, -1) if lines[j].rstrip() == "///|"), 0)
+    end = next((j for j in range(i + 1, len(lines)) if lines[j].rstrip() == "///|"), len(lines))
+    while end - 1 > i and not lines[end - 1].strip():
+        end -= 1
+    return start, end - 1
+
+
+def doc_test_blocks(lines):
+    """The doc tests of a .mbt file: the test blocks in the mbt blocks of
+    its doc comments, numbered on their own, as moon test numbers them.
+    Blame reads each with the whole item that the doc comment belongs to:
+    its own lines are often too few for git to find where they were moved
+    from."""
+    blocks = []
+    fenced = False
+    for i, line in enumerate(lines):
+        doc = DOC_LINE.match(line)
+        text = doc.group(1) if doc else ""
+        if not doc or (fenced and text.strip().startswith("```")):
+            fenced = False
+        elif not fenced:
+            fenced = text.strip().startswith("```mbt")
+        elif match := TEST_HEADER.match(text):
+            start, end = item_of(lines, i)
+            blocks.append(Block("doc", name_of(match), len(blocks), i + 1, start + 1, end + 1))
+    return blocks
+
+
+def blocks_of(path, text):
+    """The test blocks and doc tests of a file."""
+    lines = text.split("\n")
+    blocks = test_blocks(path, lines)
+    if not path.endswith(".mbt.md"):
+        blocks += doc_test_blocks(lines)
+    return sorted(blocks, key=lambda b: b.header)
 
 
 # --- Blame --------------------------------------------------------------------
@@ -131,10 +217,11 @@ BLAME_HEADER = re.compile(r"([0-9a-f]{40}) \d+ (\d+)(?: \d+)?$")
 
 
 def blame(repo, rev, path, blocks):
-    """For each line of the blocks, what git blame says of it: the commit
-    that introduced it, the file it was written in, and the commit's
-    subject."""
-    ranges = [arg for b in blocks for arg in ("-L", f"{b.header},{b.end}")]
+    """For each line of the items that hold the blocks, what git blame
+    says of it: the commit that introduced it, the file it was written in,
+    and the commit's subject."""
+    items = sorted({(b.start, b.end) for b in blocks})
+    ranges = [arg for start, end in items for arg in ("-L", f"{start},{end}")]
     out = git(repo, "blame", "--line-porcelain", "-w", "-M", "-C", "-C", "-C",
               *ranges, rev, "--", path)
     lines = {}
@@ -166,9 +253,9 @@ def issue_of(subject):
     return int(numbers.pop()) if len(numbers) == 1 else None
 
 
-def links_of(repo, rev, path):
-    """The records of the tests of a file at rev."""
-    blocks = blocks_of(git(repo, "show", f"{rev}:{path}"))
+def links_of(repo, rev, path, package):
+    """The records of the tests of a file at rev, of the package given."""
+    blocks = blocks_of(path, git(repo, "show", f"{rev}:{path}"))
     if not blocks:
         return []
     blamed = blame(repo, rev, path, blocks)
@@ -177,8 +264,11 @@ def links_of(repo, rev, path):
         line = blamed[block.header]
         subject = line.get("summary", "")
         records.append({
+            "package": package,
             "file": path,
             "line": block.header,
+            "index": block.index,
+            "kind": block.kind,
             "name": block.name,
             "commit": line["commit"],
             "introduced_in": line.get("filename", path),
@@ -270,10 +360,60 @@ def issue_record(issue):
 # --- The whole --------------------------------------------------------------------
 
 
-def moonbit_files(repo, rev, paths):
-    """The MoonBit files at rev, under the paths if any are given."""
+MODULE_NAME = re.compile(r'^\s*name\s*=\s*"([^"]*)"', re.MULTILINE)
+QUOTED = re.compile(r'"([^"]*)"')
+
+
+def modules_of(repo, rev):
+    """The modules at rev: each one's directory, from the root ("" for the
+    root itself), its name, and whether it is a member of the workspace:
+    one that moon.work lists, or the module at the root when there is no
+    moon.work."""
+    names = git(repo, "ls-tree", "-r", "--name-only", rev).splitlines()
+    modules = {}
+    for name in names:
+        directory, base = posixpath.split(name)
+        if base == "moon.mod":
+            text = git(repo, "show", f"{rev}:{name}")
+            match = MODULE_NAME.search(text)
+            modules[directory] = match.group(1) if match else ""
+        elif base == "moon.mod.json":
+            modules[directory] = json.loads(git(repo, "show", f"{rev}:{name}")).get("name", "")
+    if "moon.work" in names:
+        work = git(repo, "show", f"{rev}:moon.work")
+        listed = re.search(r"members\s*=\s*\[(.*?)\]", work, re.DOTALL)
+        members = set()
+        for member in QUOTED.findall(listed.group(1) if listed else ""):
+            directory = posixpath.normpath(member)
+            members.add("" if directory == "." else directory)
+    else:
+        members = {""}
+    return {d: (n, d in members) for d, n in modules.items()}
+
+
+def package_of(path, modules):
+    """The package of a file, as moon names it: its module's name and the
+    file's directory within the module. None when the module that holds
+    the file is not a member of the workspace, or when no module does."""
+    directory = posixpath.dirname(path)
+    parts = directory.split("/") if directory else []
+    for n in range(len(parts), -1, -1):
+        module = "/".join(parts[:n])
+        if module in modules:
+            name, member = modules[module]
+            return "/".join([name, *parts[n:]]) if member else None
+    return None
+
+
+def moonbit_files(repo, rev, paths, modules):
+    """The MoonBit files at rev that members of the workspace hold, under
+    the paths if any are given, with their packages."""
     names = git(repo, "ls-tree", "-r", "--name-only", rev, "--", *paths)
-    return [n for n in names.splitlines() if n.endswith((".mbt", ".mbt.md"))]
+    files = []
+    for name in names.splitlines():
+        if name.endswith((".mbt", ".mbt.md")) and (package := package_of(name, modules)):
+            files.append((name, package))
+    return files
 
 
 def main():
@@ -286,10 +426,10 @@ def main():
     args = parser.parse_args()
     try:
         rev = git(args.repo, "rev-parse", "--verify", "--quiet", f"{args.rev}^{{commit}}").strip()
-        files = moonbit_files(args.repo, rev, args.paths)
+        files = moonbit_files(args.repo, rev, args.paths, modules_of(args.repo, rev))
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-            tests = [t for records in pool.map(lambda f: links_of(args.repo, rev, f), files)
-                     for t in records]
+            found = pool.map(lambda file: links_of(args.repo, rev, *file), files)
+            tests = [record for records in found for record in records]
         numbers = sorted({t["issue"] for t in tests if t["issue"] is not None})
         known = fetch_issues(args.repo) if numbers else {}
     except Failure as error:

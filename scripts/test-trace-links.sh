@@ -427,6 +427,152 @@ value criteria 'out["issues"]["63"]["criteria"]' 'null'
 value criteria 'out["issues"]["63"]["state"]' '"open"'
 value criteria 'out["issues"]["64"]["criteria"]' '["A criterion written on Windows."]'
 
+# --- Which tests, and how they are named ------------------------------------
+
+# Each test is named as moon test names it, so that the kill matrix's
+# records can be joined with the links: its package (the module's name and
+# the directory), its file, its index among the file's test blocks from 0,
+# and its name, or null for a test without one. The name is the literal's
+# text with its escapes, as moon test --test-failure-json gives test_name
+# (a test "a\u{41}\x42" fails there as "test_name":"a\\u{41}\\x42"). A doc
+# test, in a doc comment's mbt block, is of kind doc and has an index of
+# its own, as moon test gives it (http1/target.mbt:44 is its #0). The
+# tests of a module that is not a member of the workspace, such as a
+# fixture of the mutation runner, are not read, and neither is text
+# outside a .mbt.md's mbt blocks.
+tree
+file moon.work <<'EOF'
+members = [
+  ".",
+  "./sub",
+]
+EOF
+file sub/moon.mod <<'EOF'
+name = "fix/sub"
+EOF
+file other/moon.mod <<'EOF'
+name = "fix/other"
+EOF
+file a/a_test.mbt <<'EOF'
+///|
+fn helper() -> Int {
+  1
+}
+
+///|
+test "a plain test" {
+  inspect(helper(), content="1")
+}
+
+///|
+#skip
+async test "an \"escaped\" name, and a backslash \\ too" {
+  inspect(helper(), content="1")
+}
+
+///|
+test "a benchmark" (b : @bench.T) {
+  b.bench(fn() { ignore(helper()) })
+}
+EOF
+file sub/README.mbt.md <<'EOF'
+# sub
+
+test "not code, but prose" {
+
+```mbt check
+///|
+test "the first example" {
+  inspect(@sub.one(), content="1")
+}
+
+///|
+test "the second example" {
+  inspect(@sub.two(), content="2")
+}
+```
+
+More prose.
+
+```mbt check
+///|
+test "the third example" {
+  inspect(@sub.one() + @sub.two(), content="3")
+}
+```
+EOF
+file sub/doc.mbt <<'EOF'
+///|
+/// The number one.
+///
+/// ```mbt check
+/// test {
+///   inspect(@sub.one(), content="1")
+/// }
+/// ```
+pub fn one() -> Int {
+  1
+}
+
+///|
+/// The number two.
+///
+/// ```mbt check
+/// test {
+///   inspect(@sub.two(), content="2")
+/// }
+/// ```
+pub fn two() -> Int {
+  2
+}
+EOF
+file other/o_test.mbt <<'EOF'
+///|
+test "a test of a module outside the workspace" {
+  inspect(1, content="1")
+}
+EOF
+commit "Add the packages (#70)"
+links naming
+exits naming 0
+value naming '[[t["package"], t["file"], t["line"], t["index"], t["kind"], t["name"]] for t in out["tests"]]' \
+  '[["fix/fix/a","a/a_test.mbt",7,0,"test","a plain test"],["fix/fix/a","a/a_test.mbt",13,1,"test","an \\\"escaped\\\" name, and a backslash \\\\ too"],["fix/fix/a","a/a_test.mbt",18,2,"test","a benchmark"],["fix/sub","sub/README.mbt.md",7,0,"test","the first example"],["fix/sub","sub/README.mbt.md",12,1,"test","the second example"],["fix/sub","sub/README.mbt.md",21,2,"test","the third example"],["fix/sub","sub/doc.mbt",5,0,"doc",null],["fix/sub","sub/doc.mbt",17,1,"doc",null]]'
+value naming '{t["issue"] for t in out["tests"]} == {70}' 'true'
+
+# A doc test moves with the function whose doc comment holds it: blame
+# reads it together with the rest of that item, since its own few lines
+# are too short for git to tell where they came from.
+file sub/doc.mbt <<'EOF'
+///|
+/// The number one.
+///
+/// ```mbt check
+/// test {
+///   inspect(@sub.one(), content="1")
+/// }
+/// ```
+pub fn one() -> Int {
+  1
+}
+EOF
+file sub/two.mbt <<'EOF'
+///|
+/// The number two.
+///
+/// ```mbt check
+/// test {
+///   inspect(@sub.two(), content="2")
+/// }
+/// ```
+pub fn two() -> Int {
+  2
+}
+EOF
+commit "Give the number two a file of its own (#71)"
+links doc_moved
+value doc_moved '[[t["file"], t["index"], t["issue"], t["introduced_in"]] for t in out["tests"] if t["kind"] == "doc"]' \
+  '[["sub/doc.mbt",0,70,"sub/doc.mbt"],["sub/two.mbt",0,70,"sub/doc.mbt"]]'
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" = 0 ]
