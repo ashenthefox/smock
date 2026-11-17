@@ -141,7 +141,10 @@ Packages of `smock/smock`:
   natively. It reads the host name that a TLS ClientHello asks for by SNI
   (RFC 6066, section 3) from the octets a client has sent so far, or tells
   that more octets are needed; `server` reads them from the socket and
-  chooses the certificate by the name. It imports no moonhttp
+  chooses the certificate by the name. It reads the Admin API's bearer
+  token and path parameters, and makes smock's own checks of an HTTP/2
+  request: whether HTTP/1.1's rules refuse it, and the body length its
+  `content-length` declares. It imports no moonhttp
   ([ADR 0005](docs/adr/0005-http2-comes-from-moonhttp.md),
   [ADR 0006](docs/adr/0006-tests-are-judged-by-four-ledgers.md)): anything
   that needs it stays in `server`. Its tests read no files: the
