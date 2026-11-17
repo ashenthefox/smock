@@ -420,17 +420,19 @@ struct Stopped {
 /// arguments and becomes smock by exec, such as `systemd-run --scope ...
 /// --`, so that the signal still reaches smock. With `close_stdout`, the
 /// reading end of smock's stdout is closed once smock listens, so that every
-/// write smock makes there after that fails.
+/// write smock makes there after that fails. With `dump`, smock is asked
+/// for its coverage counters, which stay in the lines of its stdout.
 async fn with_smock(
   args : Array[String],
   env~ : Map[String, String] = Map([]),
   cwd~ : String = ".",
   under~ : Array[String] = [],
   close_stdout~ : Bool = false,
+  dump~ : Bool = false,
   f : async (Smock) -> Unit,
 ) -> Stopped {
   @async.with_task_group(group => {
-    let serving = Serving::start(group, args, env~, cwd~, under~)
+    let serving = Serving::start(group, args, env~, cwd~, under~, dump~)
     guard serving.listening_on(["plain", "tls", "admin"]) is Some(ports) else {
       fail("smock exited before listening:\n\{serving.log().join("\n")}")
     }
@@ -492,24 +494,30 @@ fn logs_to_stdout(args : Array[String], env : Map[String, String]) -> Bool {
 /// its environment, in the working directory `cwd`, under the command
 /// `under` when given (see `with_smock`), and reads the lines of its stderr
 /// and of its stdout as they come. Its log lines come from stderr, or from
-/// stdout when a test sets the mockoon log format.
+/// stdout when a test sets the mockoon log format. With `dump`, smock is
+/// asked for its coverage counters, which stay in the lines of its stdout.
 async fn[X] Serving::start(
   group : @async.TaskGroup[X],
   args : Array[String],
   env~ : Map[String, String] = Map([]),
   cwd~ : String = ".",
   under~ : Array[String] = [],
+  dump~ : Bool = false,
 ) -> Serving {
   build.wait()
   let (stderr, stderr_end) = @process.read_from_process()
   let (stdout, stdout_end) = @process.read_from_process()
   let smock = [@fs.realpath(binary), "serve", ..args]
   let command = [..under, ..smock]
+  let smock_env = smock_env(env)
+  if dump {
+    smock_env[coverage_variable] = "1"
+  }
   let process = @process.spawn(
     group,
     command[0],
     command[1:],
-    extra_env=smock_env(env),
+    extra_env=smock_env,
     inherit_env=false,
     stdout=stdout_end,
     stderr=stderr_end,

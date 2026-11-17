@@ -81,3 +81,32 @@ async test "with SMOCK_COVERAGE_DUMP set, smock check writes its coverage counte
     },
   )
 }
+
+///|
+async test "with SMOCK_COVERAGE_DUMP set, smock serve writes its coverage counters to stdout as it exits after SIGTERM, after its last log line in the mockoon log format" {
+  // #341, as above. docs/running.md: on SIGTERM, smock drains and exits
+  // with 0, and the mockoon format "also writes `Server stopped` for each
+  // Mock served, right after `drain ended`": here only the Default Mock,
+  // with no definitions directory.
+  let env = { "SMOCK_LOG_FORMAT": "mockoon" }
+  let stopped = with_smock(["--port", "0"], env~, _ => ())
+  let dumped = with_smock(["--port", "0"], env~, dump=true, _ => ())
+  guard dumped.stdout.search("----- BEGIN MOONBIT COVERAGE -----")
+    is Some(begin) else {
+    fail("no coverage counters on stdout:\n\{dumped.stdout.join("\n")}")
+  }
+  inspect(
+    (
+      $|exit status \{stopped.status}, and \{dumped.status} with the variable
+      $|log lines without the variable: \{stopped.stdout.length() > 0}, the last: \{message_of(stopped.stdout[stopped.stdout.length() - 1])}
+      $|log lines with it, before the counters, as many: \{begin == stopped.stdout.length()}, the last: \{message_of(dumped.stdout[begin - 1])}
+      $|then: \{counters_shape(dumped.stdout[begin:])}
+    ),
+    content=(
+      #|exit status 0, and 0 with the variable
+      #|log lines without the variable: true, the last: Server stopped
+      #|log lines with it, before the counters, as many: true, the last: Server stopped
+      #|then: the coverage counters
+    ),
+  )
+}
