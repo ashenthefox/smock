@@ -301,6 +301,123 @@ MBT
 report extended
 empty extended
 
+# --- Snapshot lines changed ------------------------------------------------------
+
+# Snapshots: written in the call, over several lines, and in a constant and
+# a variable that content= names. The test also reads a multi-line string
+# that is its input, not a snapshot.
+snapshots() {
+  file add/lines_test.mbt <<'MBT'
+///|
+/// The lines that start_up writes.
+let startup : String =
+  #|starting
+  #|listening
+
+///|
+test "writes lines" {
+  let input =
+    #|a: 1
+    #|b: 2
+  let expected =
+    #|a=1
+    #|b=2
+  inspect(input.length(), content="9")
+  inspect(
+    [input, "end"].join("\n"),
+    content=(
+      #|a: 1
+      #|b: 2
+      #|end
+    ),
+  )
+  inspect(input, content=expected)
+  inspect(input, content=startup)
+}
+MBT
+}
+
+# A snapshot written in the call: the line counts as a snapshot line, not
+# as another assertion.
+tree
+package
+branch
+sed -i 's/content="-1"/content="-2"/' "$repo/add/add_test.mbt"
+report inline
+mentions inline "## Snapshot lines changed"
+mentions inline '`add/add_test.mbt:7`: test "adds a negative number"'
+mentions inline '-  inspect(@add.add(2, -3), content="-1")'
+mentions inline '+  inspect(@add.add(2, -3), content="-2")'
+lacks inline "## Assertions removed or changed in tests that stay"
+
+# A line of a snapshot over several lines changed, and one added to it.
+tree
+package
+snapshots
+branch
+sed -i 's/^      #|b: 2$/      #|b: 3/; s/^      #|end$/      #|end\n      #|more/' "$repo/add/lines_test.mbt"
+report multiline
+mentions multiline '`add/lines_test.mbt:8`: test "writes lines"'
+mentions multiline '-      #|b: 2'
+mentions multiline '+      #|b: 3'
+mentions multiline '+      #|more'
+lacks multiline '#|a: 1'
+
+# A snapshot in a variable and in a constant that content= names.
+tree
+package
+snapshots
+branch
+sed -i 's/^    #|b=2$/    #|b=3/; s/^  #|listening$/  #|ready/' "$repo/add/lines_test.mbt"
+report named
+mentions named '-    #|b=2'
+mentions named '+    #|b=3'
+mentions named '`add/lines_test.mbt:3`: let startup'
+mentions named '-  #|listening'
+mentions named '+  #|ready'
+lacks named "## Assertions removed or changed in tests that stay"
+
+# A snapshot of a file in __snapshot__, changed and deleted; a new one is
+# not a change.
+tree
+package
+file add/__snapshot__/sum.txt <<'TXT'
+5
+TXT
+file add/__snapshot__/difference.txt <<'TXT'
+-1
+TXT
+branch
+echo 6 >"$repo/add/__snapshot__/sum.txt"
+remove add/__snapshot__/difference.txt
+echo 0 >"$repo/add/__snapshot__/zero.txt"
+report snapshot-file
+mentions snapshot-file '`add/__snapshot__/sum.txt`'
+mentions snapshot-file '+6'
+mentions snapshot-file '`add/__snapshot__/difference.txt`'
+lacks snapshot-file 'zero.txt'
+
+# The test's input changed, and a new snapshot added, weaken nothing.
+tree
+package
+snapshots
+branch
+sed -i 's/^    #|b: 2$/    #|b: 2\n    #|c: 3/' "$repo/add/lines_test.mbt"
+cat >>"$repo/add/lines_test.mbt" <<'MBT'
+
+///|
+test "writes one line" {
+  inspect(
+    "a",
+    content=(
+      #|a
+    ),
+  )
+}
+MBT
+report input
+empty input
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]

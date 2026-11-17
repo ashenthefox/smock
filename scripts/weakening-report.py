@@ -282,34 +282,71 @@ class Hunk:
         return out
 
 
-def weakened(before, after):
-    """The hunks in which after removes or changes an assertion of
-    before, or adds lines inside one. Lines are compared without their
+SNAPSHOT = re.compile(r"(?<![\w.])(?:@\w+\.)?(?:inspect|debug_inspect|json_inspect)\s*\(")
+CONTENT_NAME = re.compile(r"\bcontent=\s*([a-z_]\w*)")
+LOCAL_LET = re.compile(r"\s*let\s+([a-z_]\w*)\b")
+
+
+def snapshot_names(items):
+    """The names that a content= of these items gives a snapshot by: of
+    a constant or a variable that holds it."""
+    return {
+        name
+        for item in items
+        for line in item.lines
+        for name in CONTENT_NAME.findall(code_of(line))
+    }
+
+
+def snapshot_spans(item, names):
+    """The ranges of lines, first and last, of an item that hold a
+    snapshot: the content= of a call of inspect, debug_inspect or
+    json_inspect, and the value of a constant or a variable that a
+    content= names."""
+    if item.kind == "let" and item.name in names:
+        return [(0, len(item.lines) - 1)]
+    code = [code_of(line) for line in item.lines]
+    spans = []
+    for i, text in enumerate(code):
+        if SNAPSHOT.search(text):
+            for j in range(i, statement_end(item.lines, i) + 1):
+                if "content=" in code[j]:
+                    spans.append((j, statement_end(item.lines, j)))
+        elif (local := LOCAL_LET.match(text)) and local.group(1) in names:
+            spans.append((i, statement_end(item.lines, i)))
+    return spans
+
+
+def weakened(before, after, names):
+    """The hunks in which after removes or changes a snapshot or an
+    assertion of before, or adds lines inside one: those of snapshots, and
+    those of other assertions. Lines are compared without their
     indentation, so that a block moved deeper changes nothing."""
-    spans = assertion_spans(before.lines)
+    snapshots = snapshot_spans(before, names)
+    assertions = assertion_spans(before.lines)
     matcher = difflib.SequenceMatcher(
         None,
         [line.strip() for line in before.lines],
         [line.strip() for line in after.lines],
         autojunk=False,
     )
-    hunks = []
+    found = {"snapshot": [], "assertion": []}
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
-        if i1 < i2 and not touches(spans, i1, i2 - 1):
-            continue
-        if i1 == i2 and not (i1 > 0 and inside(spans, i1 - 1, i1)):
-            continue
-        hunks.append(
-            Hunk(
-                before.line + i1,
-                before.lines[i1:i2],
-                after.line + j1,
-                after.lines[j1:j2],
-            )
-        )
-    return hunks
+        for kind, spans in (("snapshot", snapshots), ("assertion", assertions)):
+            if (i1 < i2 and touches(spans, i1, i2 - 1)) or (
+                i1 == i2 and i1 > 0 and inside(spans, i1 - 1, i1)
+            ):
+                hunk = Hunk(
+                    before.line + i1,
+                    before.lines[i1:i2],
+                    after.line + j1,
+                    after.lines[j1:j2],
+                )
+                found[kind].append(hunk)
+                break
+    return found["snapshot"], found["assertion"]
 
 
 def package_items(repo, rev, package):
@@ -355,18 +392,28 @@ def report(repo, base_ref, head_ref):
     head = git(repo, "rev-parse", "--verify", f"{head_ref}^{{commit}}").strip()
     git(repo, "rev-parse", "--verify", f"{base_ref}^{{commit}}")
     base = git(repo, "merge-base", base_ref, head).strip()
-    changed = git(repo, "diff", "--name-only", "--no-renames", base, head).splitlines()
+    changed = [
+        line.split("\t", 1)
+        for line in git(repo, "diff", "--name-status", "--no-renames", base, head).splitlines()
+    ]
 
-    deleted, assertions = [], []
-    packages = sorted({posixpath.dirname(path) for path in changed if is_moonbit(path)})
+    deleted, assertions, snapshots = [], [], []
+    packages = sorted({posixpath.dirname(path) for _, path in changed if is_moonbit(path)})
     for package in packages:
-        pairs, gone = pair(
-            package_items(repo, base, package), package_items(repo, head, package)
-        )
+        base_items = package_items(repo, base, package)
+        head_items = package_items(repo, head, package)
+        names = snapshot_names(base_items + head_items)
+        pairs, gone = pair(base_items, head_items)
         deleted.extend(item for item in gone if item.kind == "test")
         for before, after in pairs:
-            if hunks := weakened(before, after):
-                assertions.append((before, after, hunks))
+            in_snapshots, in_assertions = weakened(before, after, names)
+            if in_snapshots:
+                snapshots.append(changed_item(before, after, in_snapshots))
+            if in_assertions:
+                assertions.append(changed_item(before, after, in_assertions))
+    for status, path in changed:
+        if "__snapshot__" in path.split("/") and status in ("M", "D"):
+            snapshots.append(changed_file(repo, base, head, path))
 
     short = lambda rev: git(repo, "rev-parse", "--short", rev).strip()
     out = [
@@ -380,13 +427,24 @@ def report(repo, base_ref, head_ref):
         out += ["## Tests deleted", ""]
         out += [f"- `{item.path}:{item.line}`: {item.title()}" for item in deleted]
         out.append("")
-    if assertions:
-        out += ["## Assertions removed or changed in tests that stay", ""]
-        for before, after, hunks in assertions:
-            out += changed_item(before, after, hunks)
-    if not (deleted or assertions):
+    for title, entries in (
+        ("Assertions removed or changed in tests that stay", assertions),
+        ("Snapshot lines changed", snapshots),
+    ):
+        if entries:
+            out += [f"## {title}", ""]
+            for entry in entries:
+                out += entry
+    if not (deleted or assertions or snapshots):
         out += ["Nothing to report.", ""]
     return out
+
+
+def changed_file(repo, base, head, path):
+    """A file and its diff, as Markdown lines."""
+    diff = git(repo, "diff", base, head, "--", path).splitlines()
+    hunks = diff[next((i for i, line in enumerate(diff) if line.startswith("@@")), len(diff)) :]
+    return [f"### `{path}`", "", "```diff", *hunks, "```", ""]
 
 
 def changed_item(before, after, hunks):
