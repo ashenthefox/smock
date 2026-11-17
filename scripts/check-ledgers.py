@@ -20,6 +20,9 @@ TEST_COLUMNS = {"feature": ["Checked by"], "message": ["Checked by"], "limit": [
 TEST_FILE = re.compile(r".*(?:_test\.mbt|_wbtest\.mbt|\.mbt\.md)")
 TEST_HEAD = re.compile(r'(?:async )?test "((?:[^"\\]|\\.)*)"')
 TEST_ENTRY = re.compile(r'`([^`]+)` "((?:[^"\\]|\\.)*)"')
+CHECK_ENTRY = re.compile(r"`([^`]+)`(?:\s|$)")
+TICKET_ENTRY = re.compile(r"#[0-9]+\b")
+MANUAL_ENTRY = re.compile(r"Manual: \S")
 
 
 def plural(count, word):
@@ -50,17 +53,53 @@ class Tree:
                     self.names[path] = [m.group(1) for m in map(TEST_HEAD.match, f) if m]
         return self.names[path]
 
+    def exists(self, path):
+        """Whether `path`, a path from the tree's root, is a file or a
+        directory of the tree."""
+        parts = path.split("/")
+        if path.startswith("/") or ".." in parts:
+            return False
+        return os.path.exists(os.path.join(self.root, path))
 
-def entry_problems(entry, tree):
-    """The problems of one entry of a cell that names what checks a row."""
+
+def entry_kind(entry):
+    """What the entry `entry` of a cell that names what checks a row is: a
+    test, a check, a ticket or a manual check, or None."""
     test = TEST_ENTRY.match(entry)
     if test and TEST_FILE.fullmatch(test.group(1)):
-        path, name = test.groups()
+        return "test"
+    check = CHECK_ENTRY.match(entry)
+    if check and not TEST_FILE.fullmatch(check.group(1)):
+        return "check"
+    if TICKET_ENTRY.match(entry):
+        return "ticket"
+    if MANUAL_ENTRY.match(entry):
+        return "manual"
+    return None
+
+
+def entry_problems(entry, column, tree):
+    """The problems of `entry`, an entry of the cell of `column` that names
+    what checks a row."""
+    if not entry:
+        return [f"an entry of {column} is empty"]
+    kind = entry_kind(entry)
+    if kind is None:
+        return [f'"{entry}" is not a test, a check, a ticket or a manual check']
+    if kind == "test":
+        path, name = TEST_ENTRY.match(entry).groups()
         names = tree.tests(path)
         if names is None:
             return [f"{path}: no such file"]
-        if names.count(name) == 0:
+        count = names.count(name)
+        if count == 0:
             return [f'{path}: no test named "{name}"']
+        if count > 1:
+            return [f'{path}: {count} tests are named "{name}"']
+    if kind == "check":
+        path = CHECK_ENTRY.match(entry).group(1)
+        if not tree.exists(path):
+            return [f"{path}: no such file or directory"]
     return []
 
 
@@ -86,7 +125,7 @@ def ledger_problems(path, text, tree, counts):
         values = dict(zip(columns, row))
         for column in TEST_COLUMNS[kind]:
             for entry in values.get(column, "").split("<br>"):
-                for problem in entry_problems(entry.strip(), tree):
+                for problem in entry_problems(entry.strip(), column, tree):
                     problems.append((number, values["ID"], problem))
     return problems
 

@@ -172,6 +172,43 @@ says missing-test 'docs/ledgers/boundaries.md:5: L01: http1/limits_test.mbt: no 
 says missing-test "check-ledgers: 1 feature, 1 message and 1 limit, 1 problem"
 lines missing-test 2
 
+# --- Entries of every kind -----------------------------------------------------
+
+# A test, a check, a ticket and a manual check are each an entry, with text
+# after them; a name in a comment or a string, or the start of a longer
+# name, is no test; a file with two tests of a name names neither.
+tree
+ledgers
+cat >>"$root/e2e/serve_test.mbt" <<'MBT'
+
+///|
+test "a name with \"quotes\"" {
+  ()
+}
+MBT
+cat >>"$root/docs/ledgers/use-cases.md" <<'MD'
+
+| ID | Feature | Source | Status | Checked by |
+|---|---|---|---|---|
+| F02 | Kinds | [Run](../../README.md#run) | partly | `server/reset_wbtest.mbt` "a reset is sent" (white-box)<br>`scripts/smoke-test-image.sh`<br>#287 adds the rest<br>Manual: only an operating-system failure shows it |
+| F03 | Not tests | [Run](../../README.md#run) | tested | `e2e/serve_test.mbt` "a test in a comment"<br>`e2e/serve_test.mbt` "a test in a string"<br>`e2e/serve_test.mbt` "a name"<br>`e2e/serve_test.mbt` "a name with \"quotes\""<br>`e2e/missing_test.mbt` "a test"<br>`scripts/missing.sh` runs<br>the image runs<br>Manual:<br>#<br> |
+MD
+check kinds
+exits kinds 1
+says kinds 'docs/ledgers/use-cases.md:18: F03: e2e/serve_test.mbt: no test named "a test in a comment"'
+says kinds 'docs/ledgers/use-cases.md:18: F03: e2e/serve_test.mbt: no test named "a test in a string"'
+says kinds 'docs/ledgers/use-cases.md:18: F03: e2e/serve_test.mbt: no test named "a name"'
+says kinds 'docs/ledgers/use-cases.md:18: F03: e2e/serve_test.mbt: 2 tests are named "a name with \"quotes\""'
+says kinds 'docs/ledgers/use-cases.md:18: F03: e2e/missing_test.mbt: no such file'
+says kinds 'docs/ledgers/use-cases.md:18: F03: scripts/missing.sh: no such file or directory'
+says kinds 'docs/ledgers/use-cases.md:18: F03: "the image runs" is not a test, a check, a ticket or a manual check'
+says kinds 'docs/ledgers/use-cases.md:18: F03: "Manual:" is not a test, a check, a ticket or a manual check'
+says kinds 'docs/ledgers/use-cases.md:18: F03: "#" is not a test, a check, a ticket or a manual check'
+says kinds 'docs/ledgers/use-cases.md:18: F03: an entry of Checked by is empty'
+says kinds 'docs/ledgers/use-cases.md:13: M01: e2e/serve_test.mbt: 2 tests are named "a name with \"quotes\""'
+says kinds "check-ledgers: 3 features, 1 message and 1 limit, 11 problems"
+lines kinds 12
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]
