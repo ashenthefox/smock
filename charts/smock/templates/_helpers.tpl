@@ -71,12 +71,13 @@ the Pods; new content for the same files still reaches smock by reload.
 The security context of a container, for the Restricted Pod Security
 Standard: a numeric non-root UID (the argument), a read-only root
 filesystem, no privilege escalation, no capabilities and the runtime
-default seccomp profile.
+default seccomp profile. The UID is written in full, as smock.string writes
+it.
 */}}
 {{- define "smock.containerSecurityContext" -}}
 runAsNonRoot: true
-runAsUser: {{ . }}
-runAsGroup: {{ . }}
+runAsUser: {{ include "smock.string" . }}
+runAsGroup: {{ include "smock.string" . }}
 allowPrivilegeEscalation: false
 readOnlyRootFilesystem: true
 capabilities:
@@ -122,7 +123,7 @@ the init container, which syncs once so that smock starts with its files
     - {{ printf "--ref=%s" $g.ref | quote }}
     - --root=/git
     - --link=current
-    - {{ printf "--depth=%v" $g.depth | quote }}
+    - {{ printf "--depth=%s" (include "smock.string" $g.depth) | quote }}
     {{- if .oneTime }}
     - --one-time
     {{- else }}

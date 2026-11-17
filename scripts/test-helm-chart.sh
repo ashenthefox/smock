@@ -139,6 +139,28 @@ check() {
   fi
 }
 
+# check_text <name> <description> <jq filter> [jq arguments...]: like check,
+# but each number in the manifests rendered as <name> is a string, the text
+# the chart wrote for it, so the filter sees how a number is written. In
+# JSON, 1e+06 and 1000000 are the same number. The arguments, such as
+# --arg, give the filter its variables.
+check_text() {
+  name=$1 description=$2 filter=$3
+  shift 3
+  if yq --output-format=json eval-all '[.] | map(select(. != null))
+       | (.. | select(tag == "!!int" or tag == "!!float")) |= to_string' \
+    "$tmp/$name.yaml" >"$tmp/$name.text.json" 2>"$tmp/jq.err" &&
+    jq -e "$@" "$defs $filter" "$tmp/$name.text.json" >/dev/null 2>"$tmp/jq.err"; then
+    pass "$name: $description"
+  else
+    fail "$name: $description"
+    echo "     filter: $filter"
+    if [ -s "$tmp/jq.err" ]; then
+      sed 's/^/     /' "$tmp/jq.err"
+    fi
+  fi
+}
+
 # restricted <name>: the Pod rendered as <name> and each of its containers
 # meet the Restricted Pod Security Standard.
 restricted() {
@@ -337,6 +359,28 @@ check git-sync "both git-sync containers fetch the depth set, 0 for the whole hi
    | ($c | length) == 2
    and all($c[]; [.args[] | select(startswith("--depth"))] == ["--depth=0"]
      and (.args | index("--stale-worktree-timeout=30s")))'
+
+# Helm reads a number in a values file as a floating-point number, which Go
+# writes as 1e+06 from a million up; git-sync's --depth and Kubernetes'
+# runAsUser and runAsGroup take only whole numbers. A UID of this size is
+# what some platforms assign to a namespace. Both reach the two git-sync
+# containers with the digits of the values file (#377).
+cat >"$tmp/values-git-sync-large.yaml" <<'YAML'
+definitions:
+  gitSync:
+    depth: 1000000
+    uid: 1000680000
+YAML
+depth=$(yq '.definitions.gitSync.depth' "$tmp/values-git-sync-large.yaml")
+uid=$(yq '.definitions.gitSync.uid' "$tmp/values-git-sync-large.yaml")
+render git-sync-large --values "$tmp/values-token.yaml" --values "$tmp/values-git-sync.yaml" \
+  --values "$tmp/values-git-sync-large.yaml"
+check_text git-sync-large "a depth and a UID of a million or more from a values file reach both git-sync containers in full" \
+  '[container("git-sync", "git-sync-init")] as $c
+   | ($c | length) == 2
+   and all($c[]; [.args[] | select(startswith("--depth"))] == ["--depth=\($depth)"]
+     and .securityContext.runAsUser == $uid and .securityContext.runAsGroup == $uid)' \
+  --arg depth "$depth" --arg uid "$uid"
 
 render git-sync-root --values "$tmp/values-token.yaml" --set definitions.source=gitSync --set definitions.gitSync.repo=https://example.com/m.git
 check git-sync-root "without a path, the Definition files are at the top of the repository" \
