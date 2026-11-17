@@ -260,8 +260,8 @@ cat >>"$root/docs/ledgers/use-cases.md" <<'MD'
 |---|---|---|---|---|---|
 | M10 | Asserted by hand | #1 | user | asserted | Manual: by hand |
 | M11 | Deleted with a test | #1 | user | deleted | #280 deleted it<br>`scripts/smoke-test-image.sh` |
-| M12 | Seen by nobody | #1 | nobody | open | #283 |
-| M13 | Deleted | #1 | user | deleted | #280 deleted it |
+| M12 | Seen by someone | #1 | someone | open | #283 |
+| M13 | Deleted | #1 | nobody | deleted | #280 deleted it |
 | M14 | Open | #1 | package | open | #283 |
 | M15 | Manual | #1 | user | manual | Manual: only an operating-system failure shows it |
 MD
@@ -284,7 +284,7 @@ says statuses "docs/ledgers/use-cases.md:23: F16: an open row names tickets alon
 says statuses "docs/ledgers/use-cases.md:24: F17: the status is not tested, partly, manual or open"
 says statuses "docs/ledgers/use-cases.md:30: M10: an asserted row names tests and checks alone"
 says statuses "docs/ledgers/use-cases.md:31: M11: a deleted row names tickets alone: the one that deleted it"
-says statuses "docs/ledgers/use-cases.md:32: M12: seen by is not user or package"
+says statuses "docs/ledgers/use-cases.md:32: M12: seen by is not user, package or nobody"
 says statuses "docs/ledgers/boundaries.md:6: L10: a tested row names tests and checks alone"
 says statuses "docs/ledgers/boundaries.md:9: L13: a partly tested row names tests, checks and tickets alone, with at least one ticket and one test or check"
 says statuses "docs/ledgers/boundaries.md:10: L14: an open row names tickets alone"

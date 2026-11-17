@@ -19,8 +19,8 @@ first cell is ID, and the header gives the table's kind by its columns:
   | ID | Message | Source | Seen by | Status | Checked by |
       a message smock gives; its id is M and two digits, its status
       asserted, open, deleted or manual, and seen by user, when a user of
-      smock can see it, or package, when only a package's interface shows
-      it;
+      smock can see it, package, when only a package's interface shows it,
+      or nobody, when no input reaches it;
   | ID | Limit | Source | Package | Status | At the limit | Just past it |
       a limit; its id is L, two digits and maybe a lower-case letter, its
       status tested, partly or open, and its package one or more package
@@ -240,8 +240,8 @@ def row_problems(kind, values, tree):
         problems.append(f"the id is not {ID_SHAPES[kind]}")
     if not (LINK.search(values["Source"]) or TICKET.search(values["Source"])):
         problems.append("the source has no link and names no issue")
-    if kind == "message" and values["Seen by"] not in ("user", "package"):
-        problems.append("seen by is not user or package")
+    if kind == "message" and values["Seen by"] not in ("user", "package", "nobody"):
+        problems.append("seen by is not user, package or nobody")
     if kind == "limit":
         problems += package_problems(values["Package"], tree)
     sides = []
