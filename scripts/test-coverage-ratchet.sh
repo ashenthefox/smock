@@ -151,6 +151,91 @@ ratchet falls covered.bisect
 exits falls 0
 says falls "prng: 0 uncovered points, at its floor of 0"
 
+# --- A raised floor ----------------------------------------------------------------
+
+# raises <line>...: writes the list of approved raises, one a line.
+raises() {
+  mkdir -p "$repo/coverage"
+  printf '# The approved raises of a test.\n' >"$repo/coverage/approved-raises.txt"
+  for line in "$@"; do
+    printf '%s\n' "$line" >>"$repo/coverage/approved-raises.txt"
+  done
+}
+
+# A floor raised to let the uncovered point in, with no recorded raise.
+tree
+floors "prng 0"
+branch
+floors "prng 1"
+ratchet raised partly.bisect
+exits raised 1
+says raised "prng: its floor rose from 0 to 1 against the merge base"
+says raised 'add "prng 1 <reason>" to coverage/approved-raises.txt in the same change'
+
+# The same raise, recorded with its reason, passes, and the ratchet says so.
+tree
+floors "prng 0"
+raises
+branch
+floors "prng 1"
+raises "prng 1 the abort arm of an invariant waits for the exclusion list (#302)"
+ratchet recorded partly.bisect
+exits recorded 0
+says recorded "prng: its floor rose by 1, as coverage/approved-raises.txt records: the abort arm of an invariant waits for the exclusion list (#302)"
+
+# A raise recorded at the base approved that change's raise, not this one.
+tree
+floors "prng 0"
+raises "prng 1 an earlier raise"
+branch
+floors "prng 1"
+ratchet recorded-before partly.bisect
+exits recorded-before 1
+says recorded-before "prng: its floor rose from 0 to 1 against the merge base"
+
+# A record must cover the whole raise.
+tree
+floors "prng 0"
+raises
+branch
+floors "prng 2"
+raises "prng 1 one point"
+ratchet short partly.bisect
+exits short 1
+says short "prng: its floor rose from 0 to 2 against the merge base"
+says short "coverage/approved-raises.txt records 1 point of it"
+says short 'add "prng 1 <reason>" to coverage/approved-raises.txt in the same change'
+
+# A package without a floor at the base had none: its first floor is a
+# raise from 0.
+tree
+floors "prng 1"
+branch
+floors "cmd/smock 4" "prng 1" "server 4"
+raises "server 4 the parsers' callers wait for e2e coverage (#342)"
+ratchet new-packages packages.bisect
+exits new-packages 1
+says new-packages "cmd/smock: its floor rose from none to 4 against the merge base"
+says new-packages "server: its floor rose by 4, as coverage/approved-raises.txt records"
+
+# A line that is not <package> <points> <reason> fails the check.
+tree
+floors "prng 1"
+branch
+raises "prng one the abort arm"
+ratchet malformed-raise partly.bisect
+exits malformed-raise 1
+says malformed-raise "coverage/approved-raises.txt:2: should be <package> <points> <reason>"
+
+# Before the floors are committed at the merge base, there is nothing to
+# compare with.
+tree
+branch
+floors "prng 1"
+ratchet first partly.bisect
+exits first 0
+says first "has no committed floors: nothing to compare with"
+
 # write sets each package's floor to its uncovered points, in the order of
 # the packages' names, and keeps the comments at the start of the file.
 tree
