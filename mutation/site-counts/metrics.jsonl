@@ -1,0 +1,13 @@
+{"file":"metrics/metrics.mbt","definition":"CounterSeries::inc","text":"6e06a5a7a4894309","pinned":{"BODY":1,"ROR":1,"IFC":1,"NOT":1,"DEL":2,"AOR":1},"full":{"BODY":1,"ROR":1,"IFC":2,"NOT":1,"DEL":2,"AOR":1}}
+{"file":"metrics/metrics.mbt","definition":"CounterSeries::advance_to","text":"cd3b42a1a4399734","pinned":{"BODY":1,"ROR":1,"IFC":1,"DEL":1},"full":{"BODY":1,"ROR":1,"IFC":2,"DEL":1}}
+{"file":"metrics/metrics.mbt","definition":"GaugeSeries::set","text":"a32beade6705b137","pinned":{"BODY":1},"full":{"BODY":1}}
+{"file":"metrics/metrics.mbt","definition":"GaugeSeries::add","text":"33be17ec320f4b9b","pinned":{"BODY":1,"AOR":1},"full":{"BODY":1,"AOR":1}}
+{"file":"metrics/metrics.mbt","definition":"Registry::histogram","text":"5ba36277823094f2","pinned":{"ROR":2,"IFC":2,"LCR":3,"NOT":1,"DEL":2,"AOR":1,"INT":4},"full":{"ROR":2,"IFC":4,"LCR":3,"NOT":1,"DEL":2,"AOR":1,"INT":4}}
+{"file":"metrics/metrics.mbt","definition":"HistogramSeries::observe","text":"771b115eb69957c1","pinned":{"BODY":1,"ROR":1,"DEL":2,"AOR":2,"INT":1},"full":{"BODY":1,"ROR":1,"DEL":2,"AOR":2,"INT":2}}
+{"file":"metrics/metrics.mbt","definition":"Registry::register","text":"3e5f19e520f14417","pinned":{"IFC":5,"LCR":1,"NOT":2,"DEL":5,"BOOL":2},"full":{"IFC":10,"LCR":1,"NOT":2,"DEL":5,"BOOL":2}}
+{"file":"metrics/metrics.mbt","definition":"Family::series_for","text":"40ba567fcc5d92e7","pinned":{"IFC":1,"DEL":2,"AOR":1,"INT":4},"full":{"IFC":2,"DEL":2,"AOR":1,"INT":8}}
+{"file":"metrics/metrics.mbt","definition":"Registry::render","text":"91a58a20aed35046","pinned":{"BODY":1,"ROR":1,"IFC":1,"DEL":7,"BOOL":1,"AOR":1,"INT":1},"full":{"BODY":1,"ROR":1,"IFC":2,"DEL":7,"BOOL":1,"AOR":1,"INT":2}}
+{"file":"metrics/metrics.mbt","definition":"sample","text":"67f246d475667138","pinned":{"BODY":1,"ROR":1,"IFC":2,"NOT":1,"DEL":10,"BOOL":1,"INT":2},"full":{"BODY":1,"ROR":1,"IFC":4,"NOT":1,"DEL":10,"BOOL":1,"INT":2}}
+{"file":"metrics/metrics.mbt","definition":"escape","text":"5903f190efeeac30","pinned":{"BODY":1,"IFC":1},"full":{"BODY":1,"IFC":2}}
+{"file":"metrics/metrics.mbt","definition":"number","text":"cf8642aadfa36777","pinned":{"BODY":1,"IFC":2},"full":{"BODY":1,"IFC":4}}
+{"file":"metrics/metrics.mbt","definition":"is_name","text":"32de75da83d64284","pinned":{"BODY":1,"ROR":7,"IFC":2,"LCR":9,"NOT":1,"BOOL":3,"INT":2},"full":{"BODY":1,"ROR":7,"IFC":4,"LCR":9,"NOT":1,"BOOL":3,"INT":2}}

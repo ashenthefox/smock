@@ -21,6 +21,8 @@ scripts/weakening-report.py            the weakening report, which reads this li
 exclusions.*                           the exclusion list of surviving mutants and uncovered points, with each entry's category, reason and reviewer (#302)
 mutation/l4-packages.txt               the list of packages at L4 (#312)
 mutation/kept-tests.*                  the keep list: the tests kept for reasons the kill matrix cannot see (#351)
+mutation/site-counts/                  the site counts: each package's sites, per definition and operator, which must be the site finder's on the head, and which the site-count check compares with the merge base's (#309)
+mutation/approved-drops.txt            the drops of sites that the maintainer approved, each with its reason, which the site-count check reads (#309)
 docs/ledgers/                          the use-case and boundary ledgers, whose rows keep their tests under removal rule (C) (#286)
 scripts/mutation/                      the mutation runner and its site finder (#298), operator set v1 and its alternative rule, whose version every record carries (operators.py, #299), and the fixture module with its expected sites and verdicts (#298, #299)
 mutation/                              the mutation runner's committed data: the site counts and approved drops (#309), the flake threshold, and the flake rates if they are committed (#301), and the canary's mutants, recorded verdicts and explained differences (#308)
