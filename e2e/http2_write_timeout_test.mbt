@@ -13,6 +13,10 @@ async test "h2c: a client that keeps the connection window at zero is closed at 
     let stopped = with_smock(
       ["--dir", dir, "--port", "0", "--write-timeout-ms", "500"],
       smock => {
+        // "When the connection window stays at zero that long, the
+        // connection closes" (docs/running.md, The write timeout), which the
+        // test allows up to 4 times the write timeout.
+        let write = 500L
         let raw = smock.raw_h2(settings=false)
         defer raw.close()
         let start = @async.now()
@@ -32,7 +36,7 @@ async test "h2c: a client that keeps the connection window at zero is closed at 
         inspect(
           [
             ..frames.shown,
-            "ended by \{frames.how}, after at least 500 ms: \{frames.end_ms >= 500}, within 2000 ms: \{frames.end_ms < 2000}",
+            "ended by \{frames.how}, after at least 500 ms: \{frames.end_ms >= write}, within 4 times the write timeout: \{frames.end_ms < 4 * write}",
             "a new connection: \{after.brief()}",
             "Journal:",
             ..smock.journal_once(2, within=1000),
@@ -45,7 +49,7 @@ async test "h2c: a client that keeps the connection window at zero is closed at 
             #|DATA 1 16384 octets
             #|DATA 1 16384 octets
             #|DATA 1 16383 octets
-            #|ended by a FIN, after at least 500 ms: true, within 2000 ms: true
+            #|ended by a FIN, after at least 500 ms: true, within 4 times the write timeout: true
             #|a new connection: 200 hello (end)
             #|Journal:
             #|/big: stub "big", status 200
@@ -65,6 +69,10 @@ async test "h2c: a stream whose own window stays at zero for the write timeout w
     let stopped = with_smock(
       ["--dir", dir, "--port", "0", "--write-timeout-ms", "500"],
       smock => {
+        // "When only a stream's own window does, that stream gets RST_STREAM
+        // CANCEL" (docs/running.md, The write timeout), which the test
+        // allows up to 4 times the write timeout.
+        let write = 500L
         let raw = smock.raw_h2(settings=false)
         defer raw.close()
         let out = []
@@ -86,7 +94,7 @@ async test "h2c: a stream whose own window stays at zero for the write timeout w
         let frames = raw.frames_until(start, frame => frame is RstStream(..))
         out.append(frames.shown)
         out.push(
-          "stream 1 reset after at least 500 ms: \{frames.end_ms >= 500}, within 2000 ms: \{frames.end_ms < 2000}",
+          "stream 1 reset after at least 500 ms: \{frames.end_ms >= write}, within 4 times the write timeout: \{frames.end_ms < 4 * write}",
         )
         out.push("--- stream 5 sent, and its window widened by 5")
         raw.send([raw.get(5, "/item"), WindowUpdate(stream_id=5, increment=5)])
@@ -103,7 +111,7 @@ async test "h2c: a stream whose own window stays at zero for the write timeout w
             #|--- stream 3's window widened by 5
             #|DATA 3 END_STREAM 5 octets
             #|RST_STREAM 1 CANCEL
-            #|stream 1 reset after at least 500 ms: true, within 2000 ms: true
+            #|stream 1 reset after at least 500 ms: true, within 4 times the write timeout: true
             #|--- stream 5 sent, and its window widened by 5
             #|HEADERS 5 END_HEADERS [:status: 200, date: <now>, content-length: 5]
             #|DATA 5 END_STREAM 5 octets
