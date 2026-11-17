@@ -96,7 +96,7 @@ async fn TlsStream::accept(
   // the connection starts with a configuration.
   let hello = Buffer()
   let server_name = for ;; {
-    match read_client_hello(hello.to_bytes()[:]) {
+    match @serverparsers.read_client_hello(hello.to_bytes()[:]) {
       ServerName(name) => break name
       Incomplete => {
         let n = tcp.read(input)

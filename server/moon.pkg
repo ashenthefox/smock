@@ -10,6 +10,7 @@ import {
   "smock/smock/metrics",
   "smock/smock/openssl",
   "smock/smock/prng",
+  "smock/smock/serverparsers",
   "smock/smock/settings",
   "smock/smock/template",
   "smock/smock/usage",
