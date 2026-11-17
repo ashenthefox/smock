@@ -1,0 +1,46 @@
+# The coverage floors (#297, CONTRIBUTING.md, "The coverage floors"): for
+# each package, the most uncovered points its in-process tests may leave,
+# as the coverage report of scripts/coverage.sh counts them. CI's job
+# coverage runs scripts/coverage-ratchet.py, which fails a push on which a
+# package has more uncovered points than its floor here, and says when a
+# floor can be lowered.
+#
+#   <package> <uncovered points>
+#
+# A change that lowers a package's count lowers its floor in the same
+# change: `python3 scripts/coverage-ratchet.py write _coverage/coverage.bisect`
+# after `scripts/coverage.sh` writes every floor as its count. A floor rises
+# only with the maintainer's approval: a raise against the merge base with
+# main fails the ratchet unless the change records it in
+# coverage/approved-raises.txt. The weakening report lists every change to
+# both files, and the maintainer's acknowledgment of it at the merge is the
+# approval.
+
+buildinfo 5
+cmd/smock 285
+cookies 0
+defdir 42
+definitions 42
+engine 103
+grpc 0
+http1 10
+importopenapi 39
+llm 21
+log 13
+metrics 1
+openssl 24
+prng 0
+protobuf 114
+protobuf-conformance 52
+re2 5
+server 3282
+serverparsers 0
+settings 168
+template 62
+testcerts 0
+unicode 1
+usage 0
+watch 4
+xml 3
+yaml 23
+yaml-test-suite 15

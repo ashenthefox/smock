@@ -202,6 +202,15 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-coverage-report.sh
 
+      # The job coverage below holds each package's uncovered points to its
+      # floor with scripts/coverage-ratchet.py. This tests the ratchet on
+      # the same small reports, in small git repositories: failing above a
+      # floor, passing as the floor falls, and refusing a raised floor that
+      # no recorded raise covers.
+      - name: Test the coverage ratchet
+        if: ${{ !cancelled() }}
+        run: scripts/test-coverage-ratchet.sh
+
       # Each property runs with the seed committed beside it, and the weekly
       # run writes random seeds into a working copy with
       # scripts/random-seeds.py. This tests that script on a copy of re2's
@@ -344,6 +353,48 @@ jobs:
       - name: Run yaml-test-suite against smock/yaml in both modes
         run: scripts/check-yaml-test-suite.sh
 
+  # The coverage floors (CONTRIBUTING.md, "The coverage floors"):
+  # scripts/coverage.sh runs every package's in-process tests with coverage
+  # and reports each package's points; scripts/coverage-ratchet.py then
+  # fails the push when a package's uncovered points rise above its floor
+  # in coverage/floors.txt, or when a floor rises above the one at the merge
+  # base with main and the change records no approved raise. The whole
+  # history, so that the ratchet finds that merge base. It runs on amd64,
+  # whose native builds are about six times faster than arm64's (#276),
+  # beside the other jobs, so that it adds nothing to the run's wall time,
+  # and keep waits for it. The table of the packages goes to the job's
+  # summary, and the report and the bisect report are kept as
+  # coverage-report, also when the ratchet fails.
+  coverage:
+    name: Coverage floors
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The runner check, OpenSSL, MoonBit and moon update.
+      - uses: ./.github/actions/native-setup
+        with:
+          machine: x86_64
+
+      - name: Run the in-process tests with coverage
+        run: scripts/coverage.sh >coverage-report.txt
+
+      - name: Check each package's uncovered points against its floor
+        run: python3 scripts/coverage-ratchet.py check --base origin/main --summary "$GITHUB_STEP_SUMMARY" _coverage/coverage.bisect
+
+      - name: Keep the coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: |
+            coverage-report.txt
+            _coverage/coverage.bisect
+          retention-days: 7
+
   # Keeps the release binary of each architecture for a machine that cannot
   # build it: the GKE benchmark of amd64 from an arm64 machine takes it
   # (scripts/gke-bench.sh --arch amd64 --smock). It runs after every other
@@ -354,8 +405,8 @@ jobs:
   # release handed over, and removes the handed-over copy.
   keep:
     name: Keep the release binaries
-    needs: [build-test, scripts, yaml-test-suite]
-    if: ${{ !cancelled() && needs.build-test.result == 'success' && needs.scripts.result == 'success' && needs.yaml-test-suite.result == 'success' }}
+    needs: [build-test, scripts, yaml-test-suite, coverage]
+    if: ${{ !cancelled() && needs.build-test.result == 'success' && needs.coverage.result == 'success' && needs.scripts.result == 'success' && needs.yaml-test-suite.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
