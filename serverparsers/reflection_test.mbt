@@ -324,7 +324,7 @@ let field_options : Bytes = len(1, b"google.protobuf.FieldOptions")
 let number_50000 : Bytes = tag(2, 0) + varint(50000)
 
 ///|
-test "the request is read as protobuf's parsers read a proto3 message: unknown fields of each wire type are skipped, fields come in any order, the last member of the oneof wins, and the request's host is read but not used; the reply echoes the request as received, with the call's Host, or none (protobuf's proto3 guide, Unknown Fields and Oneof; its encoding guide, Field Order; gRPC's reflection.proto; docs/grpc/services-and-connections.md, Reflection)" {
+test "the request is read as protobuf's parsers read a proto3 message: unknown fields of each wire type are skipped, and so are known fields sent with another wire type, which leave the oneof's member as it was; fields come in any order, the last member of the oneof wins, and the request's host is read but not used; the reply echoes the request as received, with the call's Host, or none (protobuf's proto3 guide, Unknown Fields and Oneof; its encoding guide, Message Structure and Field Order; gRPC's reflection.proto; docs/grpc/services-and-connections.md, Reflection)" {
   let annotated = octets(annotated_file) + octets(descriptor_file)
   let list_reply = octets(reflection_list_reply)
   let by_extension_reply = with_files(
@@ -345,6 +345,30 @@ test "the request is read as protobuf's parsers read a proto3 message: unknown f
     tag(1, 0) +
     varint(1) +
     tag(12, 4)
+  // The fields that ServerReflectionRequest defines, each with another wire
+  // type than its type's: host (1), file_by_filename (3),
+  // file_containing_symbol (4), file_containing_extension (5) and
+  // all_extension_numbers_of_type (6), each a string or a message, so LEN,
+  // sent as a VARINT, a group, an I32, an I64 and a VARINT. The encoding
+  // guide, Message Structure: the wire type "tells the parser how big the
+  // payload after it is", which "allows old parsers to skip over new fields
+  // they don't understand"; protobuf's parsers keep such a field as an
+  // unknown field, as smock's message decoder skips it. `protoc --decode`
+  // reads each of these requests as its list_services alone, with the
+  // field as an unknown one: `3: 1` for the octets `18 01`.
+  let other_wire_types = tag(1, 0) +
+    varint(1) +
+    tag(3, 3) +
+    tag(3, 4) +
+    tag(4, 5) +
+    b"\x01\x02\x03\x04" +
+    tag(5, 1) +
+    b"\x01\x02\x03\x04\x05\x06\x07\x08" +
+    tag(6, 0) +
+    varint(1)
+  // list_services (7), a string, as a VARINT: protoc reads
+  // file_containing_symbol, then `7: 1`, and the last alone as `7: 1`.
+  let list_as_varint = tag(7, 0) + varint(1)
   let cases = [
     (
       "unknown fields around list_services",
@@ -352,8 +376,39 @@ test "the request is read as protobuf's parsers read a proto3 message: unknown f
       list_reply,
     ),
     (
+      "file_by_filename as a VARINT, then list_services",
+      tag(3, 0) + varint(1) + octets(reflection_list),
+      list_reply,
+    ),
+    (
+      "known fields of other wire types around list_services",
+      other_wire_types + octets(reflection_list) + other_wire_types,
+      list_reply,
+    ),
+    (
+      "file_containing_symbol, then list_services as a VARINT",
+      octets(reflection_by_symbol) + list_as_varint,
+      with_files(octets(reflection_by_symbol_reply), annotated),
+    ),
+    (
+      "list_services as a VARINT alone",
+      list_as_varint,
+      octets(reflection_nothing_reply),
+    ),
+    (
       "an unknown field in file_containing_extension",
       len(5, field_options + number_50000 + tag(3, 0) + varint(1)),
+      by_extension_reply,
+    ),
+    // ExtensionRequest's containing_type (1), a string, as a VARINT, and its
+    // extension_number (2), an int32, as LEN: protoc reads the type and the
+    // number around them, with `1: 1` and `2: "x"` as unknown fields.
+    (
+      "known fields of other wire types in file_containing_extension",
+      len(
+        5,
+        tag(1, 0) + varint(1) + field_options + number_50000 + len(2, b"x"),
+      ),
       by_extension_reply,
     ),
     (
@@ -390,7 +445,12 @@ test "the request is read as protobuf's parsers read a proto3 message: unknown f
     out.join("\n"),
     content=(
       #|unknown fields around list_services: as protoc encodes it
+      #|file_by_filename as a VARINT, then list_services: as protoc encodes it
+      #|known fields of other wire types around list_services: as protoc encodes it
+      #|file_containing_symbol, then list_services as a VARINT: as protoc encodes it
+      #|list_services as a VARINT alone: as protoc encodes it
       #|an unknown field in file_containing_extension: as protoc encodes it
+      #|known fields of other wire types in file_containing_extension: as protoc encodes it
       #|file_containing_extension, its number first: as protoc encodes it
       #|a host of its own in the request: as protoc encodes it
       #|file_containing_symbol, then file_by_filename: as protoc encodes it

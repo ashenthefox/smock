@@ -84,37 +84,35 @@ priv enum Asked {
 
 ///|
 /// Reads `message`, a ServerReflectionRequest of reflection.proto, as
-/// protobuf's parsers read a proto3 message: unknown fields are skipped, of
+/// protobuf's parsers read a proto3 message: unknown fields, and known
+/// fields sent with another wire type than their type's, are skipped, of
 /// the members of the oneof `message_request` the last one wins, and a
-/// known field of another wire type, or a string that is not UTF-8, is an
-/// error. Its `host` is read, and not used.
+/// string that is not UTF-8 is an error. Its `host` is read, and not used.
 fn read_reflection_request(message : BytesView) -> Asked raise {
   let reader = @protobuf.Reader(message)
   let mut asked = Nothing
   while !reader.at_end() {
-    match reader.tag() {
-      1 => ignore(reflection_text(reader))
-      3 => asked = File(reflection_text(reader))
-      4 => asked = Symbol(reflection_text(reader))
-      5 => {
-        reader.expect(Len)
+    let number = reader.tag()
+    match (number, reader.wire_type()) {
+      (1, Len) => ignore(reflection_text(reader))
+      (3, Len) => asked = File(reflection_text(reader))
+      (4, Len) => asked = Symbol(reflection_text(reader))
+      (5, Len) => {
         let extension = @protobuf.Reader(reader.length_delimited())
         let mut containing_type = ""
         let mut number = 0
         while !extension.at_end() {
-          match extension.tag() {
-            1 => containing_type = reflection_text(extension)
-            2 => {
-              extension.expect(Varint)
-              number = extension.varint().to_int()
-            }
+          let field = extension.tag()
+          match (field, extension.wire_type()) {
+            (1, Len) => containing_type = reflection_text(extension)
+            (2, Varint) => number = extension.varint().to_int()
             _ => extension.skip()
           }
         }
         asked = Extension(containing_type, number)
       }
-      6 => asked = ExtensionNumbers(reflection_text(reader))
-      7 => {
+      (6, Len) => asked = ExtensionNumbers(reflection_text(reader))
+      (7, Len) => {
         ignore(reflection_text(reader))
         asked = Services
       }
@@ -126,9 +124,9 @@ fn read_reflection_request(message : BytesView) -> Asked raise {
 
 ///|
 /// Reads the value of a `string` field of reflection.proto, the last tag
-/// `reader` read: a length-delimited value in UTF-8.
+/// `reader` read, whose wire type is LEN: a length-delimited value in
+/// UTF-8.
 fn reflection_text(reader : @protobuf.Reader) -> String raise {
-  reader.expect(Len)
   @utf8.decode(reader.length_delimited())
 }
 

@@ -433,8 +433,12 @@ async test "reflection: a Mock that does not turn reflection on has no reflectio
             ("a prefix cut short", b"\x00\x00"),
             // `list_services`, field 7, a string that is not UTF-8.
             ("a string that is not UTF-8", framed(b"\x3a\x01\xff")),
-            // `file_by_filename`, field 3, as a varint.
-            ("a field of the wrong wire type", framed(b"\x18\x01")),
+            // `file_by_filename`, field 3, with wire type 7, which protobuf
+            // does not define (docs/grpc/unmatched-and-refused-calls.md,
+            // Protocol checks and limits). A field that comes with another
+            // defined wire type than its type's is skipped instead, as
+            // protobuf's parsers skip it.
+            ("wire type 7", framed(b"\x1f")),
           ] {
           let (what, body) = call
           let reply = client.call(
@@ -455,7 +459,7 @@ async test "reflection: a Mock that does not turn reflection on has no reflectio
             #|a message cut short: :status: 200, grpc-status: 13, grpc-message: the request ends inside a message, 0 DATA (end)
             #|a prefix cut short: :status: 200, grpc-status: 13, grpc-message: the request ends inside a message prefix, 0 DATA (end)
             #|a string that is not UTF-8: :status: 200, grpc-status: 13, grpc-message: the request message cannot be decoded, 0 DATA (end)
-            #|a field of the wrong wire type: :status: 200, grpc-status: 13, grpc-message: the request message cannot be decoded, 0 DATA (end)
+            #|wire type 7: :status: 200, grpc-status: 13, grpc-message: the request message cannot be decoded, 0 DATA (end)
             #|"quiet" /grpc.reflection.v1.ServerReflection/ServerReflectionInfo ""/0 200 "UNIMPLEMENTED" near miss null
             #|smock_requests_total{mock="quiet",stub=""} 1
             #|smock_requests_total{mock="",stub=""} 5

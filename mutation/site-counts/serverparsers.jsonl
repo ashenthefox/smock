@@ -15,8 +15,8 @@
 {"file":"serverparsers/http2_checks.mbt","definition":"declared_length","text":"96cf5b104d36beca","pinned":{"BODY":1,"ROR":1,"IFC":1,"DEL":1,"AOR":3,"INT":4},"full":{"BODY":1,"ROR":1,"IFC":2,"DEL":1,"AOR":3,"INT":10}}
 {"file":"serverparsers/http2_checks.mbt","definition":"is_malformed_http2_request","text":"f1a8d6e0caeaf044","pinned":{"BODY":1,"IFC":9,"LCR":3,"NOT":7,"DEL":1,"BOOL":7,"STR":2},"full":{"BODY":1,"IFC":16,"LCR":3,"NOT":7,"DEL":1,"BOOL":7,"STR":4}}
 {"file":"serverparsers/reflection.mbt","definition":"reflection_reply","text":"045bebaeb8dac945","pinned":{"BODY":1,"IFC":1,"DEL":6,"INT":2,"STR":1},"full":{"BODY":1,"IFC":2,"DEL":6,"INT":5,"STR":1}}
-{"file":"serverparsers/reflection.mbt","definition":"read_reflection_request","text":"68285fdfa1a57df0","pinned":{"IFC":2,"NOT":2,"DEL":3,"INT":1,"STR":1},"full":{"IFC":4,"NOT":2,"DEL":3,"INT":2,"STR":1}}
-{"file":"serverparsers/reflection.mbt","definition":"reflection_text","text":"86e8f5d45179dc2b","pinned":{"BODY":1,"DEL":1},"full":{"BODY":1,"DEL":1}}
+{"file":"serverparsers/reflection.mbt","definition":"read_reflection_request","text":"a5e6b1010e6d934b","pinned":{"IFC":2,"NOT":2,"DEL":1,"INT":1,"STR":1},"full":{"IFC":4,"NOT":2,"DEL":1,"INT":2,"STR":1}}
+{"file":"serverparsers/reflection.mbt","definition":"reflection_text","text":"241169521c134bc7","pinned":{"BODY":1},"full":{"BODY":1}}
 {"file":"serverparsers/reflection.mbt","definition":"reflection_sources","text":"5a5216ff69254d21","pinned":{"BODY":1,"IFC":3,"NOT":1,"DEL":3,"BOOL":2,"STR":1},"full":{"BODY":1,"IFC":4,"NOT":1,"DEL":3,"BOOL":2,"STR":2}}
 {"file":"serverparsers/reflection.mbt","definition":"ReflectionSource::index_of","text":"df37ac2850b9cbd8","pinned":{"BODY":1,"IFC":1,"INT":1},"full":{"BODY":1,"IFC":2,"INT":2}}
 {"file":"serverparsers/reflection.mbt","definition":"ReflectionSource::with_imports","text":"a6c0179d9eae92fd","pinned":{"BODY":1,"ROR":2,"IFC":2,"LCR":1,"NOT":1,"DEL":5,"BOOL":2,"AOR":1,"INT":5},"full":{"BODY":1,"ROR":2,"IFC":4,"LCR":1,"NOT":1,"DEL":5,"BOOL":2,"AOR":1,"INT":8}}
