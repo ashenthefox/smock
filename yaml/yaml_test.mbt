@@ -209,6 +209,42 @@ test "comments run from a # after white space to the end of the line" {
       #|{"request":{"method":"GET","path":"/a#b","x#y":"quoted # not a comment"},"list":["a","b"]}
     ),
   )
+  // "Comments must be separated from other tokens by white space
+  // characters" (YAML 1.2.2, section 6.6). A `#` right after a quoted
+  // scalar, a flow collection or a flow indicator starts no comment, so the
+  // text is refused: yaml-test-suite marks the first three inputs, SU5Z,
+  // 9JBA and CVW2, as errors. Each refusal comes with the message the
+  // parser gives for what it finds there instead: text after a value, a
+  // plain value that starts with an indicator, as the tests above assert for
+  // `a: [1, 2]]` and `a: @x`, and the two flow messages #280's acceptance
+  // criteria name. The nearest inputs that stay valid follow: a `#` after a
+  // space or a tab, which section 6.6 allows, and a `#` inside a plain
+  // scalar, which section 7.3.3 allows after a character that is not white
+  // space ("An ns-char preceding").
+  inspect(
+    each([
+      "key: \"value\"# invalid comment", "---\n[ a, b, c, ]#invalid\n", "---\n[ a, b, c,#invalid\n]\n",
+      "a: 'x'#c", "a: {b: 1}#c", "[a, \"b\"#c\n]", "{a: \"b\"#c\n}", "[#c\n a]",
+      "key: \"value\" # c", "key: \"value\"\t# c", "a: [x]\t# c", "{a: \"b\" # c\n}",
+      "key: value# c", "[a#b, c]",
+    ]),
+    content=(
+      #|"key: \"value\"# invalid comment" -> error /key: unexpected text after the value
+      #|"---\n[ a, b, c, ]#invalid\n" -> error /2: unexpected text after the value
+      #|"---\n[ a, b, c,#invalid\n]\n" -> error /3: a plain value cannot start with #; quote this value
+      #|"a: 'x'#c" -> error /a: unexpected text after the value
+      #|"a: {b: 1}#c" -> error /a/b: unexpected text after the value
+      #|"[a, \"b\"#c\n]" -> error /1: expected , or ] in a flow sequence
+      #|"{a: \"b\"#c\n}" -> error /a: expected , or } in a flow mapping
+      #|"[#c\n a]" -> error /0: a plain value cannot start with #; quote this value
+      #|"key: \"value\" # c" -> {"key":"value"}
+      #|"key: \"value\"\t# c" -> {"key":"value"}
+      #|"a: [x]\t# c" -> {"a":["x"]}
+      #|"{a: \"b\" # c\n}" -> {"a":"b"}
+      #|"key: value# c" -> {"key":"value# c"}
+      #|"[a#b, c]" -> ["a#b","c"]
+    ),
+  )
 }
 
 ///|
@@ -361,6 +397,25 @@ test "anchors, aliases, tags, merge keys, duplicate keys and multiple documents 
       #|"---\na: 1\n...\n---\nb: 2" -> error : multiple documents are not supported
       #|"a: 1\n...\nb: 2" -> error : multiple documents are not supported
       #|"%YAML 1.2\n---\na: 1" -> error : directives (%) are not supported
+    ),
+  )
+  // Two `---` markers with nothing but white space and comments between
+  // them start two documents, the first of them empty: "Since the existence
+  // of the document is indicated by this marker, the document itself may be
+  // completely empty" (YAML 1.2.2, section 9.1.4). yaml-test-suite's 6XDY,
+  // `---\n---\n`, reads as two documents. The documents reject them as
+  // multiple documents ("Anchors, aliases, tags, merge keys, duplicate keys
+  // and multiple documents are rejected", docs/definition-files.md, Writing
+  // Definition files in YAML), with the message above for multiple documents.
+  inspect(
+    each([
+      "---\n---\n", "---\n---", "--- # a comment\n\n# another\n---\na: 1", "---\n--- x",
+    ]),
+    content=(
+      #|"---\n---\n" -> error : multiple documents are not supported
+      #|"---\n---" -> error : multiple documents are not supported
+      #|"--- # a comment\n\n# another\n---\na: 1" -> error : multiple documents are not supported
+      #|"---\n--- x" -> error : multiple documents are not supported
     ),
   )
 }
@@ -624,6 +679,27 @@ test "tabs in indentation give an error; tabs elsewhere are white space" {
       #|"a: 1\t# comment" -> {"a":1}
       #|"\t\n# comment\na: 1" -> {"a":1}
       #|"a: |\n  x\ty\n" -> {"a":"x\ty\n"}
+    ),
+  )
+  // In a nested sequence that starts on its parent's `-` line, "both the
+  // "-" indicator and the following spaces are considered to be part of the
+  // indentation of the nested collection" (YAML 1.2.2, section 8.2.1), and
+  // "tab characters must not be used in indentation" (section 6.1). So a
+  // tab between two `-` indicators is a tab in indentation, which `parse`
+  // rejects ("tabs in indentation"), with the message above.
+  // yaml-test-suite marks the first two inputs, Y79Y/004 and Y79Y/005, as
+  // errors. A tab between `-` and a scalar separates them and indents
+  // nothing: the suite reads `-\t-1` as [-1] (Y79Y/010) and `-\tbaz` as
+  // "baz" (6BCT, YAML 1.2.2's Example 6.3).
+  inspect(
+    each(["-\t-\n", "- \t-\n", "-\t- x", "- -\t- x", "-\t-1\n", "-\tbaz"]),
+    content=(
+      #|"-\t-\n" -> error /0: tabs are not allowed in indentation
+      #|"- \t-\n" -> error /0: tabs are not allowed in indentation
+      #|"-\t- x" -> error /0: tabs are not allowed in indentation
+      #|"- -\t- x" -> error /0/0: tabs are not allowed in indentation
+      #|"-\t-1\n" -> [-1]
+      #|"-\tbaz" -> ["baz"]
     ),
   )
 }

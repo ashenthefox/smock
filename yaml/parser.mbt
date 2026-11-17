@@ -146,8 +146,12 @@ fn Parser::skip_space(self : Parser) -> Unit {
 }
 
 ///|
+/// Skips a comment: a `#` at the start of a line or after white space, to
+/// the end of its line. A `#` right after other text starts no comment
+/// (YAML 1.2.2, section 6.6), so it is left for the caller to refuse.
 fn Parser::skip_comment(self : Parser) -> Unit {
-  if self.peek() == '#' {
+  if self.peek() == '#' &&
+    (self.pos == self.line_start || self.chars[self.pos - 1] is (' ' | '\t')) {
     while !(self.peek() is ('\n' | EOF)) {
       self.bump()
     }
@@ -212,6 +216,11 @@ fn Parser::document(self : Parser) -> Json raise ParseError {
     } else {
       inline = true
     }
+  }
+  // A second `---` before any content ends the first document, which is
+  // empty, and starts another.
+  if content && self.at_marker('-') {
+    self.fail("multiple documents are not supported", pointer="")
   }
   if !content || self.at_marker('.') {
     self.fail("the document is empty", pointer="")
@@ -811,7 +820,17 @@ fn Parser::block_sequence(
     let item_pointer = child(pointer, items.length().to_string())
     self.reached = item_pointer
     self.bump()
+    let separation = self.pos
     self.skip_space()
+    // A sequence on the same line is indented by the `-` and the white
+    // space after it (YAML 1.2.2, section 8.2.1), which must not hold a tab.
+    if self.at_sequence_item() {
+      for i in separation..<self.pos {
+        if self.chars[i] == '\t' {
+          self.fail("tabs are not allowed in indentation")
+        }
+      }
+    }
     self.skip_comment()
     let empty = self.peek() is ('\n' | EOF) &&
       !(self.next_content() && self.column() > column)

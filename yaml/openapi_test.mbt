@@ -399,6 +399,20 @@ test "anchors, aliases, tags, merge keys, duplicate keys, several documents, dir
       #|  openapi: error : explicit keys (?) are not supported
     ),
   )
+  // Two `---` markers with nothing between them start two documents, the
+  // first of them empty (YAML 1.2.2, section 9.1.4; yaml-test-suite's 6XDY).
+  // Both modes reject them: "more than one document" is among the errors
+  // that docs/openapi/references-and-yaml.md lists, "Each of these is an
+  // error at its pointer, with a message that names it", and
+  // docs/definition-files.md rejects "multiple documents".
+  inspect(
+    both(["---\n---\n"]),
+    content=(
+      #|"---\n---\n"
+      #|  safe: error : multiple documents are not supported
+      #|  openapi: error : multiple documents are not supported
+    ),
+  )
 }
 
 ///|
@@ -445,6 +459,48 @@ test "malformed text gives the same error in both modes" {
       #|"a: |x"
       #|  safe: error /a: invalid block scalar header
       #|  openapi: error /a: invalid block scalar header
+    ),
+  )
+  // A `#` with no white space before it starts no comment: "Comments must
+  // be separated from other tokens by white space characters" (YAML 1.2.2,
+  // section 6.6). yaml-test-suite marks these three, SU5Z, 9JBA and CVW2,
+  // as errors, and both modes refuse them, with the messages yaml_test.mbt's
+  // comment test gives.
+  inspect(
+    both([
+      "key: \"value\"# invalid comment", "---\n[ a, b, c, ]#invalid\n", "---\n[ a, b, c,#invalid\n]\n",
+    ]),
+    content=(
+      #|"key: \"value\"# invalid comment"
+      #|  safe: error /key: unexpected text after the value
+      #|  openapi: error /key: unexpected text after the value
+      #|"---\n[ a, b, c, ]#invalid\n"
+      #|  safe: error /2: unexpected text after the value
+      #|  openapi: error /2: unexpected text after the value
+      #|"---\n[ a, b, c,#invalid\n]\n"
+      #|  safe: error /3: a plain value cannot start with #; quote this value
+      #|  openapi: error /3: a plain value cannot start with #; quote this value
+    ),
+  )
+  // A tab between two `-` indicators on one line is in the indentation of
+  // the nested sequence (YAML 1.2.2, section 8.2.1), where "tab characters
+  // must not be used" (section 6.1). docs/openapi/references-and-yaml.md
+  // lists "tabs in indentation" among the errors "at its pointer, with a
+  // message that names it", so the OpenAPI mode refuses it as the safe
+  // subset does. yaml-test-suite marks the first two, Y79Y/004 and
+  // Y79Y/005, as errors.
+  inspect(
+    both(["-\t-\n", "- \t-\n", "-\t- x"]),
+    content=(
+      #|"-\t-\n"
+      #|  safe: error /0: tabs are not allowed in indentation
+      #|  openapi: error /0: tabs are not allowed in indentation
+      #|"- \t-\n"
+      #|  safe: error /0: tabs are not allowed in indentation
+      #|  openapi: error /0: tabs are not allowed in indentation
+      #|"-\t- x"
+      #|  safe: error /0: tabs are not allowed in indentation
+      #|  openapi: error /0: tabs are not allowed in indentation
     ),
   )
 }

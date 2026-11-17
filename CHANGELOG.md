@@ -717,6 +717,23 @@ of each GitHub release include its section
   kept only the last, so a request that gave the containing type in one
   record and the extension number in the next got NOT_FOUND. No known
   client sends a request that way.
+- A YAML Definition file or OpenAPI document that starts with two `---`
+  markers with nothing but comments between them is now rejected as
+  multiple documents, as the documents say: the first `---` starts an empty
+  document and the second starts another. smock read the second `---` as
+  the document's text, so `---` on two lines read as the string `---`
+  ([smock#365](https://github.com/hirunefu/smock/issues/365)).
+- In YAML, a `#` with no space or tab before it no longer starts a
+  comment, as YAML says. After a quoted value or a flow collection, such
+  as `key: "value"# note` or `[a, b]#note`, smock dropped the rest of the
+  line as a comment; it now rejects the text. Inside a plain value, as in
+  `path: /a#b`, the `#` is part of the value, as before
+  ([smock#366](https://github.com/hirunefu/smock/issues/366)).
+- In YAML, a tab between two `-` on one line, as in `-<tab>- x`, is now
+  rejected as a tab in indentation, as the documents say: the white space
+  after the first `-` indents the nested sequence. smock read it as a
+  nested sequence, and in an OpenAPI document `-<tab>-` read as `[[null]]`
+  ([smock#367](https://github.com/hirunefu/smock/issues/367)).
 
 ## [0.4.0] - 2026-11-01
 
