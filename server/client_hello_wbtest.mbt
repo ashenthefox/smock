@@ -273,10 +273,11 @@ test "a ClientHello with a length field one octet past what holds it, or below t
       records(with_length(tls13, 1567, 2, 18 + 1)),
     ),
     // RFC 6066 counts at least one octet in a HostName and one name in a
-    // server_name_list: the TLS 1.2 capture's name, or its whole list, cut
-    // out, with the lengths that hold it shortened to match. An empty
-    // HostName names no host, so the handshake gets the default
-    // certificate, as without SNI.
+    // server_name_list, and a client's server_name extension holds that
+    // list: the TLS 1.2 capture's name, its whole list, or the extension's
+    // whole data cut out, with the lengths that hold it shortened to
+    // match. An empty HostName names no host, so the handshake gets the
+    // default certificate, as without SNI.
     (
       "HostName: empty",
       records(
@@ -300,6 +301,12 @@ test "a ClientHello with a length field one octet past what holds it, or below t
         ]),
       ),
     ),
+    (
+      "server_name: empty",
+      records(
+        resized(tls12, 192, 216, b"", lengths=[(1, 3), (97, 2), (190, 2)]),
+      ),
+    ),
   ]
   inspect(
     cases.map(case => "\{case.0}: \{read(case.1[:])}").join("\n"),
@@ -316,6 +323,7 @@ test "a ClientHello with a length field one octet past what holds it, or below t
       #|HostName: one octet more than the list holds: ServerName(None)
       #|HostName: empty: ServerName(None)
       #|server_name_list: empty: ServerName(None)
+      #|server_name: empty: ServerName(None)
     ),
   )
 }
@@ -395,6 +403,23 @@ test "the cap, a finding for the maintainer (#289): a whole ClientHello that end
       #|its first octets but the last, 65535 octets: Incomplete
       #|grown to end at the 65,535th octet, then change_cipher_spec, 65541 octets: ServerName(None)
       #|as captured, then change_cipher_spec, 1616 octets: ServerName(Some("users.example.test"))
+    ),
+  )
+}
+
+///|
+test "octets that are not a TLS handshake record, or a handshake message that is not a ClientHello, read as no name (RFC 8446: section 5.1, content type 22 is handshake; section 4, msg_type 1 is client_hello)" {
+  inspect(
+    [
+      // Plain HTTP sent to the TLS port: its first octet, `G`, is no
+      // content type of TLS.
+      read(b"GET / HTTP/1.1\r\nHost: users.example.test\r\n\r\n"[:]),
+      // The TLS 1.3 capture with its msg_type changed to 2, server_hello.
+      read(records(with_length(message(tls13_sni), 0, 1, 2))[:]),
+    ].join("\n"),
+    content=(
+      #|ServerName(None)
+      #|ServerName(None)
     ),
   )
 }
