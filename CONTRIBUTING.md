@@ -579,7 +579,9 @@ SMOCK_E2E_BINARY=_coverage/native/debug/build/smock/smock/cmd/smock/smock.exe \
 
 With `SMOCK_E2E_BINARY` set, the harness runs that binary and builds
 nothing; without it, it builds and runs the native debug build, as
-usual. With `SMOCK_COVERAGE_DUMP` set, it gives the variable to every
+usual. Build the binary from the commit checked out: the test of
+`smock --version` checks that it names that commit. With
+`SMOCK_COVERAGE_DUMP` set, it gives the variable to every
 smock it starts, `smock serve` and the one-shot commands alike, takes
 the counters out of each one's stdout before a test reads it, and keeps
 them in that directory as runtime logs, `moonbit_coverage_e2e_*.txt`.
