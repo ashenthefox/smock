@@ -258,12 +258,12 @@ async fn Admin::handle(self : Admin, request : @http1.Request) -> Reply {
   }
   let open = at_path.length() > 0 && at_path.iter().all(at => at.0.open)
   if !open && self.token is Some(token) {
-    match bearer_token(request) {
+    match @serverparsers.bearer_token(request) {
       None =>
         return self.unauthorized(
           "the Admin API needs Authorization: Bearer <token>",
         )
-      Some(given) if !same_token(token, given) =>
+      Some(given) if !@serverparsers.same_token(token, given) =>
         return self.unauthorized("the bearer token is wrong")
       Some(_) => ()
     }
@@ -349,56 +349,6 @@ fn Admin::unauthorized(self : Admin, message : String) -> Reply {
   let reply = self.error(401, "unauthorized", message)
   reply.headers.push(("WWW-Authenticate", "Bearer"))
   reply
-}
-
-///|
-/// The token of the request's `Authorization: Bearer <token>` field. A
-/// request has none without exactly one Authorization field, or when the
-/// field uses another scheme.
-fn bearer_token(request : @http1.Request) -> BytesView? {
-  let fields = request.headers.filter(header => {
-    header.name.to_lower() == "authorization"
-  })
-  guard fields is [field] else { return None }
-  let value = field.value[:]
-  let scheme = "bearer"
-  guard value.length() > scheme.length() &&
-    value[scheme.length()] is (b' ' | b'\t') else {
-    return None
-  }
-  for i, c in scheme {
-    let byte = value[i]
-    let lower = if byte >= b'A' && byte <= b'Z' { byte + 32 } else { byte }
-    if lower.to_int() != c.to_int() {
-      return None
-    }
-  }
-  let mut start = scheme.length()
-  while start < value.length() && value[start] is (b' ' | b'\t') {
-    start += 1
-  }
-  if start == value.length() {
-    None
-  } else {
-    Some(value[start:])
-  }
-}
-
-///|
-/// Whether `given` is `token`, compared in constant time: the time taken
-/// depends on the length of `token` only, never on how much of `given`
-/// matches it.
-fn same_token(token : Bytes, given : BytesView) -> Bool {
-  let mut difference = token.length() ^ given.length()
-  for i, byte in token {
-    let other = if given.length() == 0 {
-      0
-    } else {
-      given[i % given.length()].to_int()
-    }
-    difference = difference | (byte.to_int() ^ other)
-  }
-  difference == 0
 }
 
 ///|
