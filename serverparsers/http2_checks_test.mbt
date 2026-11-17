@@ -233,3 +233,35 @@ test "a content-length is read as the decimal number its digits give, leading ze
     ),
   )
 }
+
+///|
+test "smock reads a content-length's digits until the length reaches 2^32, over every body limit: 4294967295 is read as itself, and 4294967296 or any longer length as 4294967296 (docs/http2.md, Request bodies, a finding that #318 takes to the maintainer)" {
+  inspect(
+    [
+      "2147483648",
+      "4294967295",
+      "0004294967295",
+      "4294967296",
+      "4294967297",
+      "42949672960",
+      "18446744073709551626",
+      "1" + "0".repeat(400),
+    ]
+    .map(digits => {
+      let length = @serverparsers.declared_length(@utf8.encode(digits))
+      let shown = if digits.length() > 30 { "1 and 400 zeros" } else { digits }
+      "\{shown}: \{length}"
+    })
+    .join("\n"),
+    content=(
+      #|2147483648: 2147483648
+      #|4294967295: 4294967295
+      #|0004294967295: 4294967295
+      #|4294967296: 4294967296
+      #|4294967297: 4294967296
+      #|42949672960: 4294967296
+      #|18446744073709551626: 4294967296
+      #|1 and 400 zeros: 4294967296
+    ),
+  )
+}
