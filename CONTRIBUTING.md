@@ -1044,6 +1044,13 @@ An equivalence claim reaches the maintainer in three steps:
   survivor proves it redundant, and with the maintainer's approval.
   Outside the removal batches, no change deletes, skips or weakens an
   existing test: a test that should go is proposed for a removal batch.
+- **Commit subjects.** A commit's subject is a short summary in the
+  imperative that ends with the issue it belongs to in parentheses, such
+  as `(#275)`, or with each of them, such as `(#258, #43)`, when it
+  belongs to two. The trace links of the removal proof
+  ([Removing a test](#removing-a-test), `scripts/trace-links.py`) take a
+  test's tickets from the subject of the commit that introduced it: the
+  issues in that last parenthesis, or else every issue the subject names.
 - **The weakening report.** For each branch, against its merge base with
   `main`, it lists the tests deleted; the assertion lines removed or
   changed in tests that stay; the snapshot lines changed; the skip
@@ -1214,7 +1221,8 @@ A test may go only under (A) or (B), and never when (C) holds.
   - the covered points;
   - the trace links, derived mechanically: from the commit that
     introduced the test block (following moves and copies across files),
-    to the ticket in its subject, to that issue's acceptance criteria.
+    to the tickets in its subject (Commit subjects, above), to those
+    issues' acceptance criteria.
 - **(B) Negative value.** It pins an implementation detail that a
   refactor keeping the behaviour would break, or restates a constant that
   no spec, document or user fixes. The default is to rewrite it, not to
