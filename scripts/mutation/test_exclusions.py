@@ -381,5 +381,92 @@ class CoverageTest(unittest.TestCase):
                       " prng/prng.mbt,Generator::below,2:19", result.stderr)
 
 
+def stanza(mutant, reason="A reason.", reviewer=""):
+    """An ARID entry of a mutant, with a made-up text: review reads no
+    definition."""
+    return (f'[[exclusion]]\nmutant = "{mutant}"\ntext = "0123456789abcdef"\ncategory = "ARID"\n'
+            f'reason = "{reason}"\nreviewer = "{reviewer}"\n')
+
+
+class ReviewTest(unittest.TestCase):
+    """`review` lists the batch, the entries that a branch adds or changes
+    against its merge base with main, and those the maintainer reads:
+    every one in the protocol packages (http1, grpc, yaml, re2, xml and
+    protobuf) and in serverparsers, and one in five of the others, which
+    the maintainer draws with a seed after the batch is frozen (#302,
+    CONTRIBUTING.md, "Exclusions")."""
+
+    OTHERS = ["engine/a.mbt,a,INT,1,2,0", "engine/b.mbt,b,INT,1,2,0", "engine/c.mbt,c,INT,1,2,0",
+              "engine/d.mbt,d,INT,1,2,0", "engine/e.mbt,e,INT,1,2,0", "protobuf-conformance/f.mbt,f,INT,1,2,0"]
+    PROTOCOL = ["yaml/y.mbt,y,INT,1,2,0", "protobuf/p.mbt,p,INT,1,2,0", "serverparsers/s.mbt,s,INT,1,2,0"]
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="test-exclusions-"))
+        self.root = self.tmp / "repo"
+        self.root.mkdir()
+        self.git("init", "-q", "-b", "main")
+        # At the base: an entry the branch changes, and one whose reviewer
+        # alone it fills in, which is the maintainer's review, not the
+        # author's batch.
+        self.list(stanza("log/l.mbt,changed,INT,1,2,0"), stanza("log/l.mbt,reviewed,INT,1,2,0"))
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "base")
+        self.git("checkout", "-q", "-b", "topic")
+        self.list(stanza("log/l.mbt,changed,INT,1,2,0", reason="Another reason."),
+                  stanza("log/l.mbt,reviewed,INT,1,2,0", reviewer="the maintainer"),
+                  *[stanza(m) for m in self.PROTOCOL + self.OTHERS])
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "a batch")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def git(self, *args):
+        subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                        "-c", "commit.gpgsign=false", "-C", str(self.root), *args], check=True, capture_output=True)
+
+    def list(self, *stanzas):
+        (self.root / "exclusions.toml").write_text("\n".join(stanzas))
+
+    def review(self, *args):
+        result = subprocess.run([sys.executable, str(EXCLUSIONS), "--root", str(self.root), "review", "--base", "main",
+                                 *args], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def listed(self, text, heading):
+        """The ids listed under a heading of review's output."""
+        lines = text.split("\n")
+        start = next(i for i, line in enumerate(lines) if line.startswith(heading))
+        found = []
+        for line in lines[start + 1 :]:
+            if not line.startswith("  "):
+                break
+            found.append(line.split()[0])
+        return found
+
+    def test_the_maintainer_reads_every_entry_in_the_protocol_packages_and_serverparsers(self):
+        text = self.review()
+        self.assertIn("The batch: 10 entries that the branch adds or changes against", text)
+        self.assertEqual(sorted(self.listed(text, "Every one in the protocol packages and in serverparsers (3):")),
+                         sorted(self.PROTOCOL))
+
+    def test_without_a_seed_it_says_how_many_of_the_others_the_maintainer_draws(self):
+        # The changed entry and the six others: one in five of seven is 2.
+        text = self.review()
+        self.assertIn("One in five of the other 7: 2, which the maintainer draws once the batch is frozen,"
+                      " with `review --seed <seed>`.", text)
+        self.assertNotIn("log/l.mbt,reviewed", text)
+
+    def test_with_a_seed_it_draws_one_in_five_of_the_others(self):
+        text = self.review("--seed", "a seed the author cannot know")
+        drawn = self.listed(text, "One in five of the other 7: 2, drawn with the seed")
+        self.assertEqual(len(drawn), 2)
+        self.assertTrue(set(drawn) <= set(self.OTHERS) | {"log/l.mbt,changed,INT,1,2,0"}, drawn)
+        # The same seed draws the same entries.
+        self.assertEqual(self.listed(self.review("--seed", "a seed the author cannot know"),
+                                     "One in five of the other 7"), drawn)
+
+
 if __name__ == "__main__":
     unittest.main()

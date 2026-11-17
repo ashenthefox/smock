@@ -6,6 +6,8 @@ reviewed it. No attribute in the source excludes anything.
 
 usage: python3 scripts/mutation/exclusions.py [--root <dir>] [--moonc <moonc>] check
        python3 scripts/mutation/exclusions.py [--root <dir>] [--moonc <moonc>] new <what>
+       python3 scripts/mutation/exclusions.py [--root <dir>] review [--base <ref>]
+           [--seed <seed>]
 
 <root> is the workspace, the current directory unless it is given. Each
 entry is a table of the array `exclusion`:
@@ -50,13 +52,26 @@ new    prints the stanza of a new entry for <what>, a mutant's id or a
        so), with the definition's text as it is now, and the category,
        the reason and the reviewer empty, for the author to fill in.
 
-The definitions are read with the site finder's parser (sites.py), so it
-needs moonc. It exits with 2 when it cannot judge: a file does not parse,
+review lists the batch: the entries that the tree adds or changes against
+       the merge base of HEAD and <base> (origin/main unless it is given),
+       a change of the reviewer alone aside. Of the batch, the maintainer
+       reads every entry in the protocol packages (http1, grpc, yaml, re2,
+       xml and protobuf) and in serverparsers, and one in five of the
+       others, rounded up. The maintainer draws those once the batch is
+       frozen, with a seed of the maintainer's choosing, so that the
+       author cannot know which: with --seed, it lists them; without, it
+       says how many there are to draw.
+
+The definitions are read with the site finder's parser (sites.py), so
+check and new need moonc; review does not. It exits with 2 when it cannot judge: a file does not parse,
 or a point of `new` lies in no definition.
 """
 
 import argparse
+import math
+import random
 import re
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -74,6 +89,9 @@ NEEDS = {"EQUIVALENT": ("compiler_output", "adversarial"), "UNREACHABLE": ("argu
 COMPARED = ("differs", "not compared")
 PLACE = re.compile(r"^(.+):(\d+):(\d+)$")
 POSITION = re.compile(r"^(\d+):(\d+)$")
+# The packages whose every entry the maintainer reads: the protocol
+# packages, and the parsers moved out of server.
+READ_ALL = ("http1", "grpc", "yaml", "re2", "xml", "protobuf", "serverparsers")
 
 
 class ExclusionError(Exception):
@@ -130,14 +148,16 @@ class Entry:
         return (int(match.group(1)), int(match.group(2))) if match else None
 
 
-def read_list(root):
-    """The entries of the list at root, and the problems of its form; no
-    list is an empty one."""
+def read_list(root, text=None):
+    """The entries of the list at root, or of its text if given, and the
+    problems of its form; no list is an empty one."""
     path = root / LIST
-    if not path.is_file():
-        return [], []
+    if text is None:
+        if not path.is_file():
+            return [], []
+        text = path.read_text(encoding="utf-8")
     try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
         return [], [f"{LIST}: not TOML: {error}"]
     problems = []
@@ -424,6 +444,46 @@ def quoted(text):
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t") + '"'
 
 
+def git(root, *args):
+    """The output of a git command in root."""
+    result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise ExclusionError(f"git {' '.join(args)}: {result.stderr.strip()}")
+    return result.stdout
+
+
+def review(root, base, seed):
+    """The lines that say which entries of the batch the maintainer reads."""
+    entries, problems = read_list(root)
+    if problems:
+        raise ExclusionError("; ".join(problems))
+    merge_base = git(root, "merge-base", "HEAD", base).strip()
+    listed = git(root, "ls-tree", "--name-only", merge_base, "--", LIST.as_posix()).strip()
+    before = read_list(root, git(root, "show", f"{merge_base}:{LIST.as_posix()}"))[0] if listed else []
+
+    def unreviewed(entry):
+        return {k: v for k, v in entry.fields.items() if k != "reviewer"}
+
+    earlier = {e.key: unreviewed(e) for e in before}
+    batch = [e for e in entries if earlier.get(e.key) != unreviewed(e)]
+    every = [e for e in batch if isinstance(e.file, str) and str(Path(e.file).parent.as_posix()) in READ_ALL]
+    others = [e for e in batch if e not in every]
+    drawn = math.ceil(len(others) / 5)
+    lines = [f"The batch: {len(batch)} entries that the branch adds or changes against {merge_base[:12]}, its merge"
+             f" base with {base}.", "",
+             f"Every one in the protocol packages and in serverparsers ({len(every)}):"]
+    lines += [f"  {e.key}  {e.category}" for e in every]
+    lines.append("")
+    if seed is None:
+        lines.append(f"One in five of the other {len(others)}: {drawn}, which the maintainer draws once the batch is"
+                     " frozen, with `review --seed <seed>`.")
+    else:
+        chosen = random.Random(seed).sample(sorted(e.key for e in others), drawn)
+        lines.append(f"One in five of the other {len(others)}: {drawn}, drawn with the seed {seed!r}:")
+        lines += [f"  {e.key}  {e.category}" for e in others if e.key in chosen]
+    return lines
+
+
 def main():
     parser = argparse.ArgumentParser(description="Check the exclusion list, or start an entry of it.")
     parser.add_argument("--root", default=".", help="the workspace")
@@ -432,11 +492,17 @@ def main():
     commands.add_parser("check", help="check the list's entries, and list the stale ones")
     making = commands.add_parser("new", help="print the stanza of a new entry")
     making.add_argument("what", help="a mutant's id, or a point as <file>:<line>:<column>")
+    reviewing = commands.add_parser("review", help="list the entries of the batch that the maintainer reads")
+    reviewing.add_argument("--base", default="origin/main", help="the batch is what HEAD's tree changes against"
+                                                                 " its merge base with this")
+    reviewing.add_argument("--seed", help="the maintainer's seed, which draws one in five of the other entries")
     args = parser.parse_args()
     root = Path(args.root).resolve()
     try:
         if args.command == "new":
             print(new(root, args.what, args.moonc), end="")
+        elif args.command == "review":
+            print("\n".join(review(root, args.base, args.seed)))
         elif not check(root, args.moonc):
             sys.exit(1)
     except ExclusionError as error:
