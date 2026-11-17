@@ -8,8 +8,8 @@ the work fits where smock is going. Report a vulnerability privately, as
 
 This document is for people who work on smock itself. It describes the
 repository's layout, the pinned MoonBit toolchain, how to build and test
-smock, and the release benchmark, and says where making a release is
-described. The
+smock, how its tests are judged, and the release benchmark, and says where
+making a release is described. The
 [Contributing to smock](docs/README.md#contributing-to-smock) list in
 docs/README.md names the other documents for contributors: the
 architecture decisions (ADRs), the glossary and the maintainer's
@@ -20,6 +20,7 @@ checklists.
 - [Layout](#layout)
 - [Toolchain](#toolchain)
 - [Build and test](#build-and-test)
+- [How tests are judged](#how-tests-are-judged)
 - [Benchmark](#benchmark)
 - [Making a release](#making-a-release)
 
@@ -514,6 +515,446 @@ goes in a package of its own, whose tests get a process of their own, as
 
 `SMOCK_VERSION` and `SMOCK_COMMIT` set the version and the commit that a
 native build, such as `scripts/build-release.sh`, records in the binary.
+
+## How tests are judged
+
+The test review ([#275](https://github.com/hirunefu/smock/issues/275))
+judges smock's tests by what they would catch, not by a percentage.
+[ADR 0006](docs/adr/0006-tests-are-judged-by-four-ledgers.md) records the
+decision and why. This section holds the rules, for anyone who writes,
+changes or removes a test. The review builds its tooling step by step:
+until the coverage wrapper, the mutation runner and the branch checks
+exist, the ledgers are kept by hand and none of them stops a merge, but
+the rules for writing and removing tests apply already.
+
+### Terms
+
+- **Point**: an instrumentation point of moon's coverage, at a
+  function's first statement, a then, else or match-arm body, or a call.
+  It is covered when its counter is above zero.
+- **Pure package**: a package of code that builds on wasm-gc. There are
+  19: `buildinfo`, `cookies`, `definitions`, `engine`, `grpc`, `http1`,
+  `importopenapi`, `llm`, `log`, `metrics`, `prng`, `protobuf`, `re2`,
+  `settings`, `template`, `unicode`, `usage`, `xml` and `yaml`.
+  `testcerts` builds there too, but it is data only, so it is not one.
+  The native-only packages are `server`, `cmd/smock`, `defdir`, `watch`,
+  `openssl`, `protobuf-conformance`, `schema` and `e2e`.
+- **Protocol packages**: `http1`, `grpc`, `yaml`, `re2`, `xml` and
+  `protobuf`.
+- **Site**: one change that one operator can make at one place.
+  **Position**: a place that holds one or more sites. **Mutant**: the
+  source with one site's change applied. A mutant **survives** when every
+  test passes with it.
+- **Pinned set**: one mutant per position, its alternative chosen by the
+  rule of operator set v1 (two for INT in a comparison or an index).
+  **Full set**: every alternative that an operator of v1 defines, at
+  every position. The pinned set is part of it.
+- **Equivalent mutant**: a mutant that no input can tell from the
+  original.
+- **BODY mutant**: a function's body replaced by a default value of its
+  return type. A function whose BODY mutant survives is
+  **pseudo-tested**.
+- **Schema binary**: one build that holds many mutants, each switched on
+  only when an environment variable, read once at startup, names it. It
+  has nothing to do with the `schema` package.
+- **Kill matrix**: for each mutant, the tests that kill it.
+- **Exclusion**: an entry of the exclusion list that accepts an uncovered
+  point or a surviving mutant, with a category and a reason.
+- **Unexplained survivor**: a survivor that no test kills, no code change
+  removed and no current exclusion other than DEFERRED covers. A survivor
+  whose only covering entry is stale is **stale-covered**: the merge check
+  reports it without stopping the merge, and the weekly run, the release
+  check and every count for L4 treat it as unexplained.
+
+### The four ledgers
+
+"100%" means that nothing is left unexplained in four ledgers. No
+percentage is a target or a gate: scores are reported per package, and
+never gated. Each baseline below was measured at d953f320.
+
+1. **Coverage**, necessary but not sufficient: no uncovered point in
+   scope, outside exclusions that carry a reason. The measure is moon's
+   point coverage, read from the bisect report (the default format of
+   `moon coverage report`). Line figures overstate coverage, since a line
+   that is only partly covered counts as covered, so they are only shown
+   beside it. Baseline: 819 points uncovered outside `server` and
+   `cmd/smock`; `server` 6.8% covered; `cmd/smock` 0%.
+2. **Mutation**: no unresolved survivor over the pinned set. A survivor
+   is resolved by a test that kills it, by a code change (a survivor can
+   prove code redundant), or by a reviewed entry in the exclusion list.
+   Baseline: of 250 mutants sampled from the pure packages, 243 compiled,
+   and 77.4% of those were killed; of the 229 that are not equivalent,
+   89.1% were killed when the importers' tests ran too.
+3. **Boundaries**: every limit that a spec or smock's documents state is
+   tested at the limit and just past it, with the smallest input that
+   crosses it. A limit in the code that no document states is a finding.
+   Baseline: about 33 of the 40 most important limits tested on both
+   sides.
+4. **Use cases**: every documented feature has an automated test, or a
+   recorded manual check with its reason. Every Definition-file example
+   in the documents passes `smock check` in CI. Every message a user can
+   see is asserted at least once. Baseline: of 99 documented features, 93
+   covered, 2 partly and 4 not; 70 of the 71 whole Definition files in the
+   documents pass once given the context they leave out; 22 messages, 20
+   of which a user can see, and the top-level help asserted by no test.
+
+**Scope.** All non-test source of the workspace, except generated files
+(the Unicode data table and the build information) and the test
+certificates, which are data. A definition leaves the scope only through
+the exclusion list, with a category, a reason and the maintainer's
+approval. Its sites still appear in the site counts and in the counts of
+sites skipped.
+
+### The ladder
+
+A package climbs four levels:
+
+- **L1, coverage**: no uncovered point outside exclusions, in the pure
+  packages and in the small native-only ones (`defdir`, `watch`,
+  `openssl`, `protobuf-conformance`). `server` and `cmd/smock` get no
+  percentage: the pure parsers that move out of `server`, into a package
+  without I/O, are covered in full in-process, and the rest is reported
+  from e2e coverage.
+- **L2, no pseudo-tested function**: every BODY mutant is killed or
+  excluded.
+- **L3, changed lines**: no unexplained survivor on the lines a branch
+  changes.
+- **L4, per package**: no unexplained survivor over the pinned set. The
+  weekly run executes exactly this set, so it verifies L4.
+
+All 19 pure packages go to L4, in two stages: first `yaml`, `http1`,
+`xml`, `re2`, `grpc`, `cookies`, `settings`, `metrics`, `usage` and
+`prng`, then the other nine. `server` and `cmd/smock` get coverage through
+e2e, a BODY audit and, if the measurements on CI's runners bear out the
+estimate, mutants at operator level through e2e, monthly and before each
+release.
+
+L4 and a release read the pinned set alone. The monthly run over the full
+set is report-only: its survivors at the other alternatives are listed
+apart, and they stop no merge and no release, and do not count towards
+L4.
+
+### Operator set v1
+
+The operators that make the mutants are pinned as a version, v1. A
+change to them, the rule that picks an alternative included, needs the
+maintainer's approval, and shows in the weekly report.
+
+- **BODY**: a function's body replaced by a default value of its return
+  type.
+- **ROR**: a comparison, always with the boundary alternative: `<` and
+  `<=` swap, and `>` and `>=` swap.
+- **IFC**: a condition or guard forced to true or to false.
+- **LCR**: `&&` and `||` swap.
+- **NOT**: a prefix `!` removed.
+- **DEL**: a statement deleted.
+- **BOOL**: `true` and `false` swap.
+- **AOR**: `+` and `-` swap, and `*` and `/`, in their compound
+  assignments too.
+- **INT**: an integer literal, with both n+1 and n-1 where it is an
+  operand of a comparison or an index, and one replacement elsewhere.
+- **STR**: a string literal replaced by the empty string or with one
+  character changed, in the protocol packages, in `server` and in `log`'s
+  line writers. A mock server's behaviour is mostly strings: header
+  names, content types, JSON keys, status texts and log lines.
+
+The pinned set holds one mutant per position, two for INT in a comparison
+or an index, and a fixed rule chooses the alternative, so that a runner
+cannot pick those that are easiest to kill. The full set adds every other
+alternative: both of IFC's, all of INT's and both of STR's. One mutant
+per line, chosen by operator priority, would not do: of the 24 survivors
+of the sample first read as real, it would have picked another site for
+16.
+
+Sites come from a parser, not from a lexer. For each package, each report
+gives the number of sites that each rule skipped (no default value for
+BODY, a string outside STR's scope, FFI) beside the number of survivors,
+so that a "zero" always says what it is zero of. Each mutant has a stable
+id: its file, its enclosing definition, its operator, its original text,
+its replacement text and its ordinal. A report, an exclusion and a commit
+message name a mutant by that id.
+
+### Outcomes and kill credit
+
+- **Killed**: a test fails with the mutant on.
+- **Timed out**: the run takes longer than 1.25 times the baseline run
+  plus 4 s. A confirmed time-out counts as killed, and is listed.
+- **Unviable**: the mutant does not compile. It counts neither as killed
+  nor as survived.
+- **Survived**: every test passes.
+
+**Kill confirmation.** A kill counts only when the failing tests fail
+again with the mutant on and pass with it off. A time-out counts only
+when the mutant times out again and the run without it finishes within
+the limit; otherwise it is recorded as unconfirmed. The baseline runs
+twice before any mutant. The runner records each test's flake rate, and a
+test above the flake threshold, which the maintainer sets, gives no kill
+credit until it is fixed.
+
+**Kill credit for a pure package.** Any wasm-gc test of any package of
+the workspace gives credit. The package's own tests run first. For the
+survivors, the tests of every package that imports it, directly or
+through another package, run too: in the sample, `engine`'s tests alone
+killed 16 of the 25 survivors in `template`'s comparison code. An e2e
+test gives no credit for a pure package. Only the kill-matrix mode, for a
+package heading into a removal batch and for a snapshot audit, runs every
+covering test for every mutant.
+
+**Kill credit for a native-only package.** In-process and e2e tests give
+credit.
+
+**Backend.** The verdicts for pure packages are taken on wasm-gc. A site
+that uses an unchecked array access is also judged natively on amd64,
+because wasm-gc traps where the native binary does not, and for such a
+site the native verdict decides.
+
+The runner never passes `-u` to `moon test`.
+
+### Exclusions
+
+The exclusion list is one file in the repository. No attribute in the
+source excludes a mutant. An entry names its mutant by its id, and gives a
+category, a reason and who reviewed it. Only the maintainer fills in the
+reviewer, in a commit that the maintainer makes or acknowledges at the
+merge. An entry goes stale when the text of its definition changes. Stale
+entries are triaged again in a batch, which the first weekly run that
+lists them opens as an issue. The uncovered points that the coverage
+ledger accepts are in the same list, under the same categories:
+
+- **EQUIVALENT**: an equivalent mutant, through the three steps below. The
+  entry records the result of comparing the compiler's output and the
+  adversarial attempt: the agent context that made it and the tests it
+  tried.
+- **ARID**: code whose change no user, document or test could notice,
+  kept narrow: capacity hints, the fill values of empty arrays, abort
+  messages. Logs, metrics and timeouts are features of a mock server, so
+  they are not arid.
+- **UNREACHABLE**: only for an arm that an invariant guards with an
+  abort, or with a written argument that the maintainer approves.
+- **FAULT**: reached only through an OpenSSL or file-system failure. It
+  has nothing to do with a Stub's Fault. No C seam is added to inject
+  such failures ([ADR 0001](docs/adr/0001-moonbit-with-c-only-for-tls.md)).
+- **UB-NATIVE**: a mutant whose effect on the native binary is undefined,
+  such as an unchecked array access out of bounds, so that no test can
+  pin it there.
+- **DEFERRED**: carries an issue number, and still counts as unresolved.
+
+Dead code is deleted, not excluded.
+
+An equivalence claim reaches the maintainer in three steps:
+
+1. **Automatic.** The compiler's output for the mutated package is
+   compared with the original's. Identical output marks the mutant
+   equivalent, or a duplicate of another mutant.
+2. **Adversarial.** For each claim that remains, a separate agent context
+   tries to write a test that kills the mutant, from the spec.
+3. **The maintainer.** What survives both goes to the maintainer: every
+   entry in the protocol packages, and one in five of the others, as a
+   sample. The maintainer draws the sample after the batch is frozen, so
+   that its author cannot know which entries will be read. If a sampled
+   entry is rejected, its author triages the whole batch again, and the
+   maintainer draws a new sample.
+
+### Rules for the work
+
+- **The oracle rule.** Each expected value a test adds comes from a named
+  source: a spec section, a sentence of smock's documents, an issue's
+  acceptance criterion, the output of a reference tool (protoc, the RE2
+  reference, an official SDK), or the maintainer. The test, or its name,
+  cites it. A snapshot is a fine form for the value, and the source
+  decides its content: a snapshot that `moon test -u` fills is checked
+  against its source before it is committed. A test that disagrees with
+  the current code becomes an issue. It is never made green with `-u`.
+- **Extend first.** Before adding a test, extend the existing test of the
+  same behaviour. Random and differential tests exist already: `re2`'s
+  comparison of its DFA with the Pike VM on random patterns, and
+  `http1`'s tests of split invariance and random garbage. Work on
+  properties converts and extends them, and adds no parallel tests.
+- **Roles.** An agent that kills survivors may delete code only when a
+  survivor proves it redundant, and with the maintainer's approval.
+  Outside the removal batches, no change deletes, skips or weakens an
+  existing test: a test that should go is proposed for a removal batch.
+- **The weakening report.** For each branch, against its merge base with
+  `main`, it lists the tests deleted; the assertion lines removed or
+  changed in tests that stay; the snapshot lines changed; the skip
+  attributes added; the package settings that stop a test from running on
+  wasm-gc; and any change to what decides a verdict: the exclusion list,
+  the operator set, the runner and its committed data, the coverage
+  floors and scope, the flake threshold, the lists of packages at L4 and
+  of tests kept, the merge and release checks, and the mutation and
+  coverage workflows. The maintainer acknowledges it at the merge.
+- **The mutator is governed too.** A ratchet on each package's number of
+  sites, compared per definition: a package's sites may drop by at most
+  as many as the base tree had in the definitions that a change deletes
+  or changes, and any other drop needs the maintainer's approval. A
+  forced-fail self-test: a mutant switched on must be observable, or the
+  run fails. A weekly canary replays the 250 mutants sampled at
+  d953f320, whose verdicts are known, on that commit with the toolchain
+  pinned there, and the maintainer accepts each difference once it is
+  explained.
+- **The held-out measure.** A set of mutants that no check gates on and
+  that no agent writing tests ever sees: operators outside v1, such as
+  swapped arguments and replaced match arms, and realistic mutants written
+  by hand or by a model. It is kept outside the repository, on the
+  maintainer's machine, and runs there. Nothing about a single mutant
+  becomes public, only kill rates. Its mutants are keyed as exclusions
+  are, so that they apply to later commits, and those whose text is gone
+  are counted beside the rate. Its kill rate, measured at d953f320, at
+  step 2's baseline, after steps 1, 3 and 5, after stage 1 and in each
+  removal batch, is reported to the maintainer as the outcome of the
+  review.
+- **Seeds.** Each property runs with a fixed seed committed beside it: on
+  every push, in mutation runs and in kill confirmations. Each week a
+  separate job writes a random seed into a working copy, the way the
+  runner applies a mutant, and prints it; a failure is rerun by
+  committing that seed. No test reads the environment for a seed, so
+  `scripts/check-no-io.sh` stays as it is.
+- **Where the checks run.** smock merges branches locally, ticket
+  branches into integration branches and those into `main`, and opens no
+  pull requests; only Dependabot does. So the changed-lines job and the
+  weakening report run on pushes to every branch but `main`, against the
+  merge base with `main`, in a workflow of their own, which CI's job
+  `keep` never waits for. An outside contributor's pull request goes the
+  same way: before merging it, the maintainer pushes its branch here. The
+  stop is in the merge procedure. It reports only, at first; once a
+  package reaches L4, an unexplained survivor on lines of that package
+  that the branch changes stops the merge into `main`. A script reads the
+  report of the run on the branch head, as the release checks that CI
+  passed on a tag's commit, and the
+  [checklist before merging into main](docs/merging-into-main.md) gains
+  it when the script exists. A diff too large for the changed-lines job
+  is reported as not covered, and runs whole in a run started by hand;
+  the merge check reads whichever run covered the whole diff.
+- **Releases.** For the packages at L4, the latest weekly run over the
+  pinned set must also show no unexplained survivor before a release, on
+  the tag's commit or on an ancestor whose later changes the changed-lines
+  reports cover or touch no non-test source of a package at L4. The
+  release checks it before it publishes, beside the check that CI passed
+  on the tag's commit
+  ([What a tag does](docs/releasing.md#what-a-tag-does)). So a release may
+  wait for one weekly run.
+- **Bulk runs go to Actions**: the baseline of 1,000 mutants, the weekly
+  and monthly runs, `server` through e2e, and the kill matrices. On a
+  developer's machine, only single mutants and the diff mode run, which
+  checks one change's lines, and two named exceptions: step 1's replay of
+  the 250 sampled mutants and the held-out runs on the maintainer's
+  machine.
+
+### Snapshot audits
+
+When a package's turn comes to climb to L4, about ten of its snapshots
+are audited. They are drawn, with a seed the maintainer picks, among the
+tests that alone kill some mutant in a kill-matrix run of the package, at
+least half of them from tests that the work added. A separate agent
+context, one that wrote none of that package's tests under these rules,
+checks each against its source. The maintainer reads only the snapshots
+that this context finds in disagreement with their source, and each of
+those becomes an issue (a bug) or a corrected test.
+
+### What makes a good test
+
+- It drives a public interface, and survives a refactor that keeps the
+  behaviour. The seams are the existing ones: in-process tests of a
+  package's public interface (the harness in `engine/harness_test.mbt`
+  for the engine), and e2e tests that run the binary over real sockets.
+  The one new seam is the package without I/O that receives `server`'s
+  pure parsers.
+- Its expected value comes from a named source, which the test or its
+  name cites (the oracle rule).
+- A limit is tested at the limit and just past it, with the smallest
+  input that crosses it. A recogniser is tested with inputs that almost
+  match as well as with matches.
+- It checks one behaviour, and the existing test of that behaviour is
+  extended before a new one is added.
+- e2e is for what only the binary shows: the process and its CLI,
+  sockets, TLS, reloads, logs, the HTTP/2 loop, gRPC's wire behaviour,
+  and the Admin API's routing, authentication and contract. The engine's
+  semantics belong in the engine's in-process tests. The rule of about
+  20 ms between awaits ([Build and test](#build-and-test)) still holds.
+- A time bound is relative to the competing event or to the configured
+  value, never to the runner's speed. A bound that says "X happens before
+  Y" is written relative to Y, or to the configured value, for example
+  under three times it. A fixed number stays only where a document states
+  it as a tolerance, such as the 100 ms before a gRPC call's deadline in
+  which a client's reset does not count
+  ([Resets and the connection's defences](docs/grpc/state-and-faults.md#resets-and-the-connections-defences)).
+- A property is grounded in a spec, as a round trip or agreement with a
+  reference, reports its input classes, and shrinks.
+- Killing a mutant is not enough: a test written for a survivor still
+  states the behaviour from its source. The held-out measure checks that
+  the tests did not merely fit the operators.
+- Tests to learn from: `http1`'s split-invariance and random-garbage
+  tests; `re2`'s conformance table; the codec tests on protoc's fixtures;
+  the protobuf conformance job's failure list, as a model of a skip list;
+  the goldens; the settings boundary pairs; `llm`'s size test (exactly
+  1 MiB is within the bound, and one byte more is over it); the engine
+  harness's fixed clock and seeded random source.
+
+The e2e package may be built locally with one build job, so that work on
+e2e tests need not go through CI:
+
+```sh
+moon test --target native -p smock/smock/e2e --build-only -j 1
+```
+
+Mutants, though, run locally only one at a time or in the diff mode, and
+in the two exceptions that [Rules for the work](#rules-for-the-work)
+names: every larger run goes to Actions.
+
+### Removing a test
+
+A test may go only under (A) or (B), and never when (C) holds.
+
+- **(A) Mechanically redundant.** With the test removed, three sets stay
+  the same:
+  - the mutants killed over the full set, counting only tests in the same
+    layer or a lower one: an e2e kill never justifies removing a unit
+    test;
+  - the covered points;
+  - the trace links, derived mechanically: from the commit that
+    introduced the test block (following moves and copies across files),
+    to the ticket in its subject, to that issue's acceptance criteria.
+- **(B) Negative value.** It pins an implementation detail that a
+  refactor keeping the behaviour would break, or restates a constant that
+  no spec, document or user fixes. The default is to rewrite it, not to
+  delete it.
+- **(C) Keep reasons.** The test is:
+  - the only test of a feature, an acceptance criterion, a rule of an ADR,
+    a documented limit, or an Admin API reply's endpoint and status;
+  - the only regression test of a closed bug;
+  - the only e2e test of a feature a user sees;
+  - a documented example that nothing else runs;
+  - one of the deliberate overlaps: the HTTP/2 rules of
+    [ADR 0005](docs/adr/0005-http2-comes-from-moonhttp.md), the contract
+    checker's own tests, the goldens, the in-process codec tests on
+    protoc's fixtures, the settings boundary pairs, and the reload tests
+    with symlinks;
+  - a test of a constant that a spec fixes;
+  - a test that the backends agree, or a test in a release build, such as
+    the engine's tests of seeded floating-point results;
+  - a test of behaviour that a dependency provides.
+
+  The tests kept for the last four reasons are named in a list.
+
+An e2e test goes only when operator-level mutants of the `server` code on
+its path are killed by the tests that remain, or when a named test at a
+lower seam, together with one remaining e2e test, checks each of its
+claims about the wire. Without a run at operator level, only the second
+way is open.
+
+Each removal batch comes with its proof: the kill matrix, the point sets
+and the trace links before and after, as CI artifacts, with an empty
+difference; a replay of the real bug fixes
+([#264](https://github.com/hirunefu/smock/issues/264),
+[#60](https://github.com/hirunefu/smock/issues/60) and
+[#59](https://github.com/hirunefu/smock/issues/59)) that first checks
+that the full suite fails on each, and then checks the reduced one (a fix that cannot be reverted cleanly is replayed by bringing its
+bug back in the smallest way, or left out with the maintainer's
+approval); small commits that name the tests that take over; the
+maintainer's approval; and a new measurement of the held-out set.
+
+These never justify removing a test: coverage alone, text similarity,
+smell detectors, a target count, or CI's speed.
 
 ## Benchmark
 
