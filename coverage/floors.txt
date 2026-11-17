@@ -35,7 +35,7 @@ protobuf-conformance 52
 re2 5
 server 3282
 serverparsers 0
-settings 168
+settings 1
 template 62
 testcerts 0
 unicode 1
