@@ -124,7 +124,10 @@ test "conditions on Struct, Value, ListValue and NullValue: a Struct's keys are 
 /// does" (docs/grpc/messages.md), so no call's message can hold it: "A
 /// value that can never match is a problem: a number out of its type's
 /// range", reported "at the JSON Pointer of the value at fault"
-/// (docs/definition-files/grpc.md). The message ends as #283 names it.
+/// (docs/definition-files/grpc.md). The message ends as #283 names it. Its
+/// first part, "must be a JSON value: null, a number within the range of a
+/// double, a string, true or false, an object or an array", is the code's
+/// wording, which the maintainer confirmed on 2026-11-17 (#275).
 test "an Any's type that the set lacks, in a condition or a static reply, is a problem; so are members that do not fit the type it names, and values of the wrong form" {
   inspect(
     documents(
