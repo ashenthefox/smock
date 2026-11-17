@@ -8,6 +8,9 @@ reasons, ids and the request id, and that the reply the SDK's stream helper
 builds from a stream equals the one it parses from the JSON reply, apart
 from differences listed by name. It also checks what each SDK raises or
 yields on smock's mid-stream errors and on the docs' 429 and 529 replies.
+Then it serves llm-sdks/azure/, the docs' Azure OpenAI example, on its own,
+and calls it through openai-python's AzureOpenAI client, once it has checked
+that the docs still show that example as written.
 
 It uses only the SDKs and the standard library. Every client is built with
 max_retries=0, so that each call sends one request, but for the retry
@@ -40,6 +43,13 @@ import anthropic
 import openai
 
 DEFINITIONS = Path(__file__).resolve().parent / "definitions"
+
+# The definition set of the docs' Azure OpenAI example, which smock serves
+# on its own, and the document that shows it, with the Paths and compatible
+# endpoints it describes.
+AZURE_DEFINITIONS = Path(__file__).resolve().parent / "azure"
+AZURE_EXAMPLE = AZURE_DEFINITIONS / "azure.yaml"
+LLM_RESPONSES = Path(__file__).resolve().parent.parent / "docs" / "definition-files" / "llm-responses.md"
 
 # How long smock may take to become ready, and to exit after SIGTERM, and
 # how long one call may take.
@@ -128,6 +138,19 @@ OVERLOADED_REQUEST_ID = "req_5J4ymbACTcA49ramAi1T8pGa"
 # gives for Gemini. Its table gives the Stub the path
 # /v1beta/openai/chat/completions, which the Stub gemini-text has.
 GEMINI_BASE_PATH = "/v1beta/openai/"
+
+# The docs' Azure OpenAI example
+# (docs/definition-files/llm-responses.md#paths-and-compatible-endpoints):
+# the API version that openai-python's AzureOpenAI client is given, the
+# deployment that a call names as its model, the request target the docs
+# say the client sends for it, and the text of the docs' Stub. The reply is
+# in OpenAI's form, with none of Azure's content-filter members, such as
+# these two.
+AZURE_API_VERSION = "2024-10-21"
+AZURE_DEPLOYMENT = "my-gpt"
+AZURE_TARGET = "/openai/deployments/my-gpt/chat/completions?api-version=2024-10-21"
+AZURE_TEXT = "Hello! How can I assist you today?"
+AZURE_CONTENT_FILTER_MEMBERS = ("prompt_filter_results", "content_filter_results")
 
 # The stop sequences an application gives the Messages API, and the stop
 # details of a refusal: its type, category and explanation.
@@ -223,12 +246,14 @@ MISSING = object()
 
 
 class Smock:
-    """smock serving DEFINITIONS on ports it picks, until the with block
-    ends. Its Admin API needs a token of its own, SMOCK_ADMIN_TOKEN, and
-    no other SMOCK_ variable of the environment reaches it."""
+    """smock serving a definition set, DEFINITIONS unless another is given,
+    on ports it picks, until the with block ends. Its Admin API needs a
+    token of its own, SMOCK_ADMIN_TOKEN, and no other SMOCK_ variable of the
+    environment reaches it."""
 
-    def __init__(self, binary):
+    def __init__(self, binary, definitions=DEFINITIONS):
         self.binary = binary
+        self.definitions = definitions
         self.ports = {}
         self.log = []
         self.listening = threading.Event()
@@ -238,7 +263,7 @@ class Smock:
         env = {name: value for name, value in os.environ.items() if not name.startswith("SMOCK_")}
         env["SMOCK_ADMIN_TOKEN"] = self.admin_token
         command = [
-            self.binary, "serve", "--dir", str(DEFINITIONS),
+            self.binary, "serve", "--dir", str(self.definitions),
             "--port", "0", "--tls-port", "0", "--admin-port", "0", "--drain-timeout-ms", "1000",
         ]
         self.process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -320,6 +345,15 @@ class Smock:
         options = {"max_retries": 0, "timeout": CALL_TIMEOUT_S, **options}
         return openai.OpenAI(base_url=f"{self.url}{GEMINI_BASE_PATH}", api_key="test", **options)
 
+    def azure(self, **options):
+        """An openai-python AzureOpenAI client of this smock, configured as
+        the docs' Azure OpenAI example configures it, with smock as the
+        endpoint, and with max_retries=0 unless the options say otherwise.
+        A call names the deployment as its model."""
+        options = {"max_retries": 0, "timeout": CALL_TIMEOUT_S, **options}
+        return openai.AzureOpenAI(azure_endpoint=self.url, api_version=AZURE_API_VERSION, api_key="test",
+                                  **options)
+
     def anthropic(self, **options):
         """An anthropic-sdk-python client of this smock, with max_retries=0
         unless the options say otherwise. Its base URL has no /v1, which
@@ -337,6 +371,16 @@ class Smock:
                      "Content-Type": "application/json"})
         with urllib.request.urlopen(request, timeout=CALL_TIMEOUT_S) as response:
             return json.load(response)
+
+    def journal(self, session):
+        """The Journal's entries of the Session, oldest first, as a test
+        queries them through the Admin API."""
+        request = urllib.request.Request(
+            f"{self.admin_url}/v1/journal/query", data=json.dumps({"filter": {}}).encode(),
+            headers={"Authorization": f"Bearer {self.admin_token}", "baggage": f"smock-session={session}",
+                     "Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=CALL_TIMEOUT_S) as response:
+            return json.load(response)["entries"]
 
 
 class Checks:
@@ -435,12 +479,42 @@ def collect(stream, seen):
             seen.append(item)
 
 
-def check_definitions(checks, binary):
-    """Checks that DEFINITIONS passes `smock check`, with no warning."""
-    result = subprocess.run([binary, "check", str(DEFINITIONS)], capture_output=True, text=True)
+def check_definitions(checks, binary, definitions):
+    """Checks that a definition set passes `smock check`, with no warning."""
+    result = subprocess.run([binary, "check", str(definitions)], capture_output=True, text=True)
     output = (result.stdout + result.stderr).strip()
-    checks.check("definitions: smock check passes with no warning", result.returncode == 0 and not output,
+    checks.check(f"{definitions.name}: smock check passes with no warning", result.returncode == 0 and not output,
                  f"exit status {result.returncode}\n{output}")
+
+
+def yaml_blocks(document):
+    """The yaml blocks of a Markdown document, each without the indent of
+    its fence, as a list item indents it."""
+    blocks, block, indent = [], None, ""
+    for line in document.read_text(encoding="utf-8").splitlines(keepends=True):
+        fence = re.fullmatch(r"([ \t]*)```(\S*)[ \t]*\n?", line)
+        if block is None:
+            if fence and fence.group(2) == "yaml":
+                block, indent = [], fence.group(1)
+        elif fence and not fence.group(2):
+            blocks.append("".join(block))
+            block = None
+        else:
+            block.append(line.removeprefix(indent))
+    return blocks
+
+
+def check_azure_example(checks):
+    """Checks that the docs still show AZURE_EXAMPLE, without its first
+    comment lines, as one of the yaml blocks of LLM_RESPONSES, so that the
+    job serves the docs' Azure OpenAI example as written."""
+    lines = AZURE_EXAMPLE.read_text(encoding="utf-8").splitlines(keepends=True)
+    while lines and lines[0].startswith("#"):
+        lines.pop(0)
+    example = "".join(lines)
+    checks.check(f"azure: {LLM_RESPONSES.name} shows {AZURE_EXAMPLE.name}, without its first comment lines",
+                 example in yaml_blocks(LLM_RESPONSES),
+                 f"no yaml block of {LLM_RESPONSES} is\n{example}")
 
 
 def chat_create(client, model, **options):
@@ -703,6 +777,70 @@ def chat_error(checks, smock):
     reply = chat_create(client, "chat-error")
     checks.equal(f"{name}: the whole text", reply.choices[0].message.content, ERROR_TEXT)
     checks.equal(f"{name}: the stop reason", reply.choices[0].finish_reason, "stop")
+
+
+def members_named(value, names, path=()):
+    """The paths, joined with dots, of the members of a value of JSON's data
+    model, at any depth, whose names are among names."""
+    if isinstance(value, dict):
+        for key, member in value.items():
+            if key in names:
+                yield ".".join((*path, key))
+            yield from members_named(member, names, (*path, key))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from members_named(item, names, (*path, str(index)))
+
+
+def azure_chat(checks, smock):
+    """The docs' Azure OpenAI example, served on its own, through
+    openai-python's AzureOpenAI client as the docs configure it, each call
+    in the Session azure: create() with and without stream, and the
+    stream() helper. The Stub answers the deployment's path whatever the
+    query, and its reply, with generated ids, is in OpenAI's form, without
+    Azure's content-filter members. The Journal shows the target the docs
+    say the client sends."""
+    session = "azure"
+    client = smock.azure(default_headers={"baggage": f"smock-session={session}"})
+    name = "azure-chat: create"
+    reply = chat_create(client, AZURE_DEPLOYMENT)
+    message = reply.choices[0].message
+    checks.equal(f"{name}: the text", message.content, AZURE_TEXT)
+    checks.equal(f"{name}: no tool calls", message.tool_calls, None)
+    checks.equal(f"{name}: the stop reason", reply.choices[0].finish_reason, "stop")
+    check_usage(checks, name, reply.usage, 0, 0)
+    checks.id(f"{name}: the id", reply.id, CHAT_ID)
+    checks.equal(f"{name}: the model, the deployment's", reply.model, AZURE_DEPLOYMENT)
+    checks.id(f"{name}: the request id", reply._request_id, REQUEST_ID)
+    checks.equal(f"{name}: none of Azure's content-filter members",
+                 list(members_named(reply.model_dump(), AZURE_CONTENT_FILTER_MEMBERS)), [])
+
+    name = "azure-chat: create(stream=True)"
+    request_id, chunks = chat_stream(client, AZURE_DEPLOYMENT)
+    check_chunks(checks, name, chunks, CHAT_ID, AZURE_DEPLOYMENT)
+    checks.equal(f"{name}: the text", streamed_content(chunks), AZURE_TEXT)
+    checks.equal(f"{name}: the stop reason, on the closing chunk only",
+                 streamed_finish_reasons(chunks), [None] * (len(chunks) - 1) + ["stop"])
+    checks.equal(f"{name}: no usage", [chunk.usage for chunk in chunks], [None] * len(chunks))
+    checks.id(f"{name}: the request id", request_id, REQUEST_ID)
+    checks.equal(f"{name}: none of Azure's content-filter members in any chunk",
+                 [path for chunk in chunks
+                  for path in members_named(chunk.model_dump(), AZURE_CONTENT_FILTER_MEMBERS)], [])
+
+    name = "azure-chat: stream()"
+    events, built = chat_helper(client, AZURE_DEPLOYMENT)
+    checks.equal(f"{name}: the content deltas, joined",
+                 "".join(event.delta for event in events if event.type == "content.delta"), AZURE_TEXT)
+    checks.equal(f"{name}: content.done",
+                 [event.content for event in events if event.type == "content.done"], [AZURE_TEXT])
+    checks.id(f"{name}: the id", built.id, CHAT_ID)
+    checks.same(f"{name}: the reply equals the JSON reply, apart from the listed differences",
+                reply.model_dump(), built.model_dump(), {**CHAT_HELPER_DIFFERENCES, **GENERATED_ID_DIFFERENCES})
+
+    checks.equal("azure-chat: the Journal: each call, a POST of the docs' target that the Stub answered",
+                 [(entry["request"]["method"], entry["request"]["target"], entry["stub"])
+                  for entry in smock.journal(session)],
+                 [("POST", AZURE_TARGET, "azure-chat")] * 3)
 
 
 def responses_create(client, model, **options):
@@ -1451,8 +1589,9 @@ def retries(checks, smock):
                          f"the Journal holds {verdict['count']}; reason {verdict['reason']}")
 
 
-# The cases, in the order they run. Each calls the Stubs it names, and a
-# case whose SDK raises unexpectedly fails without stopping the others.
+# The cases of DEFINITIONS, in the order they run. Each calls the Stubs it
+# names, and a case whose SDK raises unexpectedly fails without stopping the
+# others.
 CASES = [
     chat_text, chat_tools, chat_call_only, chat_length, chat_error,
     responses_text, responses_tools, responses_incomplete, responses_error,
@@ -1460,6 +1599,13 @@ CASES = [
     messages_broken_arguments, messages_error,
     error_replies, retries,
 ]
+
+# The cases of the docs' Azure OpenAI example, AZURE_DEFINITIONS.
+AZURE_CASES = [azure_chat]
+
+# Each definition set, with its cases, in the order they run. smock serves
+# one set at a time.
+SETS = [(DEFINITIONS, CASES), (AZURE_DEFINITIONS, AZURE_CASES)]
 
 
 def main():
@@ -1471,15 +1617,20 @@ def main():
     print(f"{version}; openai-python {openai.__version__}; anthropic-sdk-python {anthropic.__version__}; "
           f"Python {sys.version.split()[0]}", flush=True)
     checks = Checks()
-    check_definitions(checks, binary)
-    with Smock(binary) as smock:
-        for case in CASES:
-            try:
-                case(checks, smock)
-            except Exception as error:
-                checks.raised(case.__name__.replace("_", "-"), error)
+    for definitions, _ in SETS:
+        check_definitions(checks, binary, definitions)
+    check_azure_example(checks)
+    logs = []
+    for definitions, cases in SETS:
+        with Smock(binary, definitions) as smock:
+            for case in cases:
+                try:
+                    case(checks, smock)
+                except Exception as error:
+                    checks.raised(case.__name__.replace("_", "-"), error)
+        logs.append(f"smock's log, serving {definitions.name}:\n{''.join(smock.log)}")
     if checks.failed:
-        print(f"\n{len(checks.failed)} of {checks.count} checks failed. smock's log:\n{''.join(smock.log)}")
+        print(f"\n{len(checks.failed)} of {checks.count} checks failed. {''.join(logs)}")
         return 1
     print(f"\nAll {checks.count} checks passed.")
     return 0

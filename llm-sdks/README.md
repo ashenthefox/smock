@@ -25,7 +25,8 @@ it. `scripts/check-ci-artifacts.sh` checks these rules.
 | File | What it is |
 |---|---|
 | `definitions/llm.yaml` | The Definition file made for the job. Its one Mock answers both SDKs, and each Stub answers one model, named as its id. |
-| `check.py` | The script. It checks the Definition file with `smock check`, serves it, calls each Stub through an SDK and checks what the SDK reads. |
+| `azure/azure.yaml` | The Azure OpenAI example of [LLM responses](../docs/definition-files/llm-responses.md#paths-and-compatible-endpoints), as written, under a few comment lines. smock serves it on its own, so its one Mock is the Default Mock. |
+| `check.py` | The script. It checks each Definition file with `smock check`, serves it, calls each Stub through an SDK and checks what the SDK reads. |
 | `requirements.in` | The SDKs, each pinned to one version. |
 | `requirements.txt` | The SDKs and every package they need, each pinned by version and by the hashes of its files. It is generated from `requirements.in`. |
 | `.python-version` | The Python the job runs with. |
@@ -55,6 +56,20 @@ retry checks, below, keep the default retries.
   It makes the calls and the checks of the text-only Chat Stub: `create`
   with and without `stream`, and a stream with
   `stream_options.include_usage`.
+- Azure OpenAI's deployment path, with the reference's Azure example: an
+  openai-python `AzureOpenAI` client, configured as the reference shows it,
+  with smock as the endpoint, API version `2024-10-21`, and the deployment
+  `my-gpt` as the model, calls `create` with and without `stream`, and the
+  `stream()` helper. It checks the text, the stop reason, usage, ids, the
+  model and the request id, what every chunk of the stream shares, and that
+  the helper's reply equals the JSON reply, apart from the listed
+  differences. It also checks what the reference says of this setup: the
+  Journal holds each call as `POST
+  /openai/deployments/my-gpt/chat/completions?api-version=2024-10-21`,
+  answered by the Stub whose path pattern ignores the query, and no reply
+  or chunk carries Azure's content-filter members. Before it serves the
+  example, it checks that the reference still shows `azure/azure.yaml`,
+  without its comment lines, as a `yaml` block.
 - Responses: `create` with and without `stream`, and the `stream()` helper
   with text and with two tool calls, given function tools. It checks the
   text, the function call items and their arguments as the SDK parses
@@ -112,7 +127,12 @@ expects it to. It prints every check, and smock's log when one fails.
 
 To check more, add a Stub to `definitions/llm.yaml` for a model of its own,
 write what the script should read beside the other expectations at the top
-of `check.py`, and add a case to `CASES`.
+of `check.py`, and add a case to `CASES`. An example of the reference that
+must run as written, with a Mock of its own, gets a directory of its own,
+as `azure/` has, and an entry in `SETS`.
+
+A change to the reference's Azure example changes `azure/azure.yaml` in
+the same commit, or the job fails.
 
 ## Run it
 
