@@ -54,9 +54,10 @@ pub impl Show for ParseError with fn output(self, logger) {
 /// Rejected, each with a message naming it: anchors, aliases, tags, merge
 /// keys (`<<`), duplicate keys, multiple documents, directives, explicit
 /// keys (`?`), block scalar indentation indicators, empty values (YAML
-/// reads them as null; write `null`), tabs in indentation, control
-/// characters, and nesting deeper than 1024 collections, the limit of
-/// `@json.parse`.
+/// reads them as null; write `null`), tabs in indentation (the white space
+/// between a `-` and a mapping or a sequence that starts on its line is
+/// indentation too), control characters, and nesting deeper than 1024
+/// collections, the limit of `@json.parse`.
 ///
 /// Rejected too, on purpose, though YAML allows them: a text with no
 /// document, such as an empty one or one of comments only; a key that is a

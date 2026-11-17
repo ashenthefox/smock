@@ -749,6 +749,38 @@ test "tabs in indentation give an error; tabs elsewhere are white space" {
       #|"-\tbaz" -> ["baz"]
     ),
   )
+  // The same holds for a compact mapping that starts on its sequence's `-`
+  // line: "The compact notation may be used when the entry is itself a
+  // nested block collection. In this case, both the "-" indicator and the
+  // following spaces are considered to be part of the indentation of the
+  // nested collection" (YAML 1.2.2, section 8.2.1), so a tab there is a tab
+  // in indentation (section 6.1), with the message above, whatever the
+  // key's style and however deep the sequence. No case of yaml-test-suite
+  // has it (#382). The nearest inputs that stay valid follow: a tab
+  // between `-` and a scalar, a flow collection or a block scalar, which
+  // separates them (`s-l+block-node`, section 8.2.3; "such white space may
+  // safely include tab characters", section 6.2), spaces before a compact
+  // mapping, and a tab after a key's `:`.
+  inspect(
+    each([
+      "-\ta: 1", "- \ta: 1", "stubs:\n-\tid: a\n  mock: m", "-\t\"a\": 1", "- -\ta: 1",
+      "-\tx", "-\t[a, b]", "-\t|\n  x\n", "-  a: 1", "stubs:\n-   id: a\n    mock: m",
+      "- a:\tb",
+    ]),
+    content=(
+      #|"-\ta: 1" -> error /0: tabs are not allowed in indentation
+      #|"- \ta: 1" -> error /0: tabs are not allowed in indentation
+      #|"stubs:\n-\tid: a\n  mock: m" -> error /stubs/0: tabs are not allowed in indentation
+      #|"-\t\"a\": 1" -> error /0: tabs are not allowed in indentation
+      #|"- -\ta: 1" -> error /0/0: tabs are not allowed in indentation
+      #|"-\tx" -> ["x"]
+      #|"-\t[a, b]" -> [["a","b"]]
+      #|"-\t|\n  x\n" -> ["x\n"]
+      #|"-  a: 1" -> [{"a":1}]
+      #|"stubs:\n-   id: a\n    mock: m" -> {"stubs":[{"id":"a","mock":"m"}]}
+      #|"- a:\tb" -> [{"a":"b"}]
+    ),
+  )
   // In a block scalar, only spaces indent. "The content indentation level
   // is equal to the number of leading spaces on the first non-empty line"
   // (YAML 1.2.2, section 8.1.1.1), and a line of text is that many spaces

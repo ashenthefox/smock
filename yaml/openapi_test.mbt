@@ -526,6 +526,25 @@ test "malformed text gives the same error in both modes" {
       #|  openapi: error /0: tabs are not allowed in indentation
     ),
   )
+  // So is a tab between `-` and a compact mapping on its line, by the same
+  // sections (#382), in both modes; a tab before a scalar separates.
+  inspect(
+    both([
+      "-\ta: 1", "paths:\n  /pets:\n    parameters:\n    -\tname: id\n      in: path",
+      "-\tx",
+    ]),
+    content=(
+      #|"-\ta: 1"
+      #|  safe: error /0: tabs are not allowed in indentation
+      #|  openapi: error /0: tabs are not allowed in indentation
+      #|"paths:\n  /pets:\n    parameters:\n    -\tname: id\n      in: path"
+      #|  safe: error /paths/~1pets/parameters/0: tabs are not allowed in indentation
+      #|  openapi: error /paths/~1pets/parameters/0: tabs are not allowed in indentation
+      #|"-\tx"
+      #|  safe: ["x"]
+      #|  openapi: ["x"]
+    ),
+  )
   // In a block scalar, a tab after fewer spaces than the indentation is in
   // no empty line, which holds spaces only (YAML 1.2.2, section 6.4), and in
   // no line of text, which starts with the indentation's spaces (section

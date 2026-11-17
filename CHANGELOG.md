@@ -743,6 +743,13 @@ of each GitHub release include its section
   the indentation is now rejected as a tab in indentation; smock read that
   line as an empty line too
   ([smock#369](https://github.com/hirunefu/smock/issues/369)).
+- In YAML, a tab between a `-` and a mapping that starts on its line, as
+  in `-<tab>id: a`, is now rejected as a tab in indentation, as YAML says:
+  the white space after the `-` indents the mapping. smock read it as the
+  mapping, so a Definition file or an OpenAPI document written that way
+  loaded, and is now rejected. A tab between a `-` and a scalar still
+  separates them
+  ([smock#382](https://github.com/hirunefu/smock/issues/382)).
 
 ## [0.4.0] - 2026-11-01
 

@@ -265,7 +265,9 @@ and nothing is written:
 - a hexadecimal or octal integer above 2^53 - 1: write it in decimal;
 - infinity and NaN, such as `.inf`, `-.Inf` and `.NaN`, which JSON
   cannot hold;
-- tabs in indentation, and text that is not UTF-8.
+- tabs in indentation, which includes the white space between a `-` and
+  a mapping or a sequence that starts on its line, and text that is not
+  UTF-8.
 
 For example:
 

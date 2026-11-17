@@ -624,8 +624,11 @@ only a safe subset of YAML (`yaml/`):
   would type, such as `yes`, `on`, `~`, `True`, `0x1F`, `007`, `1_000`,
   `.inf` or `2001-12-14`, is rejected with "quote this value". Every other
   plain scalar is a string.
-- Anchors, aliases, tags, merge keys, duplicate keys and multiple documents
-  are rejected.
+- Anchors, aliases, tags, merge keys, duplicate keys, multiple documents
+  and tabs in indentation are rejected. A mapping or a sequence that
+  starts on the line of a `-` is indented by the `-` and the white space
+  after it, so a tab there is rejected too. Before a scalar or a flow
+  collection, a tab after `-` only separates them.
 - Some valid YAML is rejected too, on purpose: a file with no document,
   such as an empty file or one of comments only; a key that is a
   collection, such as `[a, b]: 1`; a `key: value` pair in a flow sequence

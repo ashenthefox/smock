@@ -267,10 +267,12 @@ fn Parser::block_node(
 ) -> Json raise ParseError {
   self.reached = pointer
   let column = self.column()
+  let start = self.pos
   if self.at_sequence_item() {
     if inline {
       self.fail("a block sequence must start on its own line")
     }
+    self.check_indentation(start)
     return self.block_sequence(column, pointer)
   }
   if self.peek() is ('|' | '>') {
@@ -293,10 +295,30 @@ fn Parser::block_node(
         "unexpected ':' after a value; a nested mapping must start on its own line",
       )
     }
+    self.check_indentation(start)
     return self.block_mapping(column, pointer, scalar)
   }
   let _ = self.next_content()
   self.scalar_value(scalar)
+}
+
+///|
+/// Rejects a tab in the white space before `start`, where a block collection
+/// starts. A collection that starts on a `-` line is indented by the `-` and
+/// the white space after it (YAML 1.2.2, section 8.2.1), and a tab must not
+/// be used in indentation (section 6.1). Only that white space can hold a
+/// tab: one at the start of a line is rejected before.
+fn Parser::check_indentation(
+  self : Parser,
+  start : Int32,
+) -> Unit raise ParseError {
+  let mut i = start - 1
+  while i >= 0 && self.chars[i] is (' ' | '\t') {
+    if self.chars[i] == '\t' {
+      self.fail("tabs are not allowed in indentation")
+    }
+    i -= 1
+  }
 }
 
 ///|
@@ -837,17 +859,7 @@ fn Parser::block_sequence(
     let item_pointer = child(pointer, items.length().to_string())
     self.reached = item_pointer
     self.bump()
-    let separation = self.pos
     self.skip_space()
-    // A sequence on the same line is indented by the `-` and the white
-    // space after it (YAML 1.2.2, section 8.2.1), which must not hold a tab.
-    if self.at_sequence_item() {
-      for i in separation..<self.pos {
-        if self.chars[i] == '\t' {
-          self.fail("tabs are not allowed in indentation")
-        }
-      }
-    }
     self.skip_comment()
     let empty = self.peek() is ('\n' | EOF) &&
       !(self.next_content() && self.column() > column)
