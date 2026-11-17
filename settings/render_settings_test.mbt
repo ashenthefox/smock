@@ -77,10 +77,12 @@ test "render: the Stub ID is its argument, and --dir, by its flag or SMOCK_DIR, 
 ///|
 test "render: --time takes an RFC 3339 date-time, in milliseconds since the Unix epoch, and refuses any other value" {
   // docs/commands.md, smock render: "--time (RFC 3339) and --seed fix the
-  // clock and the random source of the rendering". The milliseconds are
+  // clock and the random source of the rendering", and without it the
+  // rendering is "now" (its help: "Default: now"). The milliseconds are
   // Python's datetime(2026, 10, 12, 14, 30, 5, tzinfo=timezone.utc)
-  // .timestamp() * 1000, and @log.parse_time's own tests check how a
-  // date-time is read.
+  // .timestamp() * 1000. @log.parse_time reads the date-time, as its
+  // documentation says; the template and Journal tests that use it check
+  // more of its forms.
   let time = (settings : @settings.RenderSettings) => {
     match settings.time {
       Some(time) => time.to_string()
