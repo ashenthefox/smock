@@ -64,7 +64,7 @@ says() {
   fi
 }
 
-# --- Points covered of all, per package ------------------------------------
+# --- Points covered of all, per package --------------------------------------
 
 # Every point of prng's four has a count above 0, on its two lines.
 report covered "$fixtures/covered.bisect"
@@ -72,7 +72,7 @@ exits covered 0
 says covered "package points covered uncovered lines covered"
 says covered "prng 4 of 4 100.0% 0 2 of 2"
 
-# --- A partly covered line -------------------------------------------------
+# --- A partly covered line ---------------------------------------------------
 
 # Line 16 of prng.mbt holds three points, counted 3, 0 and 3: two of them
 # are covered, but the line is not. The uncovered point, the then arm's
@@ -142,8 +142,12 @@ broken left-over "BISECT-COVERAGE-4 1 13 prng/prng.mbt 4 206 327 343 372 4 5 3 0
 # trace source of a file removed since, or of an older version of it.
 broken gone "BISECT-COVERAGE-4 1 13 prng/gone.mbt 1 10 1 0" \
   "prng/gone.mbt is not in $fixtures/tree"
-broken past-end "BISECT-COVERAGE-4 1 13 prng/prng.mbt 2 206 9999 2 1 0" \
-  "prng/prng.mbt has a point at byte 9999, past its end"
+# prng.mbt holds 396 bytes: 395 is its last, and 396 the first past it.
+printf '%s\n' "BISECT-COVERAGE-4 1 13 prng/prng.mbt 2 206 395 2 1 0" >"$tmp/last-byte.bisect"
+report last-byte "$tmp/last-byte.bisect"
+exits last-byte 0
+broken past-end "BISECT-COVERAGE-4 1 13 prng/prng.mbt 2 206 396 2 1 0" \
+  "prng/prng.mbt has a point at byte 396, past its end"
 
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]
