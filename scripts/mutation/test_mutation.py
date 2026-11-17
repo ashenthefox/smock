@@ -186,7 +186,7 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("calc/calc.mbt,is_blank,BOOL,true,false,0", report)
         self.assertIn(
             "@@ -8,7 +8,7 @@ in_range\n"
-            " pub fn in_range(n : Int, low : Int, high : Int) -> Bool {\n",
+            " pub fn in_range(n : Int32, low : Int32, high : Int32) -> Bool {\n",
             report)
         self.assertIn("-  low <= n && n <= high\n+  low <= n && n < high\n }\n", report)
         # The time-out is listed apart, and no killed mutant is shown.

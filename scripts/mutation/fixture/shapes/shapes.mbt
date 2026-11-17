@@ -1,12 +1,12 @@
 // The site finder's fixture (scripts/mutation/test_mutation.py): one site
 // in each kind of top-level definition, which names it, and the look-alikes
-// that are not sites. The runner does not run it, and nothing tests it.
+// that are not sites. The runner does not run it, and it has no tests.
 
 ///|
 /// A closed range of numbers.
 pub(all) struct Span {
-  low : Int
-  high : Int
+  low : Int32
+  high : Int32
 }
 
 ///|
@@ -16,18 +16,18 @@ pub fn Span::is_empty(self : Span) -> Bool {
 }
 
 ///|
-pub impl Show for Span with output(self, logger) {
+pub impl Show for Span with fn output(self, logger) {
   logger.write_string(if self.low <= self.high { "span" } else { "empty" })
 }
 
 ///|
 /// A shape that may be round.
 pub trait Round {
-  is_round(Self) -> Bool = _
+  fn is_round(Self) -> Bool = _
 }
 
 ///|
-impl Round with is_round(_self) {
+impl Round with fn is_round(_self) {
   false
 }
 
@@ -37,7 +37,7 @@ let threshold : Bool = !(1 >= 2)
 ///|
 /// Strings, bytes and characters that read like sites are not, nor are
 /// patterns, ranges, equality and arrows.
-pub fn look_alikes(flag : Bool) -> Int {
+pub fn look_alikes(flag : Bool) -> Int32 {
   let words = ["true", "<", "!x"]
   let raw = b"false"
   let quote = '<'

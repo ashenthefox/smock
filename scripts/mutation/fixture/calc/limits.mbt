@@ -4,4 +4,4 @@
 
 ///|
 /// The largest number `in_range` is tested with.
-pub let largest : Int = if 3 > 2 { 3 } else { 2 }
+pub let largest : Int32 = if 3 > 2 { 3 } else { 2 }
