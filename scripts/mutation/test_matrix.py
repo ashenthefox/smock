@@ -175,7 +175,9 @@ class KillMatrixTest(unittest.TestCase):
                          MATRIX)
 
     def test_the_summary_and_the_report_count_the_tests_that_kill_and_those_that_alone_kill(self):
-        package = json.loads((self.out / "summary.json").read_text())["packages"][0]
+        summary = json.loads((self.out / "summary.json").read_text())
+        self.assertIs(summary["kill_matrix"], True)
+        package = summary["packages"][0]
         self.assertEqual({k: package[k] for k in ("mutants", "killed", "timed_out", "survived", "unviable")},
                          {"mutants": 6, "killed": 5, "timed_out": 0, "survived": 1, "unviable": 0})
         self.assertEqual(package["baseline"]["tests"], 7)
@@ -309,6 +311,23 @@ class KillMatrixTest(unittest.TestCase):
                                  str(shards[0]), str(other)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
         self.assertIn("is of another run", result.stderr)
+
+    def test_a_shard_with_no_mutant_of_a_kill_matrix_merges_too(self):
+        # A bulk run may have more shards than mutants (#313): one mutant in
+        # two shards leaves the second with none, and no package to run.
+        shards = []
+        for k in (1, 2):
+            shards.append(self.tmp / f"one-{k}")
+            result = run_runner(FIXTURE, self.tmp / "work", shards[-1], self.moon, "--matrix", "--mutant",
+                                MATRIX[1][0], "--shard", f"{k}/2", "units")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        merged = self.tmp / "one-merged"
+        result = subprocess.run([sys.executable, str(HERE / "merge.py"), "--out", str(merged), *map(str, shards)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        matrix = json.loads((merged / "matrix" / "units.json").read_text())
+        self.assertEqual(matrix["mutants"], [{"id": MATRIX[1][0], "outcome": "killed",
+                                              "killing_tests": [test_id(METER_LOW)]}])
 
     def test_a_kill_matrix_runs_over_the_full_set_too(self):
         # For removal proofs (#306, first criterion). units' full set has

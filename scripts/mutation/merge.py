@@ -93,8 +93,8 @@ def ordered(directories):
 
     def of_run(summary):
         selection = dict(summary["selection"], shard=None)
-        kill_matrix = any("matrix" in package for package in summary["packages"])
-        return summary.get("operator_set"), summary.get("set"), selection, summary.get("changed"), kill_matrix
+        return (summary.get("operator_set"), summary.get("set"), selection, summary.get("changed"),
+                summary.get("kill_matrix"))
 
     first = of_run(shards[0][3])
     for index, _, directory, summary, *_ in shards[1:]:

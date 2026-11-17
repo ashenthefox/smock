@@ -153,7 +153,9 @@ It writes into <out> (<work>/out unless it is given):
                  credit, the compiler's message for an unviable one, and
                  the diff of a survivor or of an unconfirmed one;
   summary.json   the operator set's version, the set that ran (listed for
-                 --list), what chose the mutants (selection), the flake
+                 --list), what chose the mutants (selection), that the
+                 run was a kill matrix (kill_matrix, with --matrix), the
+                 flake
                  threshold with the tests above it and those with a
                  flaky result in this run ("flakes"), and per package: the
                  baseline (both runs, and the tests that failed in them),
@@ -927,7 +929,8 @@ def main():
                     f.write(json.dumps(site, ensure_ascii=False) + "\n")
     (out / "summary.json").write_text(
         json.dumps({"operator_set": operator_set, "set": run_set, "selection": choice.selection(args),
-                    **({"changed": changes} if changes is not None else {}), "packages": summaries, **flakes},
+                    **({"changed": changes} if changes is not None else {}),
+                    **({"kill_matrix": True} if args.matrix else {}), "packages": summaries, **flakes},
                    indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     text = report(operator_set, run_set, summaries, records)
     if entries is not None and not args.sites_only:

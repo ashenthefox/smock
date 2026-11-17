@@ -1872,7 +1872,8 @@ natively, every test that ran with its name, package, file, line, index,
 name and layer, and each mutant with its outcome and the names of the
 tests that kill it, and, for a duplicate, the mutant it compiles as. Every
 run rewrites `matrix/`, so a run without the mode leaves none. The summary
-gives, per package, in place of the counts with its own tests alone and
+says that the run was a kill matrix (`kill_matrix`), and gives, per
+package, in place of the counts with its own tests alone and
 with its importers' tests, the tests that ran, how many of them kill some
 mutant, how many alone kill some mutant, and how many mutants the tests of
 each package kill; the report gives the same counts. `merge.py` merges the
