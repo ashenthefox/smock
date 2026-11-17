@@ -2,16 +2,17 @@
 # Tests of the check of the documented examples
 # (scripts/check-doc-examples.py), which CI runs on the release binary in
 # every run. Each test writes a small tree into a temporary directory, user
-# documents with fenced blocks and a Mockoon guide with commands, runs the
-# check on it with a fake smock, and checks its exit status, what it
-# prints, and how it ran smock.
+# documents with fenced blocks, a Mockoon guide with commands and a Jsonnet
+# example, runs the check on it with a fake smock and a fake jsonnet, and
+# checks its exit status, what it prints, and how it ran smock.
 #
 # The fake smock judges a Definition file by the words in it, as the JSON
 # Schema cross-check's test does, and renders a Stub as a line of JSON made
-# of its arguments. The check finds no real smock: it is given the fake by
-# its path, on a PATH that holds only the few other commands it and the
-# documents' commands run. It needs python3, 3.9 or later, and jq, which
-# the guide's commands run.
+# of its arguments. The fake jsonnet copies the file it exports. The check
+# finds no real smock or jsonnet: it is given the fake smock by its path,
+# on a PATH that holds the fake jsonnet and the few other commands it and
+# the documents' commands run. It needs python3, 3.9 or later, and jq,
+# which the guide's commands run.
 #
 # usage: scripts/test-check-doc-examples.sh
 set -eu
@@ -46,7 +47,7 @@ python=$(python3 -c 'import sys; print(sys.executable)') || {
 # the command on PATH again.
 sys=$tmp/sys
 mkdir "$sys"
-for command in cat cp find grep jq mkdir sed sort tr; do
+for command in cat cp dirname find grep jq mkdir sed sort tr; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "test-check-doc-examples: needs $command" >&2
     exit 2
@@ -128,6 +129,37 @@ SH
 } >"$fakes/smock"
 chmod +x "$fakes/smock"
 
+# A fake jsonnet, which prints the version in $tmp/jsonnet-version, at
+# first the one scripts/install-jsonnet.sh pins, and of which the check's
+# example runs `jsonnet <file> -o <output>`: it copies the file, which
+# holds JSON already, into a directory that must be there.
+pinned=$(sed -n 's/^version=//p' scripts/install-jsonnet.sh)
+if [ -n "$pinned" ]; then
+  pass "scripts/install-jsonnet.sh has the version line the check reads"
+else
+  fail "scripts/install-jsonnet.sh has no version line for the check"
+fi
+jsonnet=$tmp/jsonnet
+mkdir "$jsonnet"
+{
+  echo '#!/bin/sh'
+  echo "version='$tmp/jsonnet-version'"
+  cat <<'SH'
+if [ "$#" -eq 1 ] && [ "$1" = --version ]; then
+  echo "Jsonnet commandline interpreter (Go implementation) v$(cat "$version")"
+  exit 0
+fi
+[ "$#" -eq 3 ] && [ "$2" = -o ] || exit 64
+if [ ! -d "$(dirname "$3")" ]; then
+  echo "fake jsonnet: no directory for $3" >&2
+  exit 1
+fi
+cp "$1" "$3"
+SH
+} >"$jsonnet/jsonnet"
+chmod +x "$jsonnet/jsonnet"
+echo "$pinned" >"$tmp/jsonnet-version"
+
 # file <path>: writes its standard input to <path> in the tree.
 file() {
   mkdir -p "$(dirname "$root/$1")"
@@ -137,11 +169,12 @@ file() {
 # tree: makes $root anew, with the documents' index, which lists the user
 # documents before its section for contributors, a user document whose
 # blocks are of every kind, two whole Definition files and blocks that the
-# check sets aside, and the Mockoon guide.
+# check sets aside, the Mockoon guide and the Jsonnet example.
 tree() {
   rm -rf "$root"
   mkdir -p "$root"
   guide
+  jsonnet_example
   file docs/README.md <<'MD'
 # Documentation
 
@@ -247,13 +280,36 @@ mocks: [{ name: users-api }]
 YAML
 }
 
+# jsonnet_example: writes the document that exports the Jsonnet example
+# and checks the result, the example, and the fixture it exports.
+jsonnet_example() {
+  file docs/definition-files.md <<'MD'
+# Definition files
+
+## Writing Definition files in another configuration language
+
+Export it into the definitions directory, then check the result:
+
+```sh
+jsonnet users.jsonnet -o defs/users.json
+smock check defs
+```
+MD
+  file docs/examples/users.jsonnet <<'JSON'
+{"mocks": [{"name": "users"}]}
+JSON
+  file schema/v1/fixtures/valid/users-from-jsonnet.json <<'JSON'
+{"mocks": [{"name": "users"}]}
+JSON
+}
+
 # check <name>: runs the check on the tree with the fake smock, its output
 # into $tmp/<name>.out, its exit status into $tmp/<name>.status, and the
 # log of smock's runs into $tmp/<name>.smock.
 check() {
   : >"$tmp/smock.log"
   status=0
-  PATH="$sys" "$python" scripts/check-doc-examples.py "$fakes/smock" "$root" \
+  PATH="$jsonnet:$sys" "$python" scripts/check-doc-examples.py "$fakes/smock" "$root" \
     >"$tmp/$1.out" 2>&1 || status=$?
   echo "$status" >"$tmp/$1.status"
   cp "$tmp/smock.log" "$tmp/$1.smock"
@@ -320,7 +376,7 @@ says good "docs/a.md:22 (example 2): passes smock check"
 says good "check-doc-examples: found 2 whole Definition files, and set aside 2 other fenced blocks as fragments"
 says good "check-doc-examples: every example passes"
 never good "c.md"
-ran good example.yaml example.json users-api.yaml
+ran good example.yaml example.json users-api.yaml users.json
 
 # A whole Definition file that smock check rejects fails the check, which
 # names the block and shows what smock printed.
@@ -410,7 +466,7 @@ says rule "docs/b.md:18 (example 3): passes smock check"
 says rule "docs/b.md:23 (example 4): passes smock check"
 says rule "docs/b.md:29 (example 5): passes smock check"
 says rule "check-doc-examples: found 7 whole Definition files, and set aside 7 other fenced blocks as fragments"
-ran rule example.yaml example.json example.yaml example.yaml example.yaml example.yaml example.json users-api.yaml
+ran rule example.yaml example.json example.yaml example.yaml example.yaml example.yaml example.json users-api.yaml users.json
 
 # A document that the index links to and that cannot be read stops the
 # check.
@@ -456,7 +512,7 @@ check context
 exits context 0
 says context "docs/a.md:5 (example 1): passes smock check, with its context: files/orders.json, context.yaml"
 says context "docs/a.md:22 (example 2): passes smock check"
-ran context "context.yaml example.yaml files/orders.json" example.json users-api.yaml
+ran context "context.yaml example.yaml files/orders.json" example.json users-api.yaml users.json
 
 # Without its context, the example fails, as smock check says.
 rm "$root/scripts/doc-examples/context.txt"
@@ -508,7 +564,7 @@ says context-problems "$context:13: /etc/hostname is not a file of the tree"
 says context-problems "docs/a.md:5 (example 1): passes smock check"
 says context-problems "docs/a.md:22 (example 2): passes smock check, with its context: files/y.json"
 says context-problems "check-doc-examples: 12 problems"
-ran context-problems example.yaml "example.json files/y.json" users-api.yaml
+ran context-problems example.yaml "example.json files/y.json" users-api.yaml users.json
 
 # --- The Mockoon guide ------------------------------------------------------------
 
@@ -576,18 +632,83 @@ check no-commands
 exits no-commands 1
 says no-commands "check-doc-examples: the Mockoon guide, docs/migrating-from-mockoon.md and docs/mockoon/*.md, runs smock check or smock render in no block"
 
+# --- The Jsonnet example ----------------------------------------------------------
+
+# The block that runs jsonnet runs as the document writes it, in a copy of
+# docs/examples/ with an empty definitions directory, prints nothing, and
+# exports the fixture that the document says it does.
+tree
+check jsonnet
+exits jsonnet 0
+says jsonnet "docs/definition-files.md:7: prints what the document shows"
+says jsonnet "docs/definition-files.md:7: exports schema/v1/fixtures/valid/users-from-jsonnet.json"
+says jsonnet "check-doc-examples: every example passes"
+if [ -e "$root/docs/examples/defs" ]; then
+  fail "jsonnet: writes into the tree"
+else
+  pass "jsonnet: writes nothing into the tree"
+fi
+
+# An export that differs from the fixture, one written elsewhere, and one
+# that smock check rejects each fail the check.
+tree
+echo '{"mocks": [{"name": "users"}], "version": 1}' >"$root/docs/examples/users.jsonnet"
+check export-differs
+exits export-differs 1
+says export-differs "docs/definition-files.md:7: exports otherwise than schema/v1/fixtures/valid/users-from-jsonnet.json, which the document says it exports:"
+says export-differs '    -{"mocks": [{"name": "users"}]}'
+says export-differs '    +{"mocks": [{"name": "users"}], "version": 1}'
+
+tree
+sed -i 's|-o defs/users.json|-o defs/other.json|' "$root/docs/definition-files.md"
+check export-elsewhere
+exits export-elsewhere 1
+says export-elsewhere "docs/definition-files.md:7: writes no defs/users.json, which the document says it exports as schema/v1/fixtures/valid/users-from-jsonnet.json"
+
+tree
+echo '{"mocks": [{"name": "users fake-problem"}]}' >"$root/docs/examples/users.jsonnet"
+check export-rejected
+exits export-rejected 1
+says export-rejected "docs/definition-files.md:7: exits with 1:"
+says export-rejected "    users.json: /stubs/0: a fake problem"
+says export-rejected "check-doc-examples: 1 problem"
+
+# A document that runs jsonnet in no block fails the check.
+tree
+sed -i 's|^jsonnet users.jsonnet|cat users.jsonnet >|' "$root/docs/definition-files.md"
+check no-jsonnet-block
+exits no-jsonnet-block 1
+says no-jsonnet-block "check-doc-examples: docs/definition-files.md runs jsonnet in no block"
+
+# Without jsonnet on the PATH, or with another version than the pinned
+# one, the check runs nothing.
+tree
+status=0
+PATH="$sys" "$python" scripts/check-doc-examples.py "$fakes/smock" "$root" \
+  >"$tmp/no-jsonnet.out" 2>&1 || status=$?
+echo "$status" >"$tmp/no-jsonnet.status"
+exits no-jsonnet 2
+says no-jsonnet "check-doc-examples: needs jsonnet $pinned on the PATH, which scripts/install-jsonnet.sh installs"
+
+echo 0.21.0 >"$tmp/jsonnet-version"
+check other-jsonnet
+echo "$pinned" >"$tmp/jsonnet-version"
+exits other-jsonnet 2
+says other-jsonnet "check-doc-examples: jsonnet says \"Jsonnet commandline interpreter (Go implementation) v0.21.0\", but the check runs $pinned, which scripts/install-jsonnet.sh pins"
+ran other-jsonnet
+
 # --- How the check is run ---------------------------------------------------------
 
 tree
 status=0
-PATH="$sys" "$python" scripts/check-doc-examples.py "$fakes/smock" "$root" extra \
+PATH="$jsonnet:$sys" "$python" scripts/check-doc-examples.py "$fakes/smock" "$root" extra \
   >"$tmp/usage.out" 2>&1 || status=$?
 echo "$status" >"$tmp/usage.status"
 exits usage 2
 says usage "usage: python3 scripts/check-doc-examples.py <smock> [<tree>]"
 
 status=0
-PATH="$sys" "$python" scripts/check-doc-examples.py "$tmp/no-smock" "$root" \
+PATH="$jsonnet:$sys" "$python" scripts/check-doc-examples.py "$tmp/no-smock" "$root" \
   >"$tmp/no-smock.out" 2>&1 || status=$?
 echo "$status" >"$tmp/no-smock.status"
 exits no-smock 2

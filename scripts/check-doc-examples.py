@@ -56,14 +56,27 @@ before the first command, or at the end of a command's line, says what
 the commands do. A guide that runs these commands in no block is a
 problem.
 
-It prints a line for each whole Definition file, each problem, how many
-whole Definition files it found and how many fenced blocks it set aside,
+The Jsonnet example, docs/examples/users.jsonnet, is exported and checked
+by a block of docs/definition-files.md that runs jsonnet. That block runs
+the same way, in a copy of docs/examples/ with an empty definitions
+directory, defs/. It must pass as a block of the guide does, and write
+defs/users.json byte for byte as the fixture
+schema/v1/fixtures/valid/users-from-jsonnet.json, which the document says
+the export is. A document that runs jsonnet in no block is a problem. The
+jsonnet on the PATH must be the version that scripts/install-jsonnet.sh
+pins, as `jsonnet --version` says; without it, the check runs nothing.
+
+It prints a line for each whole Definition file and each block it runs,
+each problem, how many whole Definition files it found and how many
+fenced blocks it set aside, how many blocks of the Mockoon guide it ran,
 and then whether every example passed or how many problems it found. It
 exits with 1 when it found a problem, and with 2 when it cannot run smock
-or a file it reads cannot be read, or is run wrongly.
+or the pinned jsonnet, or a file it reads cannot be read, or is run
+wrongly.
 
-scripts/test-check-doc-examples.sh tests it, with a fake smock. It needs
-Python 3.9 or later.
+scripts/test-check-doc-examples.sh tests it, with a fake smock and a fake
+jsonnet. It needs Python 3.9 or later, and jq, which the Mockoon guide's
+commands run.
 """
 import difflib
 import os
@@ -108,11 +121,28 @@ MOCKOON_GUIDE = "docs/migrating-from-mockoon.md"
 MOCKOON_DOCUMENTS = "docs/mockoon"
 MOCKOON_EXAMPLE = "docs/examples/from-mockoon"
 
+# The Jsonnet example: the document whose block of shell commands exports
+# it and checks the result, the directory that holds the Jsonnet file, and
+# the file the block writes, which that document says is committed as a
+# fixture: "The exported file is committed as the fixture
+# schema/v1/fixtures/valid/users-from-jsonnet.json".
+JSONNET_DOCUMENT = "docs/definition-files.md"
+JSONNET_EXAMPLE = "docs/examples"
+JSONNET_EXPORT = "defs/users.json"
+JSONNET_FIXTURE = "schema/v1/fixtures/valid/users-from-jsonnet.json"
+
+# The script that installs the pinned jsonnet, beside this one, which
+# gives its version on a line of its own.
+JSONNET_INSTALLER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install-jsonnet.sh")
+
 # The languages of a block of shell commands.
 SHELL_LANGUAGES = {"sh", "shell", "bash"}
 
 # A command that runs smock check or smock render.
 SMOCK_COMMAND = re.compile(r"(?:^|[\s;&|(])smock\s+(?:check|render)\b")
+
+# A command that runs jsonnet.
+JSONNET_COMMAND = re.compile(r"(?:^|[\s;&|(])jsonnet\s")
 
 # How long smock check may take on one Definition file, and a block of
 # commands to run, in seconds.
@@ -398,30 +428,44 @@ def shown_output(block):
     return shown
 
 
-def run_block(where, block, directory, bin_directory, problem):
+def diff(expected, actual, expected_name, actual_name):
+    """A unified diff of two lists of lines, as the check shows it."""
+    return indented("\n".join(difflib.unified_diff(expected, actual, expected_name, actual_name, lineterm="")))
+
+
+def lines(text):
+    """The lines of a text, without the empty one after its last newline."""
+    found = text.split("\n")
+    if found and found[-1] == "":
+        found.pop()
+    return found
+
+
+def run_block(where, block, directory, bin_directory, problem, document="the guide"):
     """Runs a block of shell commands in a directory, with sh -e, so that
     the block stops at a command that fails, and with the smock under check
     first on the PATH. It passes when it exits with status 0 and prints
-    what the block shows, standard output and standard error together."""
+    what the block shows, standard output and standard error together.
+    Gives whether it passed; <document> names the document in what the
+    check prints."""
     try:
         status, output = run(["/bin/sh", "-e", "-c", block.text], cwd=directory, path=bin_directory)
     except subprocess.TimeoutExpired:
         problem(f"{where}: takes longer than {TIMEOUT} s")
-        return
+        return False
     if status != 0:
         problem(f"{where}: exits with {status}:")
         if output.strip():
             print(indented(output))
-        return
+        return False
     shown = shown_output(block)
-    printed = output.split("\n")
-    if printed and printed[-1] == "":
-        printed.pop()
+    printed = lines(output)
     if printed == shown:
-        print(f"{where}: prints what the guide shows")
-        return
-    problem(f"{where}: prints otherwise than the guide shows:")
-    print(indented("\n".join(difflib.unified_diff(shown, printed, "the guide", "printed", lineterm=""))))
+        print(f"{where}: prints what {document} shows")
+        return True
+    problem(f"{where}: prints otherwise than {document} shows:")
+    print(diff(shown, printed, document, "printed"))
+    return False
 
 
 def check_mockoon_guide(tree, scratch, bin_directory, problem):
@@ -450,6 +494,63 @@ def check_mockoon_guide(tree, scratch, bin_directory, problem):
     return len(blocks)
 
 
+def check_jsonnet_example(tree, scratch, bin_directory, problem):
+    """Runs each block of the Jsonnet example's document that runs
+    jsonnet, in a copy of the directory that holds the Jsonnet file, with
+    an empty definitions directory for the export, and compares the export
+    with the fixture. A document that runs jsonnet in no block is a
+    problem."""
+    blocks = [
+        block
+        for block in fenced_blocks(read(tree, JSONNET_DOCUMENT))
+        if block.language in SHELL_LANGUAGES and any(JSONNET_COMMAND.search(line) for line in commands(block))
+    ]
+    if not blocks:
+        problem(f"check-doc-examples: {JSONNET_DOCUMENT} runs jsonnet in no block")
+        return
+    fixture = read(tree, JSONNET_FIXTURE)
+    for number, block in enumerate(blocks, 1):
+        where = f"{JSONNET_DOCUMENT}:{block.line}"
+        directory = os.path.join(scratch, f"jsonnet-{number}")
+        shutil.copytree(os.path.join(tree, JSONNET_EXAMPLE), directory, symlinks=True)
+        os.makedirs(os.path.join(directory, os.path.dirname(JSONNET_EXPORT)), exist_ok=True)
+        if not run_block(where, block, directory, bin_directory, problem, "the document"):
+            continue
+        try:
+            with open(os.path.join(directory, JSONNET_EXPORT), encoding="utf-8", errors="replace") as handle:
+                exported = handle.read()
+        except OSError:
+            problem(f"{where}: writes no {JSONNET_EXPORT}, which the document says it exports as {JSONNET_FIXTURE}")
+            continue
+        if exported == fixture:
+            print(f"{where}: exports {JSONNET_FIXTURE}")
+        else:
+            problem(f"{where}: exports otherwise than {JSONNET_FIXTURE}, which the document says it exports:")
+            print(diff(lines(fixture), lines(exported), JSONNET_FIXTURE, JSONNET_EXPORT))
+
+
+def jsonnet_problem():
+    """Why the check cannot run the pinned jsonnet, or None when it can:
+    the jsonnet on the PATH must say that it is the version that
+    scripts/install-jsonnet.sh pins."""
+    with open(JSONNET_INSTALLER, encoding="utf-8") as handle:
+        pinned = re.search(r"^version=(\S+)$", handle.read(), re.MULTILINE)
+    if pinned is None:
+        return f"{JSONNET_INSTALLER} gives no version"
+    pinned = pinned[1]
+    jsonnet = shutil.which("jsonnet")
+    if jsonnet is None:
+        return f"needs jsonnet {pinned} on the PATH, which scripts/install-jsonnet.sh installs"
+    try:
+        _, said = run([jsonnet, "--version"])
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return f"cannot run {jsonnet}: {error}"
+    said = said.strip()
+    if not said.split() or said.split()[-1] != f"v{pinned}":
+        return f'jsonnet says "{said}", but the check runs {pinned}, which scripts/install-jsonnet.sh pins'
+    return None
+
+
 def plural(count, singular, many):
     return f"{count} {singular if count == 1 else many}"
 
@@ -462,6 +563,10 @@ def main(arguments):
     tree = arguments[1] if len(arguments) == 2 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
     if not os.access(smock, os.X_OK):
         print(f"check-doc-examples: cannot run {arguments[0]}", file=sys.stderr)
+        return 2
+    cannot = jsonnet_problem()
+    if cannot is not None:
+        print(f"check-doc-examples: {cannot}", file=sys.stderr)
         return 2
     problems = []
 
@@ -481,6 +586,7 @@ def main(arguments):
             os.makedirs(bin_directory)
             os.symlink(smock, os.path.join(bin_directory, "smock"))
             guide_blocks = check_mockoon_guide(tree, scratch, bin_directory, problem)
+            check_jsonnet_example(tree, scratch, bin_directory, problem)
     except Unreadable as error:
         print(f"check-doc-examples: {error}", file=sys.stderr)
         return 2
