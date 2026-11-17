@@ -373,8 +373,14 @@ async fn beside_output(dir : String, content~ : String) -> String {
 
 ///|
 async test "smock import-openapi tries the temporary names .petstore.json.tmp and .petstore.json.tmp1 to .petstore.json.tmp99, touches none that exists, and writes nothing when all 100 exist" {
-  // The rule is the import guide's (Regenerating), which the maintainer
-  // confirms on #291.
+  // The import guide (docs/importing-openapi.md, Regenerating): "A
+  // temporary file that exists already, such as one another run is
+  // writing, is never touched: the command tries the next name instead,
+  // `.petstore.yaml.tmp1`, then `.petstore.yaml.tmp2`, and so on up to
+  // `.petstore.yaml.tmp99`. When all 100 names exist, nothing is written:
+  // the error about `--output` says `the temporary files .petstore.yaml.tmp
+  // to .petstore.yaml.tmp99 all exist`, and the exit status is 1." The
+  // maintainer confirmed those names on 2026-11-17 (#275).
   with_petstore(petstore_document, dir => {
     let defs = "\{dir}/defs"
     let taken = [".petstore.json.tmp"]
