@@ -161,13 +161,26 @@ test "cgroup memory: memory.peak holds a number of bytes" {
     [
       @usage.memory_peak("44040192\n"),
       @usage.memory_peak("0\n"),
+      // The range of a 64-bit count: a signed one holds at most
+      // 2^63 - 1 = 9223372036854775807, 19 digits.
       @usage.memory_peak("9223372036854775807\n"),
       @usage.memory_peak("9223372036854775808\n"),
+      // 2^64, 20 digits, is past even an unsigned 64-bit count, which would
+      // wrap it round to 0: it is refused, as #278 asks.
+      @usage.memory_peak("18446744073709551616\n"),
       @usage.memory_peak("max\n"),
       @usage.memory_peak(""),
     ],
     content=(
-      #|[Some(44040192), Some(0), Some(9223372036854775807), None, None, None]
+      #|[
+      #|  Some(44040192),
+      #|  Some(0),
+      #|  Some(9223372036854775807),
+      #|  None,
+      #|  None,
+      #|  None,
+      #|  None,
+      #|]
     ),
   )
 }
