@@ -301,8 +301,10 @@ value in_place 'test("a/a_test.mbt", "a total counts one request")["commit"]' "\
 value in_place 'test("a/a_test.mbt", "a total counts no request")["commit"]' "\"$introduced\""
 value in_place '[t["issue"] for t in out["tests"]]' '[40,40]'
 
-# A test whose name changes is, for moon and for its header line, a new
-# test: its link is the commit that gave it the name it has.
+# A test whose name changes keeps the commit that introduced its block:
+# the commit that renamed it wrote no other line of the block, so the
+# block's commit is the one that wrote most of its lines, though another
+# commit wrote the first of them.
 tree
 file a/a_test.mbt <<'EOF'
 ///|
@@ -313,19 +315,61 @@ test "a total counts requests" {
 }
 EOF
 commit "Count requests in totals (#50)"
+introduced=$(head)
+file a/a_test.mbt <<'EOF'
+///|
+test "a total counts requests" {
+  inspect(@a.Total::new().count(), content="0")
+  let total = @a.Total::new()
+  total.add(1)
+  inspect(total.count(), content="1")
+}
+EOF
+commit "Check that a total starts at zero (#52)"
 file a/a_test.mbt <<'EOF'
 ///|
 test "a total counts each request once" {
+  inspect(@a.Total::new().count(), content="0")
   let total = @a.Total::new()
   total.add(1)
   inspect(total.count(), content="1")
 }
 EOF
 commit "Say that a total counts each request once (#51)"
-renamed=$(head)
 links renamed
-value renamed 'test("a/a_test.mbt", "a total counts each request once")["commit"]' "\"$renamed\""
-value renamed 'test("a/a_test.mbt", "a total counts each request once")["issue"]' '51'
+value renamed 'test("a/a_test.mbt", "a total counts each request once")["commit"]' "\"$introduced\""
+value renamed 'test("a/a_test.mbt", "a total counts each request once")["issue"]' '50'
+
+# A new test that takes the name of an older test in another package is
+# not a copy of it: blame finds the header line in the older file, but no
+# other line of the block, so the block's commit is the one that wrote
+# the rest. (xml/path_test.mbt has such a test: its name is a test's of
+# re2/regex_test.mbt.) A line without a letter or a digit, such as the
+# blank line that blame finds beside the header in the older file, does
+# not count.
+tree
+file r/r_test.mbt <<'EOF'
+///|
+test "a compile error position counts characters, not bytes" {
+
+  inspect(@r.error_of("é😀a)"), content="position 3: unexpected )")
+}
+EOF
+commit "Add the regular expressions (#12)"
+file x/x_test.mbt <<'EOF'
+///|
+test "a compile error position counts characters, not bytes" {
+
+  inspect(@x.path_errors(["/名😀/*"]), content="position 4: wildcard * is not supported")
+}
+EOF
+commit "Add the XML paths (#66)"
+named=$(head)
+links same_name
+value same_name 'test("x/x_test.mbt", "a compile error position counts characters, not bytes")["commit"]' "\"$named\""
+value same_name 'test("x/x_test.mbt", "a compile error position counts characters, not bytes")["introduced_in"]' '"x/x_test.mbt"'
+value same_name 'test("x/x_test.mbt", "a compile error position counts characters, not bytes")["issue"]' '66'
+value same_name 'test("r/r_test.mbt", "a compile error position counts characters, not bytes")["issue"]' '12'
 
 # --- The ticket a subject names ---------------------------------------------
 

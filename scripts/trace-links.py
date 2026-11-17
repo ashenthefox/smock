@@ -23,11 +23,17 @@ top-level item that holds it with -w -M -C -C -C: across whitespace
 changes, and following lines moved or copied within a file, from other
 files of the same commit, and from any file of any commit. A test moved
 or copied to another file keeps the commit that first wrote it, and so
-does a test that a later commit extends. A test whose name changed is
-linked to the commit that gave it the name, which wrote its header line.
-A doc test is read with the item its doc comment belongs to, and moves
-with it. git follows a moved block only when it holds at least 40
-letters and digits (20 within one file).
+does a test that a later commit extends. git follows moved lines only
+where they hold at least 40 letters and digits together (20 within one
+file); a doc test is read with the whole item its doc comment belongs
+to, and moves with it.
+
+The header's commit must also have written another line of the block
+that holds a letter or a digit. Where it wrote none, the header came
+alone: from a commit that renamed the test, or from an older test of the
+same name, which blame takes it to be a copy of. The block's commit is
+then the one that wrote most of those other lines (the first of them on
+a tie), so that a renamed test keeps the commit that introduced it.
 
 The ticket is the issue number in the commit's subject: the one in a
 trailing "(#N)", or else the only #N the subject names. A subject that
@@ -73,6 +79,7 @@ import posixpath
 import re
 import subprocess
 import sys
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -253,15 +260,40 @@ def issue_of(subject):
     return int(numbers.pop()) if len(numbers) == 1 else None
 
 
+# A letter or a digit.
+ALNUM = re.compile(r"[^\W_]")
+
+
+def introduction(block, blamed, lines):
+    """What blame says of the line that tells which commit introduced a
+    block: its header line, if the header's commit also wrote another line
+    of the block that holds a letter or a digit. Otherwise the header came
+    alone, from a commit that renamed the test or from an older test of
+    the same name, and it is the first of the lines (with a letter or a
+    digit) of the commit that wrote most of them."""
+    header = blamed[block.header]
+    others = [
+        blamed[n] for n in range(block.header + 1, block.end + 1)
+        if n in blamed and ALNUM.search(lines[n - 1])
+    ]
+    if not others or any(other["commit"] == header["commit"] for other in others):
+        return header
+    counts = Counter(other["commit"] for other in others)
+    most = max(counts.values())
+    return next(other for other in others if counts[other["commit"]] == most)
+
+
 def links_of(repo, rev, path, package):
     """The records of the tests of a file at rev, of the package given."""
-    blocks = blocks_of(path, git(repo, "show", f"{rev}:{path}"))
+    text = git(repo, "show", f"{rev}:{path}")
+    blocks = blocks_of(path, text)
     if not blocks:
         return []
     blamed = blame(repo, rev, path, blocks)
+    lines = text.split("\n")
     records = []
     for block in blocks:
-        line = blamed[block.header]
+        line = introduction(block, blamed, lines)
         subject = line.get("summary", "")
         records.append({
             "package": package,
