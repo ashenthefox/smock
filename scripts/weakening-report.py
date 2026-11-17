@@ -20,6 +20,7 @@ not a commit.
 """
 
 import argparse
+import difflib
 import posixpath
 import re
 import subprocess
@@ -156,6 +157,161 @@ def items_of(path, text):
     return items
 
 
+CHAR = re.compile(r"'(?:\\[^']*|[^'\\])'")
+
+
+def code_of(line):
+    """The code of a line: without its comment and the text of its string
+    and character literals, but with the code interpolated into a string.
+    A line of a multi-line string (#| or $|) holds no code but what $|
+    interpolates."""
+    stripped = line.strip()
+    if stripped.startswith("#|"):
+        return ""
+    if stripped.startswith("$|"):
+        line = '"' + stripped[2:].replace('"', '\\"') + '"'
+    out = []
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if line.startswith("//", i):
+            break
+        if c == "'" and (char := CHAR.match(line, i)):
+            out.append("' '")
+            i = char.end()
+        elif c == '"':
+            i += 1
+            while i < len(line) and line[i] != '"':
+                if line.startswith("\\{", i):
+                    depth, j = 1, i + 2
+                    while j < len(line) and depth:
+                        depth += {"{": 1, "}": -1}.get(line[j], 0)
+                        j += 1
+                    out.append(" " + line[i + 2 : j - 1] + " ")
+                    i = j
+                elif line[i] == "\\":
+                    i += 2
+                else:
+                    i += 1
+            out.append('""')
+            i += 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def indent(line):
+    """The width of a line's indentation."""
+    return len(line) - len(line.lstrip())
+
+
+def statement_end(lines, i):
+    """The index of the last line of the statement that starts on line i,
+    by moon fmt's layout: the lines indented deeper than it, and a line
+    as deep as it that closes a bracket."""
+    depth = indent(lines[i])
+    end = i
+    for j in range(i + 1, len(lines)):
+        line = lines[j]
+        if not line.strip():
+            continue
+        if indent(line) > depth or line.strip()[0] in ")]}":
+            if indent(line) < depth:
+                break
+            end = j
+        else:
+            break
+    return end
+
+
+ASSERTION = re.compile(
+    r"(?<![\w.])(?:@\w+\.)?"
+    r"(?:inspect|debug_inspect|json_inspect|assert_\w+|fail|abort|panic)\s*\("
+)
+FAILURE = re.compile(r"(?<![\w.])(?:fail|abort|panic)\s*\(")
+GUARD = re.compile(r"\s*guard\b")
+IF = re.compile(r"\s*(?:\}\s*else\s+)?if\b")
+COMPARISON = re.compile(r"\s(?:==|!=|<=|>=|<|>)\s")
+
+
+def assertion_spans(lines):
+    """The ranges of lines, first and last, that assert something: a call
+    of inspect, debug_inspect, json_inspect, an assert_ function, fail,
+    abort or panic; a guard statement; the line of an if whose block
+    fails; and a line that compares two values."""
+    code = [code_of(line) for line in lines]
+    spans = []
+    for i, text in enumerate(code):
+        if ASSERTION.search(text) or GUARD.match(text):
+            spans.append((i, statement_end(lines, i)))
+        elif COMPARISON.search(text):
+            spans.append((i, i))
+        elif IF.match(text):
+            end = statement_end(lines, i)
+            if any(FAILURE.search(code[j]) for j in range(i + 1, end + 1)):
+                spans.append((i, i))
+    return spans
+
+
+def inside(spans, first, last):
+    """Whether one span holds every line from first to last."""
+    return any(start <= first and last <= end for start, end in spans)
+
+
+def touches(spans, first, last):
+    """Whether a span holds any line from first to last."""
+    return any(start <= last and first <= end for start, end in spans)
+
+
+@dataclass
+class Hunk:
+    """Lines of an item that the head removed, changed or added: the base's
+    and the head's, each with the line number of its first line."""
+
+    base_line: int
+    base: list
+    head_line: int
+    head: list
+
+    def render(self):
+        """The hunk as a unified diff."""
+        out = [f"@@ -{self.base_line},{len(self.base)} +{self.head_line},{len(self.head)} @@"]
+        out += [f"-{line}" for line in self.base]
+        out += [f"+{line}" for line in self.head]
+        return out
+
+
+def weakened(before, after):
+    """The hunks in which after removes or changes an assertion of
+    before, or adds lines inside one. Lines are compared without their
+    indentation, so that a block moved deeper changes nothing."""
+    spans = assertion_spans(before.lines)
+    matcher = difflib.SequenceMatcher(
+        None,
+        [line.strip() for line in before.lines],
+        [line.strip() for line in after.lines],
+        autojunk=False,
+    )
+    hunks = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if i1 < i2 and not touches(spans, i1, i2 - 1):
+            continue
+        if i1 == i2 and not (i1 > 0 and inside(spans, i1 - 1, i1)):
+            continue
+        hunks.append(
+            Hunk(
+                before.line + i1,
+                before.lines[i1:i2],
+                after.line + j1,
+                after.lines[j1:j2],
+            )
+        )
+    return hunks
+
+
 def package_items(repo, rev, package):
     """The items of test code in a package at rev."""
     items = []
@@ -201,11 +357,16 @@ def report(repo, base_ref, head_ref):
     base = git(repo, "merge-base", base_ref, head).strip()
     changed = git(repo, "diff", "--name-only", "--no-renames", base, head).splitlines()
 
-    deleted = []
+    deleted, assertions = [], []
     packages = sorted({posixpath.dirname(path) for path in changed if is_moonbit(path)})
     for package in packages:
-        _, gone = pair(package_items(repo, base, package), package_items(repo, head, package))
+        pairs, gone = pair(
+            package_items(repo, base, package), package_items(repo, head, package)
+        )
         deleted.extend(item for item in gone if item.kind == "test")
+        for before, after in pairs:
+            if hunks := weakened(before, after):
+                assertions.append((before, after, hunks))
 
     short = lambda rev: git(repo, "rev-parse", "--short", rev).strip()
     out = [
@@ -219,8 +380,24 @@ def report(repo, base_ref, head_ref):
         out += ["## Tests deleted", ""]
         out += [f"- `{item.path}:{item.line}`: {item.title()}" for item in deleted]
         out.append("")
-    else:
+    if assertions:
+        out += ["## Assertions removed or changed in tests that stay", ""]
+        for before, after, hunks in assertions:
+            out += changed_item(before, after, hunks)
+    if not (deleted or assertions):
         out += ["Nothing to report.", ""]
+    return out
+
+
+def changed_item(before, after, hunks):
+    """An item of the base and its hunks, as Markdown lines."""
+    out = [f"### `{before.path}:{before.line}`: {before.title()}", ""]
+    if (after.path, after.title()) != (before.path, before.title()):
+        out += [f"Now `{after.path}:{after.line}`: {after.title()}.", ""]
+    out.append("```diff")
+    for hunk in hunks:
+        out += hunk.render()
+    out += ["```", ""]
     return out
 
 

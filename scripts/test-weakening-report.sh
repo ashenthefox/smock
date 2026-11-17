@@ -183,6 +183,124 @@ report deleted-file
 mentions deleted-file '`add/add_test.mbt:2`: test "adds two numbers"'
 mentions deleted-file '`add/add_test.mbt:7`: test "adds a negative number"'
 
+# --- Assertions removed or changed in a test that stays -------------------------
+
+# A timed test: an upper bound in a guard, a comparison kept in a variable,
+# and an assertion over several lines.
+timed() {
+  file add/timed_test.mbt <<'MBT'
+///|
+test "answers in time" {
+  let took = 120L
+  guard took < 250L else { fail("took \{took} ms") }
+  let fast = took < 300L
+  inspect(fast, content="true")
+  assert_eq(
+    @add.add(took.to_int(), 1),
+    121,
+  )
+}
+
+///|
+/// Fails unless the text is short.
+fn check_short(text : String) -> Unit raise {
+  if text.length() > 10 {
+    fail("too long: \{text}")
+  }
+}
+MBT
+}
+
+# An exact comparison made weaker.
+tree
+package
+branch
+file add/add_test.mbt <<'MBT'
+///|
+test "adds two numbers" {
+  assert_true(@add.add(2, 3) > 0)
+}
+
+///|
+test "adds a negative number" {
+  inspect(@add.add(2, -3), content="-1")
+}
+MBT
+report weaker
+mentions weaker "## Assertions removed or changed in tests that stay"
+mentions weaker '`add/add_test.mbt:2`: test "adds two numbers"'
+mentions weaker '-  assert_eq(@add.add(2, 3), 5)'
+mentions weaker '+  assert_true(@add.add(2, 3) > 0)'
+lacks weaker "## Tests deleted"
+lacks weaker 'test "adds a negative number"'
+
+# An upper bound raised, in a guard and in a variable.
+tree
+package
+timed
+branch
+sed -i 's/took < 250L/took < 2500L/; s/took < 300L/took < 3000L/' "$repo/add/timed_test.mbt"
+report bound
+mentions bound '`add/timed_test.mbt:2`: test "answers in time"'
+mentions bound '-  guard took < 250L else { fail("took \{took} ms") }'
+mentions bound '+  guard took < 2500L else { fail("took \{took} ms") }'
+mentions bound '-  let fast = took < 300L'
+mentions bound '+  let fast = took < 3000L'
+
+# An assertion removed, and a line changed inside one that spans lines.
+tree
+package
+timed
+branch
+sed -i '/inspect(fast/d; s/^    121,$/    122,/' "$repo/add/timed_test.mbt"
+report removed
+mentions removed '-  inspect(fast, content="true")'
+mentions removed '-    121,'
+mentions removed '+    122,'
+
+# A helper of a test file that no longer fails.
+tree
+package
+timed
+branch
+sed -i '/fail("too long/d' "$repo/add/timed_test.mbt"
+report helper
+mentions helper '`add/timed_test.mbt:15`: fn check_short'
+mentions helper '-    fail("too long: \{text}")'
+
+# Assertions added to a test that stays, a changed line that asserts
+# nothing, and the same test indented in a block of its own weaken nothing.
+tree
+package
+timed
+branch
+file add/timed_test.mbt <<'MBT'
+///|
+test "answers in time" {
+  let took = 121L
+  {
+    guard took < 250L else { fail("took \{took} ms") }
+    let fast = took < 300L
+    inspect(fast, content="true")
+    inspect(took > 0L, content="true")
+    assert_eq(
+      @add.add(took.to_int(), 1),
+      121,
+    )
+  }
+}
+
+///|
+/// Fails unless the text is short.
+fn check_short(text : String) -> Unit raise {
+  if text.length() > 10 {
+    fail("too long: \{text}")
+  }
+}
+MBT
+report extended
+empty extended
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]
