@@ -247,9 +247,10 @@ real gRPC client, and the calls grpcurl makes, each with what it prints
 source tree they describe, that test the coverage report of
 `scripts/coverage.sh` (see [Build and test](#build-and-test)).
 
-`scripts/mutation/` holds the mutation runner, its site finder, and the
-module their tests run on, `scripts/mutation/fixture`, which is not a
-member of the workspace (see [Mutation runner](#mutation-runner)).
+`scripts/mutation/` holds the mutation runner, its site finder, operator
+set v1 (`operators.py`), and the module their tests run on,
+`scripts/mutation/fixture`, which is not a member of the workspace (see
+[Mutation runner](#mutation-runner)).
 
 ## Toolchain
 
@@ -858,13 +859,66 @@ The pinned set takes these alternatives, for the reasons that
 - **ROR** swaps only `<` and `<=`, and `>` and `>=`. It does not swap `==`
   and `!=`, in either set.
 
+Where an operator needs more detail, v1 has this:
+
+- **BODY** replaces the body of a top-level function or method, trait
+  implementations included, not of `init`, `main`, a local function or a
+  closure. The default values are `()`, `false`, `0` for every type of
+  number, `'\u{0}'`, `""` for `String` and `StringView`, `b""` for
+  `Bytes` and `BytesView`, `[]` for `Array`, `FixedArray` and
+  `ArrayView`, `{}` for `Map`, `null` for `Json`, `Iter::empty()`, `None`
+  for an option, `Ok` of the default for a `Result`, and a tuple of
+  defaults. Any other type, such as a type parameter or a type of
+  smock's own, has none. An implementation that does not write its
+  return type has the one of core's trait (`Show`, `Eq`, `Compare`,
+  `Hash` or `ToJson`). A body that already is the default value is no
+  site.
+- **IFC** forces the condition of an `if` or an `else if`, of a `while`
+  loop or a `for` loop with a condition, a match arm's guard, and a
+  `guard` statement's condition. A `for .. in` loop has none.
+- **DEL** deletes a call or an assignment, compound ones and those to a
+  field or an element included: one whose value its block drops, or the
+  last one of a block whose value is `Unit` (the body of a function that
+  returns `Unit`, of a loop, or of an `if` without an `else`). It does not
+  delete the only statement of a function's body, whose BODY mutant is
+  the same.
+- **INT** is in a comparison or an index when it is an operand of `<`,
+  `<=`, `>`, `>=`, `==` or `!=`, or the index of an element or a slice,
+  directly or through `+`, `-`, `*`, `/` and `%`. An alternative must fit
+  the literal's type: the one its suffix names, or `Int` without one (or
+  the wider type that the value needs). So a `0` in a comparison takes
+  `1` and `-1`, unless its type is unsigned.
+- **STR** changes string and byte-string literals, interpolated ones and
+  those over several lines included, but not character literals. An
+  escape, such as `\t`, is one character. A literal that writes no
+  character outside its interpolations gets `_` at the start of its text,
+  as the empty literal does. STR's scope is the protocol packages,
+  `server` and `log`, but `log/target.mbt`, the reader of request
+  targets.
+- **Not sites**: literals in patterns, ranges (`..<` and `..=`), and
+  `not(...)` calls.
+- **Skipped sites.** A rule skips a site that cannot be a mutant, and the
+  reports count it: a BODY site without a default value, or whose
+  function is foreign (FFI); a STR site outside STR's scope; IFC's `true`
+  for a condition that binds a name with `is`, and LCR at an `&&` whose
+  operand does, since the name would then be unbound where it is used;
+  and an AOR site at a `+` with a string literal as an operand, since
+  strings have no `-`. Such a condition is forced to false as
+  `false && (condition)`, which keeps the name bound.
+- **The same mutant.** Where two sites make the same mutant, as BODY's
+  `{ false }` and BOOL's `false` do in a body that is only `true`, one is
+  kept: the one in the pinned set, then the first of BODY, ROR, LCR, NOT,
+  BOOL, AOR, INT, STR, IFC and DEL.
+
 Sites come from a parser, not from a lexer. For each package, each report
 gives the number of sites that each rule skipped (no default value for
 BODY, a string outside STR's scope, FFI) beside the number of survivors,
 so that a "zero" always says what it is zero of. Each mutant has a stable
 id: its file, its enclosing definition, its operator, its original text,
 its replacement text and its ordinal. A report, an exclusion and a commit
-message name a mutant by that id.
+message name a mutant by that id. Every site, record, summary and report
+carries the operator set's version, `v1`, so a change to the set is a new
+version.
 
 ### Outcomes and kill credit
 
@@ -1196,19 +1250,29 @@ survive. It has two parts, which only a line format joins:
 - `scripts/mutation/sites.py`, the site finder, reads source and prints
   one [site](#terms) per line, as JSON: the mutant's id, its file, its
   enclosing definition, its operator, its original text, its replacement
-  text, its ordinal and its position (line and column).
+  text, its ordinal, its position (line and column), whether the pinned
+  set takes it, and the operator set's version. It finds the places in the
+  parse tree, and `scripts/mutation/operators.py`, operator set v1, says
+  what each place becomes.
 - `scripts/mutation/run.py`, the runner, makes one mutant of each site
   that the finder prints, builds and tests it, and writes the records and
   the report.
 
-The operators so far are three of [operator set v1](#operator-set-v1):
-ROR, BOOL and NOT. Each gives one mutant per position. Test files, test
-blocks and generated files have no sites. A generated file is one whose
-first line says `// Generated by <what>. Do not edit.`, as the Unicode data
-table (`unicode/data.mbt`), the build information
-(`buildinfo/build_info.mbt`), the test certificates
-(`testcerts/testcerts.mbt`) and the descriptor of gRPC's `health.proto`
-(`server/health_set.mbt`) do.
+The operators are those of [operator set v1](#operator-set-v1): BODY,
+ROR, IFC, LCR, NOT, DEL, BOOL, AOR, INT and STR. `operators.py` holds
+everything that decides what a "zero" means: the version, `v1`; each
+operator's alternatives and which one the pinned set takes; STR's scope;
+BODY's default values; and the rules that skip a site. A change to it is
+a new version, and needs the maintainer's approval; the weakening report
+lists it. The finder prints the pinned set (`--set pinned`, the default)
+or the full set (`--set full`), and, besides the sites, each site that a
+rule skipped, with the rule's reason (`"skipped"`) and no id, so that a
+report can count it. Test files, test blocks and generated files have no
+sites. A generated file is one whose first line says
+`// Generated by <what>. Do not edit.`, as the Unicode data table
+(`unicode/data.mbt`), the build information (`buildinfo/build_info.mbt`),
+the test certificates (`testcerts/testcerts.mbt`) and the descriptor of
+gRPC's `health.proto` (`server/health_set.mbt`) do.
 
 **How sites are found.** Sites come from a parser, not from a lexer or a
 regular expression, so that a string, a comment, a pattern or a range that
@@ -1246,16 +1310,21 @@ checks, which read the modules the workspace resolves.
 operator, its original text, its replacement text and its ordinal, joined
 by commas, as in `usage/usage.mbt,resident_bytes,ROR,<=,<,0`. Inside a
 field, a `\` escapes a comma or a `\`, and `\n`, `\r` and `\t` stand for
-those characters. The definition is the top-level one that holds the
-site: `f`, `Type::f`, `impl Trait for Type with f`, `impl Trait with f`
-for a trait's default, the name of a `let`, a `const`, a type or a trait,
-or `main` or `init`. The ordinal counts, from 0,
-the sites of the same file, definition, operator and texts that come
-before it, so an id stays the same as long as the definition's sites of
-that kind keep their order. A report, an exclusion and a commit message
+those characters. A text over several lines, such as a function's body,
+which BODY replaces, is written in the id as its first line, `…` and its
+last line, without the indentation: `{…}`. The definition is the
+top-level one that holds the site: `f`, `Type::f`,
+`impl Trait for Type with f`, `impl Trait with f` for a trait's default,
+the name of a `let`, a `const`, a type or a trait, or `main` or `init`.
+The ordinal counts, from 0, the sites of the same file, definition,
+operator and texts that come before it, so an id stays the same as long
+as the definition's sites of that kind keep their order. A report, an exclusion and a commit message
 name a mutant by its id.
 
-**A run.** For each worker (`--workers`, 1 unless given), the runner
+**A run.** The runner asks the finder for the full set, and runs the
+pinned set (`--set pinned`, the default) or the full set (`--set full`).
+A **position** is the place of one or more sites: their file, operator,
+line and column. For each worker (`--workers`, 1 unless given), the runner
 copies the workspace, the files git tracks and the untracked ones it does
 not ignore, into `_build/mutation/tree-<n>`, and builds there into
 `_build/mutation/target-<n>`: a build directory at a stable path, with a
@@ -1277,18 +1346,25 @@ it never passes `-u`. Each mutant's outcome is one of:
 - **survived**: every test passed.
 
 It writes into `_build/mutation/out/`: `mutants.jsonl`, one record per
-mutant with its site, its outcome, the tests that killed it, the backend
-and the timings; `summary.json`, per package, the counts of each outcome
-and the run without a mutant; and `report.md`, the summaries, the
-time-outs, and each survivor's diff with its whole enclosing definition,
-which the runner also prints. `--work` and `--out` choose other
-directories.
+mutant with its site, the set that ran, its outcome, the tests that
+killed it, the backend and the timings; `summary.json`, the operator
+set's version and the set, and per package the counts of sites and
+positions in both sets, the sites each rule skipped, the counts of each
+outcome and the run without a mutant; and `report.md`, the same counts,
+the time-outs, and each survivor's diff with its whole enclosing
+definition, which the runner also prints. A run of the full set counts
+the mutants at the pinned alternatives and at the other alternatives
+apart, and lists their survivors apart: L4 reads only the former.
+`--sites-only` runs no mutant, and writes only the counts. `--work` and
+`--out` choose other directories.
 
 To see the sites of a package, and to run one mutant, or the few mutants
 of a small package (they need python3, git, moon and moonc):
 
 ```sh
 python3 scripts/mutation/sites.py usage
+python3 scripts/mutation/sites.py --set full usage
+python3 scripts/mutation/run.py --sites-only usage
 python3 scripts/mutation/run.py --mutant 'usage/usage.mbt,resident_bytes,ROR,<=,<,0' usage
 python3 scripts/mutation/run.py usage
 ```
@@ -1299,10 +1375,14 @@ later steps of the review add.
 
 The tests (`python3 -m unittest discover -s scripts/mutation -v`) run the
 finder and the runner on `scripts/mutation/fixture`, a module that is not
-a member of the workspace. In its package `calc`, each site's mutant has a
-known outcome, given beside the site with its reason: some are killed, a
-few survive, and one times out. The package `shapes` holds a site in each
-kind of definition, and look-alikes that are not sites. `moon fmt --check`
+a member of the workspace. In its package `calc`, each mutant of the
+pinned set has a known outcome, given beside the site with its reason:
+some are killed, a few survive, one times out, and one does not compile.
+In its package `log`, whose paths put it in STR's scope as smock's `log`
+is, each mutant of the full set has one. The package `shapes` holds a
+site in each kind of definition, and look-alikes that are not sites; the
+package `forms` holds each form of each operator, and the tests copy its
+strings into STR's scope too. `moon fmt --check`
 at the root does not read the fixture: run `moon fmt` inside it after a
 change.
 

@@ -22,7 +22,8 @@ exclusions.*                           the exclusion list of surviving mutants a
 mutation/l4-packages.txt               the list of packages at L4 (#312)
 mutation/kept-tests.*                  the keep list: the tests kept for reasons the kill matrix cannot see (#351)
 docs/ledgers/                          the use-case and boundary ledgers, whose rows keep their tests under removal rule (C) (#286)
-mutation/                              the mutation runner and its committed data: the operator set and its alternative rule (#298, #299), the site counts and approved drops (#309), the flake threshold, and the flake rates if they are committed (#301), the fixture module and its expected verdicts (#298), and the canary's mutants, recorded verdicts and explained differences (#308)
+scripts/mutation/                      the mutation runner and its site finder (#298), operator set v1 and its alternative rule, whose version every record carries (operators.py, #299), and the fixture module with its expected sites and verdicts (#298, #299)
+mutation/                              the mutation runner's committed data: the site counts and approved drops (#309), the flake threshold, and the flake rates if they are committed (#301), and the canary's mutants, recorded verdicts and explained differences (#308)
 coverage/                              the coverage wrapper and its committed data: the bisect parser (#296), the floors and approved raises (#297), and the scope's list of generated files
 scripts/check-merge.*                  the merge check (#312)
 scripts/check-weekly-run.*             the release's check of the latest weekly run (#316)

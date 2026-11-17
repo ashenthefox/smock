@@ -4,15 +4,22 @@ tests, and writes one record per mutant, a summary per package and a
 report (CONTRIBUTING.md, "Mutation runner").
 
 usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir>]
-           [--mutant <id>]... [--workers <n>] [--moon <moon>] [--finder <command>]
-           <package directory>...
+           [--set pinned|full] [--mutant <id>]... [--sites-only] [--workers <n>]
+           [--moon <moon>] [--finder <command>] <package directory>...
 
 <package directory> is relative to <root>, the workspace or module to
 mutate: the current directory unless it is given. The site finder
-(scripts/mutation/sites.py, or --finder) gives the sites, one per line,
-and the runner makes one mutant of each. --mutant runs only the mutant
-with that id, and may be given more than once; a package given that holds
-none of the ids is not run.
+(scripts/mutation/sites.py, or --finder) gives the sites of the full set,
+one per line, each with whether the pinned set takes it, and the sites
+that a rule of the operator set skipped. --set pinned, the default, makes
+one mutant of each site of the pinned set: one per position, two for INT
+in a comparison or an index, the alternative chosen by the rule of
+operator set v1. --set full makes one of each site of the full set: every
+alternative of every operator at every position. --mutant runs only the
+mutant with that id, which must be in the set, and may be given more than
+once; a package given that holds none of the ids is not run.
+--sites-only runs no mutant: it writes the counts of sites, positions and
+skipped sites of each package, in both sets.
 
 For each worker, the runner copies <root> into <work>/tree-<n>, the files
 that git tracks and the untracked ones it does not ignore, and builds
@@ -36,17 +43,29 @@ runs the binary of an earlier one, and it never passes -u. The outcome is
 
 It writes into <out> (<work>/out unless it is given):
 
-  mutants.jsonl  one record per mutant: the site's fields, the package, the
-                 outcome, the tests that killed it, the backend, the
-                 timings (build_s, run_s and the run's limit_s), the
-                 compiler's message for an unviable one, and a survivor's
-                 diff;
-  summary.json   per package: the baseline, the counts of sites, mutants
-                 and each outcome, and the score: killed / (killed +
-                 survived), which leaves time-outs out until they are
-                 confirmed;
-  report.md      the summaries, the time-outs, and each survivor's diff
-                 with its whole enclosing definition, which it also prints.
+  mutants.jsonl  one record per mutant: the site's fields (its operator
+                 set's version and whether the pinned set takes it
+                 included), the package, the set that ran, the outcome,
+                 the tests that killed it, the backend, the timings
+                 (build_s, run_s and the run's limit_s), the compiler's
+                 message for an unviable one, and a survivor's diff;
+  summary.json   the operator set's version and the set that ran, and per
+                 package: the baseline, the counts of sites and positions
+                 in the set that ran and in both sets, the sites each rule
+                 skipped, the counts of mutants and each outcome, and the
+                 score: killed / (killed + survived), which leaves
+                 time-outs out until they are confirmed; for the full set,
+                 the same counts at the pinned alternatives and at the
+                 other alternatives apart;
+  report.md      the operator set's version and the set, the summaries,
+                 the sites each rule skipped, the time-outs, and each
+                 survivor's diff with its whole enclosing definition (for
+                 the full set, the survivors at the pinned alternatives and
+                 those at the other alternatives apart), which it also
+                 prints.
+
+A position is the place of one or more sites: their file, operator, line
+and column.
 
 It exits with 0 when every mutant has an outcome, survivors or not, and
 with 1 when it cannot run them.
@@ -248,17 +267,105 @@ def definition_diff(site, text, mutated):
 
 
 def find_sites(finder, root, directory):
-    """The sites the finder prints for a package's directory."""
-    command = [*finder, "--root", str(root), directory]
+    """The sites of the full set that the finder prints for a package's
+    directory, and the sites that a rule skipped. Every line names the
+    same operator set."""
+    command = [*finder, "--root", str(root), "--set", "full", directory]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         raise RunnerError(f"the site finder failed on {directory}:\n{result.stderr}")
-    return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    lines = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    versions = {line.get("operator_set") for line in lines}
+    if None in versions or len(versions) > 1:
+        raise RunnerError(f"the site finder's lines for {directory} do not name one operator set:"
+                          f" {sorted(map(str, versions))}")
+    return [s for s in lines if "skipped" not in s], [s for s in lines if "skipped" in s]
+
+
+def in_set(site, chosen):
+    """Whether a site is in the chosen set, pinned or full."""
+    return chosen == "full" or site["pinned"]
+
+
+def position(site):
+    """The place of a site, which it shares with the other alternatives of
+    its operator there."""
+    return site["file"], site["operator"], site["line"], site["column"]
+
+
+def set_counts(sites, skipped):
+    """The counts of sites and positions, and of the sites that each rule
+    skipped, in the pinned set and in the full set."""
+    counts = {}
+    for chosen in ("pinned", "full"):
+        mine = [s for s in sites if in_set(s, chosen)]
+        rules = {}
+        for site in skipped:
+            if in_set(site, chosen):
+                rule = f"{site['operator']} {site['skipped']}"
+                rules[rule] = rules.get(rule, 0) + 1
+        counts[chosen] = {"sites": len(mine), "positions": len({position(s) for s in mine}),
+                          "skipped": dict(sorted(rules.items()))}
+    return counts
+
+
+def outcome_counts(records):
+    """The count of each outcome among records, and the score."""
+    counts = {o: sum(1 for r in records if r["outcome"] == o) for o in ("killed", "timed out", "survived", "unviable")}
+    judged = counts["killed"] + counts["survived"]
+    return {
+        "mutants": len(records),
+        "killed": counts["killed"],
+        "timed_out": counts["timed out"],
+        "survived": counts["survived"],
+        "unviable": counts["unviable"],
+        # Time-outs are left out until they are confirmed as kills.
+        "score": round(counts["killed"] / judged, 4) if judged else None,
+    }
+
+
+def choose(found, chosen_set, ids, directories):
+    """The sites of the chosen set in each package, and the mutants to run
+    of them: all of them, or, with ids, those the ids name, which must all
+    be sites of the set."""
+    sites = {d: [s for s in found[d][0] if in_set(s, chosen_set)] for d in directories}
+    if not ids:
+        return sites, {d: list(mine) for d, mine in sites.items()}
+    known = {s["id"] for mine in sites.values() for s in mine}
+    unknown = [i for i in ids if i not in known]
+    if unknown:
+        where = ", ".join(directories)
+        raise RunnerError("".join(f"no site of {where} in the {chosen_set} set has the id {i}\n"
+                                  for i in unknown).rstrip())
+    return sites, {d: [s for s in mine if s["id"] in ids] for d, mine in sites.items()}
+
+
+def alternative_counts(records):
+    """A full set's counts at the pinned alternatives and at the others,
+    apart: L4 reads only the former."""
+    return {"pinned": outcome_counts([r for r in records if r["pinned"]]),
+            "other": outcome_counts([r for r in records if not r["pinned"]])}
+
+
+def package_summary(root, directory, sites, skipped, chosen, operator_set):
+    """What a package's summary says without a run: its sites, positions
+    and skipped sites in the set that ran and in both sets."""
+    counts = set_counts(sites, skipped)
+    return {
+        "package": package_name(root, directory),
+        "directory": directory,
+        "operator_set": operator_set,
+        "set": chosen,
+        "sites": counts[chosen]["sites"],
+        "positions": counts[chosen]["positions"],
+        "skipped": counts[chosen]["skipped"],
+        "sets": counts,
+    }
 
 
 def run_package(root, directory, sites, mutants, workers, log):
     """Runs the chosen mutants of one package, whose sites are given: its
-    records and its summary."""
+    records, and its summary's counts of the run."""
     package = package_name(root, directory)
     first = workers[0]
     status, output, _ = first.build(package)
@@ -296,22 +403,11 @@ def run_package(root, directory, sites, mutants, workers, log):
         for future in [pool.submit(work, w) for w in workers]:
             future.result()
 
-    counts = {o: sum(1 for r in records if r["outcome"] == o) for o in ("killed", "timed out", "survived", "unviable")}
-    judged = counts["killed"] + counts["survived"]
     summary = {
-        "package": package,
-        "directory": directory,
         "backend": BACKEND,
         "baseline": {"run_s": round(baseline_s, 3), "tests": tests},
         "limit_s": round(limit, 3),
-        "sites": len(sites),
-        "mutants": len(mutants),
-        "killed": counts["killed"],
-        "timed_out": counts["timed out"],
-        "survived": counts["survived"],
-        "unviable": counts["unviable"],
-        # Time-outs are left out until they are confirmed as kills.
-        "score": round(counts["killed"] / judged, 4) if judged else None,
+        **outcome_counts(records),
     }
     return records, summary
 
@@ -348,38 +444,69 @@ def run_mutant(worker, package, site, limit):
     return record
 
 
-def report(summaries, records):
-    """The report: the summary of each package, its time-outs, and its
-    survivors with their diffs."""
-    out = ["# Mutation report", ""]
+def report(operator_set, chosen, summaries, records):
+    """The report: the operator set and the set, the summary of each
+    package, the sites each rule skipped, its time-outs, and its survivors
+    with their diffs, those at the other alternatives of the full set
+    apart."""
+    which = "the pinned set" if chosen == "pinned" else "the full set"
+    out = ["# Mutation report", "", f"Operator set {operator_set}, {which}.", ""]
     for summary in summaries:
         package = summary["package"]
         mine = [r for r in records if r["package"] == package]
-        score = "none" if summary["score"] is None else f"{summary['score']:.1%}"
-        out += [
-            f"## {package}",
-            "",
-            f"Backend {summary['backend']}, {summary['baseline']['tests']} tests, baseline run"
-            f" {summary['baseline']['run_s']:.2f} s, time limit {summary['limit_s']:.2f} s.",
-            "",
-            "| sites | mutants | killed | timed out | survived | unviable | score |",
-            "|---:|---:|---:|---:|---:|---:|---:|",
-            f"| {summary['sites']} | {summary['mutants']} | {summary['killed']} | {summary['timed_out']}"
-            f" | {summary['survived']} | {summary['unviable']} | {score} |",
-            "",
-        ]
+        out += [f"## {package}", ""]
+        if "backend" in summary:
+            out += [f"Backend {summary['backend']}, {summary['baseline']['tests']} tests, baseline run"
+                    f" {summary['baseline']['run_s']:.2f} s, time limit {summary['limit_s']:.2f} s.", ""]
+        out += site_table(summary)
+        if "backend" not in summary:
+            continue
+        rows = [("", summary)]
+        if chosen == "full":
+            rows = [("all", summary), ("at the pinned alternatives", summary["pinned"]),
+                    ("at the other alternatives", summary["other"])]
+        out += ["| mutants | killed | timed out | survived | unviable | score |" if chosen == "pinned" else
+                "| alternatives | mutants | killed | timed out | survived | unviable | score |"]
+        out += ["|---:|---:|---:|---:|---:|---:|" if chosen == "pinned" else "|---|---:|---:|---:|---:|---:|---:|"]
+        for label, counts in rows:
+            score = "none" if counts["score"] is None else f"{counts['score']:.1%}"
+            cells = [counts["mutants"], counts["killed"], counts["timed_out"], counts["survived"],
+                     counts["unviable"], score]
+            out += ["| " + " | ".join(([label] if chosen == "full" else []) + [str(c) for c in cells]) + " |"]
+        out += [""]
         timed_out = [r for r in mine if r["outcome"] == "timed out"]
         if timed_out:
             out += ["### Timed out, not yet confirmed", ""]
             out += [f"- `{r['id']}` (run stopped after {r['timings']['run_s']:.2f} s)" for r in timed_out]
             out += [""]
         survivors = [r for r in mine if r["outcome"] == "survived"]
-        out += [f"### Survivors ({len(survivors)})", ""]
-        for record in survivors:
-            out += [f"#### `{record['id']}`", "", f"In `{record['definition']}`, {record['file']}"
-                    f" lines {record['definition_lines'][0]} to {record['definition_lines'][1]}:", "",
-                    "```diff", record["diff"].rstrip("\n"), "```", ""]
+        groups = [("Survivors", survivors)]
+        if chosen == "full":
+            groups = [("Survivors at the pinned alternatives", [r for r in survivors if r["pinned"]]),
+                      ("Survivors at the other alternatives", [r for r in survivors if not r["pinned"]])]
+        for title, group in groups:
+            out += [f"### {title} ({len(group)})", ""]
+            for record in group:
+                out += [f"#### `{record['id']}`", "", f"In `{record['definition']}`, {record['file']}"
+                        f" lines {record['definition_lines'][0]} to {record['definition_lines'][1]}:", "",
+                        "```diff", record["diff"].rstrip("\n"), "```", ""]
     return "\n".join(out)
+
+
+def site_table(summary):
+    """The lines of the report that count a package's sites, positions and
+    skipped sites, in both sets."""
+    sets = summary["sets"]
+    out = ["| set | sites | positions |", "|---|---:|---:|"]
+    for chosen in ("pinned", "full"):
+        out += [f"| {chosen} | {sets[chosen]['sites']} | {sets[chosen]['positions']} |"]
+    out += [""]
+    skipped = summary["skipped"]
+    if skipped:
+        out += ["Sites skipped in this set: " + ", ".join(f"{rule} {n}" for rule, n in skipped.items()) + ".", ""]
+    else:
+        out += ["Sites skipped in this set: none.", ""]
+    return out
 
 
 def main():
@@ -387,7 +514,11 @@ def main():
     parser.add_argument("--root", default=".", help="the workspace or module to mutate")
     parser.add_argument("--work", help="the runner's own directory (default <root>/_build/mutation)")
     parser.add_argument("--out", help="where the records and the report go (default <work>/out)")
+    parser.add_argument("--set", default="pinned", choices=("pinned", "full"),
+                        help="the pinned set (the default) or the full set")
     parser.add_argument("--mutant", action="append", help="run only the mutant with this id")
+    parser.add_argument("--sites-only", action="store_true",
+                        help="count the sites of each package in both sets, and run no mutant")
     parser.add_argument("--workers", type=int, default=1, help="how many mutants build and run at once")
     parser.add_argument("--moon", default="moon", help="the moon command")
     parser.add_argument("--finder", help="the site finder's command (default: sites.py beside this script)")
@@ -404,25 +535,32 @@ def main():
         print(message, file=sys.stderr, flush=True)
 
     try:
-        sites = {directory: find_sites(finder, root, directory) for directory in args.packages}
-        chosen = {directory: list(found) for directory, found in sites.items()}
-        if args.mutant:
-            known = {s["id"] for found in sites.values() for s in found}
-            unknown = [i for i in args.mutant if i not in known]
-            if unknown:
-                where = ", ".join(args.packages)
-                raise RunnerError("".join(f"no site of {where} has the id {i}\n" for i in unknown).rstrip())
-            chosen = {d: [s for s in found if s["id"] in args.mutant] for d, found in sites.items()}
-        files = listed_files(root)
-        workers = [Worker(n, work, shlex.split(args.moon)) for n in range(args.workers)]
-        for worker in workers:
-            sync(root, worker.tree, files)
+        found = {directory: find_sites(finder, root, directory) for directory in args.packages}
+        versions = {s["operator_set"] for sites, skipped in found.values() for s in sites + skipped}
+        if len(versions) > 1:
+            raise RunnerError(f"the packages' sites name several operator sets: {sorted(versions)}")
+        operator_set = versions.pop() if versions else None
+        sites, chosen = choose(found, args.set, args.mutant, args.packages)
         records, summaries = [], []
+        if not args.sites_only:
+            files = listed_files(root)
+            workers = [Worker(n, work, shlex.split(args.moon)) for n in range(args.workers)]
+            for worker in workers:
+                sync(root, worker.tree, files)
         for directory in args.packages:
             if args.mutant and not chosen[directory]:
                 continue
-            package_records, summary = run_package(root, directory, sites[directory], chosen[directory], workers, log)
-            records += package_records
+            summary = package_summary(root, directory, found[directory][0], found[directory][1], args.set,
+                                      operator_set)
+            if not args.sites_only:
+                package_records, counts = run_package(root, directory, sites[directory], chosen[directory],
+                                                      workers, log)
+                for record in package_records:
+                    record.update(set=args.set)
+                summary.update(counts)
+                if args.set == "full":
+                    summary.update(alternative_counts(package_records))
+                records += package_records
             summaries.append(summary)
     except RunnerError as error:
         print(f"run: {error}", file=sys.stderr)
@@ -431,9 +569,10 @@ def main():
     with open(out / "mutants.jsonl", "w", encoding="utf-8") as f:
         for record in records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    (out / "summary.json").write_text(json.dumps({"packages": summaries}, indent=2, ensure_ascii=False) + "\n",
-                                      encoding="utf-8")
-    text = report(summaries, records)
+    (out / "summary.json").write_text(
+        json.dumps({"operator_set": operator_set, "set": args.set, "packages": summaries},
+                   indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    text = report(operator_set, args.set, summaries, records)
     (out / "report.md").write_text(text, encoding="utf-8")
     print(text)
 
