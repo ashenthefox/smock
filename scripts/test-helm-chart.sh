@@ -305,6 +305,9 @@ definitions:
     repo: https://example.com/team/mocks.git
     ref: main
     path: mocks/dev
+    depth: 0
+    extraArgs:
+      - --stale-worktree-timeout=30s
 YAML
 render git-sync --values "$tmp/values-token.yaml" --values "$tmp/values-git-sync.yaml"
 check git-sync "no ConfigMap: the Definition files come from the Git repository" \
@@ -325,6 +328,15 @@ check git-sync "git-sync writes its home in a volume of its own, since its root 
   'mount("git-sync"; "git-sync-home") == {"name": "git-sync-home", "mountPath": "/tmp"}
    and mount("git-sync-init"; "git-sync-home") == {"name": "git-sync-home", "mountPath": "/tmp"}
    and volume("git-sync-home") == {"name": "git-sync-home", "emptyDir": {}}'
+# The README's values table: definitions.gitSync.depth is how many commits
+# of history to fetch, 0 for all of it, and definitions.gitSync.extraArgs
+# are more git-sync flags, such as the --stale-worktree-timeout that its
+# git-sync section names. A depth of 0 must not be dropped as empty.
+check git-sync "both git-sync containers fetch the depth set, 0 for the whole history, and take the extra flags" \
+  '[container("git-sync", "git-sync-init")] as $c
+   | ($c | length) == 2
+   and all($c[]; [.args[] | select(startswith("--depth"))] == ["--depth=0"]
+     and (.args | index("--stale-worktree-timeout=30s")))'
 
 render git-sync-root --values "$tmp/values-token.yaml" --set definitions.source=gitSync --set definitions.gitSync.repo=https://example.com/m.git
 check git-sync-root "without a path, the Definition files are at the top of the repository" \
