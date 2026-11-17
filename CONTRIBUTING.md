@@ -338,6 +338,8 @@ python3 -m unittest discover -s bench -p test_compare.py -v   # the benchmark's 
 python3 scripts/check-kept-tests.py   # every test that the keep list, mutation/kept-tests.toml, names is still there (needs Python 3.11 or later)
 scripts/test-check-kept-tests.sh     # that check, on small trees
 scripts/test-trace-links.sh          # the trace links of the removal proof (scripts/trace-links.py), on small git histories with a stand-in for gh (needs python3 and git)
+python3 scripts/check-ledgers.py     # every test that the use-case and boundary ledgers, docs/ledgers/, name is still there, and each row's status agrees with what it names
+scripts/test-check-ledgers.sh        # that check, on small trees
 helm lint --strict charts/smock --set adminAuth.tokenSecret.name=smock-admin-token   # the Helm chart passes helm's lint (needs helm)
 scripts/test-helm-chart.sh           # rendering tests of the Helm chart (needs helm, yq and jq)
 python3 -m unittest discover -s bench -p test_gke_script.py -v   # scripts/gke-bench.sh against fake gcloud, kubectl and docker commands, about 5 minutes
@@ -400,6 +402,14 @@ the searches that found its tests. A removal batch never proposes a test
 on it. `scripts/check-kept-tests.py` fails when a test that the list names
 is no longer there, so a change that renames, moves or removes a listed
 test changes the list in the same commit.
+
+[`docs/ledgers/`](docs/ledgers/use-cases.md) holds the use-case and
+boundary ledgers of the test review
+([The four ledgers](#the-four-ledgers)): each documented feature, message
+and limit, with its source and the tests that check it.
+`scripts/check-ledgers.py` fails in the same way when a test that a ledger
+names is no longer there, and when a row's status does not agree with what
+it names.
 
 `scripts/check-h2spec.sh` runs h2spec 2.6.0, the HTTP/2 conformance tool,
 against a smock binary: every case of its `generic`, `http2` and `hpack`
@@ -719,14 +729,21 @@ never gated. Each baseline below was measured at d953f320.
    crosses it. A limit in the code that no document states is a finding:
    once the maintainer confirms it, the documents state it, and it is
    tested like the others. Baseline: about 33 of the 40 most important
-   limits tested on both sides.
+   limits tested on both sides. The
+   [boundary ledger](docs/ledgers/boundaries.md) lists each limit with its
+   source and its tests.
 4. **Use cases**: every documented feature has an automated test, or a
    recorded manual check with its reason. Every Definition-file example
    in the documents passes `smock check` in CI. Every message a user can
    see is asserted at least once. Baseline: of 99 documented features, 93
-   covered, 2 partly and 4 not; 70 of the 71 whole Definition files in the
-   documents pass once given the context they leave out; 22 messages, 19
-   of which a user can see, and the top-level help asserted by no test.
+   covered, 2 partly and 4 not, as the survey counted them; 70 of the 71
+   whole Definition files in the documents pass once given the context
+   they leave out; 22 messages and the top-level help asserted by no test.
+   A user can see 17 of the 22 messages: no input reaches 2 of the others,
+   and only a package's interface shows 3 (the survey counted 20 that a
+   user can see). The [use-case ledger](docs/ledgers/use-cases.md) lists
+   each feature and each message with its source and its tests, and has
+   the recheck of the survey's rows.
 
 **Scope.** All non-test source of the workspace, except generated files
 (the Unicode data table and the build information) and the test
@@ -734,6 +751,31 @@ certificates, which are data. A definition leaves the scope only through
 the exclusion list, with a category, a reason and the maintainer's
 approval. Its sites still appear in the site counts and in the counts of
 sites skipped.
+
+### Keeping the ledgers current
+
+The use-case and boundary ledgers, in
+[`docs/ledgers/`](docs/ledgers/use-cases.md), are kept current by each
+change, not surveyed again before each release:
+
+- A change that documents a feature, a limit or a message adds its row,
+  with its source and the tests that check it, or the ticket or issue that
+  adds them.
+- A change that renames, moves or removes a test that a row names, or
+  that adds a test for what a row still lacks, updates the row in the same
+  commit, and its status with it.
+- A gap that no ticket closes is filed as an issue, and its row names the
+  issue.
+
+`scripts/check-ledgers.py`, in CI's job `scripts`, fails a push on which a
+ledger names a test that is no longer there, or a row whose status does
+not agree with what it names. The weakening report lists every change to
+the ledgers, for the maintainer to read before the merge into `main`. A
+removal batch keeps the only test of a row unless it names another
+([Removing a test](#removing-a-test)). No check sees a feature, a limit or
+a message documented without a row: whoever reviews the change looks for
+one. Step 3's close checks the ledgers against the documents once more
+([#340](https://github.com/hirunefu/smock/issues/340)).
 
 ### The ladder
 

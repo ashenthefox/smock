@@ -176,6 +176,11 @@ such as Mock, Stub and Session.
   to build and test smock, and how its tests are judged: what makes a
   good test, how mutants measure the suite, and when a test may be
   removed.
+- [ledgers/](ledgers/use-cases.md) holds two of the four ledgers that
+  judge the tests: the [use-case ledger](ledgers/use-cases.md), each
+  documented feature and message with the tests that check it, and the
+  [boundary ledger](ledgers/boundaries.md), each documented limit with its
+  tests at the limit and just past it.
 - [bench/README.md](../bench/README.md) describes the release benchmark:
   how to run it on a machine, on GKE Autopilot and in CI, what a run
   writes, and how to compare runs.

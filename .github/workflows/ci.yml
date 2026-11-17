@@ -265,6 +265,20 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-check-kept-tests.sh
 
+      # --- The use-case and boundary ledgers ----------------------------------
+
+      # docs/ledgers/ lists each documented feature, message and limit with
+      # the tests that check it. This checks that each test a ledger names
+      # is still there and that each row's status agrees with what it names
+      # (scripts/check-ledgers.py), and tests that check on small trees.
+      - name: Check that every test the ledgers name is still there
+        if: ${{ !cancelled() }}
+        run: python3 scripts/check-ledgers.py
+
+      - name: Test the check of the ledgers
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-ledgers.sh
+
       # --- The removal proof -------------------------------------------------
 
       # A test may be removed only when, among other sets, its removal keeps
