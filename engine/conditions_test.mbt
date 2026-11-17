@@ -595,6 +595,38 @@ test "a json condition compares numbers by their exact value, even integers abov
       #|POST / "{\"v\":-1e400}" -> none
     ),
   )
+  // The value 10^400 in other notations, each a number the parser keeps as
+  // text, so that both sides of each comparison are compared exactly. The
+  // values come from #281's acceptance criteria: a `1` followed by 400
+  // zeros, `1e0000000000000000000400` and a `1` followed by 500 zeros and
+  // `e-100` each equal `1e400`; the near misses are 9 * 10^399, 10^401 and
+  // 10^399, which differ in value ("numbers by their value", matching.md).
+  let zeros = (n : Int32) => "0".repeat(n)
+  let notations = [
+    ("1 and 400 zeros", "1\{zeros(400)}"),
+    ("9 and 399 zeros", "9\{zeros(399)}"),
+    ("1e0000000000000000000400", "1e0000000000000000000400"),
+    ("1e0000000000000000000401", "1e0000000000000000000401"),
+    ("1 and 500 zeros, e-100", "1\{zeros(500)}e-100"),
+    ("1 and 500 zeros, e-101", "1\{zeros(500)}e-101"),
+  ]
+  inspect(
+    notations
+    .map(notation => {
+      let (label, v) = notation
+      let winner = matched_id(h.send("POST", "/", body="{\"v\":\{v}}"))
+      "\{label} -> \{winner.unwrap_or("none")}"
+    })
+    .join("\n"),
+    content=(
+      #|1 and 400 zeros -> huge
+      #|9 and 399 zeros -> none
+      #|1e0000000000000000000400 -> huge
+      #|1e0000000000000000000401 -> none
+      #|1 and 500 zeros, e-100 -> huge
+      #|1 and 500 zeros, e-101 -> none
+    ),
+  )
 }
 
 ///|

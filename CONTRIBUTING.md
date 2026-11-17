@@ -8,8 +8,8 @@ the work fits where smock is going. Report a vulnerability privately, as
 
 This document is for people who work on smock itself. It describes the
 repository's layout, the pinned MoonBit toolchain, how to build and test
-smock, and the release benchmark, and says where making a release is
-described. The
+smock, how to measure the tests' costs on CI's runners, and the release
+benchmark, and says where making a release is described. The
 [Contributing to smock](docs/README.md#contributing-to-smock) list in
 docs/README.md names the other documents for contributors: the
 architecture decisions (ADRs), the glossary and the maintainer's
@@ -20,6 +20,7 @@ checklists.
 - [Layout](#layout)
 - [Toolchain](#toolchain)
 - [Build and test](#build-and-test)
+- [Test costs on CI's runners](#test-costs-on-cis-runners)
 - [Benchmark](#benchmark)
 - [Making a release](#making-a-release)
 
@@ -210,6 +211,11 @@ runs it when started by hand; `scripts/gke-bench.sh` runs it on GKE
 Autopilot before an integration branch is merged into `main` (see
 [Benchmark](#benchmark)).
 
+`.github/workflows/measure-costs.yml` measures what the tests cost on CI's
+runners when started by hand, with `scripts/measure-costs.py`, and
+`scripts/estimate-costs.py` recomputes the test review's cost model from
+it (see [Test costs on CI's runners](#test-costs-on-cis-runners)).
+
 `scripts/h2spec/` holds the Definition file that CI serves to h2spec, the
 HTTP/2 conformance tool, and the lists of h2spec's cases that do not pass on
 the plain port and on the TLS port, each with its reason (see
@@ -271,6 +277,10 @@ scripts/check-release-workflow.sh    # the release workflow publishes only for t
 scripts/test-release-notes.sh        # the release notes, with CHANGELOG.md's links at the release's tag
 scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit and that the tag names moon.mod's version (needs jq)
 scripts/check-benchmark-workflow.sh  # the benchmark workflow runs only by hand (needs yq and jq)
+scripts/check-measure-costs-workflow.sh   # the workflow that measures the tests' costs runs only by hand, with no C flags (needs yq and jq)
+scripts/test-check-measure-costs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
+scripts/test-measure-costs.sh        # the measurement of the tests' costs, against a fake moon (needs python3 and jq)
+scripts/test-estimate-costs.sh       # the cost model recomputed from made-up measurements (needs python3)
 scripts/check-ci-artifacts.sh        # when CI's jobs and steps run, and that it keeps the release binaries only from a run whose every job passed (needs yq and jq)
 scripts/test-check-ci-artifacts.sh   # that check, on copies of the workflows changed one thing at a time (needs yq and jq)
 scripts/test-ci-plan.sh              # the plan that skips the tests on main of a tree that already passed (needs git and jq)
@@ -525,6 +535,60 @@ goes in a package of its own, whose tests get a process of their own, as
 
 `SMOCK_VERSION` and `SMOCK_COMMIT` set the version and the commit that a
 native build, such as `scripts/build-release.sh`, records in the binary.
+
+## Test costs on CI's runners
+
+`.github/workflows/measure-costs.yml` measures on CI's runners what the
+cost model of the test review
+([#275](https://github.com/hirunefu/smock/issues/275)) guesses. It runs on
+a linux/amd64 and a linux/arm64 runner, and only when started by hand. It
+sets no variable that gives moon another C compiler or flags: on amd64,
+moon's native debug builds skip the system's C compiler, and the
+measurement is of the builds as CI's test job makes them.
+`scripts/measure-costs.py` measures in four parts:
+
+- `e2e`: every e2e test run in one process, three times by default, after
+  the builds of `cmd/smock` and the e2e package.
+- `alone`: each e2e test run alone, in a `moon` process of its own
+  (`moon test --target native e2e/<file> -i <index>`), since `moon` prints
+  no time per test and runs a package's async tests ten at a time in one
+  process. Each time holds moon's own work around a run, which the part
+  `e2e` measures as a build with nothing to do.
+- `rebuild`: from clean, in a target directory of its own, the native
+  rebuild of engine's tests and of `cmd/smock` after one mutant in engine,
+  and engine's tests on wasm-gc after it.
+- `coverage`: builds and runs, plain and with `--enable-coverage`, of the
+  native-only packages' tests, the pure packages' tests on wasm-gc but
+  yaml's, yaml's natively, and the binary, each mode from clean; whether
+  moon plans the system's C compiler or tcc for them; and the points the
+  coverage build covers.
+
+Start it from the Actions tab, or with `gh`. GitHub starts a workflow by
+hand only once it is on the default branch; `--ref` picks the commit it
+measures:
+
+```sh
+gh workflow run measure-costs.yml --ref main -f e2e-runs=3 -f alone-runs=1
+```
+
+`alone-runs=0` leaves the part `alone` out. Each architecture's results
+are kept as the artifact `measurements-linux-amd64` or
+`measurements-linux-arm64`, also when a measurement fails, and the job's
+summary shows them. `scripts/estimate-costs.py` recomputes the cost model
+from both, and prints it as Markdown with where it falls against decision
+6's band:
+
+```sh
+gh run download <run id> --dir measurements
+python3 scripts/estimate-costs.py --run-url <run link> \
+  measurements/measurements-linux-amd64 measurements/measurements-linux-arm64
+```
+
+Each part also runs on a developer's machine:
+`python3 scripts/measure-costs.py <part> <out dir>`, with `--jobs` for
+moon's build jobs and `--file` for the tests of one e2e file alone. The
+part `rebuild` changes `engine/range.mbt` while it runs, and puts it back
+afterwards.
 
 ## Benchmark
 

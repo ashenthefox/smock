@@ -75,14 +75,14 @@ reported and the current one keeps serving
 | `--admin-port` | `SMOCK_ADMIN_PORT` | 9090 (0 picks a free port) |
 | `--admin-auth` | `SMOCK_ADMIN_AUTH` | `on`: the Admin API needs a bearer token; `off` for local use |
 | `--admin-token-file` | `SMOCK_ADMIN_TOKEN_FILE` | none: the token comes from `SMOCK_ADMIN_TOKEN` |
-| `--replicas` | `SMOCK_REPLICAS` | 1: above 1, every Admin API response warns that state is per replica |
+| `--replicas` | `SMOCK_REPLICAS` | 1, from 1 to 10000: above 1, every Admin API response warns that state is per replica |
 | `--session-header` | `SMOCK_SESSION_HEADER` | `baggage`: the W3C Baggage header that carries the [Session](admin-api.md#sessions-and-ephemeral-stubs) |
 | `--session-member` | `SMOCK_SESSION_MEMBER` | `smock-session`: the member of that header whose value is the Session key |
 | `--log-format` | `SMOCK_LOG_FORMAT` | `json` by default (stderr, smock's own shape), or `mockoon` (stdout, the Mockoon CLI's shape, [for Mockoon users](migrating-from-mockoon.md#logs)) |
 | `--body-file-dir` | `SMOCK_BODY_FILE_DIR` | `files` |
 | `--template-env` | `SMOCK_TEMPLATE_ENV` | none: templates read no environment variable; a comma-separated list of names lets them read those as `env.NAME`, with values read once at startup ([Environment variables](definition-files/templates.md#environment-variables)) |
 | `--header-size-limit` | `SMOCK_HEADER_SIZE_LIMIT` | 16384 bytes (16 KiB): larger request heads get 431; over HTTP/2, a larger header list, counted as RFC 7541 counts it, gets 431 on its stream, and a header block over twice the limit closes the connection ([Header lists](http2.md#header-lists)); it also bounds each block of a gRPC reply's metadata, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL ([Metadata size](grpc/metadata-and-status.md#metadata-size)) |
-| `--header-count-limit` | `SMOCK_HEADER_COUNT_LIMIT` | 100 header fields: more get 431 |
+| `--header-count-limit` | `SMOCK_HEADER_COUNT_LIMIT` | 100 header fields, from 1 to 1073741824 (2^30): more get 431 |
 | `--body-limit` | `SMOCK_BODY_LIMIT` | 10485760 bytes (10 MiB): longer bodies get 413; over HTTP/2, per stream, on that stream alone ([Request bodies](http2.md#request-bodies)); a gRPC call gets RESOURCE_EXHAUSTED instead, and its message's decoded JSON is held to the limit too ([The body limit](grpc/unmatched-and-refused-calls.md#the-body-limit)), and to 32,768 values and 4 more for each octet of the message ([The values a message may print](grpc/unmatched-and-refused-calls.md#the-values-a-message-may-print)) |
 | `--http2-max-concurrent-streams` | `SMOCK_HTTP2_MAX_CONCURRENT_STREAMS` | 100, from 1 to 1000: the most streams an HTTP/2 connection may have in progress at once; a stream past it gets RST_STREAM `REFUSED_STREAM` ([Limits and timeouts](http2.md#limits-and-timeouts)) |
 | `--read-timeout-ms` | `SMOCK_READ_TIMEOUT_MS` | 30000: a request must arrive whole within 30 s of its first byte, or, when it was pipelined behind a response, of that response; over HTTP/2, a stream whose request is late gets RST_STREAM `CANCEL` alone ([Limits and timeouts](http2.md#limits-and-timeouts)) |
@@ -91,7 +91,7 @@ reported and the current one keeps serving
 | `--drain-timeout-ms` | `SMOCK_DRAIN_TIMEOUT_MS` | 20000: how long smock drains after SIGTERM before it cuts what is still running |
 | `--seed` | `SMOCK_SEED` | none: smock picks the seed of its random generator, from 0 to 9007199254740991, and logs it ([Faults](definition-files/faults.md#seeds)) |
 | `--journal` | `SMOCK_JOURNAL` | `on`: requests are recorded in the [Journal](admin-api.md#the-journal); `off` records none |
-| `--journal-max-entries` | `SMOCK_JOURNAL_MAX_ENTRIES` | 10000: beyond it, the oldest entries are evicted |
+| `--journal-max-entries` | `SMOCK_JOURNAL_MAX_ENTRIES` | 10000, from 1 to 1073741824 (2^30): beyond it, the oldest entries are evicted |
 | `--journal-max-bytes` | `SMOCK_JOURNAL_MAX_BYTES` | a quarter of smock's memory limit (cgroup v2 `memory.max`), at least 1048576 bytes (1 MiB) and at most 67108864 (64 MiB); 64 MiB without a limit ([The Journal](admin-api.md#the-journal)): beyond it, the oldest entries are evicted |
 | `--journal-body-limit` | `SMOCK_JOURNAL_BODY_LIMIT` | 4096 bytes (4 KiB): the most of a request body an entry keeps, and of the form and XML values its Near miss keeps, in total |
 | `--state-max-bytes` | `SMOCK_STATE_MAX_BYTES` | an eighth of smock's memory limit (cgroup v2 `memory.max`), at least 1048576 bytes (1 MiB) and at most 67108864 (64 MiB); 64 MiB without a limit ([The state bound](definition-files/variables.md#the-state-bound)): the most bytes the per-Session state of the whole process takes; a request or an Admin API set whose writes would pass it gets 507, and a gRPC call RESOURCE_EXHAUSTED ([smock's own failures](grpc/unmatched-and-refused-calls.md#smocks-own-failures)) |
