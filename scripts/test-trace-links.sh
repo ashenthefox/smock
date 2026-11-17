@@ -216,6 +216,117 @@ value moved 'test("b/b_test.mbt", "a total counts every request")["introduced_in
 value moved 'test("b/b_test.mbt", "a total counts every request")["issue"]' '12'
 value moved 'out["issues"]["12"]["criteria"]' '["A total counts every request.","A new total is zero."]'
 
+# A test copied into a file that was there before, and removed from its
+# first file in a later commit: blame must look for copies from any file
+# of any commit (-C three times) to find where it came from.
+tree
+file a/a_test.mbt <<'EOF'
+///|
+test "a total resets to zero when the window ends" {
+  let total = @a.Total::new()
+  total.add(5)
+  total.end_window()
+  inspect(total.count(), content="0")
+}
+EOF
+file b/b_test.mbt <<'EOF'
+///|
+test "b reads a total back" {
+  inspect(@b.read(@a.Total::new()), content="0")
+}
+EOF
+commit "Reset totals at the end of each window (#30)"
+introduced=$(head)
+file b/b_test.mbt <<'EOF'
+///|
+test "b reads a total back" {
+  inspect(@b.read(@a.Total::new()), content="0")
+}
+
+///|
+test "a total resets to zero when the window ends" {
+  let total = @a.Total::new()
+  total.add(5)
+  total.end_window()
+  inspect(total.count(), content="0")
+}
+EOF
+commit "Copy the test of windows beside the reader (#31)"
+file a/a_test.mbt </dev/null
+commit "Remove the test of windows from a (#32)"
+links copied
+exits copied 0
+value copied 'test("b/b_test.mbt", "a total resets to zero when the window ends")["commit"]' "\"$introduced\""
+value copied 'test("b/b_test.mbt", "a total resets to zero when the window ends")["issue"]' '30'
+
+# Tests that change places in their file, and a test that a later commit
+# extends with more lines, keep the commit that introduced them.
+tree
+file a/a_test.mbt <<'EOF'
+///|
+test "a total counts one request" {
+  let total = @a.Total::new()
+  total.add(1)
+  inspect(total.count(), content="1")
+}
+
+///|
+test "a total counts no request" {
+  let total = @a.Total::new()
+  inspect(total.count(), content="0")
+}
+EOF
+commit "Count requests in totals (#40)"
+introduced=$(head)
+file a/a_test.mbt <<'EOF'
+///|
+test "a total counts no request" {
+  let total = @a.Total::new()
+  inspect(total.count(), content="0")
+}
+
+///|
+test "a total counts one request" {
+  let total = @a.Total::new()
+  total.add(1)
+  inspect(total.count(), content="1")
+  total.add(1)
+  inspect(total.count(), content="2")
+}
+EOF
+commit "Count a second request, and order the tests by size (#41)"
+links in_place
+exits in_place 0
+value in_place 'test("a/a_test.mbt", "a total counts one request")["commit"]' "\"$introduced\""
+value in_place 'test("a/a_test.mbt", "a total counts no request")["commit"]' "\"$introduced\""
+value in_place '[t["issue"] for t in out["tests"]]' '[40,40]'
+
+# A test whose name changes is, for moon and for its header line, a new
+# test: its link is the commit that gave it the name it has.
+tree
+file a/a_test.mbt <<'EOF'
+///|
+test "a total counts requests" {
+  let total = @a.Total::new()
+  total.add(1)
+  inspect(total.count(), content="1")
+}
+EOF
+commit "Count requests in totals (#50)"
+file a/a_test.mbt <<'EOF'
+///|
+test "a total counts each request once" {
+  let total = @a.Total::new()
+  total.add(1)
+  inspect(total.count(), content="1")
+}
+EOF
+commit "Say that a total counts each request once (#51)"
+renamed=$(head)
+links renamed
+value renamed 'test("a/a_test.mbt", "a total counts each request once")["commit"]' "\"$renamed\""
+value renamed 'test("a/a_test.mbt", "a total counts each request once")["issue"]' '51'
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" = 0 ]
