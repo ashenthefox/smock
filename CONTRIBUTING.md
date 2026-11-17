@@ -2346,8 +2346,10 @@ three jobs, and `scripts/mutation/bulk.py` holds the steps they take:
   costliest package's mutant on a runner with its kill confirmed:
   `engine`'s tests took about 3 s a mutant on wasm-gc on a laptop, a
   runner is about 1.7 times slower, and a kill is built and run three
-  times. A run never has more shards than mutants, and one that would need
-  more than the 256 jobs a matrix makes is refused. The job's summary
+  times. More shards than the width run in waves, as jobs come free, so
+  their count is then a multiple of the width, which fills each wave. A
+  run never has more shards than mutants, and one that would need more
+  than the 256 jobs a matrix makes is refused. The job's summary
   gives the run's mutants per package, and how many of them are at an
   unchecked access, and the plan is kept as the artifact `mutation-plan`.
 - **shard** runs each shard (`bulk.py shard`), at most the width at once,
