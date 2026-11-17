@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Tests are judged by four ledgers that leave nothing unexplained, with mutants as the measure
@@ -12,9 +12,9 @@ The operators that make the mutants are pinned as a version, v1: BODY, ROR, IFC,
 
 The pinned set holds one mutant per position, two for INT where it is an operand of a comparison or an index, and a fixed rule chooses the alternative, so that a runner cannot pick the alternatives that are easiest to kill. One mutant per line, chosen by operator priority, was rejected: of the 24 survivors of the sample first read as real, it would have picked another site for 16. Every site was rejected as what L4 counts: stage 1 alone would then hold about 1,200 to 1,700 survivors instead of about 760 to 1,090 (estimates), and the maintainer reads every exclusion in the protocol packages and one in five of the others. The full set, every alternative that an operator of v1 defines at every position, is still run, monthly and before each release, and reported.
 
-### The four choices the spec left open (proposed)
+### The four choices the spec left open
 
-The spec left four choices of v1 open: which alternative IFC and STR take at a position, which replacement INT takes outside comparisons and indexes, and whether ROR also swaps `==` and `!=`. They are proposed here, and take effect when the maintainer accepts this ADR.
+The spec left four choices of v1 open: which alternative IFC and STR take at a position, which replacement INT takes outside comparisons and indexes, and whether ROR also swaps `==` and `!=`. The maintainer settled them on 2026-11-17:
 
 - **IFC takes the alternative under which the code that the condition guards never runs**: false for the condition of an `if` or an `else if`, of a loop, and for a match arm's guard; true for the condition of a `guard` statement, whose `else` then never runs. The guarded code is where a refusal, a limit or a special case lives, and a mutant that skips it is killed only by a test that needs it: one with an input on the far side of the check. That is the input the sample's survivors lacked most: of the 39 read by hand, 19 lacked a boundary or negative input. The other alternative runs the guarded code for every input, so wherever that code is a refusal, the main use case kills it: a request refused whatever it holds fails every test that expects an answer. On a loop it would also make the loop never end, and a time-out is the costliest outcome. Forcing a `guard` statement's condition to false would be that same easy alternative, which is why the rule is stated by what never runs, not by a value. The other alternative is in the full set.
 - **STR changes one character**: the first character of the literal's text, outside any interpolation, becomes `_`, or `-` when it already is `_`; an empty literal becomes `"_"`. STR is in v1 for the strings that clients and users see letter for letter, and the use-case ledger asks that every message a user can see be asserted at least once; at d953f320, 22 messages were asserted by no test. A one-character change keeps the text well-formed: `_` is allowed in a header name and in a JSON key, and it is no letter, so a comparison that ignores case, as header names are compared, cannot make the change equivalent. Only a test that checks the exact text kills it. An empty string can fail elsewhere, as an empty header name is not a valid one, so a test that never checks the text could still kill it. The empty string is in the full set.
