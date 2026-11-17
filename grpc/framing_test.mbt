@@ -180,6 +180,38 @@ test "framing a message gives flag 0, its length and its octets, which read back
       #|ends after 1 messages
     ),
   )
+  // PROTOCOL-HTTP2, Requests: Message-Length is the message's length
+  // "encoded as 4 byte unsigned integer (big endian)". So a message of 255
+  // octets carries 00 00 00 ff; one of 256, the first length one octet
+  // cannot hold, 00 00 01 00; and ones of 65,536 and 16,777,216, the first
+  // lengths that need a third and a fourth octet, 00 01 00 00 and
+  // 01 00 00 00. Each prefix starts with flag 0, after which the message
+  // is as it is (Compressed-Flag).
+  let out = []
+  for length in [255, 256, 65_536, 16_777_216] {
+    let message = Bytes::make(length, b'\x2a')
+    let framed = @grpc.frame(message[:])
+    assert_true(framed[@grpc.prefix_length:] == message[:])
+    out.push("\{length} octets: \{@hex.encode(framed[:@grpc.prefix_length])}")
+    out.push(whole(framed))
+  }
+  inspect(
+    out.join("\n"),
+    content=(
+      #|255 octets: 00000000ff
+      #|prefix: flag 0, 255 octets, the body 260 octets through them
+      #|ends after 1 messages
+      #|256 octets: 0000000100
+      #|prefix: flag 0, 256 octets, the body 261 octets through them
+      #|ends after 1 messages
+      #|65536 octets: 0000010000
+      #|prefix: flag 0, 65536 octets, the body 65541 octets through them
+      #|ends after 1 messages
+      #|16777216 octets: 0001000000
+      #|prefix: flag 0, 16777216 octets, the body 16777221 octets through them
+      #|ends after 1 messages
+    ),
+  )
 }
 
 ///|
