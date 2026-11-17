@@ -130,6 +130,79 @@ ratchet at partly.bisect
 exits at 0
 says at "prng: 1 uncovered point, at its floor of 1"
 
+# The new uncovered points are those on the lines that the change adds or
+# changes. At the base, line 16 of prng.mbt had no abort arm; the branch
+# adds it, uncovered.
+tree
+floors "prng 0"
+sed -i '16s/.*/  self.next() % count/' "$repo/prng/prng.mbt"
+branch
+cp "$fixtures/tree/prng/prng.mbt" "$repo/prng/prng.mbt"
+ratchet new-line partly.bisect
+exits new-line 1
+says new-line "prng: 1 uncovered point, above its floor of 0. Its new uncovered points, on the lines that the change adds or changes:"
+says new-line "prng/prng.mbt:16:19  Generator::below"
+
+# A file that the merge base does not have is new in every line.
+tree
+mv "$repo/prng/prng.mbt" "$tmp/prng.mbt"
+floors "prng 0"
+branch
+mv "$tmp/prng.mbt" "$repo/prng/prng.mbt"
+ratchet new-file partly.bisect
+exits new-file 1
+says new-file "Its new uncovered points, on the lines that the change adds or changes:"
+
+# Where no uncovered point is on such a line, as when a test that reached
+# one is gone, the ratchet names every uncovered point of the package.
+tree
+floors "prng 0"
+branch
+ratchet old-line partly.bisect
+exits old-line 1
+says old-line "prng: 1 uncovered point, above its floor of 0. None is on a line that the change adds or changes, so a test may no longer reach them; its uncovered points:"
+says old-line "prng/prng.mbt:16:19  Generator::below"
+
+# --- Each package of the report has a floor, and each floor a package --------
+
+tree
+floors "cmd/smock 4" "prng 1"
+branch
+ratchet no-floor packages.bisect
+exits no-floor 1
+says no-floor 'server: 4 uncovered points, and no floor: add "server 4" to coverage/floors.txt'
+
+tree
+floors "gone 3" "prng 1"
+branch
+ratchet stray-floor partly.bisect
+exits stray-floor 1
+says stray-floor "gone: a floor of 3, but the report has no such package: remove its line from coverage/floors.txt"
+
+tree
+floors "prng one"
+branch
+ratchet malformed-floor partly.bisect
+exits malformed-floor 1
+says malformed-floor "coverage/floors.txt:2: should be <package> <uncovered points>, not: prng one"
+
+# --- The job summary ---------------------------------------------------------------
+
+# --summary appends to a file a table of the packages, in Markdown, as CI's
+# job summary shows it, and what the ratchet found.
+tree
+floors "cmd/smock 4" "prng 2" "server 3"
+branch
+ratchet summary packages.bisect --summary "$tmp/summary.md"
+exits summary 1
+cp "$tmp/summary.md" "$tmp/summary.out"
+says summary "| Package | Points | Covered | Uncovered | Floor |"
+says summary "| cmd/smock | 4 | 0 | 4 | 4 |"
+says summary "| prng | 4 | 3 | 1 | 2 |"
+says summary "| server | 6 | 2 | 4 | 3 |"
+says summary "server: 4 uncovered points, above its floor of 3."
+says summary "prng: 1 uncovered point, below its floor of 2"
+
 # --- Below a floor, and as it falls ----------------------------------------------
 
 # covered.bisect covers all of prng's points: the floor of 1 can be
