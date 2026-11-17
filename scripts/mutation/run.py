@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Runs the mutants of MoonBit packages on wasm-gc with each package's own
-tests, and writes one record per mutant, a summary per package and a
-report (CONTRIBUTING.md, "Mutation runner").
+tests, and those that survive with the tests of the packages that import
+it, and writes one record per mutant, a summary per package and a report
+(CONTRIBUTING.md, "Mutation runner").
 
 usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir>]
            [--set pinned|full] [--mutant <id>]... [--sites-only] [--workers <n>]
@@ -31,7 +32,16 @@ package, the runner first builds and runs the tests without a mutant, and
 stops if they fail. Then, for each mutant, it writes the mutated file into
 the tree, builds the package's tests (moon test --build-only), and runs
 them. It checks the build's exit status, so that a failed build never
-runs the binary of an earlier one, and it never passes -u. The outcome is
+runs the binary of an earlier one, and it never passes -u.
+
+Each mutant that survives the package's own tests runs again, the same
+way, with the tests of the package's importers that build on wasm-gc:
+the packages that import it, directly or through other packages, which
+scripts/mutation/importers.py finds in the build's own package graph
+before any mutant runs. Their tests first run without a mutant, and the
+run stops if they fail. Importers that build only natively, such as e2e,
+give no credit, since a pure package's verdict is taken on wasm-gc. The
+outcome, after both runs, is
 
   killed      a test failed;
   timed out   the run took longer than 1.25 times the baseline run plus
@@ -46,23 +56,32 @@ It writes into <out> (<work>/out unless it is given):
   mutants.jsonl  one record per mutant: the site's fields (its operator
                  set's version and whether the pinned set takes it
                  included), the package, the set that ran, the outcome,
-                 the tests that killed it, the backend, the timings
-                 (build_s, run_s and the run's limit_s), the compiler's
+                 the tests that killed it, each with its package, the
+                 importers whose tests ran it again (none, unless it
+                 survived the package's own), the backend, the timings
+                 (build_s, run_s and the run's limit_s, and the same of
+                 the importers' run under "importers"), the compiler's
                  message for an unviable one, and a survivor's diff;
   summary.json   the operator set's version and the set that ran, and per
                  package: the baseline, the counts of sites and positions
                  in the set that ran and in both sets, the sites each rule
                  skipped, the counts of mutants and each outcome, and the
                  score: killed / (killed + survived), which leaves
-                 time-outs out until they are confirmed; for the full set,
-                 the same counts at the pinned alternatives and at the
-                 other alternatives apart;
+                 time-outs out until they are confirmed; the same counts
+                 with the package's own tests alone ("own"); its importers
+                 ("importers"): those that build on wasm-gc and those that
+                 build only natively, their tests' run without a mutant
+                 and time limit, how many survivors they ran again, how
+                 many they killed, and how many the tests of each package
+                 killed; for the full set, the same counts at the pinned
+                 alternatives and at the other alternatives apart;
   report.md      the operator set's version and the set, the summaries,
-                 the sites each rule skipped, the time-outs, and each
-                 survivor's diff with its whole enclosing definition (for
-                 the full set, the survivors at the pinned alternatives and
-                 those at the other alternatives apart), which it also
-                 prints.
+                 the counts with the package's own tests alone, its
+                 importers and what their tests killed, the sites each
+                 rule skipped, the time-outs, and each survivor's diff
+                 with its whole enclosing definition (for the full set,
+                 the survivors at the pinned alternatives and those at the
+                 other alternatives apart), which it also prints.
 
 A position is the place of one or more sites: their file, operator, line
 and column.
@@ -85,6 +104,8 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import importers
 
 HERE = Path(__file__).resolve().parent
 BACKEND = "wasm-gc"
@@ -223,8 +244,11 @@ class Worker:
         self.moon = moon
 
     def moon_test(self, package, limit, build_only):
-        """Builds the package's tests, or runs them, in the worker's tree."""
-        command = [*self.moon, "test", "--target", BACKEND, "-p", package, "--target-dir", str(self.target)]
+        """Builds the tests of a package, or of a list of packages, or runs
+        them, in the worker's tree."""
+        packages = [package] if isinstance(package, str) else package
+        selected = [option for name in packages for option in ("-p", name)]
+        command = [*self.moon, "test", "--target", BACKEND, *selected, "--target-dir", str(self.target)]
         command += ["--build-only", "--output-json"] if build_only else ["--test-failure-json"]
         return run(command, self.tree, limit)
 
@@ -364,26 +388,67 @@ def package_summary(root, directory, sites, skipped, chosen, operator_set):
 
 
 def run_package(root, directory, sites, mutants, workers, log):
-    """Runs the chosen mutants of one package, whose sites are given: its
-    records, and its summary's counts of the run."""
+    """Runs the chosen mutants of one package, whose sites are given, with
+    its own tests, and those that survive again with the tests of its
+    importers that build on wasm-gc: its records, and its summary's counts
+    of the run, with its own tests alone and after its importers' tests."""
     package = package_name(root, directory)
     first = workers[0]
-    status, output, _ = first.build(package)
+    try:
+        packages, native_only = importers.find(first.moon, first.tree, first.target, package)
+    except importers.ImportersError as error:
+        raise RunnerError(str(error)) from error
+    credit = importers.credit(packages, native_only)
+    records, baseline_s, tests, limit = run_tests(workers, package, [package], mutants, log,
+                                                  f"{package}: {len(sites)} sites")
+    own = outcome_counts(records)
+    for record in records:
+        record["importers"] = []
+    survivors = [i for i, r in enumerate(records) if r["outcome"] == "survived"]
+    if packages and survivors:
+        again, again_s, again_tests, again_limit = run_tests(
+            workers, f"the importers of {package} ({', '.join(packages)})", packages,
+            [mutants[i] for i in survivors], log, f"{package}: survivors again with the tests of {', '.join(packages)}")
+        credit.update(baseline={"run_s": round(again_s, 3), "tests": again_tests}, limit_s=round(again_limit, 3))
+        for index, record in zip(survivors, again):
+            importers.merge(records[index], record, packages, credit)
+
+    summary = {
+        "backend": BACKEND,
+        "baseline": {"run_s": round(baseline_s, 3), "tests": tests},
+        "limit_s": round(limit, 3),
+        **outcome_counts(records),
+        "own": own,
+        "importers": credit,
+    }
+    return records, summary
+
+
+def run_tests(workers, what, packages, mutants, log, header):
+    """Builds the tests of packages without a mutant in each worker's tree,
+    and runs them in the first, and stops if they fail; then runs each
+    mutant with them. It logs the run without a mutant after header, and
+    each outcome. It gives the records, the run without a mutant's seconds
+    and number of tests, and the time limit."""
+    first = workers[0]
+    status, output, _ = first.build(packages)
     if status != 0:
-        raise RunnerError(f"{package} does not build without a mutant:\n{output}")
-    status, output, baseline_s, timed_out = first.moon_test(package, FIRST_RUN_LIMIT_S, build_only=False)
+        raise RunnerError(f"{what} does not build without a mutant:\n{output}")
+    status, output, baseline_s, timed_out = first.moon_test(packages, FIRST_RUN_LIMIT_S, build_only=False)
     totals = TOTAL.findall(output)
     if status != 0 or timed_out:
-        raise RunnerError(f"the tests of {package} fail without a mutant:\n{output}")
+        raise RunnerError(f"the tests of {what} fail without a mutant:\n{output}")
     tests = sum(int(t[0]) for t in totals)
     limit = 1.25 * baseline_s + 4
-    log(f"{package}: {len(sites)} sites, {len(mutants)} mutants, {tests} tests,"
-        f" baseline run {baseline_s:.2f} s, limit {limit:.2f} s")
+    log(f"{header}, {len(mutants)} mutants, {tests} tests, baseline run {baseline_s:.2f} s, limit {limit:.2f} s")
     for worker in workers[1:]:
-        status, output, _ = worker.build(package)
+        status, output, _ = worker.build(packages)
         if status != 0:
-            raise RunnerError(f"{package} does not build without a mutant in {worker.tree}:\n{output}")
+            raise RunnerError(f"{what} does not build without a mutant in {worker.tree}:\n{output}")
 
+    # A record names its package; the records of the importers' run are
+    # only read for what they found.
+    tested = packages[0] if len(packages) == 1 else packages
     records = [None] * len(mutants)
     queue = list(enumerate(mutants))
     lock = threading.Lock()
@@ -394,7 +459,7 @@ def run_package(root, directory, sites, mutants, workers, log):
                 if not queue:
                     return
                 index, site = queue.pop(0)
-            records[index] = run_mutant(worker, package, site, limit)
+            records[index] = run_mutant(worker, tested, site, limit)
             record = records[index]
             log(f"  {record['outcome']:9} {site['id']}  (build {record['timings']['build_s']:.2f} s,"
                 f" run {record['timings']['run_s']:.2f} s)")
@@ -402,14 +467,7 @@ def run_package(root, directory, sites, mutants, workers, log):
     with ThreadPoolExecutor(max_workers=len(workers)) as pool:
         for future in [pool.submit(work, w) for w in workers]:
             future.result()
-
-    summary = {
-        "backend": BACKEND,
-        "baseline": {"run_s": round(baseline_s, 3), "tests": tests},
-        "limit_s": round(limit, 3),
-        **outcome_counts(records),
-    }
-    return records, summary
+    return records, baseline_s, tests, limit
 
 
 def run_mutant(worker, package, site, limit):
@@ -474,10 +532,12 @@ def report(operator_set, chosen, summaries, records):
                      counts["unviable"], score]
             out += ["| " + " | ".join(([label] if chosen == "full" else []) + [str(c) for c in cells]) + " |"]
         out += [""]
+        out += importers.report_lines(summary)
         timed_out = [r for r in mine if r["outcome"] == "timed out"]
         if timed_out:
             out += ["### Timed out, not yet confirmed", ""]
-            out += [f"- `{r['id']}` (run stopped after {r['timings']['run_s']:.2f} s)" for r in timed_out]
+            out += [f"- `{r['id']}` (run stopped after {r['timings'].get('importers', r['timings'])['run_s']:.2f} s)"
+                    for r in timed_out]
             out += [""]
         survivors = [r for r in mine if r["outcome"] == "survived"]
         groups = [("Survivors", survivors)]

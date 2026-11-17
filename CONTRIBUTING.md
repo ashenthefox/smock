@@ -1318,8 +1318,10 @@ smell detectors, a target count, or CI's speed.
 
 The mutation runner makes, for a package, the mutants by which the tests
 are judged ([How tests are judged](#how-tests-are-judged)), runs the
-package's own tests on wasm-gc against each, and reports the mutants that
-survive. It has two parts, which only a line format joins:
+package's own tests on wasm-gc against each, then the tests of the
+packages that import it against those that survive, and reports the
+mutants that survive both. It has two parts, which only a line format
+joins:
 
 - `scripts/mutation/sites.py`, the site finder, reads source and prints
   one [site](#terms) per line, as JSON: the mutant's id, its file, its
@@ -1409,7 +1411,27 @@ each mutant, it writes the mutated file into the tree, builds the
 package's tests with `moon test --target wasm-gc -p <package>
 --build-only`, and runs them. It checks the build's exit status, so a
 mutant that does not build never runs the binary of an earlier build, and
-it never passes `-u`. Each mutant's outcome is one of:
+it never passes `-u`.
+
+**Importers' tests.** A mutant that survives the package's own tests runs
+again, the same way, with the tests of the package's importers, which
+gives a pure package the [kill credit](#outcomes-and-kill-credit) of any
+wasm-gc test of the workspace. Its importers are the packages that import
+it, in their source or their tests, directly or through other packages
+whose source imports it. `scripts/mutation/importers.py` finds them in the
+build's own package graph (`moon tree --package --json --target wasm-gc`),
+not in a list kept by hand, before any mutant runs. The graph lists every
+package on every backend, so it then asks moon whether each importer's
+tests build on wasm-gc (`moon test --target wasm-gc -p <importer>
+--dry-run`). Those that build only natively, `server`, `defdir`, `schema`,
+`protobuf-conformance` and `e2e` among them, give no credit, since a pure
+package's verdict is taken on wasm-gc. The importers' tests first run
+without a mutant, and the run stops if they fail; their time limit comes
+from that run. A record names the package of each test that killed its
+mutant, and the importers whose tests ran it again. To see a package's
+importers: `python3 scripts/mutation/importers.py template`.
+
+Each mutant's outcome, after both runs, is one of:
 
 - **killed**: a test failed;
 - **timed out**: the run took longer than 1.25 times the run without a
@@ -1421,11 +1443,14 @@ it never passes `-u`. Each mutant's outcome is one of:
 
 It writes into `_build/mutation/out/`: `mutants.jsonl`, one record per
 mutant with its site, the set that ran, its outcome, the tests that
-killed it, the backend and the timings; `summary.json`, the operator
-set's version and the set, and per package the counts of sites and
-positions in both sets, the sites each rule skipped, the counts of each
-outcome and the run without a mutant; and `report.md`, the same counts,
-the time-outs, and each survivor's diff with its whole enclosing
+killed it, the importers whose tests ran it again, the backend and the
+timings; `summary.json`, the operator set's version and the set, and per
+package the counts of sites and positions in both sets, the sites each
+rule skipped, the counts of each outcome and the run without a mutant,
+the same counts with the package's own tests alone, and its importers:
+those on wasm-gc and those left out, the survivors their tests ran again
+and how many the tests of each importer killed; and `report.md`, the same
+counts, the time-outs, and each survivor's diff with its whole enclosing
 definition, which the runner also prints. A run of the full set counts
 the mutants at the pinned alternatives and at the other alternatives
 apart, and lists their survivors apart: L4 reads only the former.
@@ -1456,7 +1481,12 @@ In its package `log`, whose paths put it in STR's scope as smock's `log`
 is, each mutant of the full set has one. The package `shapes` holds a
 site in each kind of definition, and look-alikes that are not sites; the
 package `forms` holds each form of each operator, and the tests copy its
-strings into STR's scope too. `moon fmt --check`
+strings into STR's scope too. In its package `units`, each mutant has a
+known outcome with `units`' own tests and, for those that survive them,
+with its importers' tests: `meter` imports `units`, `dial` imports
+`meter`, for its tests only, and each kills one survivor; `probe` imports
+`units` but builds only natively, so the one survivor that only its test
+would kill stays a survivor. `moon fmt --check`
 at the root does not read the fixture: run `moon fmt` inside it after a
 change.
 
