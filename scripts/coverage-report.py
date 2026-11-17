@@ -18,6 +18,14 @@ hold a point, and those of them whose every point is covered, so that a
 partly covered line never counts as covered. A summary gives the totals
 of the packages other than server and cmd/smock, of those two, and of all.
 
+The uncovered points count after the exclusion list, exclusions.toml in
+<root> (scripts/mutation/exclusions.py, CONTRIBUTING.md, "Exclusions"):
+a point that a current entry other than DEFERRED accepts is not
+uncovered, and is listed apart, with the entry's category. A point of a
+DEFERRED entry stays uncovered, and its issue is named. A stale entry
+accepts nothing, and is named. Reading the list's definitions needs
+moonc; without the list, nothing is read.
+
 It exits with 2, saying why, when it cannot read the report, or when a
 file of the report is not in <root> or is shorter than its points: the
 report was then made of other sources than those in <root>.
@@ -26,6 +34,8 @@ report was then made of other sources than those in <root>.
 import re
 import sys
 from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
 
 # The first line of a top-level definition: moon fmt starts each at the
 # first column, and nothing else that holds a point starts there.
@@ -171,15 +181,22 @@ class Package:
         self.covered = 0
         self.lines = {}
         self.uncovered = []
+        self.accepted = []
+        self.deferred = {}
 
-    def add(self, file, line, column, definition, count):
+    def add(self, file, line, column, definition, count, exclusions=None):
         """Adds a point of a file, at a line and column, in a definition,
-        with its count."""
+        with its count, after what the exclusion list says of it."""
         self.points += 1
+        place = (file, line, column)
         if count > 0:
             self.covered += 1
+        elif exclusions is not None and place in exclusions.accepted:
+            self.accepted.append((file, line, column, definition, exclusions.accepted[place]))
         else:
             self.uncovered.append((file, line, column, definition))
+            if exclusions is not None and place in exclusions.deferred:
+                self.deferred[place] = exclusions.deferred[place]
         key = (file, line)
         self.lines[key] = self.lines.get(key, True) and count > 0
 
@@ -202,11 +219,13 @@ def summary(title, packages):
     """One line of totals over some packages."""
     points = sum(package.points for package in packages)
     covered = sum(package.covered for package in packages)
+    accepted = sum(len(package.accepted) for package in packages)
     lines = sum(len(package.lines) for package in packages)
     lines_covered = sum(package.lines_covered() for package in packages)
+    listed = f", {accepted} accepted by the exclusion list" if accepted else ""
     return (
         f"{title}: {covered} of {points} points covered ({percent(covered, points)}), "
-        f"{points - covered} uncovered; lines {lines_covered} of {lines}"
+        f"{points - covered - accepted} uncovered{listed}; lines {lines_covered} of {lines}"
     )
 
 
@@ -220,9 +239,33 @@ def definitions_of(lines):
     return names
 
 
-def read_packages(report, root):
-    """The packages of a bisect report, by name, with their points; the
-    report's paths are relative to root."""
+def read_exclusions(root):
+    """What the exclusion list at root says of the points
+    (scripts/mutation/exclusions.py), or None when there is no list."""
+    if not (Path(root) / "exclusions.toml").is_file():
+        return None
+    sys.path.insert(0, str(HERE / "mutation"))
+    import exclusions
+    import sites
+
+    try:
+        return exclusions.points(Path(root).resolve())
+    except (exclusions.ExclusionError, sites.FinderError, FileNotFoundError) as error:
+        raise ReportError(f"the exclusion list cannot be read: {error}") from error
+
+
+def read_coverage(report, root):
+    """The packages of a bisect report, with their points after the
+    exclusion list at root, and what the list says of the points (None
+    without a list)."""
+    found = read_exclusions(root)
+    return read_packages(report, root, found), found
+
+
+def read_packages(report, root, exclusions=None):
+    """The packages of a bisect report, by name, with their points, after
+    what the exclusion list says of them, if given; the report's paths are
+    relative to root."""
     packages = {}
     for name, points in read_report(report):
         try:
@@ -238,19 +281,27 @@ def read_packages(report, root):
                 raise ReportError(f"{name} has a point at byte {offset}, past its end")
             line = line_of(starts, offset)
             column = len(data[starts[line - 1] : offset].decode("utf-8")) + 1
-            package.add(name, line, column, definitions[line - 1], count)
+            package.add(name, line, column, definitions[line - 1], count, exclusions)
     return packages
 
 
-def print_report(packages):
-    """Prints the uncovered points of each package, a table of the
-    packages, and the totals."""
+def print_report(packages, exclusions=None):
+    """Prints the uncovered points of each package, and those the exclusion
+    list accepts, a table of the packages, the totals, and the stale entries
+    of the list."""
     for name in sorted(packages):
         package = packages[name]
         if package.uncovered:
             print(f"{name}: {len(package.uncovered)} of {package.points} points uncovered")
             for file, line, column, definition in package.uncovered:
-                print(f"  {file}:{line}:{column}  {definition}")
+                issue = package.deferred.get((file, line, column))
+                deferred = f"  (DEFERRED to #{issue})" if issue is not None else ""
+                print(f"  {file}:{line}:{column}  {definition}{deferred}")
+        if package.accepted:
+            count = len(package.accepted)
+            print(f"{name}: {count} point{'' if count == 1 else 's'} accepted by the exclusion list")
+            for file, line, column, definition, category in package.accepted:
+                print(f"  {file}:{line}:{column}  {definition}  {category}")
     rows = [("package", "points covered", "", "uncovered", "lines covered")]
     for name in sorted(packages):
         package = packages[name]
@@ -259,7 +310,7 @@ def print_report(packages):
                 name,
                 f"{package.covered} of {package.points}",
                 percent(package.covered, package.points),
-                str(package.points - package.covered),
+                str(len(package.uncovered)),
                 f"{package.lines_covered()} of {len(package.lines)}",
             )
         )
@@ -276,6 +327,10 @@ def print_report(packages):
     print(summary("Outside server and cmd/smock", outside))
     print(summary("server and cmd/smock", inside))
     print(summary("All packages", outside + inside))
+    if exclusions is not None and exclusions.stale:
+        print()
+        print("Stale entries of the exclusion list, which accept nothing: "
+              + ", ".join(entry.key for entry in exclusions.stale))
 
 
 def main(args):
@@ -288,11 +343,11 @@ def main(args):
         return 2
     report = args[0]
     try:
-        packages = read_packages(report, root)
+        packages, exclusions = read_coverage(report, root)
     except ReportError as error:
         print(f"coverage-report: {report}: {error}", file=sys.stderr)
         return 2
-    print_report(packages)
+    print_report(packages, exclusions)
     return 0
 
 

@@ -141,8 +141,10 @@ It writes into <out> (<work>/out unless it is given):
                  without_s), how its confirmation went ("confirmation";
                  for an unconfirmed one, its first outcome and the tests
                  that failed then), the tests that failed but give no kill
-                 credit, the compiler's message for an unviable one, and
-                 the diff of a survivor or of an unconfirmed one;
+                 credit, the compiler's message for an unviable one, the
+                 diff of a survivor or of an unconfirmed one, and a
+                 survivor's status after the exclusion list (exclusion,
+                 below);
   summary.json   the operator set's version, the set that ran (listed for
                  --list), what chose the mutants (selection), the flake
                  threshold with the tests above it and those with a
@@ -162,13 +164,18 @@ It writes into <out> (<work>/out unless it is given):
                  counts at the pinned alternatives and at the other
                  alternatives apart; and the self-test's record
                  (self_test): the functions it changed, its outcome and
-                 how many of its tests failed;
+                 how many of its tests failed; and its survivors after the
+                 exclusion list (exclusions): how many are unexplained,
+                 stale-covered and accepted, and the categories of those
+                 accepted;
   report.md      the operator set's version and the set, the summaries,
                  the counts with the package's own tests alone, its
                  importers and what their tests killed, the sites each
                  rule skipped, the tests that failed without a mutant,
-                 the time-outs, the unconfirmed mutants, each survivor's
-                 diff with its whole enclosing definition (for the full
+                 the time-outs, the unconfirmed mutants, the survivors
+                 after the exclusion list, and each survivor's status and
+                 diff with its whole enclosing definition, the unexplained
+                 first, then the stale-covered, then the accepted (for the full
                  set, the survivors at the pinned alternatives and those
                  at the other alternatives apart); for a listed set,
                  then, per package, the mutants listed, run, no longer
@@ -181,6 +188,14 @@ It writes into <out> (<work>/out unless it is given):
 
 A position is the place of one or more sites: their file, operator, line
 and column.
+
+The exclusion list, exclusions.toml at <root> (exclusions.py,
+CONTRIBUTING.md, "Exclusions"), gives each survivor its status: accepted,
+when a current entry other than DEFERRED names it; stale-covered, when
+its only entry is stale (the text of its definition changed); and
+unexplained otherwise, a survivor with a DEFERRED entry included, whose
+issue the record names. The merge check reports a stale-covered survivor
+without blocking; every other count treats it as unexplained.
 
 It exits with 0 when every mutant has an outcome, survivors or not, and
 with 1 when it cannot run them, a self-test that no test killed included.
@@ -205,6 +220,7 @@ import changed
 import choice
 import compare
 import confirm
+import exclusions
 import importers
 import selftest
 
@@ -697,6 +713,9 @@ def report(operator_set, chosen, summaries, records):
                      counts["unviable"], counts["unconfirmed"], score]
             out += ["| " + " | ".join(([label] if chosen == "full" else []) + [str(c) for c in cells]) + " |"]
         out += [""]
+        after = exclusions.summary_line(summary)
+        if after:
+            out += [after, ""]
         out += compare.report(mine)
         out += importers.report_lines(summary)
         out += confirm.Judge.baseline_lines(summary)
@@ -721,8 +740,10 @@ def report(operator_set, chosen, summaries, records):
                       ("Survivors at the other alternatives", [r for r in survivors if not r["pinned"]])]
         for title, group in groups:
             out += [f"### {title} ({len(group)})", ""]
-            for record in group:
-                out += [f"#### `{record['id']}`", "", f"In `{record['definition']}`, {record['file']}"
+            for record in exclusions.ordered(group):
+                status = exclusions.status_line(record)
+                out += [f"#### `{record['id']}`", "", *([status, ""] if status else []),
+                        f"In `{record['definition']}`, {record['file']}"
                         f" lines {record['definition_lines'][0]} to {record['definition_lines'][1]}:", "",
                         "```diff", record["diff"].rstrip("\n"), "```", ""]
     return "\n".join(out)
@@ -862,7 +883,11 @@ def main():
                     summary.update(alternative_counts(package_records))
                 records += package_records
             summaries.append(summary)
-    except (RunnerError, choice.ChoiceError, changed.ChangedError) as error:
+        if records:
+            exclusions.annotate(root, records)
+            for summary in summaries:
+                summary.update(exclusions.counts([r for r in records if r["package"] == summary["package"]]))
+    except (RunnerError, choice.ChoiceError, changed.ChangedError, exclusions.ExclusionError) as error:
         print(choice.HIDDEN if args.totals_only else f"run: {error}", file=sys.stderr)
         sys.exit(1)
     except Exception:

@@ -11,8 +11,9 @@ selections (the set, the packages, the ids, the sample) must be the same.
 The records are those of the shards, in shard order, which is the order
 of the run without shards. Each package's summary is its shards'
 summary, with the counts of the outcomes, of the comparison of the
-compiler's output and with the package's own tests alone taken again
-from all its records, its importers' counts summed (importers.py), and
+compiler's output, with the package's own tests alone and of the
+survivors after the exclusion list (exclusions.py) taken again from all
+its records, its importers' counts summed (importers.py), and
 with "shards": what each shard that ran the package gave of its run (the
 mutants it ran, the run without a mutant and the time limit, those of
 its importers' tests, and its self-test), since each shard ran the tests
@@ -35,6 +36,7 @@ import changed
 import choice
 import compare
 import confirm
+import exclusions
 import importers
 import run
 
@@ -122,6 +124,8 @@ def merge(directories):
             package = [r for r in records if r["package"] == summary["package"]]
             summary.update(run.outcome_counts(package))
             summary.update(compare.counts(package))
+            summary.pop("exclusions", None)
+            summary.update(exclusions.counts(package))
             if "own" in summary:
                 summary["own"] = run.outcome_counts(importers.own_records(package))
             if "importers" in summary:

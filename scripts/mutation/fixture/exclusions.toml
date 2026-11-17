@@ -1,0 +1,29 @@
+# The exclusion list of the fixture module, which the runner reads at the
+# root it runs on, as it reads the repository's (CONTRIBUTING.md,
+# "Exclusions"). Three of calc's survivors have an entry, so that the
+# runner's tests see each status a survivor can have after the list: one
+# entry is current (ARID), one is current but DEFERRED, which still counts
+# as unexplained, and one is stale, its text being no text that
+# halve_until ever had. The other six survivors have none: unexplained.
+
+[[exclusion]]
+mutant = "calc/calc.mbt,is_blank,BOOL,true,false,0"
+text = "5fd10e41baf9fa48"
+category = "ARID"
+reason = "The default of `spaces`, which no test of the fixture leaves out with a text that tells."
+reviewer = ""
+
+[[exclusion]]
+mutant = "calc/calc.mbt,is_odd,INT,0,-1,0"
+text = "90e6c82aa9560cde"
+category = "DEFERRED"
+reason = "A test of a negative odd number."
+reviewer = ""
+issue = 1
+
+[[exclusion]]
+mutant = "calc/calc.mbt,halve_until,INT,2,3,0"
+text = "0000000000000000"
+category = "ARID"
+reason = "Stale on purpose: the text is no text of halve_until."
+reviewer = ""

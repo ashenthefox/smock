@@ -34,8 +34,9 @@
 #   other.
 # - The job checks, which runs with either toolchain, runs the mutation
 #   runner's tests, its self-test on the fixture module and the site-count
-#   check against the merge base with main, each once (#309), and checks
-#   out the whole history, so that the check finds that merge base.
+#   check against the merge base with main (#309), and the check of the
+#   exclusion list (#302), each once, and checks out the whole history, so
+#   that the site-count check finds that merge base.
 # - Every job with a matrix runs once for amd64 on x86_64 and once for arm64
 #   on aarch64, on the runner its matrix names, and every native setup
 #   checks that machine and installs the toolchain of the call.
@@ -263,7 +264,8 @@ problems=$(yq --output-format=json "$workflow" | jq -r \
     ($all[] | select(.key == "checks") | . as $job
      | (("python3 -m unittest discover -s scripts/mutation -v",
          "python3 scripts/mutation/run.py --root scripts/mutation/fixture --self-test-only calc log",
-         "python3 scripts/mutation/ratchet.py check --base origin/main") as $command
+         "python3 scripts/mutation/ratchet.py check --base origin/main",
+         "python3 scripts/mutation/exclusions.py check") as $command
         | ([$job.value.steps[]? | select(command == $command)] | length) as $times
         | if $times != 1 then "job checks should run \($command) once, not \($times) times" else empty end),
        (if any(.value.steps[]?; ((.uses // "") | startswith("actions/checkout@")) and .with["fetch-depth"] == 0) then empty

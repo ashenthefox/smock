@@ -274,6 +274,10 @@ source tree they describe, that test the coverage report of
 points, and the list of the raises of a floor that a change recorded (see
 [The coverage floors](#the-coverage-floors)).
 
+`exclusions.toml` is the exclusion list, which accepts a surviving mutant
+or an uncovered point with a category, a reason and its reviewer, and
+which both ledgers read (see [Exclusions](#exclusions)).
+
 `scripts/mutation/` holds the mutation runner, its site finder, operator
 set v1 (`operators.py`), the runner's self-test (`selftest.py`), the
 site-count ratchet (`ratchet.py`), and the module their tests run on,
@@ -383,7 +387,9 @@ scripts/check-conformance.sh         # protobuf's conformance suite against smoc
 scripts/fetch-yaml-test-suite.sh     # the pinned release of the YAML test suite, into _build/yaml-test-suite
 scripts/check-yaml-test-suite.sh     # the YAML test suite against smock/yaml in both modes, judged by yaml-test-suite/safe.txt and openapi.txt (fetches the suite first)
 scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, read smock's LLM responses (needs python3 and PyPI)
-python3 -m unittest discover -s scripts/mutation -v   # the mutation runner and its site finder, on a module whose mutants are known (needs git, moon and moonc)
+python3 -m unittest discover -s scripts/mutation -v   # the mutation runner and its site finder, on a module whose mutants are known, and the exclusion list (needs git, moon and moonc)
+python3 scripts/mutation/exclusions.py check   # each entry of the exclusion list has a category and what it needs, and the stale ones are listed (needs moonc)
+python3 scripts/mutation/exclusions.py review --base origin/main   # the entries this branch adds or changes, and those the maintainer reads (--seed draws one in five)
 python3 scripts/check-e2e-helpers.py   # no e2e test file uses what another test file defines (needs moon and moonc)
 scripts/test-check-e2e-helpers.sh    # that check, on small modules (needs python3, moon and moonc)
 python3 scripts/mutation/run.py --root scripts/mutation/fixture --self-test-only calc log   # the mutation runner's self-test, on its fixture (needs git, moon and moonc)
@@ -1161,6 +1167,66 @@ An equivalence claim reaches the maintainer in three steps:
    that its author cannot know which entries will be read. If a sampled
    entry is rejected, its author triages the whole batch again, and the
    maintainer draws a new sample.
+
+The list is `exclusions.toml`, at the root, and
+`scripts/mutation/exclusions.py` reads it. Each entry is a table of the
+array `exclusion`:
+
+```toml
+[[exclusion]]
+file = "engine/crud.mbt"
+definition = "crud_call"
+position = "6:13"
+text = "2e77cf0f70f849a0"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a CRUD Stub matched a request it does not serve\"."
+reviewer = ""
+```
+
+- A mutant is named by its id (`mutant = "<id>"`); a point by its file,
+  its definition, named as a mutant's id names it, and its position in
+  the definition: its line, counted from the definition's first line,
+  which is line 1, and its column in characters.
+- `text` is the first 16 hexadecimal digits of the SHA-256 of the
+  definition's text when the entry was made. An entry whose definition no
+  longer has that text, or is gone, is stale.
+- `reviewer` stays empty until the maintainer fills it in.
+- An EQUIVALENT entry, of a mutant only, adds `compiler_output`, what the
+  comparison found (`"differs"`, or `"not compared"` where the comparison
+  cannot compare the mutant), and
+  `adversarial = { context = "...", tests = ["..."] }`: the agent context
+  that made the attempt and the tests it tried, which passed. An
+  UNREACHABLE entry that is not a point at an abort adds `argument`, its
+  written argument. A DEFERRED entry adds `issue`, its issue's number.
+  UB-NATIVE is for a mutant only.
+
+`python3 scripts/mutation/exclusions.py new <file>:<line>:<column>`, a
+point as the coverage report names it, or `new <mutant id>`, prints a new
+entry's stanza with the definition's text, for the author to fill in.
+`python3 scripts/mutation/exclusions.py check`, in CI's job `checks`,
+fails an entry in another category, without what its category needs, with
+a field the list does not know, or a second entry for the same mutant or
+point; it lists the stale entries, and passes with them.
+
+Both ledgers read the list. The coverage report and the coverage floors
+count only the uncovered points that no current entry other than
+DEFERRED accepts, and the report lists the accepted ones apart, with
+their categories ([The coverage floors](#the-coverage-floors)). The
+mutation runner gives each survivor its status: accepted by a current
+entry other than DEFERRED; stale-covered, when its only entry is stale;
+or unexplained. Its summary counts them per package, and its report lists
+the unexplained survivors first, then the stale-covered ones, each beside
+its stale entry's id, then the accepted ones. A stale entry accepts
+nothing, so its point counts again, and the floor may fail until the
+entry is triaged again.
+
+`python3 scripts/mutation/exclusions.py review` lists the entries that a
+branch adds or changes against its merge base with `main`, the batch, and
+which of them the maintainer reads: every one in the protocol packages
+and in `serverparsers`, and one in five of the others. Once the batch is
+frozen (the branch's last push), the maintainer draws that sample with a
+seed of the maintainer's choosing: `review --seed <seed>`. The weakening
+report lists every entry whose reviewer changed.
 
 ### Rules for the work
 
