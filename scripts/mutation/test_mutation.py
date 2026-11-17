@@ -30,6 +30,11 @@ mutation/flakes.toml, gives no kill credit. A fake moon answers the runs
 of tests from a script, so that a flaky failure and a time-out that does
 not repeat happen every time.
 
+In the fixture's package same, each mutant of the pinned set has a known
+outcome and a known result of the comparison of the compiler's output,
+which compare.py makes before any test runs (#303); a comment beside each
+site gives both, with the reasons.
+
 They need python3, git, moon and moonc (the toolchain of .moonbit-version),
 and take about a minute and a half: one mutant of the fixture times out,
 and the scripted time-outs each take a time limit.
@@ -131,6 +136,39 @@ BELOW = ("mutation/fixture/calc", "calc_test.mbt", 1, "a number below the range 
 NATIVE_ONLY = {"smock/smock/server", "smock/smock/cmd/smock", "smock/smock/defdir", "smock/smock/watch",
                "smock/smock/openssl", "smock/smock/protobuf-conformance", "smock/smock/yaml-test-suite",
                "smock/smock/schema", "smock/smock/e2e"}
+
+# The mutants of same's pinned set: each one's id, the outcome that the
+# comment beside its site gives, and what the comparison of the compiler's
+# output found before any test ran (#303).
+SAME = [
+    ("same/same.mbt,TRACING,BOOL,false,true,0", "killed", "not compared"),
+    ("same/same.mbt,total,BODY,{…},{ 0 },0", "killed", "differs"),
+    ("same/same.mbt,total,INT,0,1,0", "killed", "differs"),
+    # The condition is false already: the mutant shortens its line.
+    ("same/same.mbt,total,IFC,TRACING,false,0", "equivalent", "identical"),
+    # A call over three lines, deleted: equivalent only because the runner
+    # keeps the lines, which a later message names.
+    ("same/same.mbt,total,DEL,trace.push(…),,0", "equivalent", "identical"),
+    ("same/same.mbt,total,DEL,sum = sum + x,,0", "unviable", None),
+    ("same/same.mbt,total,AOR,+,-,0", "killed", "differs"),
+    # Its BODY's 0 goes into the caller: the mutant's output has no
+    # function of its own for count_a.
+    ("same/same.mbt,count_a,BODY,{…},{ 0 },0", "killed", "not compared"),
+    ("same/same.mbt,count_a,INT,0,1,0", "killed", "differs"),
+    ("same/same.mbt,count_a,IFC,c == 'a',false,0", "killed", "differs"),
+    ("same/same.mbt,count_a,DEL,n += 1,,0", "unviable", None),
+    ("same/same.mbt,count_a,AOR,+=,-=,0", "killed", "differs"),
+    ("same/same.mbt,count_a,INT,1,2,0", "killed", "differs"),
+    ("same/same.mbt,count_a_if,BODY,{…},{ 0 },0", "killed", "differs"),
+    ("same/same.mbt,count_a_if,IFC,wanted,false,0", "duplicate", "duplicate"),
+    ("same/same.mbt,count_a_if,INT,0,1,0", "killed", "differs"),
+    ("same/same.mbt,refuse,BODY,{…},{ () },0", "killed", "differs"),
+    # An implementation that a public function calls, and one that none
+    # does, which the output leaves out.
+    ("same/same.mbt,impl Show for Tally with output,BODY,{…},{ () },0", "killed", "differs"),
+    ("same/same.mbt,impl Eq for Tally with equal,BODY,{…},{ false },0", "killed", "not compared"),
+    ('same/same.mbt,describe,BODY,{…},{ "" },0', "killed", "differs"),
+]
 
 
 def find_sites(root, *paths, chosen=None):
@@ -1161,6 +1199,118 @@ class ConfirmationTest(unittest.TestCase):
         _, records, _, summary = self.run_scripted([], "--flakes", str(records_file), *mutant)
         self.assertEqual((summary["flakes"]["runs_read"], summary["flakes"]["above"]), (recent, []))
         self.assertEqual([r["outcome"] for r in records], ["killed"])
+
+
+class OutputNamesTest(unittest.TestCase):
+    """The compiler numbers its locals, labels and closures in the order it
+    makes them, and a closure's name holds the line of its definition: the
+    comparison replaces every name of the output, and keeps its text."""
+
+    # A closure at line 30, in moonc's WAT, and a SourceLoc that the program
+    # holds as text.
+    OUTPUT = """(func $_M0FP38mutation7fixture4same5totalC12l30 (param $_M0L1yS3 i32) (result i32)
+ (loop $loop:4 (result i32)
+  (i32.add (local.get $_M0L1yS3) (call $_M0FP38mutation7fixture4same4next (i32.const 1)))))
+(data $moonbit.const_data "s\\00a\\00m\\00e\\00:\\003\\000\\00")"""
+
+    def test_names_that_differ_alone_compare_alike(self):
+        import compare
+        moved = (self.OUTPUT.replace("C12l30", "C14l31").replace("S3", "S5").replace("$loop:4", "$loop:9"))
+        self.assertNotEqual(moved, self.OUTPUT)
+        self.assertEqual(compare.digest(moved), compare.digest(self.OUTPUT))
+
+    def test_text_and_the_names_pattern_of_use_still_differ(self):
+        import compare
+        # The program's own text, here the line of a SourceLoc.
+        self.assertNotEqual(compare.digest(self.OUTPUT.replace("\\003\\000", "\\003\\001")),
+                            compare.digest(self.OUTPUT))
+        # Two functions that were one.
+        call = "$_M0FP38mutation7fixture4same4next"
+        self.assertNotEqual(compare.digest(self.OUTPUT.replace(call, "$_M0FP38mutation7fixture4same5totalC12l30")),
+                            compare.digest(self.OUTPUT))
+
+
+class CompilerOutputTest(unittest.TestCase):
+    """One run of same's pinned set, whose mutants the compiler's output
+    judges before any test runs (#303)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-mutation-same-"))
+        cls.moon, cls.log = logging_moon(cls.tmp)
+        cls.work = cls.tmp / "work"
+        cls.out = cls.tmp / "same"
+        cls.result = subprocess.run(
+            [sys.executable, str(RUN), "--root", str(FIXTURE), "--work", str(cls.work), "--out", str(cls.out),
+             "--moon", str(cls.moon), "same"],
+            capture_output=True, text=True)
+        if cls.result.returncode != 0:
+            raise AssertionError(f"run.py failed ({cls.result.returncode}):\n{cls.result.stderr}")
+        cls.records = [json.loads(line) for line in (cls.out / "mutants.jsonl").read_text().splitlines()]
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_each_mutant_has_its_known_outcome(self):
+        self.assertEqual([(r["id"], r["outcome"], r.get("compiler_output", {}).get("result")) for r in self.records],
+                         SAME)
+
+    def test_an_equivalent_mutant_or_a_duplicate_runs_no_tests(self):
+        runs = [line for line in self.log.read_text().splitlines() if "--test-failure-json" in line.split()]
+        # The run without a mutant, twice, and each mutant that compiled and
+        # was neither equivalent nor a duplicate, three times: each of them
+        # is killed, and a kill is confirmed by a run with the mutant on and
+        # one without it (#301).
+        ran = [outcome for _, outcome, _ in SAME if outcome not in ("unviable", "equivalent", "duplicate")]
+        self.assertEqual(set(ran), {"killed"})
+        self.assertEqual(len(runs), 2 + 3 * len(ran))
+        for record in self.records:
+            if record["outcome"] in ("equivalent", "duplicate"):
+                self.assertEqual((record["killing_tests"], record["timings"]["run_s"]), ([], 0), record["id"])
+                self.assertGreater(record["timings"]["compare_s"], 0)
+
+    def test_a_duplicate_names_the_first_mutant_that_compiled_alike(self):
+        duplicate = next(r for r in self.records if r["outcome"] == "duplicate")
+        self.assertEqual(duplicate["duplicate_of"], "same/same.mbt,count_a_if,BODY,{…},{ 0 },0")
+        # Both compiled alike, and unlike the package without a mutant.
+        first = next(r for r in self.records if r["id"] == duplicate["duplicate_of"])
+        self.assertEqual(duplicate["compiler_output"]["digest"], first["compiler_output"]["digest"])
+        equivalent = next(r for r in self.records if r["outcome"] == "equivalent")
+        self.assertNotEqual(first["compiler_output"]["digest"], equivalent["compiler_output"]["digest"])
+
+    def test_a_mutant_the_output_does_not_hold_is_not_compared(self):
+        reasons = {r["id"]: r["compiler_output"]["reason"] for r in self.records
+                   if r.get("compiler_output", {}).get("result") == "not compared"}
+        self.assertEqual(reasons, {
+            "same/same.mbt,TRACING,BOOL,false,true,0":
+                "the output has no function of its own for TRACING",
+            "same/same.mbt,count_a,BODY,{…},{ 0 },0":
+                "the mutant's output has no function of its own for count_a",
+            "same/same.mbt,impl Eq for Tally with equal,BODY,{…},{ false },0":
+                "the output has no function of its own for impl Eq for Tally with equal",
+        })
+
+    def test_the_summary_counts_them_apart(self):
+        package = json.loads((self.out / "summary.json").read_text())["packages"][0]
+        self.assertEqual(
+            {k: package[k] for k in ("mutants", "killed", "timed_out", "survived", "unviable", "equivalent",
+                                     "duplicate", "not_compared")},
+            {"mutants": 20, "killed": 15, "timed_out": 0, "survived": 0, "unviable": 2, "equivalent": 2,
+             "duplicate": 1, "not_compared": 3})
+        # Neither counts as killed nor as survived.
+        self.assertEqual(package["score"], 1.0)
+
+    def test_the_report_counts_and_lists_them(self):
+        report = (self.out / "report.md").read_text()
+        self.assertIn("By the compiler's output: 2 equivalent and 1 duplicate, which ran no tests;"
+                      " 15 mutants compared, 3 not compared.", report)
+        self.assertIn("### Equivalent by the compiler's output (2)\n\n"
+                      "- `same/same.mbt,total,IFC,TRACING,false,0`\n"
+                      "- `same/same.mbt,total,DEL,trace.push(…),,0`\n", report)
+        self.assertIn("### Duplicates by the compiler's output (1)\n\n"
+                      "- `same/same.mbt,count_a_if,IFC,wanted,false,0`, as"
+                      " `same/same.mbt,count_a_if,BODY,{…},{ 0 },0` (killed)\n", report)
 
 
 if __name__ == "__main__":

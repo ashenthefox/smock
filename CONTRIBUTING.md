@@ -1061,7 +1061,9 @@ An equivalence claim reaches the maintainer in three steps:
 
 1. **Automatic.** The compiler's output for the mutated package is
    compared with the original's. Identical output marks the mutant
-   equivalent, or a duplicate of another mutant.
+   equivalent, or a duplicate of another mutant. The mutation runner does
+   this before any test runs ([The compiler's
+   output](#mutation-runner)).
 2. **Adversarial.** For each claim that remains, a separate agent context
    tries to write a test that kills the mutant, from the spec.
 3. **The maintainer.** What survives both goes to the maintainer: every
@@ -1488,6 +1490,10 @@ Each mutant's outcome, after both runs, is one of:
   nor as survived;
 - **survived**: every test that gives kill credit passed.
 
+A mutant that the compiler's output shows **equivalent**, or a
+**duplicate** of another, has that outcome instead, and runs no tests
+(below).
+
 It writes into `_build/mutation/out/`: `mutants.jsonl`, one record per
 mutant with its site, the set that ran, its outcome, the tests that
 killed it, the importers whose tests ran it again, how its confirmation
@@ -1507,6 +1513,62 @@ the mutants at the pinned alternatives and at the other alternatives
 apart, and lists their survivors apart: L4 reads only the former.
 `--sites-only` runs no mutant, and writes only the counts. `--work` and
 `--out` choose other directories.
+
+**The compiler's output.** Before a mutant's tests run, the runner
+compares the compiler's output for the mutated package with the output
+without a mutant, and with the outputs of the mutants before it
+(`scripts/mutation/compare.py`). This is the first of the three steps of
+an equivalence claim ([Exclusions](#exclusions)). Identical output marks
+the mutant **equivalent**, and output identical to an earlier mutant's
+marks it a **duplicate** of that one. Neither runs tests, and neither
+counts as killed or as survived. The output compared is the package
+linked as a program on wasm-gc, the backend of the verdicts: `moonc
+link-core` of the package's core IR, which the build of its tests made,
+with the core IR of its dependencies, the package's public functions and
+methods as the program's exports, the compiler's optimisations on, and
+WAT, the text form of WebAssembly, as the output. This output was chosen
+over the others for where it holds source positions:
+
+- The core IR that `moon build` writes for a package holds the position of
+  its code in a binary form, so a mutant that only makes its line longer
+  or shorter changes it.
+- The C of a native build names the source line of every statement, and
+  the verdicts are taken on wasm-gc anyway.
+- In WAT, only names hold positions. The compiler numbers its locals,
+  labels and closures in the order it makes them, and a closure's name
+  holds the line of its definition. Before the comparison, every name is
+  replaced by a number in the order of its first use, which leaves the
+  program as it was. Text that the program itself holds stays, such as
+  the file, line and column that a call to `fail` puts in its message.
+  So mutants keep the source's line breaks, and such text changes only on
+  the mutant's own line: a deletion leaves its lines empty, a block keeps
+  them before its closing brace, and another expression keeps them inside
+  parentheses.
+
+The link leaves out what the exports do not reach, inlines small
+functions into their callers, and compiles a generic function once for
+each type it is used with. So a mutant is compared only where both the
+output without it and its own output hold a function of its own, by its
+name, for the definition that holds the site. Such a function is compiled
+once for every caller, so the same output means the same function for
+any argument. Otherwise an implementation of a trait that no function of
+the package uses would look equivalent, since the output lacks it with
+the mutant and without it. A mutant in such a definition, in a function
+inlined into each of its callers, in a generic function, or in a
+constant or another value is **not compared**, and runs its tests.
+
+Each record of a mutant that built says what the comparison found
+(`compiler_output`): `identical`, `duplicate` (the record names the first
+mutant in `duplicate_of`), `differs`, or `not compared` with the reason,
+and the output's digest where it was compared. The summary and the report
+count the equivalent mutants, the duplicates and the mutants not compared
+per package, apart from the other outcomes and from exclusions. The
+report lists the equivalent mutants and the duplicates, each duplicate
+with the mutant it compiles as and that mutant's outcome. What this
+costs: the names in `moonc link-core`'s output, like the finder's
+`-show-loc`, are documented nowhere. If a new toolchain renames its
+functions, their mutants are not compared, which is safe, and the
+fixture's tests fail in the weekly run with the latest MoonBit.
 
 To see the sites of a package, and to run one mutant, or the few mutants
 of a small package (they need python3, git, moon and moonc):
@@ -1544,6 +1606,14 @@ flaky failure and a time-out that does not repeat happen every time; the
 real moon builds. `moon fmt --check`
 at the root does not read the fixture: run `moon fmt` inside it after a
 change.
+
+In the fixture's package `same`, each mutant of the pinned set has a
+known outcome and a known result of the comparison of the compiler's
+output, given beside the site. Two mutants are equivalent: one makes its
+line shorter, and the other deletes a call over three lines. One compiles
+as another mutant does. Three are not compared: one in a constant, one in
+an implementation of a trait that no function of the package calls, and
+one that lets the compiler put a function into its caller.
 
 ## The weakening report
 
