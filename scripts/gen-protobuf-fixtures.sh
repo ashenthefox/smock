@@ -419,7 +419,7 @@ copy details/details.binpb scripts/grpcurl/definitions/files/greeter.binpb
 # without source info, as reflection sends files: annotated.proto alone,
 # protobuf's descriptor.proto alone, and gRPC's health.proto built from its
 # own directory, so that the set names it health.proto.
-reflection_requests="list by-filename by-symbol by-extension extension-numbers health-symbol health-filename missing-file missing-symbol missing-extension missing-type"
+reflection_requests="list by-filename by-symbol by-extension extension-numbers extension-numbers-none health-symbol health-filename missing-file missing-symbol missing-extension missing-type"
 for name in $reflection_requests; do
   message reflection grpc/reflection/v1/reflection.proto grpc.reflection.v1.ServerReflectionRequest "$name"
 done
@@ -445,6 +445,10 @@ hex_test annotated/annotated-file.binpb annotated_file "The set of fixtures/prot
 hex_test annotated/descriptor-file.binpb descriptor_file "The set of protobuf's descriptor.proto alone, without source info, as reflection sends the file: fixtures/protobuf/annotated/descriptor-file.binpb, in hex." serverparsers "$annotated_licence"
 hex_test health/health.binpb health_set "The Descriptor set of gRPC's health.proto, fixtures/protobuf/health/health.binpb, in hex: the descriptor that smock embeds for the built-in health service." serverparsers
 hex_test reflection/health-proto.binpb health_proto_set "The set of gRPC's health.proto built from its own directory, which names it health.proto: fixtures/protobuf/reflection/health-proto.binpb, in hex." serverparsers
+# A set whose top file imports two files that both import a fourth, for the
+# reflection service's rule that it sends each file once.
+descriptor_set reflection diamond.binpb diamond/top.proto
+hex_test reflection/diamond.binpb diamond_set "The Descriptor set of fixtures/protobuf/reflection/diamond/top.proto and its imports, fixtures/protobuf/reflection/diamond.binpb, in hex." serverparsers
 
 # A type that holds itself through a message field, a group and a map's
 # values, for the decoder's bound on nesting, and a message of it.

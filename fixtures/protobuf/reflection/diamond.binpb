@@ -1,0 +1,18 @@
+
+=
+diamond/base.protodiamond"
+Base
+id (	Ridbproto3
+d
+diamond/left.protodiamonddiamond/base.proto")
+Left!
+base (2.diamond.BaseRbasebproto3
+f
+diamond/right.protodiamonddiamond/base.proto"*
+Right!
+base (2.diamond.BaseRbasebproto3
+ù
+diamond/top.protodiamonddiamond/left.protodiamond/right.proto"N
+Top!
+left (2.diamond.LeftRleft$
+right (2.diamond.RightRrightbproto3
