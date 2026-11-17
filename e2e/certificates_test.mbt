@@ -34,51 +34,6 @@ async fn Smock::presented(
 }
 
 ///|
-/// Whether a log line is about a TLS certificate.
-fn is_certificate_entry(line : String) -> Bool {
-  let entry = @json.parse(line) catch { _ => return false }
-  entry is Object(fields) &&
-  fields.get("msg") is Some(String(msg)) &&
-  msg.contains("TLS certificate")
-}
-
-///|
-/// Waits until smock has logged `count` entries about TLS certificates in
-/// all, at most `within` milliseconds, and returns them as `log_entries`
-/// shows them.
-async fn Smock::certificate_entries(
-  self : Smock,
-  count : Int32,
-  within~ : Int32 = reload_patience_ms,
-) -> String {
-  let logged = wait_for(within, () => {
-    let lines = self.logs.filter(is_certificate_entry)
-    if lines.length() >= count {
-      Some(log_entries(lines))
-    } else {
-      None
-    }
-  })
-  guard logged is Some(logged) else {
-    fail(
-      "fewer than \{count} entries about TLS certificates in time:\n\{self.logs.join("\n")}",
-    )
-  }
-  logged
-}
-
-///|
-/// Runs `f` with a new temporary directory that holds `tls.crt` and
-/// `tls.key`: `chain` and `key`.
-async fn with_pair(
-  chain : String,
-  key : String,
-  f : async (String) -> Unit,
-) -> Unit {
-  with_definitions([("tls.crt", chain + "\n"), ("tls.key", key + "\n")], f)
-}
-
-///|
 /// The flags that serve HTTPS with `tls.crt` and `tls.key` in `dir`.
 fn Certificates::pair_args(self : Certificates, dir : String) -> Array[String] {
   self.args(cert="\{dir}/tls.crt", key="\{dir}/tls.key")
@@ -407,21 +362,6 @@ async test "a changed pair that cannot be used is not swapped in: smock keeps pr
       })
     })
   })
-}
-
-///|
-/// The value of `--tls-mock-certs` that gives each Mock in `pairs` the
-/// `tls.crt` and `tls.key` of its directory.
-fn mock_certs(pairs : Array[(String, String)]) -> String {
-  let mapping : Map[String, Json] = Map([])
-  for pair in pairs {
-    let (mock, dir) = pair
-    mapping[mock] = {
-      "certFile": Json::string("\{dir}/tls.crt"),
-      "keyFile": Json::string("\{dir}/tls.key"),
-    }
-  }
-  Json::object(mapping).stringify()
 }
 
 ///|

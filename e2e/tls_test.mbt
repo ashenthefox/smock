@@ -16,12 +16,6 @@ async fn Smock::exchange(self : Smock, over : Over, request : String) -> String 
 }
 
 ///|
-/// `text` with the temporary directory of `certs` shown as `$CERTS`.
-fn hide_dir(text : String, certs : Certificates) -> String {
-  text.replace_all(old=certs.dir, new="$CERTS")
-}
-
-///|
 async test "with a certificate chain and its key, smock serves HTTPS on the TLS port with the same responses as on the plain port, for RSA and ECDSA keys" {
   with_definitions([("users.json", users)], dir => {
     with_certificates(certs => {
@@ -238,105 +232,6 @@ async test "the TLS settings can come from SMOCK_ environment variables, and the
 }
 
 ///|
-/// Runs `openssl s_client` against the TLS port with `options`, trusting
-/// only the PEM certificates in the file `ca` (by default the test root CA
-/// of `certs`), sends `request` once the handshake is done, and returns its
-/// exit status and, for each group of prefixes in `show`, the first line it
-/// printed that starts with one of them. By default these are what ALPN
-/// selected, the certificate verification result and the response's status
-/// line. The request goes through a file in `certs.dir`. The output is read
-/// as UTF-8 with any other octets replaced: over `h2`, s_client prints the
-/// server's frames, whose SETTINGS values need not be UTF-8.
-async fn Smock::s_client(
-  self : Smock,
-  certs : Certificates,
-  options : Array[String],
-  request : String,
-  ca~ : String = certs.ca,
-  show~ : Array[Array[String]] = [
-    ["ALPN protocol:", "No ALPN negotiated"],
-    ["Verify return code:"],
-    ["HTTP/"],
-  ],
-) -> String {
-  write(certs.dir, "request.txt", request)
-  let result = @async.with_timeout_opt(patience_ms, () => {
-    @process.collect_output(
-      "openssl",
-      [
-        "s_client",
-        "-connect",
-        "127.0.0.1:\{self.tls_port}",
-        "-CAfile",
-        ca,
-        "-verify_return_error",
-        "-ign_eof",
-        ..options,
-      ],
-      stdin=@process.redirect_from_file("\{certs.dir}/request.txt"),
-    )
-  })
-  guard result is Some((status, stdout, _)) else {
-    fail("openssl s_client did not exit in time")
-  }
-  let lines = @utf8.decode_lossy(stdout.binary())
-    .split("\n")
-    .map(line => line.trim_end(chars="\r"))
-    .collect()
-  let first = (prefixes : Array[String]) => {
-    lines
-    .iter()
-    .filter(line => prefixes.iter().any(prefix => line.has_prefix(prefix)))
-    .map(line => line.to_owned())
-    .collect()
-    .get(0)
-    .unwrap_or("(none of \{prefixes.join(", ")})")
-  }
-  ["status \{status}", ..show.map(first)].join("\n")
-}
-
-///|
-/// Opens a TLS connection to `server_name`, trusting only the PEM
-/// certificates in `trusted`, that offers `offer` by ALPN, then sends
-/// `GET path` for that Host over the protocol ALPN selected: HTTP/2 for
-/// `h2`, else HTTP/1.1. Returns the protocol selected and the response's
-/// status line, or why the handshake failed: the alert smock sent, named
-/// as in RFC 8446, section 6, or else OpenSSL's reason.
-async fn Smock::alpn_offer(
-  self : Smock,
-  offer : Array[String],
-  server_name~ : String = "localhost",
-  trusted~ : String = @testcerts.root_ca,
-  path~ : String = "/users/1",
-) -> String {
-  let tls = self.tls(alpn=offer, server_name~, trusted~) catch {
-    HandshakeAlert(120) =>
-      return "handshake failed: smock sent alert no_application_protocol"
-    HandshakeAlert(alert) =>
-      return "handshake failed: smock sent alert \{alert}"
-    @openssl.Failed(reason) => return "handshake failed: \{reason}"
-    err => raise err
-  }
-  let protocol = tls.protocol()
-  let status = if protocol == "h2" {
-    let client = H2Client::over(Encrypted(tls))
-    defer client.close()
-    "HTTP/2 \{client.request("GET", path, authority=server_name).status}"
-  } else {
-    defer tls.close()
-    tls.write(
-      @utf8.encode(
-        "GET \{path} HTTP/1.1\r\nHost: \{server_name}\r\nConnection: close\r\n\r\n",
-      ),
-    )
-    status_line(@utf8.decode_lossy(tls.read_all()))
-    .trim_end(chars="\r")
-    .to_owned()
-  }
-  "ALPN \{protocol}, \{status}"
-}
-
-///|
 async test "ALPN: a client offering h2 and http/1.1, or h2 alone, gets h2 and is served over HTTP/2; one offering http/1.1 alone, or no ALPN, gets HTTP/1.1; one offering neither fails the handshake" {
   with_definitions([("users.json", users)], dir => {
     with_certificates(certs => {
@@ -439,25 +334,6 @@ async test "with --tls-http2 off, or SMOCK_TLS_HTTP2=off, ALPN offers http/1.1 a
     })
   })
 }
-
-///|
-/// Two Mocks with Hosts, each with a Stub `GET /x` that answers with its
-/// name on a line of its own.
-let users_and_orders : Array[(String, String)] = [
-  (
-    "mocks.json",
-    (
-      #|{ "mocks": [{ "name": "users", "hosts": ["users.example.com"] },
-      #|            { "name": "orders", "hosts": ["orders.example.com"] }],
-      #|  "stubs": [{ "id": "users-x", "mock": "users",
-      #|              "request": { "method": "GET", "path": "/x" },
-      #|              "response": { "status": 200, "body": "from users\n" } },
-      #|            { "id": "orders-x", "mock": "orders",
-      #|              "request": { "method": "GET", "path": "/x" },
-      #|              "response": { "status": 200, "body": "from orders\n" } }] }
-    ),
-  ),
-]
 
 ///|
 async test "SNI never chooses the Mock: a request whose SNI names one Mock's Host and whose Host header names another's is answered by the Mock of its Host header" {
