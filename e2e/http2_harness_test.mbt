@@ -4,7 +4,9 @@
 // which send any frame, malformed ones included, with none of the checks a
 // client makes, and read frames back. Over TLS, the octets go through the
 // OpenSSL bindings' client side, which offers ALPN: moonbitlang/async's TLS
-// client offers none.
+// client offers none. It also holds what several HTTP/2 test files share:
+// the Definition files they serve, and what they read back from responses,
+// frames and the Journal.
 
 ///|
 /// A TLS connection to smock's TLS port through the OpenSSL bindings'
@@ -329,6 +331,21 @@ async fn H2Client::stream_event(
       self.events.push(event)
     }
   }
+}
+
+///|
+/// How many of the events `client` has read and kept for later are about
+/// `stream`. Once the client has read a stream's response with
+/// `stream_event`, this tells whether anything of another stream came
+/// before that response ended.
+fn H2Client::kept_for(self : H2Client, stream : Int32) -> Int32 {
+  let mut n = 0
+  for event in self.events {
+    if event_stream(event) == Some(stream) {
+      n += 1
+    }
+  }
+  n
 }
 
 ///|
@@ -752,4 +769,925 @@ fn setting_name(id : Int32) -> String {
     0x8 => "ENABLE_CONNECT_PROTOCOL"
     _ => "0x\{id.to_string(radix=16)}"
   }
+}
+
+///|
+/// The response on one stream as a test shows it, on one line: the status,
+/// the header fields, and how the stream ended.
+fn H2Response::line(self : H2Response) -> String {
+  let fields = self.headers.map(header => shown_field(header.0, header.1))
+  "\{self.status} [\{fields.join(", ")}] \{self.body.length()} octets, \{self.ended}"
+}
+
+///|
+/// Reads smock's SETTINGS, the first frame it sends on a connection,
+/// acknowledges them, and shows them as `render_frame` does.
+async fn RawH2::acknowledge_settings(self : RawH2) -> String {
+  guard self.read_frame() is Some(Settings(ack=false, ..) as frame) else {
+    fail("smock's SETTINGS did not come first")
+  }
+  self.send([Settings(params=[], ack=true)])
+  self.render_frame(frame)
+}
+
+///|
+/// The Journal's entries, one per line, as `<method> <target> <body>
+/// <status>`.
+async fn uploads_journaled(smock : Smock) -> String {
+  let (_, journal) = smock.journal()
+  guard journal is Object({ "entries": Array(entries), .. }) else {
+    fail("no entries: \{journal.stringify()}")
+  }
+  let out = []
+  for entry in entries {
+    guard entry
+      is Object(
+        {
+          "request": Object(
+            {
+              "method": String(meth),
+              "target": String(target),
+              "body": Object({ "data": String(body), .. }),
+              ..
+            }
+          ),
+          "status": status,
+          ..
+        }
+      ) else {
+      fail("an entry without a request: \{entry.stringify()}")
+    }
+    out.push("\{meth} \{target} \{body} \{status.stringify()}")
+  }
+  out.join("\n")
+}
+
+///|
+/// The fields of a CONNECT to `authority`: `:method` and `:authority`
+/// alone, with no `:scheme` and no `:path` (RFC 9113, section 8.5), then
+/// `headers`.
+fn connect_fields(
+  authority : String,
+  headers~ : Array[(String, String)] = [],
+) -> Array[(String, String)] {
+  [(":method", "CONNECT"), (":authority", authority), ..headers]
+}
+
+///|
+/// A Journal entry as the tests of CONNECT show it: the method and target
+/// of its request, its Host, its Mock and Stub, its status, and how many
+/// octets of body its request had.
+fn connect_entry(entry : Json) -> String {
+  guard entry
+    is Object(
+      {
+        "host": host,
+        "mock": mock,
+        "stub": stub,
+        "status": status,
+        "request": Object(
+          {
+            "method": String(meth),
+            "target": target,
+            "version": String(version),
+            "body": Object({ "size": size, .. }),
+            ..
+          }
+        ),
+        ..
+      }
+    ) else {
+    return entry.stringify()
+  }
+  "\{version} \{meth} \{target.stringify()} host=\{host.stringify()} mock=\{mock.stringify()} stub=\{stub.stringify()} status=\{status.stringify()} body=\{size.stringify()} octets"
+}
+
+///|
+/// The Journal's entries as `connect_entry` shows them, one per line.
+async fn connect_journal(smock : Smock) -> String {
+  let (_, journal) = smock.journal()
+  guard journal is Object({ "entries": Array(entries), .. }) else {
+    fail("no entries: \{journal.stringify()}")
+  }
+  entries.map(connect_entry).join("\n")
+}
+
+///|
+/// `lines`, one per line, with a run of the same line shown once, followed
+/// by ` x<n>` when it comes `n` times in a row.
+fn runs(lines : Array[String]) -> String {
+  let out = []
+  let mut i = 0
+  while i < lines.length() {
+    let mut n = 1
+    while i + n < lines.length() && lines[i + n] == lines[i] {
+      n += 1
+    }
+    out.push(if n == 1 { lines[i] } else { "\{lines[i]} x\{n}" })
+    i += n
+  }
+  out.join("\n")
+}
+
+///|
+/// Reads frames until smock ends the connection, and shows them as `runs`
+/// does, then how it ended: `a FIN`, or `an RST`.
+async fn RawH2::runs_until_closed(self : RawH2) -> String {
+  let frames = self.frames_until(@async.now(), _ => false)
+  "\{runs(frames.shown)}\nthen \{frames.how}"
+}
+
+///|
+/// The PING frame a test floods smock with.
+let ping : @http2.Frame = Ping(
+  payload=b"\x00\x00\x00\x00\x00\x00\x00\x07",
+  ack=false,
+)
+
+///|
+/// `frame`, `n` times.
+fn times(frame : @http2.Frame, n : Int32) -> Array[@http2.Frame] {
+  Array::make(n, frame)
+}
+
+///|
+/// What a fresh connection gets for `GET /fast`, as a test shows it: to the
+/// plain port, or with `tls` to the TLS port.
+async fn Smock::fresh(self : Smock, tls~ : Bool = false) -> String {
+  let client = if tls { self.h2() } else { self.h2c() }
+  defer client.close()
+  let response = client.request("GET", "/fast", authority="localhost")
+  "then a fresh connection: \{response.status} \{@utf8.decode_lossy(response.body)}"
+}
+
+///|
+/// The log lines of the connections a defence closed, as `log_entries`
+/// shows them.
+fn defence_entries(logs : Array[String]) -> String {
+  log_entries(logs.filter(line => line.contains("closed by a defence")))
+}
+
+///|
+/// Opens a connection, sends the frames `setup` makes, and reads smock's
+/// answers until `ready` holds for one; then sends the frames `flood`
+/// makes, in one write, and shows, after `label`, what smock sends until
+/// it ends the connection, then what a fresh connection gets. The client's
+/// SETTINGS is one frame that does no work, so a flood that comes to 100
+/// more passes the bound with its last frame. With `tls`, both connections
+/// go to the TLS port.
+async fn Smock::flood(
+  self : Smock,
+  label : String,
+  setup~ : (RawH2) -> Array[@http2.Frame] = _ => [],
+  ready~ : (@http2.Frame) -> Bool = frame => frame is Settings(ack=true, ..),
+  tls~ : Bool = false,
+  flood : (RawH2) -> Array[@http2.Frame],
+) -> String {
+  let raw = self.raw_h2(tls~)
+  defer raw.close()
+  raw.send(setup(raw))
+  let before = raw.frames_until(@async.now(), frame => {
+    ready(frame) || is_goaway(frame)
+  })
+  raw.send(flood(raw))
+  [
+    "\{label}:",
+    runs(before.shown),
+    "flood:",
+    raw.runs_until_closed(),
+    self.fresh(tls~),
+  ].join("\n")
+}
+
+///|
+/// Reads frames from smock as `frames_until` does, until smock's PING, and
+/// acknowledges it, as a client does.
+async fn RawH2::frames_until_ping_acked(self : RawH2, since : Int64) -> Frames {
+  let payload = Ref(b"")
+  let frames = self.frames_until(since, frame => {
+    guard frame is Ping(payload=p, ack=false) else { return false }
+    payload.val = p
+    true
+  })
+  self.send([Ping(payload=payload.val, ack=true)])
+  frames
+}
+
+///|
+/// Reads events until each stream of `due` has ended, been reset, or the
+/// connection has closed, and shows, for each stream in the order of
+/// `due`, what came on it, a line each: its HEADERS with their fields, each
+/// DATA with its octets as text, as `data` shows them, and how it ended.
+/// `due` gives, for each stream, when its HEADERS are due and then when
+/// each DATA is, in milliseconds after `start`. A frame due later says
+/// whether it came then (`arrival`). A frame due at once, at 0, says `at
+/// once` when it came before every frame due later, on any stream of the
+/// connection: smock sends a connection's frames in one order, so that
+/// order, not the runner's speed, shows that it did not wait.
+async fn H2Client::timeline(
+  self : H2Client,
+  start~ : Int64,
+  due~ : Array[(Int32, Array[Int32])],
+  data~ : (String) -> String = text => text.escape(),
+) -> String {
+  let seen : Map[Int32, Array[String]] = Map([])
+  for stream in due {
+    seen[stream.0] = []
+  }
+  let mut open = due.length()
+  // Whether a frame due later than at once has come, on any stream.
+  let later = Ref(false)
+  let when = (stream : Int32, ms : Int64) => {
+    let lines = seen.get(stream).unwrap()
+    let times = due.filter(entry => entry.0 == stream)[0].1
+    if lines.length() >= times.length() {
+      later.val = true
+      "at \{ms} ms, after the frames due"
+    } else if times[lines.length()] > 0 {
+      later.val = true
+      arrival(ms, times[lines.length()])
+    } else if later.val {
+      "at \{ms} ms, after a frame due later"
+    } else {
+      "at once"
+    }
+  }
+  while open > 0 {
+    let event = self.read_event()
+    let ms = @async.now() - start
+    match event {
+      Response(stream~, fields~) if seen.contains(stream) => {
+        let shown = fields.map(field => {
+          shown_field(
+            @utf8.decode_lossy(field.name),
+            @utf8.decode_lossy(field.value),
+          )
+        })
+        let at = when(stream, ms)
+        seen.get(stream).unwrap().push("HEADERS \{at}: \{shown.join(", ")}")
+      }
+      Data(stream~, data=octets) if seen.contains(stream) => {
+        let at = when(stream, ms)
+        seen
+        .get(stream)
+        .unwrap()
+        .push("DATA \{at}: \{data(@utf8.decode_lossy(octets))}")
+      }
+      End(stream~) if seen.contains(stream) => {
+        seen.get(stream).unwrap().push("end")
+        open -= 1
+      }
+      Reset(stream~, code~, ..) if seen.contains(stream) => {
+        seen.get(stream).unwrap().push("reset \{error_name(code)}")
+        open -= 1
+      }
+      Closed => break
+      _ => ()
+    }
+  }
+  let out = []
+  for stream in due {
+    out.push("stream \{stream.0}:")
+    for line in seen.get(stream.0).unwrap() {
+      out.push("  \{line}")
+    }
+  }
+  out.join("\n")
+}
+
+///|
+/// The Journal's entries, each shown as its target, its Stub, its status
+/// and whether its `durationMs` is below `below`, once there are `count`
+/// of them, or as they are after `within` milliseconds: the first 100, or
+/// the first `limit`. `durationMs` runs "from the request being read to
+/// the last byte being written" (openapi/admin.json), by smock's own clock,
+/// so the test's own pace does not enter it.
+async fn Smock::journal_durations(
+  self : Smock,
+  count : Int32,
+  below~ : Int32,
+  within~ : Int32,
+  limit~ : Int32 = 100,
+) -> Array[String] {
+  let start = @async.now()
+  for ;; {
+    let (_, journal) = self.journal(query="{\"limit\":\{limit}}")
+    guard journal is Object({ "entries": Array(entries), .. }) else {
+      fail("no entries: \{journal.stringify()}")
+    }
+    if entries.length() >= count || @async.now() - start >= within.to_int64() {
+      return entries.map(entry => {
+        guard entry
+          is Object(
+            {
+              "request": Object({ "target": String(target), .. }),
+              "stub": stub,
+              "status": status,
+              "durationMs": Number(duration, ..),
+              ..
+            }
+          ) else {
+          return entry.stringify()
+        }
+        let short = duration < below.to_double()
+        "\{target}: stub \{stub.stringify()}, status \{status.stringify()}, durationMs below \{below}: \{short}"
+      })
+    }
+    @async.sleep(20)
+  }
+}
+
+///|
+/// Mock `m` with Stubs for every Fault over HTTP/2: `/fast` at once,
+/// `/reset`, `/close` and `/partial` (a body of ten octets) with their
+/// connection Faults, and partial Faults on responses with no body to
+/// halve, `/empty` (200 with no body) and `/no-content` (204), and on
+/// Server-Sent Events, `/ticks` (four events, the third two seconds after
+/// the second) and `/tick` (one event, after two seconds); `/later`
+/// answers after a delay of 500 ms, and `/upload` any request at once.
+/// After a delay, `/late-partial` (300 ms), `/late-ticks` (400 ms, three
+/// events), `/late-reset` (500 ms) and `/late-close` (700 ms) take their
+/// Faults; `/big-partial` has a partial Fault on the 150,000 octets of
+/// `big_body`, from the body file `big.txt`.
+let h2_faults : String =
+  #|{ "mocks": [{ "name": "m" }],
+  #|  "stubs": [
+  #|    { "id": "fast", "mock": "m", "request": { "path": "/fast" },
+  #|      "response": { "status": 200, "body": "fast" } },
+  #|    { "id": "reset", "mock": "m", "request": { "path": "/reset" },
+  #|      "response": { "status": 200, "body": "never sent" },
+  #|      "fault": { "connection": { "kind": "reset" } } },
+  #|    { "id": "close", "mock": "m", "request": { "path": "/close" },
+  #|      "response": { "status": 200, "body": "never sent" },
+  #|      "fault": { "connection": { "kind": "close" } } },
+  #|    { "id": "partial", "mock": "m", "request": { "path": "/partial" },
+  #|      "response": { "status": 200, "headers": { "Content-Type": "text/plain" },
+  #|        "body": "0123456789" },
+  #|      "fault": { "connection": { "kind": "partial" } } },
+  #|    { "id": "empty", "mock": "m", "request": { "path": "/empty" },
+  #|      "response": { "status": 200 },
+  #|      "fault": { "connection": { "kind": "partial" } } },
+  #|    { "id": "no-content", "mock": "m", "request": { "path": "/no-content" },
+  #|      "response": { "status": 204 },
+  #|      "fault": { "connection": { "kind": "partial" } } },
+  #|    { "id": "ticks", "mock": "m", "request": { "path": "/ticks" },
+  #|      "response": { "status": 200, "events": [
+  #|        { "data": "one" }, { "delay": 200, "data": "two" },
+  #|        { "delay": 2000, "data": "three" }, { "data": "four" } ] },
+  #|      "fault": { "connection": { "kind": "partial" } } },
+  #|    { "id": "tick", "mock": "m", "request": { "path": "/tick" },
+  #|      "response": { "status": 200, "events": [
+  #|        { "delay": 2000, "data": "one" } ] },
+  #|      "fault": { "connection": { "kind": "partial" } } },
+  #|    { "id": "later", "mock": "m", "request": { "path": "/later" },
+  #|      "response": { "status": 200, "body": "later" },
+  #|      "fault": { "delay": { "fixed": 500 } } },
+  #|    { "id": "upload", "mock": "m", "request": { "path": "/upload" },
+  #|      "response": { "status": 201, "body": "stored" } },
+  #|    { "id": "late-partial", "mock": "m", "request": { "path": "/late-partial" },
+  #|      "response": { "status": 200, "body": "0123456789" },
+  #|      "fault": { "delay": { "fixed": 300 },
+  #|        "connection": { "kind": "partial" } } },
+  #|    { "id": "late-ticks", "mock": "m", "request": { "path": "/late-ticks" },
+  #|      "response": { "status": 200, "events": [
+  #|        { "data": "one" }, { "data": "two" }, { "data": "three" } ] },
+  #|      "fault": { "delay": { "fixed": 400 },
+  #|        "connection": { "kind": "partial" } } },
+  #|    { "id": "late-reset", "mock": "m", "request": { "path": "/late-reset" },
+  #|      "response": { "status": 200, "body": "never sent" },
+  #|      "fault": { "delay": { "fixed": 500 },
+  #|        "connection": { "kind": "reset" } } },
+  #|    { "id": "late-close", "mock": "m", "request": { "path": "/late-close" },
+  #|      "response": { "status": 200, "body": "never sent" },
+  #|      "fault": { "delay": { "fixed": 700 },
+  #|        "connection": { "kind": "close" } } },
+  #|    { "id": "big-partial", "mock": "m", "request": { "path": "/big-partial" },
+  #|      "response": { "status": 200, "bodyFile": "big.txt" },
+  #|      "fault": { "connection": { "kind": "partial" } } } ] }
+
+///|
+/// The Definition files of the Fault tests: `h2_faults` and its body file.
+fn fault_definitions() -> Array[(String, String)] {
+  [("m.json", h2_faults), ("files/big.txt", big_body)]
+}
+
+///|
+/// A body of `lines` lines, each a number of seven digits and a newline,
+/// counting from 0, so that a part sent twice, lost or out of order shows.
+fn numbered(lines : Int32) -> String {
+  let out = StringBuilder()
+  for i in 0..<lines {
+    let digits = i.to_string()
+    out.write_string("0".repeat(7 - digits.length()))
+    out.write_string(digits)
+    out.write_char('\n')
+  }
+  out.to_string()
+}
+
+///|
+/// The body of `GET /big`: 150,000 octets, more than both of the windows a
+/// client starts with (65,535 octets each).
+let big_body : String = numbered(18_750)
+
+///|
+/// The body of `GET /medium`: 65,544 octets, nine more than the connection
+/// window a client starts with.
+let medium_body : String = numbered(8193)
+
+///|
+/// Mock `m`, for `localhost`, with Stubs that answer `GET /big` with
+/// `big_body`, `GET /medium` with `medium_body`, `GET /item` with a short
+/// body, and `GET /slow-big` with `big_body` after a delay of 300 ms.
+fn flow_definitions() -> Array[(String, String)] {
+  [
+    (
+      "m.json",
+      (
+        #|{ "mocks": [{ "name": "m", "hosts": ["localhost"] }],
+        #|  "stubs": [
+        #|    { "id": "big", "mock": "m", "request": { "path": "/big" },
+        #|      "response": { "status": 200, "bodyFile": "big.txt" } },
+        #|    { "id": "medium", "mock": "m", "request": { "path": "/medium" },
+        #|      "response": { "status": 200, "bodyFile": "medium.txt" } },
+        #|    { "id": "item", "mock": "m", "request": { "path": "/item" },
+        #|      "response": { "status": 200, "body": "hello" } },
+        #|    { "id": "slow-big", "mock": "m", "request": { "path": "/slow-big" },
+        #|      "response": { "status": 200, "bodyFile": "big.txt" },
+        #|      "fault": { "delay": { "fixed": 300 } } } ] }
+      ),
+    ),
+    ("files/big.txt", big_body),
+    ("files/medium.txt", medium_body),
+  ]
+}
+
+///|
+/// Reads frames until `stop` holds for one, or smock ends the connection,
+/// and shows each as `render_frame` does, one per line, except that DATA
+/// frames in a row on one stream show as one line: how many there are,
+/// their octets, and whether the last ends the stream.
+async fn RawH2::runs_until(
+  self : RawH2,
+  stop : (@http2.Frame) -> Bool,
+) -> String {
+  let out = []
+  // The stream, frame count and octets of the DATA frames in a row so far.
+  let mut run = (0, 0, 0)
+  let flush = (end : Bool) => {
+    let (stream, frames, octets) = run
+    if frames > 0 {
+      let ended = if end { " END_STREAM" } else { "" }
+      out.push("DATA \{stream}\{ended}: \{frames} frames, \{octets} octets")
+    }
+    run = (0, 0, 0)
+  }
+  for ;; {
+    guard self.read_frame() is Some(frame) else {
+      flush(false)
+      out.push("closed")
+      break
+    }
+    match frame {
+      Data(stream_id~, data~, end_stream~, ..) => {
+        if run.0 != stream_id {
+          flush(false)
+        }
+        run = (stream_id, run.1 + 1, run.2 + data.length())
+        if end_stream {
+          flush(true)
+        }
+      }
+      _ => {
+        flush(false)
+        out.push(self.render_frame(frame))
+      }
+    }
+    if stop(frame) {
+      flush(false)
+      break
+    }
+  }
+  out.join("\n")
+}
+
+///|
+/// Whether `frame` ends `stream`: DATA or HEADERS with END_STREAM, or
+/// RST_STREAM.
+fn ends_stream(frame : @http2.Frame, stream : Int32) -> Bool {
+  match frame {
+    Data(stream_id~, end_stream=true, ..)
+    | Headers(stream_id~, end_stream=true, ..)
+    | RstStream(stream_id~, ..) => stream_id == stream
+    _ => false
+  }
+}
+
+///|
+/// A PING from the client, whose acknowledgement shows where smock's
+/// answers to the frames before it end.
+let fence : @http2.Frame = Ping(
+  payload=b"\x00\x00\x00\x00\x00\x00\x00\x01",
+  ack=false,
+)
+
+///|
+/// A predicate on frames that holds once `octets` of DATA on `stream` have
+/// come, counting from when it is made.
+fn data_seen(stream : Int32, octets : Int32) -> (@http2.Frame) -> Bool {
+  let mut seen = 0
+  frame => {
+    if frame is Data(stream_id~, data~, ..) && stream_id == stream {
+      seen += data.length()
+    }
+    seen >= octets
+  }
+}
+
+///|
+/// The size of the header list `fields` as RFC 7541, section 4.1, counts
+/// it: each field's name and value, in octets, plus 32.
+fn list_size(fields : Array[(String, String)]) -> Int32 {
+  let mut size = 0
+  for field in fields {
+    size += @utf8.encode(field.0).length() + @utf8.encode(field.1).length() + 32
+  }
+  size
+}
+
+///|
+/// `fields`, then an `x-pad` field whose value of `a`s makes the list
+/// `size` octets as RFC 7541, section 4.1, counts it.
+fn padded(
+  fields : Array[(String, String)],
+  size : Int32,
+) -> Array[(String, String)] {
+  let pad = size - list_size(fields) - "x-pad".length() - 32
+  [..fields, ("x-pad", String::make(pad, 'a'))]
+}
+
+///|
+/// The Journal's entries, one per line, as `<method> <target>`.
+async fn journaled(smock : Smock) -> String {
+  let (_, journal) = smock.journal()
+  guard journal is Object({ "entries": Array(entries), .. }) else {
+    fail("no entries: \{journal.stringify()}")
+  }
+  let out = []
+  for entry in entries {
+    guard entry
+      is Object(
+        {
+          "request": Object(
+            { "method": String(meth), "target": String(target), .. }
+          ),
+          ..
+        }
+      ) else {
+      fail("an entry without a request: \{entry.stringify()}")
+    }
+    out.push("\{meth} \{target}")
+  }
+  out.join("\n")
+}
+
+///|
+/// The body of `/large`: 131,072 octets (128 KiB).
+let large_body : String = numbered(16_384)
+
+///|
+/// The body of `/larger`: 524,288 octets (512 KiB).
+let larger_body : String = numbered(65_536)
+
+///|
+/// Mock `m`, for `localhost`, with Stubs that answer `/large` with
+/// `large_body`, `/small` with a short body, and `/late` with
+/// `larger_body` after a delay of 100 ms.
+fn output_definitions() -> Array[(String, String)] {
+  [
+    (
+      "m.json",
+      (
+        #|{ "mocks": [{ "name": "m", "hosts": ["localhost"] }],
+        #|  "stubs": [
+        #|    { "id": "large", "mock": "m", "request": { "path": "/large" },
+        #|      "response": { "status": 200, "bodyFile": "large.txt" } },
+        #|    { "id": "small", "mock": "m", "request": { "path": "/small" },
+        #|      "response": { "status": 200, "body": "hello" } },
+        #|    { "id": "late", "mock": "m", "request": { "path": "/late" },
+        #|      "response": { "status": 200, "bodyFile": "larger.txt" },
+        #|      "fault": { "delay": { "fixed": 100 } } } ] }
+      ),
+    ),
+    ("files/large.txt", large_body),
+    ("files/larger.txt", larger_body),
+  ]
+}
+
+///|
+/// `shown`, a frame as `render_frame` shows it, with the stream ID it
+/// names as `n`, so that the like frames of many streams show alike.
+fn any_stream(shown : String) -> String {
+  let words = shown.split(" ").map(word => word.to_owned()).collect()
+  if words.length() > 1 &&
+    words[1] != "" &&
+    words[1].iter().all(c => c >= '0' && c <= '9') {
+    words[1] = "n"
+  }
+  words.join(" ")
+}
+
+///|
+/// `lines`, each with its stream ID as `n` (`any_stream`), and each such
+/// line once, in the order it first came, followed by ` x<n>` when it came
+/// `n` times in all.
+fn tally(lines : Array[String]) -> String {
+  let counts : Map[String, Int32] = Map([])
+  for line in lines {
+    let key = any_stream(line)
+    counts[key] = counts.get(key).unwrap_or(0) + 1
+  }
+  let out = []
+  for line, n in counts {
+    out.push(if n == 1 { line } else { "\{line} x\{n}" })
+  }
+  out.join("\n")
+}
+
+///|
+/// Reads frames until smock ends the connection, and shows them as `tally`
+/// does, then how it ended: `a FIN`, or `an RST`.
+async fn RawH2::tally_until_closed(self : RawH2) -> String {
+  let frames = self.frames_until(@async.now(), _ => false)
+  "\{tally(frames.shown)}\nthen \{frames.how}"
+}
+
+///|
+/// Reads frames until the acknowledgement of a PING, and shows each frame
+/// before it as `render_frame` does, one per line. smock answers frames in
+/// order, so the frames of the streams the client ended before its PING
+/// come first.
+async fn RawH2::frames_until_ping_ack(self : RawH2) -> String {
+  let out = []
+  while self.read_frame() is Some(frame) {
+    if frame is Ping(ack=true, ..) {
+      return out.join("\n")
+    }
+    out.push(self.render_frame(frame))
+  }
+  out.push("closed")
+  out.join("\n")
+}
+
+///|
+/// The status of an HTTP/1.1 response and its body, read from `conn`.
+async fn http1_status_and_body(conn : Conn) -> (Int32, Bytes) {
+  guard read_framed(conn) is Some((head, body)) else {
+    fail("the connection closed without a response")
+  }
+  let status_line = head[:head.find("\r\n").unwrap_or(head.length())]
+  (@string.parse_int(status_line.split(" ").nth(1).unwrap()), body)
+}
+
+///|
+/// The fields of a request with the method `meth` for `path` to
+/// `authority`.
+fn request_fields(
+  meth : String,
+  path : String,
+  authority : String,
+) -> Array[(String, String)] {
+  [
+    (":method", meth),
+    (":scheme", "http"),
+    (":path", path),
+    (":authority", authority),
+  ]
+}
+
+///|
+/// A HEADERS frame on `stream` that carries all of `block`, and ends the
+/// stream unless `end_stream` is false.
+fn headers_frame(
+  stream : Int32,
+  block : Bytes,
+  end_stream~ : Bool = true,
+) -> @http2.Frame {
+  Headers(
+    stream_id=stream,
+    fragment=block,
+    end_stream~,
+    end_headers=true,
+    priority=None,
+    padding=0,
+  )
+}
+
+///|
+/// Mock `m` with Stubs that answer `GET /slow` after a fixed delay of
+/// 1000 ms, and `GET /fast` at once.
+let delays : String =
+  #|{ "mocks": [{ "name": "m" }],
+  #|  "stubs": [
+  #|    { "id": "slow", "mock": "m", "request": { "path": "/slow" },
+  #|      "response": { "status": 200, "body": "slow" },
+  #|      "fault": { "delay": { "fixed": 1000 } } },
+  #|    { "id": "fast", "mock": "m", "request": { "path": "/fast" },
+  #|      "response": { "status": 200, "body": "fast" } } ] }
+
+///|
+/// The HEADERS frame of a GET of `path` on `stream`, which ends the stream.
+fn RawH2::get(self : RawH2, stream : Int32, path : String) -> @http2.Frame {
+  Headers(
+    stream_id=stream,
+    fragment=self.block([
+      (":method", "GET"),
+      (":scheme", "http"),
+      (":path", path),
+      (":authority", "localhost"),
+    ]),
+    end_stream=true,
+    end_headers=true,
+    priority=None,
+    padding=0,
+  )
+}
+
+///|
+/// Reads frames until one ends `stream`, and shows each as `render_frame`
+/// does, one per line.
+async fn RawH2::frames_until_end_of(self : RawH2, stream : Int32) -> String {
+  let out = []
+  for ;; {
+    guard self.read_frame() is Some(frame) else {
+      out.push("closed")
+      break
+    }
+    out.push(self.render_frame(frame))
+    match frame {
+      Data(stream_id~, end_stream=true, ..)
+      | Headers(stream_id~, end_stream=true, ..)
+      | RstStream(stream_id~, ..) if stream_id == stream => break
+      _ => ()
+    }
+  }
+  out.join("\n")
+}
+
+///|
+/// The Journal's entries, each shown as its target, its Stub and its
+/// status, once there are `count` of them, or as they are after `within`
+/// milliseconds: the first 100, or the first `limit`.
+async fn Smock::journal_once(
+  self : Smock,
+  count : Int32,
+  within~ : Int32,
+  limit~ : Int32 = 100,
+) -> Array[String] {
+  let start = @async.now()
+  for ;; {
+    let (_, journal) = self.journal(query="{\"limit\":\{limit}}")
+    guard journal is Object({ "entries": Array(entries), .. }) else {
+      fail("no entries: \{journal.stringify()}")
+    }
+    if entries.length() >= count || @async.now() - start >= within.to_int64() {
+      return entries.map(entry => {
+        guard entry
+          is Object(
+            {
+              "request": Object({ "target": String(target), .. }),
+              "stub": stub,
+              "status": status,
+              ..
+            }
+          ) else {
+          return entry.stringify()
+        }
+        "\{target}: stub \{stub.stringify()}, status \{status.stringify()}"
+      })
+    }
+    @async.sleep(20)
+  }
+}
+
+///|
+/// Mock `m` with a Stub that answers `GET /big` with a body of 65,536
+/// octets after a fixed delay of 300 ms.
+fn big_delayed() -> String {
+  let body = StringBuilder()
+  for _ in 0..<65536 {
+    body.write_char('x')
+  }
+  (
+    #|{ "mocks": [{ "name": "m" }],
+    #|  "stubs": [
+    #|    { "id": "big", "mock": "m", "request": { "path": "/big" },
+    #|      "fault": { "delay": { "fixed": 300 } },
+  ) +
+  "\"response\": { \"status\": 200, \"body\": \"\{body.to_string()}\" } } ] }"
+}
+
+///|
+/// A Mock that answers every Host, with a Stub that takes uploads.
+let uploads : String =
+  #|{ "mocks": [{ "name": "files" }],
+  #|  "stubs": [{ "id": "upload", "mock": "files",
+  #|    "request": { "method": "POST", "path": "/upload" },
+  #|    "response": { "status": 201, "body": "stored" } }] }
+
+///|
+/// A response in one line: its status and its body, or that none came, and
+/// how its stream ended.
+fn H2Response::brief(self : H2Response) -> String {
+  let response = if self.status == 0 {
+    "no response"
+  } else {
+    "\{self.status} \{@utf8.decode_lossy(self.body)}"
+  }
+  "\{response} (\{self.ended})"
+}
+
+///|
+/// The log lines of a smock process started with `--port 0` and no
+/// certificate, that wrote nothing between starting and draining when it
+/// was stopped: timeouts are not logged.
+let startup_only_h2c : String =
+  #|{"level":"info","msg":"smock starting","version":"*","commit":"*","toolchain":"*","adminAuth":"on"}
+  #|{"level":"info","msg":"random seed","seed":"*"}
+  #|{"level":"info","msg":"journal byte bound","maxBytes":"*","source":"*","memoryLimit":"*"}
+  #|{"level":"info","msg":"state byte bound","maxBytes":"*","source":"*","memoryLimit":"*"}
+  #|{"level":"info","msg":"listening","listener":"admin","address":"0.0.0.0:*","protocols":["http/1.1"]}
+  #|{"level":"info","msg":"self-signed certificate in use","sha256Fingerprint":"*","names":["localhost","127.0.0.1","::1"]}
+  #|{"level":"info","msg":"listening","listener":"plain","address":"0.0.0.0:*","protocols":["http/1.1","h2c"]}
+  #|{"level":"info","msg":"listening","listener":"tls","address":"0.0.0.0:*","protocols":["h2","http/1.1"]}
+  #|{"level":"info","msg":"drain started","timeoutMs":20000}
+  #|{"level":"info","msg":"drain ended","connectionsCut":0}
+
+///|
+/// The frames smock sent, as `RawH2::frames_until` read them.
+struct Frames {
+  /// Each frame, as `render_frame` shows it.
+  shown : Array[String]
+  /// How they ended: `open` when a frame met the condition, else how
+  /// smock ended the connection, `a FIN` for a clean end of stream or `an
+  /// RST` for a reset.
+  how : String
+  /// When the last frame came or the connection ended, in milliseconds
+  /// after the time the caller gave.
+  end_ms : Int64
+}
+
+///|
+/// Reads frames from smock until one meets `stop`, or smock ends the
+/// connection, timing the last from `since`, and, over TCP, tells a FIN
+/// from a reset.
+async fn RawH2::frames_until(
+  self : RawH2,
+  since : Int64,
+  stop : (@http2.Frame) -> Bool,
+) -> Frames {
+  let shown = []
+  let result = @async.with_timeout_opt(patience_ms, () => {
+    for ;; {
+      let (frame, used) = @http2.decode(self.received) catch {
+        Incomplete => {
+          let n = self.wire.read(self.buf) catch {
+            @os_error.OSError(_, ..) as err if is_reset(err) => break "an RST"
+            err => break "an error: \{err}"
+          }
+          guard n > 0 else { break "a FIN" }
+          self.received = self.received +
+            self.buf.unsafe_reinterpret_as_bytes()[:n].to_owned()
+          continue
+        }
+        err => fail("smock sent a frame that does not decode: \{err}")
+      }
+      self.received = self.received[used:].to_owned()
+      shown.push(self.render_frame(frame))
+      if stop(frame) {
+        break "open"
+      }
+    }
+  })
+  guard result is Some(how) else { fail("no frame and no end in time") }
+  { shown, how, end_ms: @async.now() - since, }
+}
+
+///|
+/// Whether `frame` is a GOAWAY.
+fn is_goaway(frame : @http2.Frame) -> Bool {
+  frame is GoAway(..)
+}
+
+///|
+/// Whether `ms`, the time from one of smock's steps to the next that comes
+/// "a second" after it, is about a second: at least 800 ms, which allows for
+/// a first step read late, and less than 3 seconds. After a GOAWAY with
+/// `NO_ERROR`, smock reads what the client sends "until the client closes
+/// the connection, or for one second at most, and then closes"
+/// (docs/http2.md, Timeouts), and in a drain it sends the final GOAWAY "a
+/// second after the first" when the client does not answer its PING
+/// (docs/http2.md, The drain).
+fn about_a_second(ms : Int64) -> Bool {
+  ms >= 800 && ms < 3 * 1000
 }

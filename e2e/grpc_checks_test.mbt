@@ -24,27 +24,6 @@ let checks_example : String =
   #|    response: { json: { message: Hello Tom } }
 
 ///|
-/// The fields of a gRPC call with the method `meth` to `path` at
-/// `localhost`: `content-type: <content_type>`, by default
-/// `application/grpc`, and `te: trailers`, unless `te` is false, then
-/// `more`.
-fn checked_call(
-  meth : String,
-  path~ : String = "/helloworld.Greeter/SayHello",
-  content_type~ : String = "application/grpc",
-  te~ : Bool = true,
-  more~ : Array[(String, String)] = [],
-) -> Array[(String, String)] {
-  let fields = request_fields(meth, path, "localhost")
-  fields.push(("content-type", content_type))
-  if te {
-    fields.push(("te", "trailers"))
-  }
-  fields.append(more)
-  fields
-}
-
-///|
 /// The Journal's entries, one per line: the target, the gRPC status and
 /// the request's `grpc-timeout`, or `-` without one.
 async fn checked_journaled(smock : Smock) -> String {

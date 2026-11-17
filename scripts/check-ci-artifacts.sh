@@ -32,6 +32,10 @@
 #   Every other job runs in every run: it has no condition.
 # - The jobs that plan may skip are checks, test and release-test, and no
 #   other.
+# - The job checks, which runs with either toolchain, runs the mutation
+#   runner's tests, its self-test on the fixture module and the site-count
+#   check against the merge base with main, each once (#309), and checks
+#   out the whole history, so that the check finds that merge base.
 # - Every job with a matrix runs once for amd64 on x86_64 and once for arm64
 #   on aarch64, on the runner its matrix names, and every native setup
 #   checks that machine and installs the toolchain of the call.
@@ -61,7 +65,9 @@
 #   the job does, also after a failed step (!cancelled()). No job or step
 #   continues on error or hides a failed command, and no other job uploads
 #   smock-linux-<arch>.
-# - One of those jobs runs this check and its test.
+# - Those jobs run, each once: this check and its test, yaml-test-suite
+#   against smock's YAML parser (scripts/check-yaml-test-suite.sh), and the
+#   test of its verdict (scripts/test-yaml-test-suite-verdict.sh).
 #
 # scripts/test-check-ci-artifacts.sh tests this check. It needs yq
 # (mikefarah/yq v4, on GitHub's Ubuntu runners) and jq.
@@ -239,6 +245,16 @@ problems=$(yq --output-format=json "$workflow" | jq -r \
          "job \(.key) does not wait for plan, so it should run in every run, not \(condition | shown)"
        else empty end),
 
+  # What governs the mutation runner, in job checks.
+    ($all[] | select(.key == "checks") | . as $job
+     | (("python3 -m unittest discover -s scripts/mutation -v",
+         "python3 scripts/mutation/run.py --root scripts/mutation/fixture --self-test-only calc log",
+         "python3 scripts/mutation/ratchet.py check --base origin/main") as $command
+        | ([$job.value.steps[]? | select(command == $command)] | length) as $times
+        | if $times != 1 then "job checks should run \($command) once, not \($times) times" else empty end),
+       (if any(.value.steps[]?; ((.uses // "") | startswith("actions/checkout@")) and .with["fetch-depth"] == 0) then empty
+        else "job checks should check out the whole history (fetch-depth: 0), so that the site-count check finds the merge base with main" end)),
+
     (([$all[] | select((needed | index("plan")) != null) | .key] | sort) as $skipped
      | if $skipped != ["checks", "release-test", "test"] then
          "the jobs that plan may skip should be checks, release-test and test, not: \(if $skipped == [] then "none" else $skipped | join(", ") end)"
@@ -366,7 +382,8 @@ problems=$(yq --output-format=json "$caller" | jq -r --arg workflow "$(basename 
     ($all[] | .key as $job | .value.steps[]? | (.if | expression) as $if
      | select($if != null and $if != "!cancelled()")
      | "the step \"\(step_name)\" of job \($job) should run whenever its job does (no condition, or !cancelled() to run after a failed step), not if: \($if)"),
-    (("scripts/check-ci-artifacts.sh", "scripts/test-check-ci-artifacts.sh") as $command
+    (("scripts/check-ci-artifacts.sh", "scripts/test-check-ci-artifacts.sh",
+      "scripts/check-yaml-test-suite.sh", "scripts/test-yaml-test-suite-verdict.sh") as $command
      | ([$all[] | select(.key as $key | any($keep[]; .key == $key) | not) | .value.steps[]? | select(command == $command)] | length) as $times
      | if $times != 1 then "a job that the binaries wait for should run \($command) once, not \($times) times" else empty end),
 

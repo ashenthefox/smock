@@ -34,7 +34,7 @@ fail() {
 export HANDED='release-linux-${{ matrix.arch }}'
 export PINNED="inputs.toolchain == 'pinned'"
 export GATED='${{ !cancelled() && needs.plan.outputs.full != '"'false'"' }}'
-export KEEP='${{ !cancelled() && needs.build-test.result == '"'success'"' && needs.scripts.result == '"'success'"' }}'
+export KEEP='${{ !cancelled() && needs.build-test.result == '"'success'"' && needs.scripts.result == '"'success'"' && needs.yaml-test-suite.result == '"'success'"' }}'
 
 # check <name>: runs the check on the copies, its output into
 # $tmp/<name>.out and its exit status into $tmp/<name>.status.
@@ -321,6 +321,46 @@ refuses checks-with-the-latest-toolchain workflow \
   '(.jobs.checks.steps[] | select(.run == "scripts/install-moonbit.sh \"$TOOLCHAIN\"") | .env.TOOLCHAIN) = "latest"' \
   'job checks should install the toolchain of the call (scripts/install-moonbit.sh "$TOOLCHAIN" with TOOLCHAIN: ${{ inputs.toolchain }})'
 
+# --- What governs the mutation runner (#309) -------------------------------------
+
+# The runner's tests, its self-test on the fixture module and the
+# site-count check run in job checks, which the weekly run with the latest
+# MoonBit runs too, once each.
+export SELF_TEST='python3 scripts/mutation/run.py --root scripts/mutation/fixture --self-test-only calc log'
+export SITE_COUNTS='python3 scripts/mutation/ratchet.py check --base origin/main'
+export RUNNER_TESTS='python3 -m unittest discover -s scripts/mutation -v'
+for named in "self-test|$SELF_TEST" "site-counts|$SITE_COUNTS" "runner-tests|$RUNNER_TESTS"; do
+  export COMMAND="${named#*|}"
+  refuses "no-${named%%|*}" workflow \
+    'del(.jobs.checks.steps[] | select(.run == strenv(COMMAND)))' \
+    "job checks should run $COMMAND once, not 0 times"
+done
+
+refuses the-self-test-twice workflow \
+  '.jobs.checks.steps += [{"name": "Again", "run": strenv(SELF_TEST)}]' \
+  "job checks should run $SELF_TEST once, not 2 times"
+
+# On a machine of its own, it would not run in the weekly run's job checks.
+refuses the-site-counts-in-another-job workflow \
+  '(.jobs.test.steps += [.jobs.checks.steps[] | select(.run == strenv(SITE_COUNTS))]) | del(.jobs.checks.steps[] | select(.run == strenv(SITE_COUNTS)))' \
+  "job checks should run $SITE_COUNTS once, not 0 times"
+
+refuses the-site-counts-against-another-base workflow \
+  '(.jobs.checks.steps[] | select(.run == strenv(SITE_COUNTS)) | .run) = "python3 scripts/mutation/ratchet.py check --base HEAD"' \
+  "job checks should run $SITE_COUNTS once, not 0 times"
+
+refuses the-self-test-with-the-pinned-toolchain-only workflow \
+  '(.jobs.checks.steps[] | select(.run == strenv(SELF_TEST)) | .if) = strenv(PINNED)' \
+  "the step \"Run the mutation runner's self-test on its fixture\" of job checks should run whenever its job does, not if: inputs.toolchain =="
+
+refuses checks-without-the-history workflow \
+  'del(.jobs.checks.steps[] | select(.uses == "actions/checkout@v7") | .with)' \
+  "job checks should check out the whole history (fetch-depth: 0), so that the site-count check finds the merge base with main"
+
+refuses checks-with-one-commit workflow \
+  '(.jobs.checks.steps[] | select(.uses == "actions/checkout@v7") | .with.fetch-depth) = 1' \
+  "job checks should check out the whole history (fetch-depth: 0)"
+
 # --- Each step runs whenever its job does --------------------------------------
 
 refuses a-test-step-never workflow \
@@ -478,6 +518,33 @@ refuses this-check-may-fail caller \
   '(.jobs.scripts.steps[] | select(.run == "scripts/check-ci-artifacts.sh") | .run) = "scripts/check-ci-artifacts.sh || true"' \
   "a job that the binaries wait for should run scripts/check-ci-artifacts.sh once, not 0 times"
 
+# yaml-test-suite runs against smock's YAML parser in every run, and its
+# verdict's test too: a run without them would keep binaries whose parser
+# no suite checked.
+refuses yaml-test-suite-not-run caller \
+  'del(.jobs.yaml-test-suite.steps[] | select(.run == "scripts/check-yaml-test-suite.sh"))' \
+  "a job that the binaries wait for should run scripts/check-yaml-test-suite.sh once, not 0 times"
+
+refuses yaml-test-suite-run-twice caller \
+  '.jobs.scripts.steps += [{"run": "scripts/check-yaml-test-suite.sh"}]' \
+  "a job that the binaries wait for should run scripts/check-yaml-test-suite.sh once, not 2 times"
+
+refuses yaml-test-suite-may-fail caller \
+  '(.jobs.yaml-test-suite.steps[] | select(.run == "scripts/check-yaml-test-suite.sh") | .run) = "scripts/check-yaml-test-suite.sh || true"' \
+  "a job that the binaries wait for should run scripts/check-yaml-test-suite.sh once, not 0 times"
+
+refuses yaml-test-suite-verdict-not-tested caller \
+  'del(.jobs.scripts.steps[] | select(.run == "scripts/test-yaml-test-suite-verdict.sh"))' \
+  "a job that the binaries wait for should run scripts/test-yaml-test-suite-verdict.sh once, not 0 times"
+
+refuses yaml-test-suite-on-pull-requests-only caller \
+  '.jobs.yaml-test-suite.if = "github.event_name == '"'"'pull_request'"'"'"' \
+  "job yaml-test-suite should run in every run, once: no condition, no needs and no matrix"
+
+refuses yaml-test-suite-after-the-build caller \
+  '.jobs.yaml-test-suite.needs = "build-test"' \
+  "job yaml-test-suite should run in every run, once: no condition, no needs and no matrix"
+
 refuses called-with-the-latest-toolchain caller \
   '.jobs.build-test.with.toolchain = "latest"' \
   "it should call build-test.yml with toolchain: pinned, with which the release binaries are handed over"
@@ -541,7 +608,7 @@ refuses kept-whatever-happened caller \
   '(.jobs.keep.steps[] | select(.with.name == "smock-linux-arm64") | .if) = "always()"' \
   "job keep should make smock-linux-arm64 whenever it runs, not if: always()"
 
-for job in build-test scripts; do
+for job in build-test scripts yaml-test-suite; do
   refuses "keep-without-$job" caller \
     ".jobs.keep.needs -= [\"$job\"]" \
     "job keep should need job $job, so that it keeps nothing when that job fails"

@@ -1,0 +1,18 @@
+# The drops of sites that the maintainer approved (#309, CONTRIBUTING.md,
+# "Mutation runner"). The site-count check (scripts/mutation/ratchet.py
+# check, in CI's job checks) compares each package's sites, per definition,
+# operator and set, with the counts in mutation/site-counts/ at the merge
+# base with main. A change may drop only the sites of the definitions it
+# deletes or changes. Any other drop fails the check, unless the change
+# adds a line here for each package, operator and set with such a drop:
+#
+#   <package> <operator> <pinned|full> <sites> <reason>
+#
+# <package> is the package's directory, as mutation/site-counts/ names it;
+# <operator> is one of operator set v1's; <sites> is the number of sites
+# dropped, which the check's message gives; <reason> says why, such as the
+# issue of a change to the finder, to operator set v1 or to the toolchain.
+# Only the lines that a change adds approve its drops, and each must name a
+# drop it makes. The weakening report shows them, and the maintainer's
+# acknowledgment of the report at the merge is the approval. The lines
+# stay, as the record of what was approved.

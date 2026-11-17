@@ -4,49 +4,6 @@
 // names neither Mock: the Host header chooses the Mock on both ports.
 
 ///|
-/// Two Mocks with Hosts, `users` marked default and `orders`, each with a
-/// Stub `GET /x` that answers with its name. With `default=false`, neither
-/// is the Default Mock.
-fn two_mocks(default~ : Bool) -> Array[(String, String)] {
-  [
-    (
-      "orders.json",
-      (
-        #|{ "mocks": [{ "name": "orders", "hosts": ["orders.example.com"] }],
-        #|  "stubs": [{ "id": "orders-x", "mock": "orders",
-        #|    "request": { "method": "GET", "path": "/x" },
-        #|    "response": { "status": 200, "body": "from orders" } }] }
-      ),
-    ),
-    (
-      "users.json",
-      (
-        $|{ "mocks": [{ "name": "users", "hosts": ["users.example.com", "[::1]:8080"],
-        $|    "default": \{default} }],
-        $|  "stubs": [{ "id": "users-x", "mock": "users",
-        $|    "request": { "method": "GET", "path": "/x" },
-        $|    "response": { "status": 200, "body": "from users" } }] }
-      ),
-    ),
-  ]
-}
-
-///|
-/// Sends each request in `requests` on its own connection, as
-/// `Smock::exchange` does, and renders the responses, separated by `---`.
-async fn exchange_each(
-  smock : Smock,
-  over : Over,
-  requests : Array[String],
-) -> String {
-  let out = []
-  for request in requests {
-    out.push(smock.exchange(over, request))
-  }
-  out.join("\n---\n")
-}
-
-///|
 async test "requests reach the Mock whose Hosts include their Host, whatever its case, port or trailing dot" {
   let _ = on_both_ports(files=two_mocks(default=true), (smock, over) => {
     inspect(

@@ -7,10 +7,6 @@
 // against itself.
 
 ///|
-/// The set of fixtures/protobuf/replies/replies.proto.
-let replies_set_path : String = "fixtures/protobuf/replies/replies.binpb"
-
-///|
 /// The set of fixtures/protobuf/unserved/unserved.proto, whose output types
 /// reach Struct and Value, which gRPC Stubs once did not serve.
 let unserved_set_path : String = "fixtures/protobuf/unserved/unserved.binpb"

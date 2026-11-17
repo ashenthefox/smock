@@ -442,6 +442,7 @@ test "the list applies the filters, then $sort, then $offset and $limit, whereve
 
 ///|
 test "numbers order by value as json conditions compare them: exactly when a Double cannot hold them, as large integers and numbers beyond a Double's range" {
+  let zeros = (n : Int32) => "0".repeat(n)
   let h = harness(
     [
       (
@@ -451,10 +452,24 @@ test "numbers order by value as json conditions compare them: exactly when a Dou
           #|  - name: numbers
           #|data:
           #|  - { mock: numbers, name: numbers, key: id, jsonFile: numbers.json }
+          #|  - { mock: numbers, name: notations, key: id, jsonFile: notations.json }
+          #|  - { mock: numbers, name: written, key: id, jsonFile: written.json }
           #|stubs:
           #|  - id: numbers
           #|    mock: numbers
           #|    crud: { bucket: numbers, path: /numbers }
+          #|  - id: notations
+          #|    mock: numbers
+          #|    crud: { bucket: notations, path: /notations }
+          #|  - id: write-zero
+          #|    mock: numbers
+          #|    request: { method: POST, path: /write-zero }
+          #|    dataWrites:
+          #|      - { op: append, bucket: written, value: { id: 3, v: "${toFixed(-0.001, 2)}" } }
+          #|    response: { status: 204 }
+          #|  - id: written
+          #|    mock: numbers
+          #|    crud: { bucket: written, path: /written }
         ),
       ),
     ],
@@ -486,13 +501,70 @@ test "numbers order by value as json conditions compare them: exactly when a Dou
           ),
         ),
       ),
+      (
+        "notations.json",
+        @utf8.encode(
+          "[{ \"id\": 1, \"v\": 1e400 }, { \"id\": 2, \"v\": 1\{zeros(400)} }, { \"id\": 3, \"v\": 9\{zeros(399)} }]",
+        ),
+      ),
+      (
+        "written.json",
+        @utf8.encode(
+          (
+            #|[
+            #|  { "id": 1, "v": 12345678901234567890 },
+            #|  { "id": 2, "v": -12345678901234567890 }
+            #|]
+          ),
+        ),
+      ),
     ],
   )
+  // By value, exactly for the integers that keep their digits and for the
+  // numbers beyond a 64-bit float's range, as crud-stubs.md's sentence
+  // below says. Items that tie, 5, 7 and 18 (each 10^400) and 12 and 13
+  // (each 0), keep the bucket's order in either direction. Item 16, whose
+  // exponent is above 10^18, comes after every other item: "A positive
+  // number whose exponent is 10^18 or more comes after every number whose
+  // exponent is smaller" (crud-stubs.md).
   inspect(
     h.lists("/numbers", ["$sort=v", "$sort=-v"]),
     content=(
       #|?$sort=v: 200 18/18 [9,8,4,3,12,13,14,11,10,2,1,17,5,7,18,15,6,16]
       #|?$sort=-v: 200 18/18 [16,6,15,5,7,18,17,1,2,10,11,14,12,13,3,4,8,9]
+    ),
+  )
+  // One value beyond a Double's range in two notations, 1e400 (item 1) and
+  // a 1 followed by 400 zeros (item 2), ties, and both order after a 9
+  // followed by 399 zeros (item 3), as #281's acceptance criteria state and
+  // crud-stubs.md gives: "Numbers order by value, compared as `json`
+  // conditions compare them, so large integers and numbers beyond a 64-bit
+  // float's range order exactly: `1e400` and a `1` followed by 400 zeros
+  // tie, and both come after a `9` followed by 399 zeros." Ties keep the
+  // bucket's order, in either direction ("The sort is stable").
+  inspect(
+    h.lists("/notations", ["$sort=v", "$sort=-v"]),
+    content=(
+      #|?$sort=v: 200 3/3 [3,1,2]
+      #|?$sort=-v: 200 3/3 [1,2,3]
+    ),
+  )
+  // A zero that a template writes: `toFixed(-0.001, 2)` is `0.00`
+  // (template-helpers.md), and a write's value is a structured template
+  // (data-buckets.md), so item 3 is appended with the value 0. By value it
+  // orders between -12345678901234567890 (item 2) and 12345678901234567890
+  // (item 1), both integers that keep their digits, in either direction.
+  // The write keeps the text `0.00`, as a Stub's `variables` keep the text
+  // a value renders with (variables.md), so the sort compares item 3 with
+  // the others as exact decimals: a zero's text reaches that comparison.
+  let wrote = h.send("POST", "/write-zero").plan.status
+  inspect(
+    "POST /write-zero: \{wrote}\n" +
+    h.lists("/written", ["$sort=v", "$sort=-v"]),
+    content=(
+      #|POST /write-zero: 204
+      #|?$sort=v: 200 3/3 [2,3,1]
+      #|?$sort=-v: 200 3/3 [1,3,2]
     ),
   )
 }

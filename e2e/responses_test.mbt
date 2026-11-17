@@ -1,20 +1,4 @@
 ///|
-/// Sends `meth target` with `headers` and `body` on a new connection, and
-/// renders the response with `read_response`.
-async fn Smock::send(
-  self : Smock,
-  meth : String,
-  target : String,
-  headers~ : Array[(String, String)] = [],
-  body~ : String = "",
-) -> String {
-  let conn = self.connect()
-  defer conn.close()
-  conn.write(raw_request(meth, target, host="localhost", headers~, body~))
-  read_response(conn)
-}
-
-///|
 /// A Mock whose unmatched requests get 501, with Stubs that answer from a
 /// body file, match on the query, a header and a JSON body, or win by
 /// priority.

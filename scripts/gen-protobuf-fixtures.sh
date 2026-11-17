@@ -419,17 +419,36 @@ copy details/details.binpb scripts/grpcurl/definitions/files/greeter.binpb
 # without source info, as reflection sends files: annotated.proto alone,
 # protobuf's descriptor.proto alone, and gRPC's health.proto built from its
 # own directory, so that the set names it health.proto.
-reflection_requests="list by-filename by-symbol by-extension extension-numbers health-symbol health-filename missing-file missing-symbol missing-extension missing-type"
+reflection_requests="list by-filename by-symbol by-extension extension-numbers extension-numbers-none health-symbol health-filename missing-file missing-symbol missing-extension missing-type"
 for name in $reflection_requests; do
   message reflection grpc/reflection/v1/reflection.proto grpc.reflection.v1.ServerReflectionRequest "$name"
 done
-for name in $reflection_requests nothing list-health health-filename-missing; do
+for name in $reflection_requests nothing list-health list-without-health health-filename-missing; do
   message reflection grpc/reflection/v1/reflection.proto grpc.reflection.v1.ServerReflectionResponse "$name-reply"
 done
 build_set "" annotated annotated-file.binpb annotated.proto
 build_set "" annotated descriptor-file.binpb google/protobuf/descriptor.proto
 "$protoc" -I "$fixtures/health/grpc/health/v1" --descriptor_set_out="$(target "$fixtures/reflection/health-proto.binpb")" health.proto
 wrote "$fixtures/reflection/health-proto.binpb"
+# The same in hex, for the in-process tests of the reflection service's
+# reader and builder in serverparsers, which read no files: the requests,
+# the replies, the Mock's set and the sets of one file each.
+annotated_licence="It holds protobuf's descriptor.proto, under protobuf's licence: fixtures/protobuf/annotated/LICENSE."
+for name in $reflection_requests; do
+  hex_test "reflection/$name.binpb" "reflection_$(echo "$name" | tr - _)" "The ServerReflectionRequest of fixtures/protobuf/reflection/$name.txtpb, as protoc encodes it, in hex." serverparsers
+done
+for name in $reflection_requests nothing list-health list-without-health health-filename-missing; do
+  hex_test "reflection/$name-reply.binpb" "reflection_$(echo "$name" | tr - _)_reply" "The ServerReflectionResponse of fixtures/protobuf/reflection/$name-reply.txtpb, as protoc encodes it, in hex." serverparsers
+done
+hex_test annotated/annotated.binpb annotated_set "The Descriptor set of fixtures/protobuf/annotated/annotated.proto and protobuf's descriptor.proto, which it imports, with source info: fixtures/protobuf/annotated/annotated.binpb, in hex." serverparsers "$annotated_licence"
+hex_test annotated/annotated-file.binpb annotated_file "The set of fixtures/protobuf/annotated/annotated.proto alone, without source info, as reflection sends the file: fixtures/protobuf/annotated/annotated-file.binpb, in hex." serverparsers
+hex_test annotated/descriptor-file.binpb descriptor_file "The set of protobuf's descriptor.proto alone, without source info, as reflection sends the file: fixtures/protobuf/annotated/descriptor-file.binpb, in hex." serverparsers "$annotated_licence"
+hex_test health/health.binpb health_set "The Descriptor set of gRPC's health.proto, fixtures/protobuf/health/health.binpb, in hex: the descriptor that smock embeds for the built-in health service." serverparsers
+hex_test reflection/health-proto.binpb health_proto_set "The set of gRPC's health.proto built from its own directory, which names it health.proto: fixtures/protobuf/reflection/health-proto.binpb, in hex." serverparsers
+# A set whose top file imports two files that both import a fourth, for the
+# reflection service's rule that it sends each file once.
+descriptor_set reflection diamond.binpb diamond/top.proto
+hex_test reflection/diamond.binpb diamond_set "The Descriptor set of fixtures/protobuf/reflection/diamond/top.proto and its imports, fixtures/protobuf/reflection/diamond.binpb, in hex." serverparsers
 
 # A type that holds itself through a message field, a group and a map's
 # values, for the decoder's bound on nesting, and a message of it.
@@ -463,6 +482,15 @@ descriptor_set bench shop.binpb shop.proto
 message bench shop.proto bench.shop.v1.GetOrderRequest get-order
 message bench shop.proto bench.shop.v1.QuoteRequest quote-order
 message bench shop.proto bench.shop.v1.TrackOrderRequest track-order
+
+# The set that the health example of docs/grpc/services-and-connections.md
+# says to build, of gRPC's helloworld.proto and health.proto, with the
+# command it shows, but for the include directories. scripts/doc-examples/
+# holds it for that example (scripts/check-doc-examples.py).
+"$protoc" -I "$fixtures/helloworld" -I "$fixtures/health" --include_imports \
+  --descriptor_set_out="$(target scripts/doc-examples/greeter-health.binpb)" \
+  helloworld.proto grpc/health/v1/health.proto
+wrote scripts/doc-examples/greeter-health.binpb
 
 # The end of the list of fixtures. With --check: every file the script
 # wrote, compared with the committed one.

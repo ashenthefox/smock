@@ -3,13 +3,16 @@
 Bug reports and proposals are welcome as
 [issues](https://github.com/hirunefu/smock/issues). Before a pull request
 that changes code, open an issue and talk the approach over there, so that
-the work fits where smock is going. Report a vulnerability privately, as
-[SECURITY.md](SECURITY.md) says.
+the work fits where smock is going. Before merging a contributor's pull
+request, the maintainer pushes its branch here, so that the
+[weakening report](#the-weakening-report) runs on it. Report a
+vulnerability privately, as [SECURITY.md](SECURITY.md) says.
 
 This document is for people who work on smock itself. It describes the
 repository's layout, the pinned MoonBit toolchain, how to build and test
-smock, and the release benchmark, and says where making a release is
-described. The
+smock, how its tests are judged, the mutation runner, the weakening
+report, how to measure the tests' costs on CI's runners, and the
+release benchmark, and says where making a release is described. The
 [Contributing to smock](docs/README.md#contributing-to-smock) list in
 docs/README.md names the other documents for contributors: the
 architecture decisions (ADRs), the glossary and the maintainer's
@@ -20,6 +23,10 @@ checklists.
 - [Layout](#layout)
 - [Toolchain](#toolchain)
 - [Build and test](#build-and-test)
+- [How tests are judged](#how-tests-are-judged)
+- [Mutation runner](#mutation-runner)
+- [The weakening report](#the-weakening-report)
+- [Test costs on CI's runners](#test-costs-on-cis-runners)
 - [Benchmark](#benchmark)
 - [Making a release](#making-a-release)
 
@@ -113,7 +120,8 @@ Packages of `smock/smock`:
   template helpers `uppercase`, `lowercase` and `trim`, from the data of
   one pinned Unicode version (18.0.0). `scripts/gen-unicode-data.py`
   generated the data from the Unicode Character Database; it changes only
-  with a new format version.
+  with a new format version. A workflow checks that the data is still what
+  the script writes ([Build and test](#build-and-test)).
 - `defdir`: reads the definitions directory and loads it, for
   `smock serve`, `smock check` and `smock render`, and takes the stamp of
   it that a poll compares (native).
@@ -123,10 +131,31 @@ Packages of `smock/smock`:
   ([ADR 0005](docs/adr/0005-http2-comes-from-moonhttp.md)).
   On the TLS port the same loop reads and writes through a TLS stream; on
   the admin port it answers the Admin API. It reloads rotated certificates,
-  and reads the SNI name from the ClientHello before OpenSSL sees it, so that
-  the name chooses the certificate without a C callback. Its one C
-  function, in `server/reset.c`, sets `SO_LINGER` so that the reset Fault
-  ends a connection with an RST, the exception ADR 0001 makes for it.
+  and reads the SNI name from the ClientHello, with `serverparsers`, before
+  OpenSSL sees it, so that the name chooses the certificate without a C
+  callback. Its one C function, in `server/reset.c`, sets `SO_LINGER` so
+  that the reset Fault ends a connection with an RST, the exception
+  ADR 0001 makes for it.
+- `serverparsers`: the parsers of `server` that do no I/O, in a package of
+  their own so that in-process tests reach them, on `wasm-gc` as well as
+  natively. It reads the host name that a TLS ClientHello asks for by SNI
+  (RFC 6066, section 3) from the octets a client has sent so far, or tells
+  that more octets are needed; `server` reads them from the socket and
+  chooses the certificate by the name. It reads the Admin API's bearer
+  token and path parameters, and makes smock's own checks of an HTTP/2
+  request: whether HTTP/1.1's rules refuse it, and the body length its
+  `content-length` declares. It builds the reply of a Mock's reflection
+  service to the first request message of a call, which `server` sends,
+  and reads when a certificate expires from its PEM, which `server`
+  reports in the expiry metric. It imports no moonhttp
+  ([ADR 0005](docs/adr/0005-http2-comes-from-moonhttp.md),
+  [ADR 0006](docs/adr/0006-tests-are-judged-by-four-ledgers.md)): anything
+  that needs it stays in `server`. Its tests read no files: the
+  ClientHellos they start from, captured from a real client, are bytes in
+  the test source, the reflection service's Descriptor sets and messages
+  are protoc's, which `scripts/gen-protobuf-fixtures.sh` writes in hex
+  there, and the certificates are RFC 7468's examples or built in the
+  test.
 - `watch`: polls the definitions directory and the certificate files
   every second, so that `server` can reload them (native). It uses no
   file-system events until a release of the async runtime fixes its file
@@ -178,6 +207,13 @@ Packages of `smock/smock`:
   that the module fails (native). smock's image does not hold it.
   `scripts/check-conformance.sh` runs the suite on it
   ([protobuf-conformance/README.md](protobuf-conformance/README.md)).
+- `yaml-test-suite`: the testee of the YAML test suite, a program built on
+  `smock/yaml` that reads each case in both of the parser's modes, with
+  each mode's list of the suite's cases that do not pass (native). smock's
+  image does not hold it. `scripts/check-yaml-test-suite.sh` runs the
+  suite on it ([yaml-test-suite/README.md](yaml-test-suite/README.md)).
+  The repository holds none of the suite: `scripts/fetch-yaml-test-suite.sh`
+  fetches its pinned release and checks it against its SHA-256.
 - `schema`: a test over every Definition-file fixture in
   `schema/v1/fixtures/` that needs no `smock` binary: each, written as YAML
   by `smock/yaml`, reads back as the same tree (native).
@@ -185,8 +221,9 @@ Packages of `smock/smock`:
 A package that does I/O or uses FFI declares `supported_targets = "native"`.
 Every other package also builds for `wasm-gc`, and CI tests it there. The
 packages that decide a response, `definitions`, `engine`, `template` and
-`llm`, the ones they import, `prng`, `cookies`, `unicode` and `log`, and the
-OpenAPI converter, `importopenapi`, must stay that way:
+`llm`, the ones they import, `prng`, `cookies`, `unicode` and `log`, the
+OpenAPI converter, `importopenapi`, and the parsers of `server` that do no
+I/O, `serverparsers`, must stay that way:
 `scripts/check-no-io.sh` fails if one of them leaves out `wasm-gc`, reads
 the environment, binds C or imports a package that does I/O.
 
@@ -210,6 +247,15 @@ runs it when started by hand; `scripts/gke-bench.sh` runs it on GKE
 Autopilot before an integration branch is merged into `main` (see
 [Benchmark](#benchmark)).
 
+`.github/workflows/measure-costs.yml` measures what the tests cost on CI's
+runners when started by hand, with `scripts/measure-costs.py`, and
+`scripts/estimate-costs.py` recomputes the test review's cost model from
+it (see [Test costs on CI's runners](#test-costs-on-cis-runners)).
+
+`.github/workflows/e2e-repeat.yml`, started by hand, runs the e2e tests
+many times on one runner, to show that a timing test holds on CI's
+runners (see [Build and test](#build-and-test)).
+
 `scripts/h2spec/` holds the Definition file that CI serves to h2spec, the
 HTTP/2 conformance tool, and the lists of h2spec's cases that do not pass on
 the plain port and on the TLS port, each with its reason (see
@@ -218,6 +264,16 @@ the plain port and on the TLS port, each with its reason (see
 `scripts/grpcurl/` holds the definition set that CI serves to grpcurl, a
 real gRPC client, and the calls grpcurl makes, each with what it prints
 (see [Build and test](#build-and-test)).
+
+`scripts/coverage-tests/` holds the small bisect reports, and the small
+source tree they describe, that test the coverage report of
+`scripts/coverage.sh` (see [Build and test](#build-and-test)).
+
+`scripts/mutation/` holds the mutation runner, its site finder, operator
+set v1 (`operators.py`), the runner's self-test (`selftest.py`), the
+site-count ratchet (`ratchet.py`), and the module their tests run on,
+`scripts/mutation/fixture`, which is not a member of the workspace (see
+[Mutation runner](#mutation-runner)).
 
 ## Toolchain
 
@@ -250,7 +306,8 @@ moon test --target wasm-gc     # every package that does no I/O
 moon check --deny-warn --target all
 moon fmt --check
 moon bench -p smock/smock/engine --release   # match index lookups: 100 vs 10,000 Stubs
-scripts/check-no-io.sh         # no I/O in the protocol modules, the packages that decide a response and the OpenAPI converter
+scripts/coverage.sh            # point coverage of the in-process tests, per package (needs python3)
+scripts/check-no-io.sh         # no I/O in the protocol modules, the packages that decide a response, the OpenAPI converter and server's parsers
 scripts/check-no-c.sh          # the C boundary of ADR 0001, in smock and in the modules it resolves (after moon check; needs jq)
 scripts/check-moonhttp-pin.sh  # the build resolves the moonhttp that moon.mod names (needs jq)
 scripts/check-notice.sh        # NOTICE names the toolchain and every module the build resolves (needs jq)
@@ -259,6 +316,8 @@ scripts/test-openssl-asan.sh   # the OpenSSL bindings under AddressSanitizer and
 scripts/build-release.sh       # dist/smock
 dist/smock --version
 scripts/check-schema.sh dist/smock   # the JSON Schema and smock agree
+scripts/install-jsonnet.sh     # the pinned jsonnet, into ~/.local/bin
+python3 scripts/check-doc-examples.py dist/smock   # every whole Definition file in the user documents passes smock check, and the Mockoon guide's and the Jsonnet example's commands do what the documents say (needs jsonnet and jq)
 scripts/install-h2spec.sh      # the pinned h2spec, into ~/.local/bin
 scripts/check-h2spec.sh dist/smock   # h2spec's conformance cases against the plain and TLS ports (needs h2spec, python3 and jq)
 scripts/install-grpcurl.sh     # the pinned grpcurl, into ~/.local/bin
@@ -271,27 +330,58 @@ scripts/check-release-workflow.sh    # the release workflow publishes only for t
 scripts/test-release-notes.sh        # the release notes, with CHANGELOG.md's links at the release's tag
 scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit and that the tag names moon.mod's version (needs jq)
 scripts/check-benchmark-workflow.sh  # the benchmark workflow runs only by hand (needs yq and jq)
+scripts/check-measure-costs-workflow.sh   # the workflow that measures the tests' costs runs only by hand, with no C flags (needs yq and jq)
+scripts/test-check-measure-costs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
+scripts/test-measure-costs.sh        # the measurement of the tests' costs, against a fake moon (needs python3 and jq)
+scripts/test-estimate-costs.sh       # the cost model recomputed from made-up measurements (needs python3)
+scripts/check-e2e-repeat-workflow.sh       # the e2e repeat workflow runs only by hand, as many times as asked, on the architecture asked for (needs yq and jq)
+scripts/test-check-e2e-repeat-workflow.sh  # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
+scripts/test-repeat-e2e.sh           # the script that runs the e2e tests again and again, with a fake moon
+scripts/check-unicode-data-workflow.sh   # the Unicode data workflow runs when its files change and weekly, and runs the generator's check (needs yq and jq)
+scripts/test-check-unicode-data-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/check-ci-artifacts.sh        # when CI's jobs and steps run, and that it keeps the release binaries only from a run whose every job passed (needs yq and jq)
 scripts/test-check-ci-artifacts.sh   # that check, on copies of the workflows changed one thing at a time (needs yq and jq)
 scripts/test-ci-plan.sh              # the plan that skips the tests on main of a tree that already passed (needs git and jq)
 scripts/test-latest-toolchain-plan.sh   # the plan that skips the weekly run with the latest MoonBit when it would repeat CI (needs jq)
+scripts/check-branch-checks-workflow.sh   # the branch checks workflow writes the weakening report on each push to a branch but main (needs yq and jq)
+scripts/test-check-branch-checks-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
+python3 scripts/weakening-report.py --base origin/main   # what this branch weakens, against its merge base with main (needs git)
+scripts/test-weakening-report.sh     # the weakening report, on small git histories (needs python3 and git)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
+scripts/test-yaml-test-suite-verdict.sh   # how a run of yaml-test-suite is judged against its lists of cases
 scripts/test-check-schema.sh         # the JSON Schema cross-check, with a fake validator and a fake smock (needs jq)
+scripts/test-check-doc-examples.sh   # the check of the documents' examples, with a fake smock and a fake jsonnet (needs python3 and jq)
+scripts/test-coverage-report.sh      # the coverage report, on small bisect reports (needs python3)
+scripts/test-random-seeds.sh         # the script that writes random seeds into the properties, on a copy of re2's property and on small trees (needs python3)
 python3 scripts/check-doc-links.py   # the documents' links into the repository lead to a file, and to a heading when they name one (needs git)
 scripts/test-check-doc-links.sh      # that check, on small trees (needs python3 and git)
 scripts/check-openapi.sh             # the Admin API document is valid OpenAPI 3.1
 python3 bench/gen_definitions.py --check   # the benchmark's committed definitions are what their generator writes
+python3 scripts/gen-unicode-data.py --check   # unicode/data.mbt is what its generator writes (downloads from unicode.org)
 scripts/install-protoc.sh            # the pinned protoc, into ~/.local/bin, with its well-known types
 PROTOC=~/.local/bin/protoc scripts/gen-protobuf-fixtures.sh --check   # the protobuf fixtures are what their sources build
 PROTOC=~/.local/bin/protoc scripts/test-protobuf-fixtures.sh          # that check, on a copy of the working tree
 python3 -m unittest discover -s bench -p test_compare.py -v   # the benchmark's comparison of two runs, which the merge checklist reads
+python3 scripts/check-kept-tests.py   # every test that the keep list, mutation/kept-tests.toml, names is still there (needs Python 3.11 or later)
+scripts/test-check-kept-tests.sh     # that check, on small trees
+scripts/test-trace-links.sh          # the trace links of the removal proof (scripts/trace-links.py), on small git histories with a stand-in for gh (needs python3 and git)
+python3 scripts/check-ledgers.py     # every test that the use-case and boundary ledgers, docs/ledgers/, name is still there, and each row's status agrees with what it names
+scripts/test-check-ledgers.sh        # that check, on small trees
 helm lint --strict charts/smock --set adminAuth.tokenSecret.name=smock-admin-token   # the Helm chart passes helm's lint (needs helm)
 scripts/test-helm-chart.sh           # rendering tests of the Helm chart (needs helm, yq and jq)
 python3 -m unittest discover -s bench -p test_gke_script.py -v   # scripts/gke-bench.sh against fake gcloud, kubectl and docker commands, about 5 minutes
 scripts/build-conformance-runner.sh  # protobuf's conformance runner, from the pinned release, into ~/.local/bin (needs CMake and a C++17 compiler)
 scripts/check-conformance.sh         # protobuf's conformance suite against smock/protobuf, judged by protobuf-conformance/failure_list.txt
+scripts/fetch-yaml-test-suite.sh     # the pinned release of the YAML test suite, into _build/yaml-test-suite
+scripts/check-yaml-test-suite.sh     # the YAML test suite against smock/yaml in both modes, judged by yaml-test-suite/safe.txt and openapi.txt (fetches the suite first)
 scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, read smock's LLM responses (needs python3 and PyPI)
+python3 -m unittest discover -s scripts/mutation -v   # the mutation runner and its site finder, on a module whose mutants are known (needs git, moon and moonc)
+python3 scripts/check-e2e-helpers.py   # no e2e test file uses what another test file defines (needs moon and moonc)
+scripts/test-check-e2e-helpers.sh    # that check, on small modules (needs python3, moon and moonc)
+python3 scripts/mutation/run.py --root scripts/mutation/fixture --self-test-only calc log   # the mutation runner's self-test, on its fixture (needs git, moon and moonc)
+python3 scripts/mutation/ratchet.py write   # the site counts of each package, into mutation/site-counts/ (needs moonc)
+python3 scripts/mutation/ratchet.py check --base origin/main   # the site counts are the commit's, and no package's sites drop beyond what the change deletes or changes (needs git and moonc)
 ```
 
 `scripts/test-helm-chart.sh` renders `charts/smock` for each delivery mode
@@ -334,6 +424,59 @@ one rule for each difference decided on purpose; any other difference
 fails the test. Adding a fixture file under
 `schema/v1/fixtures/` adds it to the cross-check; the README there says
 which directory a fixture belongs in.
+
+`scripts/check-doc-examples.py` runs the examples of the user documents,
+those that [docs/README.md](docs/README.md) lists before "Contributing to
+smock", with a smock binary. A fenced block in YAML or JSON whose
+top-level keys are all fields of a Definition file (`version`, `mocks`,
+`stubs` and `data`) is a whole Definition file; every other block is a
+fragment, and is set aside. `smock check` must pass on each whole file
+alone, and the check prints how many it found and how many blocks it set
+aside. An example that leaves something out, such as a Mock that another
+block declares or a body file whose content it does not show, gets it
+from `scripts/doc-examples/context.txt`. A line there names the example
+by its document and its number among the document's whole Definition
+files, as the check prints it, so a change that adds an example that
+needs context, or moves one, changes the file in the same commit. The
+check also runs the [Mockoon guide](docs/migrating-from-mockoon.md)'s
+`smock check` and `smock render` commands as the guide writes them, in a
+copy of `docs/examples/from-mockoon/`, and their output must be what the
+guide shows after them. Last, it exports the
+[Jsonnet example](docs/definition-files.md#writing-definition-files-in-another-configuration-language)
+with the jsonnet that `scripts/install-jsonnet.sh` pins, checked against
+its SHA-256, runs `smock check` on the export, and compares the export
+with the fixture `schema/v1/fixtures/valid/users-from-jsonnet.json`. CI
+runs it in the job `release`, on the binary that job builds, on both
+architectures. To run it locally:
+
+```sh
+scripts/install-jsonnet.sh
+scripts/build-release.sh
+python3 scripts/check-doc-examples.py dist/smock
+```
+
+`mutation/kept-tests.toml` is the keep list of the test review
+([Removing a test](#removing-a-test)): the tests that
+removal rule (C) keeps for a reason that the kill matrix cannot see,
+each with its reason and the source of what it checks, and for each reason
+the searches that found its tests. A removal batch never proposes a test
+on it. `scripts/check-kept-tests.py` fails when a test that the list names
+is no longer there, so a change that renames, moves or removes a listed
+test changes the list in the same commit.
+
+`mutation/site-counts/` holds each package's count of mutation sites, per
+definition and operator ([The site counts](#the-site-counts)). CI's job
+`checks` fails when they are not what the site finder gives on the
+commit, so a change to a package's source, other than to its tests, runs
+`python3 scripts/mutation/ratchet.py write` and commits what it writes.
+
+[`docs/ledgers/`](docs/ledgers/use-cases.md) holds the use-case and
+boundary ledgers of the test review
+([The four ledgers](#the-four-ledgers)): each documented feature, message
+and limit, with its source and the tests that check it.
+`scripts/check-ledgers.py` fails in the same way when a test that a ledger
+names is no longer there, and when a row's status does not agree with what
+it names.
 
 `scripts/check-h2spec.sh` runs h2spec 2.6.0, the HTTP/2 conformance tool,
 against a smock binary: every case of its `generic`, `http2` and `hpack`
@@ -396,8 +539,26 @@ scripts/build-release.sh
 scripts/check-grpcurl.sh dist/smock
 ```
 
-CI runs all of these but `moon bench` and the tests of
-`scripts/gke-bench.sh` on each push to a branch and on each pull request
+`scripts/coverage.sh` runs every package's in-process tests with
+coverage, in a target directory of its own, `_coverage` unless
+`--target-dir` names another, and prints each package's points covered
+of all, its uncovered points with their file, line and definition, and
+line figures beside them; a line counts as covered only when every point
+on it is. A summary gives the totals inside and outside `server` and
+`cmd/smock`, which only the binary runs. The packages that build on
+wasm-gc run there, except `yaml`, whose deepest nesting test overflows
+wasm-gc's stack when instrumented; `yaml` and the native-only packages
+run natively, with at most two build jobs (`--jobs`). `e2e` does not run,
+nor does the mutation runner's fixture module, which is not a member of
+the workspace.
+`cmd/smock` has no tests, so its points come from an instrumented build
+that nothing runs. The first run builds everything with coverage and
+takes a few minutes; a later run rebuilds only what changed. It reads
+every trace source in the target directory, so remove the directory
+after removing a package.
+
+CI runs all of these but `moon bench`, `scripts/coverage.sh` and the tests
+of `scripts/gke-bench.sh` on each push to a branch and on each pull request
 (`.github/workflows/ci.yml`). It does not run on a pushed tag, since the
 release workflow checks that CI passed on the tagged commit
 ([What a tag does](docs/releasing.md#what-a-tag-does)), nor on a push to a
@@ -406,17 +567,20 @@ branch or a pull request cancels the run of the older one; on `main`,
 every commit keeps its run. The job `scripts` runs the commands from
 `scripts/check-release-workflow.sh` to `scripts/test-helm-chart.sh`, which
 need no build of smock, on linux/amd64; a step that fails does not stop
-the steps after it, so that one run shows every failure.
+the steps after it, so that one run shows every failure. The job
+`yaml-test-suite` runs `scripts/check-yaml-test-suite.sh` beside it, on
+linux/amd64: it fetches the suite and builds the testee
+([yaml-test-suite/README.md](yaml-test-suite/README.md)).
 `.github/workflows/build-test.yml` runs the rest, in jobs that run side by
 side:
 
 - `checks`, on linux/amd64 alone: `scripts/check-moonhttp-pin.sh`,
   `moon fmt --check`, `moon check`, `scripts/check-no-io.sh`,
   `scripts/check-no-c.sh`, `scripts/check-notice.sh`,
-  `scripts/test-dependency-checks.sh` and the tests on wasm-gc. None of
-  them runs native code: the checks read text or run only the compiler's
-  front end, and the tests run on wasm-gc. So they give the same answer
-  on either machine.
+  `scripts/test-dependency-checks.sh`, the tests on wasm-gc and the tests
+  of the mutation runner. None of them runs native code: the checks read
+  text or run only the compiler's front end, and the tests run on
+  wasm-gc. So they give the same answer on either machine.
 - `test`, on linux/amd64 and linux/arm64: `moon test --target native`.
 - `release-test`, on both: the engine's tests in a release build, and
   `scripts/test-openssl-asan.sh`.
@@ -441,9 +605,10 @@ side:
 
 `release` hands each release binary over as the workflow artifact
 `release-linux-<arch>`. Then the job `keep` of `ci.yml`, which runs after
-the jobs of `build-test.yml` and the job `scripts`, and only when each of
-them that ran has passed and the run was not cancelled, keeps the binary of
-each architecture for 7 days as `smock-linux-amd64` and `smock-linux-arm64`,
+the jobs of `build-test.yml` and the jobs `scripts` and `yaml-test-suite`,
+and only when each of them that ran has passed and the run was not
+cancelled, keeps the binary of each architecture for 7 days as
+`smock-linux-amd64` and `smock-linux-arm64`,
 for a machine that cannot build it
 ([On GKE Autopilot](bench/README.md#on-gke-autopilot)). A run in which a
 job failed keeps none; re-running its failed jobs within 7 days of the
@@ -455,8 +620,9 @@ head's and a CI run on a push of that head, to a branch other than
 `main`, succeeded and was last updated within 24 hours
 (`scripts/ci-plan.sh`). That run tested the same tree, the workflows and
 scripts included. `release`, `protobuf-conformance`, `llm-sdks` and the
-job `scripts` run in every run, so `main`'s binaries are built and checked
-from `main`'s own commit, and `keep` keeps them once every job has passed.
+jobs `scripts` and `yaml-test-suite` run in every run, so `main`'s
+binaries are built and checked from `main`'s own commit, and `keep` keeps
+them once every job has passed.
 Every other run, and a run whose plan fails, runs every job.
 
 `.github/workflows/bench-tests.yml` runs the tests of `scripts/gke-bench.sh`
@@ -464,17 +630,34 @@ Every other run, and a run whose plan fails, runs every job.
 or pull request that changes that script, `scripts/install-oha.sh`,
 `scripts/build-release.sh`, `Dockerfile`, `bench/` or the workflow itself.
 
+`.github/workflows/unicode-data.yml` runs
+`python3 scripts/gen-unicode-data.py --check`. It downloads the pinned
+version of the Unicode Character Database from unicode.org, and fails when
+`unicode/data.mbt` is not what the script writes from it. The table records
+the SHA-256 of each file it comes from, so a file that unicode.org now
+serves with other bytes fails it too. It runs on a push or pull request
+that changes the table, the script or the workflow itself, once a week
+(Tuesdays, 04:23 UTC), and when started by hand. It does not run in
+`ci.yml`: a network failure would fail the job `scripts`, and `keep` would
+keep no binaries. The job `scripts` runs
+`scripts/check-unicode-data-workflow.sh` and its test on every push; they
+check when the workflow runs and what it runs.
+
 The native build links OpenSSL 3 (on Debian and Ubuntu, `libssl-dev`).
 `prebuild.py`, which `moon` runs with `python3` before every native build,
 adds `-lssl -lcrypto` to every executable that uses the bindings, tests
 included, because link flags in a library's own `moon.pkg` do not reach the
-packages that import it. It also compiles every executable that holds the
-engine with `-ffp-contract=off`, so that a release build on arm64 does not
-fuse floating-point multiply-adds and a seeded delay is the same as on
-wasm-gc; CI tests the engine in a release build to check it. And it brings
-the build information that `smock --version` reports up to date, so every
-native build, release or not, names the commit checked out and the
-toolchain in use.
+packages that import it. It also brings the build information that
+`smock --version` reports up to date, so every native build, release or
+not, names the commit checked out and the toolchain in use.
+
+A release build on arm64 fuses floating-point multiply-adds unless it is
+told not to, and a seeded delay could then differ from the one wasm-gc
+draws. `moon` passes `-ffp-contract=off` to each C compile itself, so
+nothing in this repository adds it. The engine test "Fault arithmetic is
+never fused into multiply-adds, so a seeded delay is the same on every
+target" (`engine/faults_test.mbt`) fails if they are fused, and CI runs the
+engine's tests in a release build on amd64 and on arm64 to check it.
 
 Most tests drive the engine through its public interface, with in-memory
 Definition files, a fixed clock and a seeded random source
@@ -487,6 +670,14 @@ trust only the root CA of `testcerts`, and the HTTP/1.1 tests run on both
 the plain and the TLS port. The HTTP/2 tests use moonhttp's client side
 over TCP to the plain port, or over TLS to the TLS port through the OpenSSL
 bindings' client side, which offers ALPN (`e2e/http2_harness_test.mbt`).
+What several test files share, a helper, a value or a type, lives in a
+harness file, whose name ends in `harness_test.mbt`: `e2e/harness_test.mbt`
+for any test, the HTTP/2 and gRPC harness files, and those of the Admin
+API's contract checker, the Prometheus reader, the TLS tests and the
+`mockoon` log format. A test file holds only its own tests and what no
+other file uses, so that removing it breaks no other.
+`scripts/check-e2e-helpers.py` checks this with the compiler: it checks
+the harness files with each test file alone.
 The tests of the generated certificate (`e2e/self_signed_test.mbt`) read it
 from the handshake with `openssl s_client` and then trust only it.
 The test of the Journal's byte bound under a memory limit
@@ -512,8 +703,1246 @@ at a time. A check that must compute for longer, and needs no `smock`,
 goes in a package of its own, whose tests get a process of their own, as
 `schema` does.
 
+A timing test that fails once in ten runs passes most single runs of CI.
+The e2e repeat workflow (`.github/workflows/e2e-repeat.yml`) runs the e2e
+tests a given number of times, one run after another, on one runner of the
+architecture asked for, and keeps what each run printed, with a summary of
+the runs that failed and the tests that failed in each, as the artifact
+`e2e-repeat-linux-<arch>`. It runs only when started by hand, from the
+Actions tab or with:
+
+```sh
+gh workflow run e2e-repeat.yml -f arch=amd64 -f runs=30
+```
+
+`scripts/repeat-e2e.sh <runs> <directory>` does the same on a machine, once
+the e2e tests and `cmd/smock` are built.
+
 `SMOCK_VERSION` and `SMOCK_COMMIT` set the version and the commit that a
 native build, such as `scripts/build-release.sh`, records in the binary.
+
+## How tests are judged
+
+The test review ([#275](https://github.com/hirunefu/smock/issues/275))
+judges smock's tests by what they would catch, not by a percentage.
+[ADR 0006](docs/adr/0006-tests-are-judged-by-four-ledgers.md) records the
+decision and why. This section holds the rules, for anyone who writes,
+changes or removes a test. The review builds its tooling step by step:
+until the coverage wrapper, the mutation runner and the branch checks
+exist, the ledgers are kept by hand and none of them stops a merge, but
+the rules for writing and removing tests apply already.
+
+### Terms
+
+- **Point**: an instrumentation point of moon's coverage, at a
+  function's first statement, a then, else or match-arm body, or a call.
+  It is covered when its counter is above zero.
+- **Pure package**: a package of code that builds on wasm-gc. There were
+  19 when the test review began: `buildinfo`, `cookies`, `definitions`,
+  `engine`, `grpc`, `http1`, `importopenapi`, `llm`, `log`, `metrics`,
+  `prng`, `protobuf`, `re2`, `settings`, `template`, `unicode`, `usage`,
+  `xml` and `yaml`. `serverparsers`, made since from the parsers of
+  `server`, is pure too. It goes to L4 as well, outside the two stages
+  that take the 19 there (below), and the maintainer reads every
+  exclusion in it, as in the protocol packages.
+  `testcerts` builds there too, but it is data only, so it is not one.
+  The native-only packages are `server`, `cmd/smock`, `defdir`, `watch`,
+  `openssl`, `protobuf-conformance`, `yaml-test-suite`, `schema` and
+  `e2e`.
+- **Protocol packages**: `http1`, `grpc`, `yaml`, `re2`, `xml` and
+  `protobuf`.
+- **Site**: one change that one operator can make at one place.
+  **Position**: a place that holds one or more sites. **Mutant**: the
+  source with one site's change applied. A mutant **survives** when every
+  test passes with it.
+- **Pinned set**: one mutant per position, its alternative chosen by the
+  rule of operator set v1 (two for INT in a comparison or an index).
+  **Full set**: every alternative that an operator of v1 defines, at
+  every position. The pinned set is part of it.
+- **Equivalent mutant**: a mutant that no input can tell from the
+  original.
+- **BODY mutant**: a function's body replaced by a default value of its
+  return type. A function whose BODY mutant survives is
+  **pseudo-tested**.
+- **Schema binary**: one build that holds many mutants, each switched on
+  only when an environment variable, read once at startup, names it. It
+  has nothing to do with the `schema` package.
+- **Kill matrix**: for each mutant, the tests that kill it.
+- **Exclusion**: an entry of the exclusion list that accepts an uncovered
+  point or a surviving mutant, with a category and a reason.
+- **Unexplained survivor**: a survivor that no test kills, no code change
+  removed and no current exclusion other than DEFERRED covers. A survivor
+  whose only covering entry is stale is **stale-covered**: the merge check
+  reports it without stopping the merge, and the weekly run, the release
+  check and every count for L4 treat it as unexplained.
+
+### The four ledgers
+
+"100%" means that nothing is left unexplained in four ledgers. No
+percentage is a target or a gate: scores are reported per package, and
+never gated. Each baseline below was measured at d953f320.
+
+1. **Coverage**, necessary but not sufficient: no uncovered point in
+   scope, outside exclusions that carry a reason. The measure is moon's
+   point coverage, read from the bisect report (the default format of
+   `moon coverage report`). Line figures overstate coverage, since a line
+   that is only partly covered counts as covered, so they are only shown
+   beside it. Baseline: 819 points uncovered outside `server` and
+   `cmd/smock`; `server` 6.8% covered; `cmd/smock` 0%.
+2. **Mutation**: no unresolved survivor over the pinned set. A survivor
+   is resolved by a test that kills it, by a code change (a survivor can
+   prove code redundant), or by a reviewed entry in the exclusion list.
+   Baseline: of 250 mutants sampled from the pure packages, 243 compiled,
+   and 77.4% of those were killed; of the 229 that are not equivalent,
+   89.1% were killed when the importers' tests ran too.
+3. **Boundaries**: every limit that a spec or smock's documents state is
+   tested at the limit and just past it, with the smallest input that
+   crosses it. A limit in the code that no document states is a finding:
+   once the maintainer confirms it, the documents state it, and it is
+   tested like the others. Baseline: about 33 of the 40 most important
+   limits tested on both sides. The
+   [boundary ledger](docs/ledgers/boundaries.md) lists each limit with its
+   source and its tests.
+4. **Use cases**: every documented feature has an automated test, or a
+   recorded manual check with its reason. Every Definition-file example
+   in the documents passes `smock check` in CI. Every message a user can
+   see is asserted at least once. Baseline: of 99 documented features, 93
+   covered, 2 partly and 4 not, as the survey counted them; 76 of the 77
+   whole Definition files in the user documents pass once given the
+   context they leave out, and the 77th once given the Descriptor set its
+   text says to build (the survey counted 70 of 71, since it did not read
+   the 6 in list items); 22 messages and the top-level help asserted by no
+   test.
+   A user can see 17 of the 22 messages: no input reaches 2 of the others,
+   and only a package's interface shows 3 (the survey counted 20 that a
+   user can see). The [use-case ledger](docs/ledgers/use-cases.md) lists
+   each feature and each message with its source and its tests, and has
+   the recheck of the survey's rows.
+
+**Scope.** All non-test source of the workspace, except generated files
+(the Unicode data table and the build information) and the test
+certificates, which are data. A definition leaves the scope only through
+the exclusion list, with a category, a reason and the maintainer's
+approval. Its sites still appear in the site counts and in the counts of
+sites skipped.
+
+### Keeping the ledgers current
+
+The use-case and boundary ledgers, in
+[`docs/ledgers/`](docs/ledgers/use-cases.md), are kept current by each
+change, not surveyed again before each release:
+
+- A change that documents a feature, a limit or a message adds its row,
+  with its source and the tests that check it, or the ticket or issue that
+  adds them.
+- A change that renames, moves or removes a test that a row names, or
+  that adds a test for what a row still lacks, updates the row in the same
+  commit, and its status with it.
+- A gap that no ticket closes is filed as an issue, and its row names the
+  issue.
+
+`scripts/check-ledgers.py`, in CI's job `scripts`, fails a push on which a
+ledger names a test that is no longer there, or a row whose status does
+not agree with what it names. The weakening report lists every change to
+the ledgers, for the maintainer to read before the merge into `main`. A
+removal batch keeps the only test of a row unless it names another
+([Removing a test](#removing-a-test)). No check sees a feature, a limit or
+a message documented without a row: whoever reviews the change looks for
+one. The boundary ledger records the search that listed its limits, which
+anyone can run again
+([The search for documented limits](docs/ledgers/boundaries.md#the-search-for-documented-limits)).
+Step 3's close checks the ledgers against the documents once more
+([#340](https://github.com/hirunefu/smock/issues/340)).
+
+### The ladder
+
+A package climbs four levels:
+
+- **L1, coverage**: no uncovered point outside exclusions, in the pure
+  packages and in the small native-only ones (`defdir`, `watch`,
+  `openssl`, `protobuf-conformance`, `yaml-test-suite`). `server` and
+  `cmd/smock` get no percentage: the pure parsers that move out of
+  `server`, into a package without I/O, are covered in full in-process,
+  and the rest is reported from e2e coverage.
+- **L2, no pseudo-tested function**: every BODY mutant is killed or
+  excluded.
+- **L3, changed lines**: no unexplained survivor on the lines a branch
+  changes.
+- **L4, per package**: no unexplained survivor over the pinned set. The
+  weekly run executes exactly this set, so it verifies L4.
+
+All 19 pure packages go to L4, in two stages: first `yaml`, `http1`,
+`xml`, `re2`, `grpc`, `cookies`, `settings`, `metrics`, `usage` and
+`prng`, then the other nine. `serverparsers` goes to L4 too, by a climb of
+its own ([#339](https://github.com/hirunefu/smock/issues/339)) that waits
+for the ladder's tooling and for the parsers still to move out of
+`server`, not for either stage. `server` and `cmd/smock` get coverage through
+e2e, a BODY audit and, if the measurements on CI's runners bear out the
+estimate, mutants at operator level through e2e, monthly and before each
+release.
+
+L4 and a release read the pinned set alone. The monthly run over the full
+set is report-only: its survivors at the other alternatives are listed
+apart, and they stop no merge and no release, and do not count towards
+L4.
+
+### Operator set v1
+
+The operators that make the mutants are pinned as a version, v1. A
+change to them, the rule that picks an alternative included, needs the
+maintainer's approval, and shows in the weekly report.
+
+- **BODY**: a function's body replaced by a default value of its return
+  type.
+- **ROR**: a comparison, always with the boundary alternative: `<` and
+  `<=` swap, and `>` and `>=` swap.
+- **IFC**: a condition or guard forced to true or to false.
+- **LCR**: `&&` and `||` swap.
+- **NOT**: a prefix `!` removed.
+- **DEL**: a statement deleted.
+- **BOOL**: `true` and `false` swap.
+- **AOR**: `+` and `-` swap, and `*` and `/`, in their compound
+  assignments too.
+- **INT**: an integer literal, with both n+1 and n-1 where it is an
+  operand of a comparison or an index, and one replacement elsewhere.
+- **STR**: a string literal replaced by the empty string or with one
+  character changed, in the protocol packages, in `server` and the parsers
+  moved out of it (`serverparsers`), and in `log`'s line writers. A mock
+  server's behaviour is mostly strings: header names, content types, JSON
+  keys, status texts and log lines.
+
+The pinned set holds one mutant per position, two for INT in a comparison
+or an index, and a fixed rule chooses the alternative, so that a runner
+cannot pick those that are easiest to kill. The full set adds every other
+alternative: both of IFC's, all of INT's and both of STR's. One mutant
+per line, chosen by operator priority, would not do: of the 24 survivors
+of the sample first read as real, it would have picked another site for
+16.
+
+The pinned set takes these alternatives, for the reasons that
+[ADR 0006](docs/adr/0006-tests-are-judged-by-four-ledgers.md) gives:
+
+- **IFC** takes the alternative under which the code that the condition
+  guards never runs: false for the condition of an `if` or an `else if`
+  (its then-branch never runs), of a loop (its body never runs) and for a
+  match arm's guard (the arm never matches), and true for the condition
+  of a `guard` statement (its `else` never runs). The full set adds the
+  other.
+- **STR** changes one character: the first character of the literal's
+  text, outside any interpolation, becomes `_`, or `-` when it already is
+  `_`. An empty literal becomes `"_"`. The full set adds the empty string.
+- **INT** has three alternatives: n+1, n-1, and 0 where n is not 0.
+  Outside comparisons and indexes, the pinned set takes n+1, or n-1 where
+  n+1 does not fit the literal's type. The full set adds the others there,
+  and 0 in comparisons and indexes.
+- **ROR** swaps only `<` and `<=`, and `>` and `>=`. It does not swap `==`
+  and `!=`, in either set.
+
+Where an operator needs more detail, v1 has this. The mutation runner's
+ticket ([#299](https://github.com/hirunefu/smock/issues/299)) settled these
+details, and the maintainer approved them as part of v1;
+[ADR 0006](docs/adr/0006-tests-are-judged-by-four-ledgers.md) records why:
+
+- **BODY** replaces the body of a top-level function or method, trait
+  implementations included, not of `init`, `main`, a local function or a
+  closure. The default values are `()`, `false`, `0` for every type of
+  number, `'\u{0}'`, `""` for `String` and `StringView`, `b""` for
+  `Bytes` and `BytesView`, `[]` for `Array`, `FixedArray` and
+  `ArrayView`, `{}` for `Map`, `null` for `Json`, `Iter::empty()`, `None`
+  for an option, `Ok` of the default for a `Result`, and a tuple of
+  defaults. Any other type, such as a type parameter or a type of
+  smock's own, has none. An implementation that does not write its
+  return type has the one of core's trait (`Show`, `Eq`, `Compare`,
+  `Hash` or `ToJson`). A body that already is the default value is no
+  site.
+- **IFC** forces the condition of an `if` or an `else if`, of a `while`
+  loop or a `for` loop with a condition, a match arm's guard, and a
+  `guard` statement's condition. A `for .. in` loop has none.
+- **DEL** deletes a call or an assignment, compound ones and those to a
+  field or an element included: one whose value its block drops, or the
+  last one of a block whose value is `Unit` (the body of a function that
+  returns `Unit`, of a loop, or of an `if` without an `else`). It does not
+  delete the only statement of a function's body, whose BODY mutant is
+  the same.
+- **INT** is in a comparison or an index when it is an operand of `<`,
+  `<=`, `>`, `>=`, `==` or `!=`, or the index of an element or a slice,
+  directly or through `+`, `-`, `*`, `/` and `%`. An alternative must fit
+  the literal's type: the one its suffix names, or `Int` without one (or
+  the wider type that the value needs). So a `0` in a comparison takes
+  `1` and `-1`, unless its type is unsigned.
+- **STR** changes string and byte-string literals, interpolated ones and
+  those over several lines included, but not character literals. An
+  escape, such as `\t`, is one character. A literal that writes no
+  character outside its interpolations gets `_` at the start of its text,
+  as the empty literal does. STR's scope is the protocol packages,
+  `server`, `serverparsers` and `log`, but `log/target.mbt`, the reader
+  of request targets.
+- **Not sites**: literals in patterns, ranges (`..<` and `..=`), and
+  `not(...)` calls.
+- **Skipped sites.** A rule skips a site that cannot be a mutant, and the
+  reports count it: a BODY site without a default value, or whose
+  function is foreign (FFI); a STR site outside STR's scope; IFC's `true`
+  for a condition that binds a name with `is`, and LCR at an `&&` whose
+  operand does, since the name would then be unbound where it is used;
+  and an AOR site at a `+` with a string literal as an operand, since
+  strings have no `-`. Such a condition is forced to false as
+  `false && (condition)`, which keeps the name bound.
+- **The same mutant.** Where two sites make the same mutant, as BODY's
+  `{ false }` and BOOL's `false` do in a body that is only `true`, one is
+  kept: the one in the pinned set, then the first of BODY, ROR, LCR, NOT,
+  BOOL, AOR, INT, STR, IFC and DEL.
+
+Sites come from a parser, not from a lexer. For each package, each report
+gives the number of sites that each rule skipped (no default value for
+BODY, a string outside STR's scope, FFI, a name that a condition binds, a
+string operand) beside the number of survivors,
+so that a "zero" always says what it is zero of. Each mutant has a stable
+id: its file, its enclosing definition, its operator, its original text,
+its replacement text and its ordinal. A report, an exclusion and a commit
+message name a mutant by that id. Every site, record, summary and report
+carries the operator set's version, `v1`, so a change to the set is a new
+version.
+
+### Outcomes and kill credit
+
+- **Killed**: a test fails with the mutant on.
+- **Timed out**: the run takes longer than 1.25 times the baseline run
+  plus 4 s. A confirmed time-out counts as killed, and is listed.
+- **Unconfirmed**: a kill or a time-out that kill confirmation (below)
+  does not bear out. It counts neither as killed nor as survived, and is
+  listed with the reason.
+- **Unviable**: the mutant does not compile. It counts neither as killed
+  nor as survived.
+- **Survived**: every test passes.
+
+**Kill confirmation.** A kill counts only when the failing tests fail
+again with the mutant on and pass with it off. A time-out counts only
+when the mutant times out again and the run without it finishes within
+the limit; otherwise it is recorded as unconfirmed. The baseline runs
+twice before any mutant, and a test that fails in either run gives no
+kill credit in that run. The runner records each test's flake rate, and a
+test above the flake threshold, which the maintainer sets, gives no kill
+credit until it is fixed. The flake threshold is 1% of a test's runs,
+over the latest 10 runs whose flake records the runner reads;
+`mutation/flakes.toml` holds both numbers.
+
+**Kill credit for a pure package.** Any wasm-gc test of any package of
+the workspace gives credit. The package's own tests run first. For the
+survivors, the tests of every package that imports it, directly or
+through another package, run too: in the sample, `engine`'s tests alone
+killed 16 of the 25 survivors in `template`'s comparison code. An e2e
+test gives no credit for a pure package. Only the kill-matrix mode, for a
+package heading into a removal batch and for a snapshot audit, runs every
+covering test for every mutant.
+
+**Kill credit for a native-only package.** In-process and e2e tests give
+credit.
+
+**Backend.** The verdicts for pure packages are taken on wasm-gc. A site
+that uses an unchecked array access is also judged natively on amd64,
+because wasm-gc traps where the native binary does not, and for such a
+site the native verdict decides.
+
+The runner never passes `-u` to `moon test`.
+
+### Exclusions
+
+The exclusion list is one file in the repository. No attribute in the
+source excludes a mutant. An entry names its mutant by its id, and gives a
+category, a reason and who reviewed it. Only the maintainer fills in the
+reviewer, in a commit that the maintainer makes or acknowledges at the
+merge. An entry goes stale when the text of its definition changes. Stale
+entries are triaged again in a batch, which the first weekly run that
+lists them opens as an issue. The uncovered points that the coverage
+ledger accepts are in the same list, under the same categories:
+
+- **EQUIVALENT**: an equivalent mutant, through the three steps below. The
+  entry records the result of comparing the compiler's output and the
+  adversarial attempt: the agent context that made it and the tests it
+  tried.
+- **ARID**: code whose change no user, document or test could notice,
+  kept narrow: capacity hints, the fill values of empty arrays, abort
+  messages. Logs, metrics and timeouts are features of a mock server, so
+  they are not arid.
+- **UNREACHABLE**: only for an arm that an invariant guards with an
+  abort, or with a written argument that the maintainer approves.
+- **FAULT**: reached only through an OpenSSL or file-system failure. It
+  has nothing to do with a Stub's Fault. No C seam is added to inject
+  such failures ([ADR 0001](docs/adr/0001-moonbit-with-c-only-for-tls.md)).
+- **UB-NATIVE**: a mutant whose effect on the native binary is undefined,
+  such as an unchecked array access out of bounds, so that no test can
+  pin it there.
+- **DEFERRED**: carries an issue number, and still counts as unresolved.
+
+Dead code is deleted, not excluded, with the maintainer's approval.
+
+An equivalence claim reaches the maintainer in three steps:
+
+1. **Automatic.** The compiler's output for the mutated package is
+   compared with the original's. Identical output marks the mutant
+   equivalent, or a duplicate of another mutant. The mutation runner does
+   this before any test runs ([The compiler's
+   output](#mutation-runner)).
+2. **Adversarial.** For each claim that remains, a separate agent context
+   tries to write a test that kills the mutant, from the spec.
+3. **The maintainer.** What survives both goes to the maintainer: every
+   entry in the protocol packages and in `serverparsers`, and one in five
+   of the others, as a sample. The maintainer draws the sample after the batch is frozen, so
+   that its author cannot know which entries will be read. If a sampled
+   entry is rejected, its author triages the whole batch again, and the
+   maintainer draws a new sample.
+
+### Rules for the work
+
+- **The oracle rule.** Each expected value a test adds comes from a named
+  source: a spec section, a sentence of smock's documents, an issue's
+  acceptance criterion, the output of a reference tool (protoc, the RE2
+  reference, an official SDK), or the maintainer. The test, or its name,
+  cites it. A snapshot is a fine form for the value, and the source
+  decides its content: a snapshot that `moon test -u` fills is checked
+  against its source before it is committed. A test that disagrees with
+  the current code becomes an issue. It is never made green with `-u`.
+- **Extend first.** Before adding a test, extend the existing test of the
+  same behaviour. Random and differential tests exist already: `re2`'s
+  comparison of its DFA with the Pike VM on random patterns, and
+  `http1`'s tests of split invariance and random garbage. Work on
+  properties converts and extends them, and adds no parallel tests.
+- **Roles.** An agent that kills survivors may delete code only when a
+  survivor proves it redundant, and with the maintainer's approval.
+  Outside the removal batches, no change deletes, skips or weakens an
+  existing test: a test that should go is proposed for a removal batch.
+- **Commit subjects.** A commit's subject is a short summary in the
+  imperative that ends with the issue it belongs to in parentheses, such
+  as `(#275)`, or with each of them, such as `(#258, #43)`, when it
+  belongs to two. The trace links of the removal proof
+  ([Removing a test](#removing-a-test), `scripts/trace-links.py`) take a
+  test's tickets from the subject of the commit that introduced it: the
+  issues in that last parenthesis, or else every issue the subject names.
+- **The weakening report.** For each branch, against its merge base with
+  `main`, it lists the tests deleted; the assertion lines removed or
+  changed in tests that stay; the snapshot lines changed; the skip
+  attributes added; the package settings that stop a test from running on
+  wasm-gc; and any change to what decides a verdict: the exclusion list,
+  the operator set, the runner and its committed data, the coverage
+  floors and scope, the flake threshold, the lists of packages at L4 and
+  of tests kept, the merge and release checks, and the mutation and
+  coverage workflows. The maintainer acknowledges it at the merge.
+- **The mutator is governed too.** A ratchet on each package's number of
+  sites, compared per definition: a package's sites may drop by at most
+  as many as the base tree had in the definitions that a change deletes
+  or changes, and any other drop needs the maintainer's approval
+  ([The site counts](#the-site-counts)). A forced-fail self-test: a
+  mutant switched on must be observable, or the run fails
+  ([The self-test](#the-self-test)). A weekly canary replays the 250 mutants sampled at
+  d953f320, whose verdicts are known, on that commit with the toolchain
+  pinned there, and the maintainer accepts each difference once it is
+  explained.
+- **The held-out measure.** A set of mutants that no check gates on and
+  that no agent writing tests ever sees: operators outside v1, such as
+  swapped arguments and replaced match arms, and realistic mutants written
+  by hand or by a model. It is kept outside the repository, on the
+  maintainer's machine, and runs there. Nothing about a single mutant
+  becomes public, only kill rates. Its mutants are keyed as exclusions
+  are, so that they apply to later commits, and those whose text is gone
+  are counted beside the rate. Its kill rate, measured at d953f320, at
+  step 2's baseline, after steps 1, 3 and 5, after stage 1 and in each
+  removal batch, is reported to the maintainer as the outcome of the
+  review.
+- **Seeds.** Each property runs with a fixed seed committed beside it: on
+  every push, in mutation runs and in kill confirmations. Each week a
+  separate job writes a random seed into a working copy, the way the
+  runner applies a mutant, and prints it; a failure is rerun by
+  committing that seed. No test reads the environment for a seed, so
+  `scripts/check-no-io.sh` stays as it is.
+
+  The seed is a constant of the property's test file, with a doc comment
+  that names the property. It is alone on its line, in this form:
+
+  ```
+  const <NAME>_SEED : UInt64 = <digits>
+  ```
+
+  The value is decimal, without a suffix, and the property passes the
+  constant to QuickCheck as `seed=<NAME>_SEED`. The first is
+  `FULL_MATCH_SEED`, in `re2/full_match_wbtest.mbt`.
+  `python3 scripts/random-seeds.py [<path>...]` finds every such constant
+  in the test files under the paths, or under the current directory when
+  none is given. It writes a random seed in place of each value and
+  prints one line for each constant:
+  `<file>:<line>: <NAME>_SEED = <seed>`. It rewrites the files in place,
+  so run it only in a working copy that you throw away. A line that
+  declares a `_SEED` constant in another form fails it, and it then
+  writes nothing. To rerun a printed seed, set the constant to it and run
+  the property's test, such as
+  `moon test --target wasm-gc re2/full_match_wbtest.mbt`. The failure
+  shows the smallest counterexample that QuickCheck found. Commit the
+  seed with the fix, so that every push runs it.
+- **Where the checks run.** smock merges branches locally, ticket
+  branches into integration branches and those into `main`, and opens no
+  pull requests; only Dependabot does. So the changed-lines job and the
+  weakening report run on pushes to every branch but `main`, against the
+  merge base with `main`, in a workflow of their own, which CI's job
+  `keep` never waits for. An outside contributor's pull request goes the
+  same way: before merging it, the maintainer pushes its branch here. The
+  stop is in the merge procedure. It reports only, at first; once a
+  package reaches L4, an unexplained survivor on lines of that package
+  that the branch changes stops the merge into `main`. A script reads the
+  report of the run on the branch head, as the release checks that CI
+  passed on a tag's commit, and the
+  [checklist before merging into main](docs/merging-into-main.md) gains
+  it when the script exists. A diff too large for the changed-lines job
+  is reported as not covered, and runs whole in a run started by hand;
+  the merge check reads whichever run covered the whole diff.
+- **Releases.** For the packages at L4, the latest weekly run over the
+  pinned set must also show no unexplained survivor before a release, on
+  the tag's commit or on an ancestor whose later changes the changed-lines
+  reports cover or touch no non-test source of a package at L4. The
+  release checks it before it publishes, beside the check that CI passed
+  on the tag's commit
+  ([What a tag does](docs/releasing.md#what-a-tag-does)). So a release may
+  wait for one weekly run.
+- **Bulk runs go to Actions**: the baseline of 1,000 mutants, the weekly
+  and monthly runs, `server` through e2e, and the kill matrices. On a
+  developer's machine, only single mutants and the diff mode run, which
+  checks one change's lines, and two named exceptions: step 1's replay of
+  the 250 sampled mutants and the held-out runs on the maintainer's
+  machine.
+
+### Snapshot audits
+
+When a package's turn comes to climb to L4, about ten of its snapshots
+are audited. They are drawn, with a seed the maintainer picks, among the
+tests that alone kill some mutant in a kill-matrix run of the package, at
+least half of them from tests that the work added. A separate agent
+context, one that wrote none of that package's tests under these rules,
+checks each against its source. The maintainer reads only the snapshots
+that this context finds in disagreement with their source, and each of
+those becomes an issue (a bug) or a corrected test.
+
+Step 1's tests close the gaps that the review found before it had any
+tooling. Every expected value they add is checked the same way: before
+the merge into `main`, a separate agent context that wrote none of them
+checks each value against the source it cites. The maintainer reads only
+the values that this context finds in disagreement with their source,
+and those whose source it finds unclear. Each disagreement becomes an
+issue (a bug) or a corrected test, as in an audit.
+
+### What makes a good test
+
+- It drives a public interface, and survives a refactor that keeps the
+  behaviour. The seams are the existing ones: in-process tests of a
+  package's public interface (the harness in `engine/harness_test.mbt`
+  for the engine), and e2e tests that run the binary over real sockets.
+  The one new seam is the package without I/O that receives `server`'s
+  pure parsers.
+- Its expected value comes from a named source, which the test or its
+  name cites (the oracle rule).
+- A limit is tested at the limit and just past it, with the smallest
+  input that crosses it. A recogniser is tested with inputs that almost
+  match as well as with matches.
+- It checks one behaviour, and the existing test of that behaviour is
+  extended before a new one is added.
+- e2e is for what only the binary shows: the process and its CLI,
+  sockets, TLS, reloads, logs, the HTTP/2 loop, gRPC's wire behaviour,
+  and the Admin API's routing, authentication and contract. The engine's
+  semantics belong in the engine's in-process tests. The rule of about
+  20 ms between awaits ([Build and test](#build-and-test)) still holds.
+- A time bound is relative to the competing event or to the configured
+  value, never to the runner's speed. A bound that says "X happens before
+  Y" is written relative to Y, or to the configured value, for example
+  under three times it. A fixed number stays only where a document states
+  it as a tolerance, such as the 100 ms before a gRPC call's deadline in
+  which a client's reset does not count
+  ([Resets and the connection's defences](docs/grpc/state-and-faults.md#resets-and-the-connections-defences)).
+- A property is grounded in a spec, as a round trip or agreement with a
+  reference, reports its input classes, and shrinks.
+- Killing a mutant is not enough: a test written for a survivor still
+  states the behaviour from its source. The held-out measure checks that
+  the tests did not merely fit the operators.
+- Tests to learn from: `http1`'s split-invariance and random-garbage
+  tests; `re2`'s conformance table; the codec tests on protoc's fixtures;
+  the protobuf conformance job's failure list, as a model of a skip list;
+  the goldens; the settings boundary pairs; `llm`'s size test (exactly
+  1 MiB is within the bound, and one byte more is over it); the engine
+  harness's fixed clock and seeded random source.
+
+The e2e package may be built locally with one build job, so that work on
+e2e tests need not go through CI:
+
+```sh
+moon test --target native -p smock/smock/e2e --build-only -j 1
+```
+
+Mutants, though, run locally only one at a time or in the diff mode, and
+in the two exceptions that [Rules for the work](#rules-for-the-work)
+names: every larger run goes to Actions.
+
+### Removing a test
+
+A test may go only under (A) or (B), and never when (C) holds.
+
+- **(A) Mechanically redundant.** With the test removed, three sets stay
+  the same:
+  - the mutants killed over the full set, counting only tests in the same
+    layer or a lower one: an e2e kill never justifies removing a unit
+    test;
+  - the covered points;
+  - the trace links, derived mechanically: from the commit that
+    introduced the test block (following moves and copies across files),
+    to the tickets in its subject (Commit subjects, above), to those
+    issues' acceptance criteria.
+- **(B) Negative value.** It pins an implementation detail that a
+  refactor keeping the behaviour would break, or restates a constant that
+  no spec, document or user fixes. The default is to rewrite it, not to
+  delete it.
+- **(C) Keep reasons.** The test is:
+  - the only test of a feature, an acceptance criterion, a rule of an ADR,
+    a documented limit, or an Admin API reply's endpoint and status;
+  - the only regression test of a closed bug;
+  - the only e2e test of a feature a user sees;
+  - a documented example that nothing else runs;
+  - one of the deliberate overlaps: the HTTP/2 rules of
+    [ADR 0005](docs/adr/0005-http2-comes-from-moonhttp.md), the contract
+    checker's own tests, the goldens, the in-process codec tests on
+    protoc's fixtures, the settings boundary pairs, and the reload tests
+    with symlinks;
+  - a test of a constant that a spec fixes, a vendor's published API
+    reference included, such as the stop reasons of OpenAI's and
+    Anthropic's APIs;
+  - a test that the backends agree, or a test in a release build, such as
+    the engine's tests of seeded floating-point results;
+  - a test of behaviour that a dependency provides;
+  - a test of smock's own C, the OpenSSL glue in `openssl/openssl.c` and
+    the reset helper in `server/reset.c`. No mutant reaches that C, since
+    the mutation runner skips FFI, so under (A) alone such a test could
+    look redundant.
+
+  The tests kept for the last five reasons are named in the keep list,
+  [`mutation/kept-tests.toml`](mutation/kept-tests.toml).
+
+An e2e test goes only when operator-level mutants of the `server` code on
+its path are killed by the tests that remain, or when a named test at a
+lower seam, together with one remaining e2e test, checks each of its
+claims about the wire. Without a run at operator level, only the second
+way is open. A batch that removes e2e tests runs
+`scripts/check-e2e-helpers.py` first: no test file uses what another
+defines, so a test file can go whole without breaking another.
+
+Each removal batch comes with its proof: the kill matrix, the point sets
+and the trace links before and after, as CI artifacts, with an empty
+difference; a replay of the real bug fixes
+([#264](https://github.com/hirunefu/smock/issues/264),
+[#60](https://github.com/hirunefu/smock/issues/60) and
+[#59](https://github.com/hirunefu/smock/issues/59)) that first checks
+that the full suite fails on each, and then checks the reduced one (a fix that cannot be reverted cleanly is replayed by bringing its
+bug back in the smallest way, or left out with the maintainer's
+approval); small commits that name the tests that take over; the
+maintainer's approval; and a new measurement of the held-out set.
+
+These never justify removing a test: coverage alone, text similarity,
+smell detectors, a target count, or CI's speed.
+
+## Mutation runner
+
+The mutation runner makes, for a package, the mutants by which the tests
+are judged ([How tests are judged](#how-tests-are-judged)), runs the
+package's own tests on wasm-gc against each, then the tests of the
+packages that import it against those that survive, and reports the
+mutants that survive both. It has two parts, which only a line format
+joins:
+
+- `scripts/mutation/sites.py`, the site finder, reads source and prints
+  one [site](#terms) per line, as JSON: the mutant's id, its file, its
+  enclosing definition, its operator, its original text, its replacement
+  text, its ordinal, its position (line and column), whether the pinned
+  set takes it, and the operator set's version. It finds the places in the
+  parse tree, and `scripts/mutation/operators.py`, operator set v1, says
+  what each place becomes.
+- `scripts/mutation/run.py`, the runner, makes one mutant of each site
+  that the finder prints, builds and tests it, and writes the records and
+  the report.
+
+The operators are those of [operator set v1](#operator-set-v1): BODY,
+ROR, IFC, LCR, NOT, DEL, BOOL, AOR, INT and STR. `operators.py` holds
+everything that decides what a "zero" means: the version, `v1`; each
+operator's alternatives and which one the pinned set takes; STR's scope;
+BODY's default values; and the rules that skip a site. A change to it is
+a new version, and needs the maintainer's approval; the weakening report
+lists it. The finder prints the pinned set (`--set pinned`, the default)
+or the full set (`--set full`), and, besides the sites, each site that a
+rule skipped, with the rule's reason (`"skipped"`) and no id, so that a
+report can count it. Test files, test blocks and generated files have no
+sites. A generated file is one whose first line says
+`// Generated by <what>. Do not edit.`, as the Unicode data table
+(`unicode/data.mbt`), the build information (`buildinfo/build_info.mbt`),
+the test certificates (`testcerts/testcerts.mbt`) and the descriptor of
+gRPC's `health.proto` (`server/health_set.mbt`) do.
+
+**How sites are found.** Sites come from a parser, not from a lexer or a
+regular expression, so that a string, a comment, a pattern or a range that
+looks like an operator is never taken for one. The parser is the pinned
+compiler's own: `moonc compile -dsource -show-loc <file>` writes the
+file's parse tree beside it, with the position of every node, which gives
+each operator's position and the extent of its operands. The finder copies
+each file into a temporary directory and reads the tree there; the
+compiler then fails to type the file, which it reads without its package,
+and only a parse error fails the finder. This was chosen over a MoonBit
+parser library, such as moonbitlang/parser, for two reasons:
+
+- It parses exactly what the pinned compiler builds. A library has a
+  grammar of its own, which can lag behind the compiler: the latest
+  moonbitlang/parser when this was decided, 0.4.7, came out before moonc
+  v0.10.20.
+- It adds no module. moon resolves nothing new, so `NOTICE`, the image's
+  SBOM and the dependency checks (`scripts/check-notice.sh`,
+  `scripts/check-no-c.sh`, `scripts/check-moonhttp-pin.sh`) stay as they
+  are.
+
+What it costs: `-show-loc` is not in moonc's `-help`, and the format of
+the tree is documented nowhere, so a new toolchain may change either. The
+finder checks every site's original text against the source at the
+position the tree gives, and fails rather than guess. Its tests run in
+CI's job `checks`, which the weekly run with the latest MoonBit runs too,
+so a change shows within a week. Should the dump go, a finder built on
+moonbitlang/parser can replace this one without a change to the runner,
+which reads only the finder's lines. That finder would be a module of its
+own outside the workspace and away from the binary's modules, so its
+dependencies would still not reach `NOTICE`, the SBOM or the dependency
+checks, which read the modules the workspace resolves.
+
+**Ids.** A mutant's id is its file, its enclosing definition, its
+operator, its original text, its replacement text and its ordinal, joined
+by commas, as in `usage/usage.mbt,resident_bytes,ROR,<=,<,0`. Inside a
+field, a `\` escapes a comma or a `\`, and `\n`, `\r` and `\t` stand for
+those characters. A text over several lines, such as a function's body,
+which BODY replaces, is written in the id as its first line, `…` and its
+last line, without the indentation: `{…}`. The definition is the
+top-level one that holds the site: `f`, `Type::f`,
+`impl Trait for Type with f`, `impl Trait with f` for a trait's default,
+the name of a `let`, a `const`, a type or a trait, or `main` or `init`.
+The ordinal counts, from 0, the sites of the same file, definition,
+operator and texts that come before it, so an id stays the same as long
+as the definition's sites of that kind keep their order. A report, an exclusion and a commit message
+name a mutant by its id.
+
+**A run.** The runner asks the finder for the full set, and runs the
+pinned set (`--set pinned`, the default) or the full set (`--set full`).
+A **position** is the place of one or more sites: their file, operator,
+line and column. For each worker (`--workers`, 1 unless given), the runner
+copies the workspace, the files git tracks and the untracked ones it does
+not ignore, into `_build/mutation/tree-<n>`, and builds there into
+`_build/mutation/target-<n>`: a build directory at a stable path, with a
+target directory of the runner's own, so that a plain build and a mutant
+build never rebuild each other. For each package, it first builds the
+package's tests without a mutant and runs them twice. It stops if they do
+not build, or if a run fails without naming a test that failed; a test
+that fails in either run is listed, and gives no kill credit in this run.
+The longer run sets the time limit. Then, for each mutant, it writes the
+mutated file into the tree, builds the package's tests with
+`moon test --target wasm-gc -p <package> --build-only`, and runs them. It
+checks the build's exit status, so a mutant that does not build never
+runs the binary of an earlier build, and it never passes `-u`.
+
+**Confirmation.** A kill and a time-out are each checked once more, as
+[Outcomes and kill credit](#outcomes-and-kill-credit) asks, by
+`scripts/mutation/confirm.py`. For a kill, the runner runs the tests
+again with the mutant on, then without it; the kill counts only if some
+of the tests that failed fail again and pass without the mutant, and the
+record then names those tests alone. For a time-out, the mutant must time
+out again, and the run without it must finish within the limit. A kill or
+a time-out that is not borne out is **unconfirmed**, and its record says
+why. Each run is the whole `moon test` of the package, as the first was,
+so properties run with their committed seeds every time; the runner sets
+no seed. A test whose failures all give no kill credit makes no kill: the
+mutant survives, and its record names those tests.
+
+**Flake rates.** The runner counts each test's flaky results: a failure
+without a mutant, in the two runs before any mutant or in the run that
+confirms a kill, and a pass when a kill runs again with the mutant on.
+Every test of a package runs whenever its package's tests run without a
+mutant, so a run's record counts those runs per package, and per test its
+flaky results and its runs again with a mutant on. A test's flake rate is
+its flaky results over its runs, across the latest runs that
+`mutation/flakes.toml` names, and a test above the flake threshold there
+gives no kill credit, until enough later runs without a flaky result have
+pushed its flaky ones out of the latest. Each run writes `flakes.json`
+beside its report: the latest runs' records, this one included, and the
+rate of each test that had a flaky result among them. The next run reads
+it with `--flakes <file>`. The records live in the report artifact of the
+latest weekly run on GitHub Actions, which the next weekly run downloads
+and passes to the runner; the weekly workflow
+([#314](https://github.com/hirunefu/smock/issues/314)) does both. A run
+made of shards, as the weekly run is, keeps one file: its shards each
+read the same records, and
+`python3 scripts/mutation/confirm.py merge <flakes.json>...` sums their
+counts of this run into one record, as `scripts/mutation/merge.py` does
+when it merges the shards' outputs. A run
+without `--flakes`, as on a laptop, starts with no records, so only its
+own two runs without a mutant take credit away.
+
+**Importers' tests.** A mutant that survives the package's own tests runs
+again, the same way, with the tests of the package's importers, which
+gives a pure package the [kill credit](#outcomes-and-kill-credit) of any
+wasm-gc test of the workspace. Its importers are the packages that import
+it, in their source or their tests, directly or through other packages
+whose source imports it. `scripts/mutation/importers.py` finds them in the
+build's own package graph (`moon tree --package --json --target wasm-gc`),
+not in a list kept by hand, before any mutant runs. The graph lists every
+package on every backend, so it then asks moon whether each importer's
+tests build on wasm-gc (`moon test --target wasm-gc -p <importer>
+--dry-run`). Those that build only natively, `server`, `defdir`, `schema`,
+`protobuf-conformance` and `e2e` among them, give no credit, since a pure
+package's verdict is taken on wasm-gc. The importers' tests first run
+twice without a mutant, as the package's own do, and their time limit
+comes from those runs. A record names the package of each test that killed its
+mutant, and the importers whose tests ran it again. To see a package's
+importers: `python3 scripts/mutation/importers.py template`.
+
+Each mutant's outcome, after both runs, is one of:
+
+- **killed**: a test failed, and the kill is confirmed;
+- **timed out**: the run took longer than 1.25 times the longer run
+  without a mutant plus 4 s, and was stopped, and the time-out is
+  confirmed. It counts as killed, and is listed apart;
+- **unconfirmed**: a kill or a time-out that its confirmation did not
+  bear out. It counts neither as killed nor as survived, and is listed
+  with the reason and the mutant's diff;
+- **unviable**: the mutant does not build. It counts neither as killed
+  nor as survived;
+- **survived**: every test that gives kill credit passed.
+
+A mutant that the compiler's output shows **equivalent**, or a
+**duplicate** of another, has that outcome instead, and runs no tests
+(below).
+
+It writes into `_build/mutation/out/`: `mutants.jsonl`, one record per
+mutant with its site, the set that ran, its outcome, the tests that
+killed it, the importers whose tests ran it again, how its confirmation
+went, the backend and the timings; `summary.json`, the operator set's
+version and the set, the flake threshold with the tests above it and the
+tests with a flaky result in this run, and per package the counts of
+sites and positions in both sets, the sites each rule skipped, the counts
+of each outcome and the runs without a mutant with the tests that failed
+in them,
+the same counts with the package's own tests alone, and its importers:
+those on wasm-gc and those left out, the survivors their tests ran again
+and how many the tests of each importer killed; `report.md`, the same
+counts, the time-outs, the unconfirmed mutants, each survivor's diff with
+its whole enclosing definition, and the flaky tests, which the runner
+also prints; and `flakes.json`, the flake records. A run of the full set counts
+the mutants at the pinned alternatives and at the other alternatives
+apart, and lists their survivors apart: L4 reads only the former.
+`--sites-only` runs no mutant, and writes only the counts and the
+mutants a run would make (`chosen.jsonl`). `--work` and `--out` choose
+other directories.
+
+**Shards, samples and listed sets.** Bulk runs choose among the mutants
+with three more options, which `scripts/mutation/choice.py` implements.
+Each summary says what chose its mutants (`selection`): the set, the
+packages, the ids, the list's SHA-256, the sample and the shard.
+
+- `--shard k/n` runs the k-th of n parts of the mutants, in the run's
+  order (the packages as given, then each package's sites), and the
+  parts' sizes differ by one at most. Every mutant is in exactly one
+  shard, and the same input gives the same shards. Each shard runs the
+  tests of its packages without a mutant on its own, and a package with
+  no mutant at all runs in the first shard.
+  `python3 scripts/mutation/merge.py --out <dir> <shard>...` merges the
+  outputs of every shard of one run into the output of the run without
+  shards: the same records, counts and report, timings aside, the
+  counts with the package's own tests alone, its importers' counts and
+  the flake records included. One thing differs: each shard compares
+  the compiler's output only among its own mutants, so a mutant that
+  compiles as one in another shard runs its tests instead of being
+  marked a duplicate, and both records hold the same digest. Each
+  package's summary keeps each shard's run without
+  a mutant, and its importers' run, under `shards`.
+- `--sample N --seed S` takes N of the set's mutants, stratified by
+  package. Each package gets its share of N, rounded down, and the
+  mutants left over go to the packages whose shares lost the most in
+  rounding (the first package given wins a tie). Within a package, the
+  mutants taken are those whose ids, hashed with the seed by SHA-256,
+  come first. So the same seed and tree give the same sample, whatever
+  the version of Python. The seed is 0 unless given.
+- `--list FILE` runs the mutants a file lists, in its order, in place of
+  a set. Each line is a JSON object, a mutant by offset or by key:
+  - **By offset**: `file`, `offset` (in characters, from 0), `original`
+    (the text at the offset, which the mutant replaces), `replacement`,
+    and `commit`, on which the offset holds; and `operator`, if the entry
+    names one. The run stops unless the file holds its text on that
+    commit and the original text at the offset.
+  - **By key**: `file`, `definition`, `operator`, `original`,
+    `replacement` and `ordinal`, the fields of an id, by which an
+    exclusion names a mutant, with the texts whole. A key applies to any
+    later commit where it still finds its text.
+
+  A listed mutant that a site of operator set v1 makes is that site, with
+  its id: by offset, one whose change is the site's, but for white space
+  at its edges, as the finder tells two sites that make the same mutant.
+  Any other is outside v1: its record says
+  `"in_operator_set": false`. It is named as a site is, with the operator
+  its entry gives (`OTHER` when an entry by offset gives none), and an
+  ordinal that counts the places in its definition where the same
+  original text starts before it, outside comments. So a key whose
+  operator is one of v1's names a site of v1 by its id, and a mutant
+  outside v1 takes an operator name of its own, such as `SWAP`. A key no
+  longer applies when its file, its definition or its text is gone, or,
+  for an operator of v1, its site. The run writes such a key, with why,
+  to `unapplied.jsonl`, and the report counts it beside the outcomes of
+  the others; with shards, the first shard counts them. The packages are
+  those of the listed files, unless given: given packages leave the
+  list's other mutants out.
+
+  With `--totals-only`, which the held-out set needs, a listed run writes
+  only `summary.json` and `report.md`, with counts per package and in
+  total: listed, killed, timed out, survived, unviable, no longer
+  applying, and the score. It prints no mutant's id, no output of a
+  build or a test, and not the reason it stops, which may name a mutant.
+  It removes from its output directory the files of an earlier run that
+  name mutants, and from its work directory the workers' builds, which
+  hold the last mutants. It takes no shard.
+
+Without `--mutant`, `--list`, `--sample` or `--changed`, every package
+given runs, as before; with one of them, only the packages that hold one
+of the mutants.
+
+**Mutants on the changed lines.** Before you push a branch, run the
+mutants on the lines it changes. It is the one run larger than a single
+mutant that is meant for a laptop:
+
+```sh
+python3 scripts/mutation/run.py --changed
+python3 scripts/mutation/run.py --changed --base <ref>
+```
+
+`--changed` takes the merge base of `HEAD` with `main`, or with
+`origin/main` where the checkout has no `main` branch (as CI's has not),
+or with the ref that `--base` gives. Against it, it finds the lines that
+the working tree adds or changes in the non-test `.mbt` files of the
+[pure packages](#terms): your uncommitted changes count, and so does a
+file that git does not track but does not ignore, since the runner copies
+it. A generated file does not count, and a file that moved counts as
+changed whole. A pure package here is a directory with a `moon.pkg` in a
+module that `moon.work` lists, whose supported targets, if it names
+any, hold wasm-gc. The runner then runs every mutant of the pinned set
+whose original text holds one of those lines (so a function's BODY mutant
+runs when any line of its body changed), with each package's own tests.
+The report starts with the base, the merge base, the count of changed
+lines and of the mutants that ran, and then lists the survivors with
+their diffs. A change with no such line runs nothing and says so.
+Package directories given limit the run to them. With `--sites-only`, it
+counts the mutants on the changed lines and runs none, and with `--shard`
+the shards merge as above. A change of 460 such lines, about the 75th
+percentile of merges into `main`, had 174 mutants, which ran in 3.5
+minutes on wasm-gc on an arm64 laptop with 8 cores.
+
+**The compiler's output.** Before a mutant's tests run, the runner
+compares the compiler's output for the mutated package with the output
+without a mutant, and with the outputs of the mutants before it
+(`scripts/mutation/compare.py`). This is the first of the three steps of
+an equivalence claim ([Exclusions](#exclusions)). Identical output marks
+the mutant **equivalent**, and output identical to an earlier mutant's
+marks it a **duplicate** of that one. Neither runs tests, and neither
+counts as killed or as survived. The output compared is the package
+linked as a program on wasm-gc, the backend of the verdicts: `moonc
+link-core` of the package's core IR, which the build of its tests made,
+with the core IR of its dependencies, the package's public functions and
+methods as the program's exports, the compiler's optimisations on, and
+WAT, the text form of WebAssembly, as the output. This output was chosen
+over the others for where it holds source positions:
+
+- The core IR that `moon build` writes for a package holds the position of
+  its code in a binary form, so a mutant that only makes its line longer
+  or shorter changes it.
+- The C of a native build names the source line of every statement, and
+  the verdicts are taken on wasm-gc anyway.
+- In WAT, only names hold positions. The compiler numbers its locals,
+  labels and closures in the order it makes them, and a closure's name
+  holds the line of its definition. Before the comparison, every name is
+  replaced by a number in the order of its first use, which leaves the
+  program as it was. Text that the program itself holds stays, such as
+  the file, line and column that a call to `fail` puts in its message.
+  So mutants keep the source's line breaks, and such text changes only on
+  the mutant's own line: a deletion leaves its lines empty, a block keeps
+  them before its closing brace, and another expression keeps them inside
+  parentheses.
+
+The link leaves out what the exports do not reach, inlines small
+functions into their callers, and compiles a generic function once for
+each type it is used with. So a mutant is compared only where both the
+output without it and its own output hold a function of its own, by its
+name, for the definition that holds the site. Such a function is compiled
+once for every caller, so the same output means the same function for
+any argument. Otherwise an implementation of a trait that no function of
+the package uses would look equivalent, since the output lacks it with
+the mutant and without it. A mutant in such a definition, in a function
+inlined into each of its callers, in a generic function, or in a
+constant or another value is **not compared**, and runs its tests.
+
+Each record of a mutant that built says what the comparison found
+(`compiler_output`): `identical`, `duplicate` (the record names the first
+mutant in `duplicate_of`), `differs`, or `not compared` with the reason,
+and the output's digest where it was compared. The summary and the report
+count the equivalent mutants, the duplicates and the mutants not compared
+per package, apart from the other outcomes and from exclusions. The
+report lists the equivalent mutants and the duplicates, each duplicate
+with the mutant it compiles as and that mutant's outcome. What this
+costs: the names in `moonc link-core`'s output, like the finder's
+`-show-loc`, are documented nowhere. If a new toolchain renames its
+functions, their mutants are not compared, which is safe, and the
+fixture's tests fail in the weekly run with the latest MoonBit.
+
+To see the sites of a package, and to run one mutant, or the few mutants
+of a small package (they need python3, git, moon and moonc):
+
+```sh
+python3 scripts/mutation/sites.py usage
+python3 scripts/mutation/sites.py --set full usage
+python3 scripts/mutation/run.py --sites-only usage
+python3 scripts/mutation/run.py --mutant 'usage/usage.mbt,resident_bytes,ROR,<=,<,0' usage
+python3 scripts/mutation/run.py usage
+```
+
+Run only that much on a laptop, besides the mutants on your changed
+lines (above). Bulk runs, over many packages or the weekly and monthly sets, go
+to GitHub Actions, through the workflows that later steps of the review
+add.
+
+The tests (`python3 -m unittest discover -s scripts/mutation -v`) run the
+finder and the runner on `scripts/mutation/fixture`, a module that is not
+a member of the workspace. In its package `calc`, each mutant of the
+pinned set has a known outcome, given beside the site with its reason:
+some are killed, a few survive, one times out, and one does not compile.
+In its package `log`, whose paths put it in STR's scope as smock's `log`
+is, each mutant of the full set has one. The package `shapes` holds a
+site in each kind of definition, and look-alikes that are not sites; the
+package `forms` holds each form of each operator, and the tests copy its
+strings into STR's scope too. In its package `units`, each mutant has a
+known outcome with `units`' own tests and, for those that survive them,
+with its importers' tests: `meter` imports `units`, `dial` imports
+`meter`, for its tests only, and each kills one survivor; `probe` imports
+`units` but builds only natively, so the one survivor that only its test
+would kill stays a survivor. The tests of confirmation run calc's
+mutants with a moon that answers the runs of tests from a script (a
+failure, then a pass; a time-out, then a run within the limit), so that a
+flaky failure and a time-out that does not repeat happen every time; the
+real moon builds. `scripts/mutation/test_choice.py` runs the options
+above on copies of the fixture, some in a small git history, and merges
+shards; `scripts/mutation/test_changed.py` runs `--changed` on a small
+git history of the fixture, with a branch, a later change on `main` and
+a package that builds natively only. `moon fmt --check`
+at the root does not read the fixture: run `moon fmt` inside it after a
+change.
+
+In the fixture's package `same`, each mutant of the pinned set has a
+known outcome and a known result of the comparison of the compiler's
+output, given beside the site. Two mutants are equivalent: one makes its
+line shorter, and the other deletes a call over three lines. One compiles
+as another mutant does. Three are not compared: one in a constant, one in
+an implementation of a trait that no function of the package calls, and
+one that lets the compiler put a function into its caller.
+
+### The self-test
+
+Each run, in each package where it has a mutant to run, first switches
+on a mutant that the package's tests must see, and stops unless a test
+kills it. A runner that
+applies no mutant, builds or tests another tree, runs the binary of an
+earlier build, takes a failed test for a pass, or breaks every build
+would otherwise report each mutant as survived or as unviable, and the
+second is a "zero" that says nothing.
+
+The rule that chooses the mutant: it puts `abort("mutation self-test")`
+at the start of the body of every top-level function and method of the
+package's non-test source whose body is MoonBit. Foreign functions,
+`init` and `main` blocks, test blocks, test files and generated files are
+left as they are. The functions come from the compiler's parse tree, as
+the sites do, but not from the finder's lines. So the mutant depends on
+the package's source alone, never on the finder's output or on a run's
+outcome. The runner switches it on after the two runs without a mutant
+and before the first mutant, with the time limit they set, and switches
+it off again. Only a kill passes, by a test that gives kill credit in the
+run: a self-test that survives, times out or does not build stops the
+run, and so does a package with no function to change. The summary and the report give the self-test's record: the
+functions it changed and how many tests failed.
+
+A package whose own tests call none of its functions fails its
+self-test. `cookies` and `unicode` have no tests of their own, so a run of
+their own tests could see no mutant, and their self-test fails: it runs
+with the package's own tests only, and not again with its importers'
+tests as a surviving mutant does.
+
+`--self-test-only` runs, for each package, the runs without a mutant and
+the self-test, and no mutant; it takes no option that chooses mutants. CI's job `checks` runs it on the fixture
+module's packages that have tests, `calc` and `log`. The runner's tests
+break the runner on purpose, with a moon that never fails a test, one
+that tests another tree and one whose builds fail after the first, and
+check that the self-test stops the run before any mutant.
+
+### The site counts
+
+`mutation/site-counts/<package>.jsonl` holds, for each package of the
+workspace that has a site, one line per top-level definition that holds a
+site, as JSON: its file, its name, a hash of its text (the first 16
+hexadecimal digits of the SHA-256 of its lines, from the first to the
+last), and its count of sites of each operator in the pinned set and in
+the full set. `python3 scripts/mutation/ratchet.py write` writes them
+from the site finder's lines. The packages are every directory with a
+`moon.pkg` in the modules that `moon.work` lists; the runner's fixture
+module is not one of them.
+
+`python3 scripts/mutation/ratchet.py check --base origin/main`, in CI's
+job `checks`, fails:
+
+- when the committed counts are not what `write` writes on the commit,
+  with the pinned toolchain. So a change that alters sites updates them
+  in the same change. In the weekly run with the latest MoonBit, the same
+  difference shows a compiler that finds other sites, and fails that run
+  as its other checks do.
+- when a package's sites drop, against the counts committed at the merge
+  base with `main`, by more than the base's sites in the definitions that
+  the change deletes or changes. The comparison is per definition. A
+  definition that the change neither deletes nor changes is one whose
+  text the package still has, in any of its files: a definition moved
+  within its package is the same definition. For each such definition,
+  each operator and each set, a count below the base's is a drop that
+  only the list of approved drops allows. Such a drop comes from a change
+  to the finder, to operator set v1 or to the toolchain, or from moving a
+  definition out of STR's scope.
+
+`mutation/approved-drops.txt` is the list of approved drops. For each
+package, operator and set with such a drop, the change adds a line
+`<package> <operator> <pinned|full> <sites> <reason>`, with the number of
+sites that the check's message gives. Only the lines that a change adds
+approve its drops, and each must name a drop that the change makes. Both
+files are in `scripts/verdict-files.txt`, so the weakening report shows
+their changes, and the maintainer's acknowledgment of the report at the
+merge is the approval. A merge base with no committed counts, from before
+this check, is compared with nothing; on `main`, the merge base is the
+commit itself.
+
+## The weakening report
+
+Before the maintainer merges a branch into `main`, they read what it
+weakens. On each push to a branch other than `main` and Dependabot's, the
+branch checks workflow (`.github/workflows/branch-checks.yml`) runs
+`scripts/weakening-report.py` against the branch's merge base with
+`main`. The job takes seconds. It writes the report to the job summary
+and keeps it as the artifact `weakening-report` for 90 days. It only
+reports: it passes whatever the report lists, and fails only when the
+report cannot be written or kept. The workflow is not part of `ci.yml`,
+so `keep` never waits for it.
+
+The report lists:
+
+- **Tests deleted**: each test block of the base that its package no
+  longer has. A test whose name changed is followed to the new test of
+  its package that holds most of its body, or whose name is much like its
+  own, as when a test is extended.
+- **Assertions removed or changed in tests that stay**: in each test, and
+  in each function or constant of a test file, that the head still has,
+  the lines it removes or changes that assert something. Those are a call
+  of `inspect`, `debug_inspect`, `json_inspect`, an `assert_` function,
+  `fail`, `abort` or `panic`, a `guard`, an `if` whose block fails, and a
+  line that compares two values. So an exact comparison made weaker and
+  an upper bound raised show here. A line added inside an assertion is
+  not listed, since extending a test adds such lines.
+- **Snapshot lines changed**: the lines a test removes from, changes in or
+  adds to a snapshot. A snapshot is the `content=` of `inspect`,
+  `debug_inspect` or `json_inspect`, a constant or a variable that a
+  `content=` names, or a file in `__snapshot__`.
+- **Skip attributes and target settings added**: a `#skip` or `#cfg`
+  attribute that a test gains, a package whose supported targets no
+  longer let its tests run on wasm-gc, and a test file that its package's
+  `targets` no longer build for wasm-gc.
+- **Files that decide a verdict changed**: each change to a file that
+  `scripts/verdict-files.txt` names, with its diff, and each change to
+  that list.
+
+`scripts/verdict-files.txt` names, by path, every file that decides a
+verdict: the mutation runner and its data, the exclusion list, the
+coverage wrapper with its floors and scope, the canary's verdicts, the
+lists of packages at L4 and of tests kept, the merge and release checks,
+the mutation and coverage workflows, and the lists of cases that
+protobuf's conformance suite, h2spec and the YAML test suite may fail.
+Most of these files do not exist yet: the list fixes the paths they will
+have, and each line names the issue that creates them. A change that adds
+a file that decides a verdict puts it at a path the list names, or adds
+its path to the list in the same change. The report reads the base's list and the head's, so
+a file still shows when the same change takes its path off the list.
+
+The report reads MoonBit by its lines and by `moon fmt`'s layout, not as
+the compiler does. So it may list a line that weakens nothing, such as a
+comparison in a helper's loop. A changed call of a helper that asserts is
+not listed, unless the call is an assertion itself; a change to the
+helper's own lines is. It reads only the MoonBit tests: the tests of the
+scripts are not in it.
+
+To read it for a branch before pushing it:
+
+```sh
+python3 scripts/weakening-report.py --base origin/main
+```
+
+An outside contributor's pull request goes the same way as the project's
+own branches: before merging it, the maintainer pushes its branch to a
+branch here, so that the branch checks run on it. Dependabot's pull
+requests keep their own path
+([Before merging into main](docs/merging-into-main.md)).
+
+## Test costs on CI's runners
+
+`.github/workflows/measure-costs.yml` measures on CI's runners what the
+cost model of the test review
+([#275](https://github.com/hirunefu/smock/issues/275)) guesses. It runs on
+a linux/amd64 and a linux/arm64 runner, and only when started by hand. It
+sets no variable that gives moon another C compiler or flags: on amd64,
+moon's native debug builds skip the system's C compiler, and the
+measurement is of the builds as CI's test job makes them.
+`scripts/measure-costs.py` measures in four parts:
+
+- `e2e`: every e2e test run in one process, three times by default, after
+  the builds of `cmd/smock` and the e2e package.
+- `alone`: each e2e test run alone, in a `moon` process of its own
+  (`moon test --target native e2e/<file> -i <index>`), since `moon` prints
+  no time per test and runs a package's async tests ten at a time in one
+  process. Each time holds moon's own work around a run, which the part
+  `e2e` measures as a build with nothing to do.
+- `rebuild`: from clean, in a target directory of its own, the native
+  rebuild of engine's tests and of `cmd/smock` after one mutant in engine,
+  and engine's tests on wasm-gc after it.
+- `coverage`: builds and runs, plain and with `--enable-coverage`, of the
+  native-only packages' tests, the pure packages' tests on wasm-gc but
+  yaml's, yaml's natively, and the binary, each mode from clean; whether
+  moon plans the system's C compiler or tcc for them; and the points the
+  coverage build covers.
+
+Start it from the Actions tab, or with `gh`. GitHub starts a workflow by
+hand only once it is on the default branch; `--ref` picks the commit it
+measures:
+
+```sh
+gh workflow run measure-costs.yml --ref main -f e2e-runs=3 -f alone-runs=1
+```
+
+`alone-runs=0` leaves the part `alone` out. Each architecture's results
+are kept as the artifact `measurements-linux-amd64` or
+`measurements-linux-arm64`, also when a measurement fails, and the job's
+summary shows them. `scripts/estimate-costs.py` recomputes the cost model
+from both, and prints it as Markdown with where it falls against decision
+6's band:
+
+```sh
+gh run download <run id> --dir measurements
+python3 scripts/estimate-costs.py --run-url <run link> \
+  measurements/measurements-linux-amd64 measurements/measurements-linux-arm64
+```
+
+Each part also runs on a developer's machine:
+`python3 scripts/measure-costs.py <part> <out dir>`, with `--jobs` for
+moon's build jobs and `--file` for the tests of one e2e file alone. The
+part `rebuild` changes `engine/range.mbt` while it runs, and puts it back
+afterwards.
 
 ## Benchmark
 

@@ -8,41 +8,6 @@
 // codec is never checked against itself.
 
 ///|
-/// The directory of the wellknown fixtures.
-let wellknown_dir : String = "fixtures/protobuf/wellknown"
-
-///|
-/// The message that protoc encoded from `<name>.txtpb` in the wellknown
-/// fixtures, framed.
-async fn wellknown_message(name : String) -> Bytes {
-  framed(@fs.read_file("\{wellknown_dir}/\{name}.binpb").binary())
-}
-
-///|
-/// Runs `f` with a definitions directory holding `leases.yaml`, which
-/// declares the Mock `leases`, the Default Mock, whose set is
-/// wellknown.proto's, then holds `stubs`, the lines of its `stubs` array;
-/// and with the set at `files/wellknown.binpb`.
-async fn with_leases(stubs : String, f : async (String) -> Unit) -> Unit {
-  let yaml =
-    #|mocks:
-    #|  - name: leases
-    #|    default: true
-    #|    grpc: { descriptorSet: wellknown.binpb }
-    #|stubs:
-    #|
-  with_definitions([("leases.yaml", yaml + stubs)], dir => {
-    @fs.mkdir("\{dir}/files")
-    write_bytes(
-      dir,
-      "files/wellknown.binpb",
-      @fs.read_file("\{wellknown_dir}/wellknown.binpb").binary(),
-    )
-    f(dir)
-  })
-}
-
-///|
 async test "the ticket's example: a Timestamp 1.5 s after the epoch and a Duration of 1.5 s are journaled in their printed forms and meet a condition written so; a reply in other forms has protoc's bytes" {
   let stubs =
     #|  - id: example

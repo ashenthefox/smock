@@ -76,6 +76,12 @@ async test "h2 on the TLS port: part of the preface, then a stall, gets GOAWAY N
         ..certs.args(),
       ],
       smock => {
+        // From the first octet, the preface "has the read timeout instead"
+        // of the idle timeout (docs/http2.md, Timeouts), so the GOAWAY comes
+        // before the idle timeout, the competing event, timed from before
+        // the connection opened, could end it.
+        let idle = 10000L
+        let opened = @async.now()
         let raw = smock.raw_h2(tls=true, preface=false)
         defer raw.close()
         let since = @async.now()
@@ -85,12 +91,12 @@ async test "h2 on the TLS port: part of the preface, then a stall, gets GOAWAY N
         inspect(
           [
             ..frames.shown,
-            "after at least 300 ms: \{elapsed >= 300}, long before the idle timeout: \{elapsed < 5000}",
+            "after at least 300 ms: \{elapsed >= 300}, before the idle timeout: \{since - opened + elapsed < idle}",
           ].join("\n"),
           content=(
             #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
             #|GOAWAY last=0 NO_ERROR
-            #|after at least 300 ms: true, long before the idle timeout: true
+            #|after at least 300 ms: true, before the idle timeout: true
           ),
         )
       },
@@ -156,10 +162,13 @@ async test "h2 on the TLS port: requests on one connection are answered, a delay
         let slow = client.send("GET", "/slow", authority="localhost")
         let fast = client.send("GET", "/fast?after=slow", authority="localhost")
         let fast_response = client.response(fast)
-        let fast_ms = @async.now() - start
+        // A delay "delays only its own stream" (docs/http2.md, Streams that
+        // wait): events of the delayed stream read meanwhile would be kept
+        // for later.
+        let early = client.kept_for(slow)
         let slow_response = client.response(slow)
         let slow_ms = @async.now() - start
-        out.push("fast answered during the delay: \{fast_ms < 1000}")
+        out.push("nothing of the delayed stream came before: \{early == 0}")
         out.push("delayed answered after at least 1000 ms: \{slow_ms >= 1000}")
         out.push(fast_response.render())
         out.push(slow_response.render())
@@ -186,7 +195,7 @@ async test "h2 on the TLS port: requests on one connection are answered, a delay
             #|
             #|fast
             #|---
-            #|fast answered during the delay: true
+            #|nothing of the delayed stream came before: true
             #|---
             #|delayed answered after at least 1000 ms: true
             #|---

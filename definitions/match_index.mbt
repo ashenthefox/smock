@@ -3,7 +3,7 @@
 // that answers a request does not try every Stub of the Mock. gRPC Stubs
 // are not in it: HTTP requests never match them.
 //
-// The index never changes which Stub answers. A lookup gives every Stub
+// The index never changes which Stub answers. A lookup tries every Stub
 // the request could match, in matching order; it leaves out only Stubs
 // whose exact method or exact path differs from the request's. Stubs that
 // cannot be indexed, with neither an exact path nor a method, and CRUD
@@ -87,56 +87,21 @@ fn add_position(
 }
 
 ///|
-/// The HTTP Stubs of this Mock that a request with the method `meth` and
-/// the path `path` can match, in matching order. `path` is percent-decoded and
-/// without the query, as path conditions compare it.
-///
-/// They are found through the Mock's match index, built with the snapshot.
-/// Every Stub left out has an exact method or an exact path condition that
-/// the request does not meet, so the first of them that the request
-/// matches is the first Stub of `http_stubs` that it matches.
-pub fn Mock::candidates(
-  self : Mock,
-  meth : String,
-  path : String,
-) -> Iter[Stub] {
-  let index = self.index
-  let lists : Array[Array[Int32]] = []
-  if index.by_path.get(path) is Some(stubs) {
-    if stubs.by_method.get(meth) is Some(list) {
-      lists.push(list)
-    }
-    lists.push(stubs.any_method)
-  }
-  if index.by_method.get(meth) is Some(list) {
-    lists.push(list)
-  }
-  lists.push(index.scanned)
-  // Merges the lists: each step takes the lowest next position.
-  let next = FixedArray::make(lists.length(), 0)
-  Iter::new(() => {
-    let mut first = -1
-    for k, list in lists {
-      if next[k] < list.length() &&
-        (first < 0 || list[next[k]] < lists[first][next[first]]) {
-        first = k
-      }
-    }
-    guard first >= 0 else { None }
-    let position = lists[first][next[first]]
-    next[first] += 1
-    Some(self.http_stubs[position])
-  })
-}
-
-///|
 /// No positions, for a list the match index does not have.
 let no_positions : Array[Int32] = []
 
 ///|
-/// The first of `candidates(meth, path)` for which `accepts` holds, in the
-/// same order, or `None`: found with a merge over the index's lists, with
-/// no iterator or closure per Stub, since every request looks for one.
+/// The first Stub, in matching order, among the HTTP Stubs of this Mock that
+/// a request with the method `meth` and the path `path` can match, for which
+/// `accepts` holds, or `None`. `path` is percent-decoded and without the
+/// query, as path conditions compare it.
+///
+/// The Stubs are found through the Mock's match index, built with the
+/// snapshot, with a merge over the index's lists and no iterator or closure
+/// per Stub, since every request looks for one. Every Stub the index leaves
+/// out has an exact method or an exact path condition that the request does
+/// not meet, so when `accepts` tells whether the request matches a Stub, the
+/// result is the first Stub of `http_stubs` that it matches.
 pub fn Mock::first_candidate(
   self : Mock,
   meth : String,
@@ -144,8 +109,10 @@ pub fn Mock::first_candidate(
   accepts : (Stub) -> Bool,
 ) -> Stub? {
   let index = self.index
-  // The same lists as `candidates` merges. A Stub is in one list at most,
-  // so the lists never share a position.
+  // The Stubs with the request's exact path and method, those with its
+  // exact path and no method, those with its method and no exact path, and
+  // those scanned for every request. A Stub is in one list at most, so the
+  // lists never share a position.
   let mut by_path_method = no_positions
   let mut by_path_any = no_positions
   if index.by_path.get(path) is Some(stubs) {

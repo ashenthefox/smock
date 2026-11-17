@@ -172,8 +172,15 @@ such as Mock, Stub and Session.
 ## Contributing to smock
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) has the contribution policy, and
-  describes the modules and packages, the pinned MoonBit toolchain, and
-  how to build and test smock.
+  describes the modules and packages, the pinned MoonBit toolchain, how
+  to build and test smock, and how its tests are judged: what makes a
+  good test, how mutants measure the suite, and when a test may be
+  removed.
+- [ledgers/](ledgers/use-cases.md) holds two of the four ledgers that
+  judge the tests: the [use-case ledger](ledgers/use-cases.md), each
+  documented feature and message with the tests that check it, and the
+  [boundary ledger](ledgers/boundaries.md), each documented limit with its
+  tests at the limit and just past it.
 - [bench/README.md](../bench/README.md) describes the release benchmark:
   how to run it on a machine, on GKE Autopilot and in CI, what a run
   writes, and how to compare runs.
@@ -197,6 +204,9 @@ such as Mock, Stub and Session.
   - [ADR 0005](adr/0005-http2-comes-from-moonhttp.md) takes HTTP/2's
     framing, HPACK and connection state from moonbitstack/moonhttp, a
     MoonBit module with no I/O and no C.
+  - [ADR 0006](adr/0006-tests-are-judged-by-four-ledgers.md) judges the
+    tests by four ledgers that leave nothing unexplained, with mutants as
+    the measure and no percentage as a target or a gate.
 - [GLOSSARY.md](../GLOSSARY.md) defines the domain terms, and the words
   to avoid for each.
 - [`schema/v1/fixtures/README.md`](../schema/v1/fixtures/README.md) says
@@ -215,5 +225,9 @@ such as Mock, Stub and Session.
   the Descriptor sets that tests read are built, and
   [`protobuf-conformance/README.md`](../protobuf-conformance/README.md)
   how protobuf's conformance suite checks the codec.
+- [`yaml-test-suite/README.md`](../yaml-test-suite/README.md) says how
+  the YAML test suite checks the YAML parser behind YAML Definition files
+  and OpenAPI documents, and how its lists of the cases that do not pass
+  are kept.
 - [agents/](agents/) tells coding agents where issues live, which triage
   labels to use, and how to read the glossary and the ADRs.

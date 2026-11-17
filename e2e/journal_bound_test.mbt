@@ -4,65 +4,6 @@
 // bench/bench.py runs it, so that its cgroup has a known memory limit.
 
 ///|
-/// The memory limit of the scopes smock runs in here: 52Mi, that of the
-/// smallest GKE Autopilot Pod where Pods may burst, in whole pages of 4 KiB
-/// and of 16 KiB.
-let scope_memory_max : String = "54525952"
-
-///|
-/// The command that runs the command after it in a new systemd user scope
-/// whose cgroup has the memory limit `scope_memory_max`. It becomes that
-/// command by exec, so the command keeps its process ID.
-let in_scope : Array[String] = [
-  "systemd-run",
-  "--user",
-  "--scope",
-  "--quiet",
-  "--collect",
-  "-p",
-  "MemoryMax=\{scope_memory_max}",
-  "--",
-]
-
-///|
-/// What `systemd-run --user` needs from the environment to reach the
-/// systemd user manager, since the harness gives smock no other variables.
-fn user_manager_env(env : Map[String, String]) -> Map[String, String] {
-  let out = Map::from_iter(env.iter())
-  for name in ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"] {
-    if @env.get_env_var(name) is Some(value) {
-      out[name] = value
-    }
-  }
-  out
-}
-
-///|
-/// Why smock cannot run in a scope with a memory limit here, or `None` when
-/// it can: a shell run as `in_scope` prints its own cgroup's memory.max,
-/// which must be the scope's limit.
-async fn scope_unavailable() -> String? {
-  let script = "cat \"/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup)/memory.max\""
-  let command = [..in_scope, "sh", "-c", script]
-  let (status, output) = @process.collect_output_merged(
-    command[0],
-    command[1:].to_owned(),
-  ) catch {
-    err => return Some("systemd-run cannot be run: \{err}")
-  }
-  let text = output.text().trim(chars="\n").to_owned()
-  if status != 0 {
-    Some("systemd-run --user failed with exit status \{status}: \{text}")
-  } else if text != scope_memory_max {
-    Some(
-      "a scope with MemoryMax=\{scope_memory_max} got memory.max \{text.escape()}: the systemd user manager needs the memory controller delegated to it (see bench/README.md)",
-    )
-  } else {
-    None
-  }
-}
-
-///|
 async test "journal byte bound: a quarter of the memory limit of smock's cgroup, unless the flag or the variable sets it" {
   if scope_unavailable() is Some(reason) {
     println(
@@ -94,15 +35,6 @@ async test "journal byte bound: a quarter of the memory limit of smock's cgroup,
       #|{"level":"info","msg":"journal byte bound","maxBytes":2000000,"source":"variable"}
     ),
   )
-}
-
-///|
-/// The value of the sample `name` without labels in the Prometheus `text`.
-fn metric_value(text : String, name : String) -> Double raise {
-  for line in metric_lines(text, name + " ") {
-    return @string.parse_double(line[name.length() + 1:]) catch { _ => break }
-  }
-  fail("no sample \{name} in:\n\{text}")
 }
 
 ///|

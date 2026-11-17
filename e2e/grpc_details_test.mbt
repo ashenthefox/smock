@@ -9,17 +9,6 @@
 // error_details.proto, not status.proto.
 
 ///|
-/// The set of fixtures/protobuf/details/: helloworld.proto and
-/// error_details.proto.
-let details_set_path : String = "fixtures/protobuf/details/details.binpb"
-
-///|
-/// The framed HelloRequest `{name: "Ann"}`, as protoc encodes it.
-async fn hello_ann() -> Bytes {
-  framed(@fs.read_file("fixtures/protobuf/details/hello-ann.binpb").binary())
-}
-
-///|
 /// The google.rpc.Status that protoc encodes from
 /// fixtures/protobuf/details/<name>.txtpb.
 async fn protoc_status(name : String) -> Bytes {
@@ -34,30 +23,6 @@ fn GrpcReply::status_details(self : GrpcReply) -> Bytes? raise {
     return None
   }
   Some(@base64.decode(value + "=".repeat((4 - value.length() % 4) % 4)))
-}
-
-///|
-/// Runs `f` with a definitions directory holding `details.yaml`, which
-/// declares the Mock `greeter`, the Default Mock, whose set is
-/// details.binpb, then holds `stubs`, the lines of its `stubs` array; and
-/// with the set at `files/details.binpb`.
-async fn with_details(stubs : String, f : async (String) -> Unit) -> Unit {
-  let yaml =
-    #|mocks:
-    #|  - name: greeter
-    #|    default: true
-    #|    grpc: { descriptorSet: details.binpb }
-    #|stubs:
-    #|
-  with_definitions([("details.yaml", yaml + stubs)], dir => {
-    @fs.mkdir("\{dir}/files")
-    write_bytes(
-      dir,
-      "files/details.binpb",
-      @fs.read_file(details_set_path).binary(),
-    )
-    f(dir)
-  })
 }
 
 ///|

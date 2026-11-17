@@ -9,10 +9,6 @@
 // send records in orders protoc never writes.
 
 ///|
-/// The directory of the collections fixtures.
-let collections_dir : String = "fixtures/protobuf/collections"
-
-///|
 /// The framed message that the messages protoc encoded from each
 /// `<name>.txtpb` of `names` in the collections fixtures make, joined in
 /// order.
@@ -22,25 +18,6 @@ async fn collections_message(names : Array[String]) -> Bytes {
     out.write_bytes(@fs.read_file("\{collections_dir}/\{name}.binpb").binary())
   }
   framed(out.to_bytes())
-}
-
-///|
-/// Runs `f` with a definitions directory holding `shelf.yaml`, whose text
-/// is `yaml`, and the set of collections.proto at
-/// `files/collections.binpb`.
-async fn with_collections_set(
-  yaml : String,
-  f : async (String) -> Unit,
-) -> Unit {
-  with_definitions([("shelf.yaml", yaml)], dir => {
-    @fs.mkdir("\{dir}/files")
-    write_bytes(
-      dir,
-      "files/collections.binpb",
-      @fs.read_file("\{collections_dir}/collections.binpb").binary(),
-    )
-    f(dir)
-  })
 }
 
 ///|

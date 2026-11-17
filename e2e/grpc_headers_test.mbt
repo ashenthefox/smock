@@ -26,64 +26,6 @@ let unserved_example : String =
   #|    response: { json: { message: Hello Tom } }
 
 ///|
-/// The fields of a gRPC call to `path` at `authority`, as gRPC clients send
-/// them, with `content-type: <content_type>`, by default
-/// `application/grpc`, then `more`.
-fn call_fields(
-  path : String,
-  authority : String,
-  content_type~ : String = "application/grpc",
-  more~ : Array[(String, String)] = [],
-) -> Array[(String, String)] {
-  let fields = request_fields("POST", path, authority)
-  fields.push(("content-type", content_type))
-  fields.push(("te", "trailers"))
-  fields.append(more)
-  fields
-}
-
-///|
-/// The Journal's entries, one per line: the Mock, the target, the body's
-/// data and size, the HTTP status, the gRPC status and the Stub of the Near
-/// miss, each as JSON.
-async fn calls_journaled(smock : Smock) -> String {
-  let (_, journal) = smock.journal()
-  guard journal is Object({ "entries": Array(entries), .. }) else {
-    fail("no entries: \{journal.stringify()}")
-  }
-  let out = []
-  for entry in entries {
-    guard entry
-      is Object(
-        {
-          "mock": mock,
-          "request": Object(
-            {
-              "target": String(target),
-              "body": Object({ "data": data, "size": size, .. }),
-              ..
-            }
-          ),
-          "status": status,
-          "grpcStatus": grpc_status,
-          "nearMiss": near_miss,
-          ..
-        }
-      ) else {
-      fail("not a gRPC call's entry: \{entry.stringify()}")
-    }
-    let near = match near_miss {
-      Object({ "stub": stub, .. }) => stub.stringify()
-      _ => "null"
-    }
-    out.push(
-      "\{mock.stringify()} \{target} \{data.stringify()}/\{size.stringify()} \{status.stringify()} \{grpc_status.stringify()} near miss \{near}",
-    )
-  }
-  out.join("\n")
-}
-
-///|
 async test "calls that cannot reach a gRPC Stub get Trailers-Only UNIMPLEMENTED as soon as their HEADERS arrive, then RST_STREAM NO_ERROR while the client still sends, or the answer alone when the HEADERS end the request; each is journaled as unmatched with an empty body" {
   with_greeter_set([("greeter.yaml", unserved_example)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {

@@ -1,13 +1,14 @@
 // When a certificate expires, read from its PEM in MoonBit: the validity of
 // an X.509 certificate is plain DER, so no C is needed for it (ADR 0001).
 // OpenSSL has checked the certificate by the time it is presented; this
-// only reads its notAfter.
+// only reads its notAfter, which server reports in the expiry metric and in
+// the log entry of each reload.
 
 ///|
 /// When the first certificate in `pem` expires: its notAfter, in
 /// milliseconds since the Unix epoch. `None` when `pem` holds no
 /// certificate that can be read.
-fn certificate_expiry(pem : Bytes) -> Int64? {
+pub fn certificate_expiry(pem : Bytes) -> Int64? {
   guard first_certificate_der(pem) is Some(der) else { return None }
   // Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signature }
   guard der_element(der, 0) is Some((0x30, certificate, _)) &&

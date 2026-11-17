@@ -1,0 +1,13 @@
+// Written for smock's tests of the reflection service: a file that imports
+// left.proto and right.proto, which both import base.proto.
+syntax = "proto3";
+
+package diamond;
+
+import "diamond/left.proto";
+import "diamond/right.proto";
+
+message Top {
+  Left left = 1;
+  Right right = 2;
+}

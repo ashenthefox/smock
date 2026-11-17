@@ -68,53 +68,6 @@ let hello_and_uploads : String =
   #|      "response": { "status": 201, "body": "stored" } }] }
 
 ///|
-/// The size of the header list `fields` as RFC 7541, section 4.1, counts
-/// it: each field's name and value, in octets, plus 32.
-fn list_size(fields : Array[(String, String)]) -> Int32 {
-  let mut size = 0
-  for field in fields {
-    size += @utf8.encode(field.0).length() + @utf8.encode(field.1).length() + 32
-  }
-  size
-}
-
-///|
-/// `fields`, then an `x-pad` field whose value of `a`s makes the list
-/// `size` octets as RFC 7541, section 4.1, counts it.
-fn padded(
-  fields : Array[(String, String)],
-  size : Int32,
-) -> Array[(String, String)] {
-  let pad = size - list_size(fields) - "x-pad".length() - 32
-  [..fields, ("x-pad", String::make(pad, 'a'))]
-}
-
-///|
-/// The Journal's entries, one per line, as `<method> <target>`.
-async fn journaled(smock : Smock) -> String {
-  let (_, journal) = smock.journal()
-  guard journal is Object({ "entries": Array(entries), .. }) else {
-    fail("no entries: \{journal.stringify()}")
-  }
-  let out = []
-  for entry in entries {
-    guard entry
-      is Object(
-        {
-          "request": Object(
-            { "method": String(meth), "target": String(target), .. }
-          ),
-          ..
-        }
-      ) else {
-      fail("an entry without a request: \{entry.stringify()}")
-    }
-    out.push("\{meth} \{target}")
-  }
-  out.join("\n")
-}
-
-///|
 async test "h2c: a header list just over --header-size-limit, counted as RFC 7541 counts it with every cookie field, gets 431 on its stream while a concurrent stream is answered, one at the limit is served, and the 431 is rejected traffic with no Journal entry" {
   with_definitions([("files.json", hello_and_uploads)], dir => {
     let args = ["--dir", dir, "--port", "0", "--header-size-limit", "1000"]

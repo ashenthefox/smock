@@ -1,0 +1,5 @@
+{"file":"prng/prng.mbt","definition":"Generator::Generator","text":"01b9f6ac46d6f576","pinned":{"DEL":1,"AOR":3,"INT":6},"full":{"DEL":1,"AOR":3,"INT":18}}
+{"file":"prng/prng.mbt","definition":"Generator::uint64","text":"a28a982088bf506c","pinned":{"BODY":1,"DEL":6,"AOR":2,"INT":5},"full":{"BODY":1,"DEL":6,"AOR":2,"INT":15}}
+{"file":"prng/prng.mbt","definition":"Generator::double","text":"be39f37d36e68b34","pinned":{"BODY":1,"AOR":1,"INT":1},"full":{"BODY":1,"AOR":1,"INT":3}}
+{"file":"prng/prng.mbt","definition":"Generator::below","text":"263146168c24648f","pinned":{"BODY":1,"ROR":1,"IFC":1,"AOR":1,"INT":1},"full":{"BODY":1,"ROR":1,"IFC":2,"AOR":1,"INT":1}}
+{"file":"prng/prng.mbt","definition":"rotl","text":"ce71a59c6617167c","pinned":{"BODY":1,"AOR":1,"INT":1},"full":{"BODY":1,"AOR":1,"INT":3}}

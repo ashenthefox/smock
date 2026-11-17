@@ -604,7 +604,12 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
           self.will_refuse(stream, 431)
           continue
         }
-        if request.is_malformed() {
+        if @serverparsers.is_malformed_http2_request(
+            meth=request.meth,
+            target=request.target,
+            authority=request.authority,
+            headers=request.headers,
+          ) {
           self.will_refuse(stream, 400)
           continue
         }

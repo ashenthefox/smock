@@ -23,33 +23,15 @@ let slow_greeter : String =
   #|    fault: { delay: { fixed: 3000 } }
 
 ///|
-/// Starts a call to SayHello with the framed HelloRequest `{name: "Tom"}`,
-/// as `H2Client::call` sends it, with `grpc-timeout: <timeout>` when given,
-/// then `headers`, and returns its stream without reading the reply.
-async fn H2Client::start_call(
-  self : H2Client,
-  timeout? : String,
-  headers~ : Array[(String, String)] = [],
-) -> Int32 {
-  let fields = [("content-type", "application/grpc"), ("te", "trailers")]
-  if timeout is Some(timeout) {
-    fields.push(("grpc-timeout", timeout))
-  }
-  self.send(
-    "POST",
-    "/helloworld.Greeter/SayHello",
-    authority="localhost",
-    headers=[..fields, ..headers],
-    body=framed(@fs.read_file(hello_request_path).binary()),
-  )
-}
-
-///|
 async test "the ticket's example: a Stub with a delay of 3000 ms answers a call with grpc-timeout 5S after 3 s, and a call with grpc-timeout 1S gets Trailers-Only DEADLINE_EXCEEDED about 1 s after its HEADERS, journaled with status 200 and grpcStatus DEADLINE_EXCEEDED" {
   with_greeter_set([("greeter.yaml", slow_greeter)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let client = smock.h2c()
       defer client.close()
+      // The deadline cuts the delay short: the call ends "about 1 s after
+      // its HEADERS" (docs/grpc/state-and-faults.md, Deadlines), before the
+      // delay, the competing event, is over.
+      let delay = 3000L
       let start = @async.now()
       let five = client.start_call(timeout="5S")
       let one = client.start_call(timeout="1S")
@@ -62,10 +44,10 @@ async test "the ticket's example: a Stub with a delay of 3000 ms answers a call 
         [
           "grpc-timeout 1S:",
           cut.render(),
-          "after 1 s, before the delay is over: \{cut_ms >= 1000 && cut_ms < 3000}",
+          "after 1 s, before the delay is over: \{cut_ms >= 1000 && cut_ms < delay}",
           "grpc-timeout 5S:",
           served.render(),
-          "after 3 s: \{served_ms >= 3000}",
+          "after 3 s: \{served_ms >= delay}",
           "Journal:",
           answers(page),
         ].join("\n"),
@@ -172,6 +154,7 @@ async test "a call the client cancels during a delay ends there with its entry a
           error_code=@http2.error_cancel,
         )
       }
+      let delay = 3000L
       let start = @async.now()
       // Each delay of 3000 ms outlasts every deadline but the first.
       raw.send(
@@ -202,7 +185,7 @@ async test "a call the client cancels during a delay ends there with its entry a
       inspect(
         [
           ..shown,
-          "every entry committed before the delay was over: \{committed_ms < 3000}",
+          "every entry committed before the delay was over: \{committed_ms < delay}",
           journaled,
         ].join("\n"),
         content=(
@@ -236,7 +219,11 @@ async test "a delay shorter than the call's deadline is served, and so is a dela
     #|    mock: greeter
     #|    request: { path: /helloworld.Greeter/SayHello }
     #|    response: { json: { message: Hello Tom } }
-    #|    fault: { delay: { fixed: 400 } }
+    #|    fault: { delay: { fixed: 1000 } }
+  // Under a timeout of 0, "a call with a delay gets DEADLINE_EXCEEDED at
+  // once" (docs/grpc/state-and-faults.md, Deadlines): before its delay of
+  // 1000 ms, the competing event, is over.
+  let delay = 1000L
   with_greeter_set([("greeter.yaml", yaml)], dir => {
     // One stream at a time: each call needs the one before to have freed
     // its stream.
@@ -269,23 +256,25 @@ async test "a delay shorter than the call's deadline is served, and so is a dela
             .filter(field => field.0.has_prefix("grpc-"))
             .map(field => "\{field.0}: \{field.1}")
             .join(", ")
-          let at_once = if headers.is_empty() {
-            " "
+          // A call without a delay has no competing event: its status shows
+          // that it was served, and how fast is the runner's speed.
+          let (at_once, when) = if headers.is_empty() {
+            (" ", ", after the delay of 1000 ms: \{ms >= delay}")
           } else {
-            " x-delay: none, "
+            (" x-delay: none, ", "")
           }
           out.push(
-            "grpc-timeout \{timeout},\{at_once}\{reply.data.length()} message: \{status}, after 400 ms: \{ms >= 400}",
+            "grpc-timeout \{timeout},\{at_once}\{reply.data.length()} message: \{status}\{when}",
           )
         }
         let (_, page) = smock.journal()
         inspect(
           [..out, "Journal:", answers(page)].join("\n"),
           content=(
-            #|grpc-timeout 5S, 1 message: grpc-status: 0, after 400 ms: true
-            #|grpc-timeout 99999999H, 1 message: grpc-status: 0, after 400 ms: true
-            #|grpc-timeout 0m, 0 message: grpc-status: 4, grpc-message: deadline exceeded, after 400 ms: false
-            #|grpc-timeout 0m, x-delay: none, 1 message: grpc-status: 0, after 400 ms: false
+            #|grpc-timeout 5S, 1 message: grpc-status: 0, after the delay of 1000 ms: true
+            #|grpc-timeout 99999999H, 1 message: grpc-status: 0, after the delay of 1000 ms: true
+            #|grpc-timeout 0m, 0 message: grpc-status: 4, grpc-message: deadline exceeded, after the delay of 1000 ms: false
+            #|grpc-timeout 0m, x-delay: none, 1 message: grpc-status: 0
             #|Journal:
             #|"slow" 200 "OK"
             #|"slow" 200 "OK"

@@ -13,6 +13,10 @@ async test "h2c: a client that keeps the connection window at zero is closed at 
     let stopped = with_smock(
       ["--dir", dir, "--port", "0", "--write-timeout-ms", "500"],
       smock => {
+        // "When the connection window stays at zero that long, the
+        // connection closes" (docs/running.md, The write timeout), which the
+        // test allows up to 4 times the write timeout.
+        let write = 500L
         let raw = smock.raw_h2(settings=false)
         defer raw.close()
         let start = @async.now()
@@ -32,10 +36,10 @@ async test "h2c: a client that keeps the connection window at zero is closed at 
         inspect(
           [
             ..frames.shown,
-            "ended by \{frames.how}, after at least 500 ms: \{frames.end_ms >= 500}, within 2000 ms: \{frames.end_ms < 2000}",
+            "ended by \{frames.how}, after at least 500 ms: \{frames.end_ms >= write}, within 4 times the write timeout: \{frames.end_ms < 4 * write}",
             "a new connection: \{after.brief()}",
             "Journal:",
-            ..smock.journal_once(2, within=1000),
+            ..smock.journal_once(2, within=patience_ms),
           ].join("\n"),
           content=(
             #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
@@ -45,7 +49,7 @@ async test "h2c: a client that keeps the connection window at zero is closed at 
             #|DATA 1 16384 octets
             #|DATA 1 16384 octets
             #|DATA 1 16383 octets
-            #|ended by a FIN, after at least 500 ms: true, within 2000 ms: true
+            #|ended by a FIN, after at least 500 ms: true, within 4 times the write timeout: true
             #|a new connection: 200 hello (end)
             #|Journal:
             #|/big: stub "big", status 200
@@ -65,6 +69,10 @@ async test "h2c: a stream whose own window stays at zero for the write timeout w
     let stopped = with_smock(
       ["--dir", dir, "--port", "0", "--write-timeout-ms", "500"],
       smock => {
+        // "When only a stream's own window does, that stream gets RST_STREAM
+        // CANCEL" (docs/running.md, The write timeout), which the test
+        // allows up to 4 times the write timeout.
+        let write = 500L
         let raw = smock.raw_h2(settings=false)
         defer raw.close()
         let out = []
@@ -86,13 +94,13 @@ async test "h2c: a stream whose own window stays at zero for the write timeout w
         let frames = raw.frames_until(start, frame => frame is RstStream(..))
         out.append(frames.shown)
         out.push(
-          "stream 1 reset after at least 500 ms: \{frames.end_ms >= 500}, within 2000 ms: \{frames.end_ms < 2000}",
+          "stream 1 reset after at least 500 ms: \{frames.end_ms >= write}, within 4 times the write timeout: \{frames.end_ms < 4 * write}",
         )
         out.push("--- stream 5 sent, and its window widened by 5")
         raw.send([raw.get(5, "/item"), WindowUpdate(stream_id=5, increment=5)])
         out.push(raw.frames_until_stream_ends(5))
         out.push("---")
-        out.append(smock.journal_once(3, within=1000))
+        out.append(smock.journal_once(3, within=patience_ms))
         inspect(
           out.join("\n"),
           content=(
@@ -103,7 +111,7 @@ async test "h2c: a stream whose own window stays at zero for the write timeout w
             #|--- stream 3's window widened by 5
             #|DATA 3 END_STREAM 5 octets
             #|RST_STREAM 1 CANCEL
-            #|stream 1 reset after at least 500 ms: true, within 2000 ms: true
+            #|stream 1 reset after at least 500 ms: true, within 4 times the write timeout: true
             #|--- stream 5 sent, and its window widened by 5
             #|HEADERS 5 END_HEADERS [:status: 200, date: <now>, content-length: 5]
             #|DATA 5 END_STREAM 5 octets
@@ -231,7 +239,7 @@ async test "h2c: a client that widens its windows slowly but steadily keeps its 
           "by WINDOW_UPDATE on the connection, longer than the write timeout: \{@async.now() - start > 500}",
         )
         out.push("---")
-        out.append(smock.journal_once(3, within=1000))
+        out.append(smock.journal_once(3, within=patience_ms))
         inspect(
           out.join("\n"),
           content=(
@@ -314,7 +322,7 @@ async test "h2c: a Stub's delay longer than the write timeout does not count tow
         raw.send([WindowUpdate(stream_id=0, increment=100_000)])
         out.push(raw.runs_until(frame => ends_stream(frame, 1)))
         out.push("---")
-        out.append(smock.journal_once(3, within=1000))
+        out.append(smock.journal_once(3, within=patience_ms))
         inspect(
           out.join("\n"),
           content=(

@@ -10,15 +10,6 @@
 // hand, so the codec is never checked against itself.
 
 ///|
-/// The entries of the Journal of `session`, or of the no-Session space,
-/// one per line, as `answers` shows them: the Stub, the HTTP status and the
-/// gRPC status, then the template error, if any.
-async fn Smock::calls_of(self : Smock, session? : String) -> String {
-  let (_, page) = self.journal(session?)
-  answers(page)
-}
-
-///|
 async test "an Ephemeral gRPC Stub added through the Admin API answers the calls of its Session before the file Stubs, with its condition normalised as a file Stub's is, and never an HTTP request" {
   let yaml =
     #|mocks:

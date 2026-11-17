@@ -6,14 +6,6 @@
 // streams go on.
 
 ///|
-/// The response on one stream as a test shows it, on one line: the status,
-/// the header fields, and how the stream ended.
-fn H2Response::line(self : H2Response) -> String {
-  let fields = self.headers.map(header => shown_field(header.0, header.1))
-  "\{self.status} [\{fields.join(", ")}] \{self.body.length()} octets, \{self.ended}"
-}
-
-///|
 async test "h2c: a stream whose request HTTP/1.1 would refuse gets 400 on its stream alone, with no connection field, and the next stream on the connection is served" {
   with_definitions(two_mocks(default=false), dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {

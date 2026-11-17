@@ -235,6 +235,15 @@ Its body is `{"born": "2020-01-01", "code": 7, "tag": null}`.
   top](../importing-openapi.md#quick-start), with a warning that says to
   quote it.
 
+The YAML parser also holds to these rules:
+
+- A key with nothing written, as in `: value`, is an error, "a key must
+  not be empty", though an empty value is null: every key is a string.
+- A plain value that JSON cannot hold, such as `.inf`, `.NaN` or a
+  hexadecimal or octal integer above 2^53 - 1, is an error whose message
+  ends in "quote this value". Quoted, it is a string.
+- The members of a mapping are read in the order they are written.
+
 Each of these is an error at its pointer, with a message that names it,
 and nothing is written:
 
@@ -263,3 +272,11 @@ reads the aliases and writes each part in full:
 npx @redocly/cli@2.55.0 bundle api/petstore.yaml --output api/petstore.bundled.json
 smock import-openapi api/petstore.bundled.json --mock petstore --output defs/petstore.yaml
 ```
+
+Some valid YAML is an error too, on purpose, as it is in Definition files
+([Writing Definition files in
+YAML](../definition-files.md#writing-definition-files-in-yaml)): a file
+with no document, a key that is a collection, a `key: value` pair in a
+flow sequence without braces, a key of a flow mapping written over
+several lines, and a tab in the white space at the start of a line, even
+where YAML would read it as a separator rather than as indentation.

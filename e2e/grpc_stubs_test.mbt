@@ -29,21 +29,6 @@ fn greeter_stubs(json : String) -> String {
 }
 
 ///|
-/// Runs `f` with a definitions directory holding `greeter.yaml` and the set
-/// of gRPC's helloworld.proto at `files/greeter.binpb`.
-async fn with_greeter(yaml : String, f : async (String) -> Unit) -> Unit {
-  with_definitions([("greeter.yaml", yaml)], dir => {
-    @fs.mkdir("\{dir}/files")
-    write_bytes(
-      dir,
-      "files/greeter.binpb",
-      @fs.read_file(greeter_set_path).binary(),
-    )
-    f(dir)
-  })
-}
-
-///|
 async test "smock check passes a gRPC Stub without status, and reports an unknown field of its reply at its pointer" {
   let out = []
   for json in ["{ message: Hello Tom }", "{ mesage: Hi }"] {

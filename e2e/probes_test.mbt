@@ -3,22 +3,6 @@
 // (contract_test.mbt).
 
 ///|
-/// The probes, in the order the tests show them.
-let probes : Array[String] = ["/startupz", "/readyz", "/livez"]
-
-///|
-/// Each probe's answer, without a token, as `<path>: <status> <body>`, one
-/// per line, each checked against the document.
-async fn Smock::probes(self : Smock) -> String {
-  let out = []
-  for path in probes {
-    let response = self.admin("GET", path, token=None)
-    out.push("\{path}: \{response.status} \{response.body}")
-  }
-  out.join("\n")
-}
-
-///|
 async test "the probes need no token while authentication is on, and pass once smock serves" {
   with_definitions([("users.json", users)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
@@ -178,8 +162,13 @@ async test "after the first definition set has loaded and before the plain and T
         guard serving.listening_on(["plain", "tls"]) is Some(_) else {
           fail("smock exited before it listened:\n\{serving.log().join("\n")}")
         }
-        // The probes answer as docs/admin-api.md says, and with the error
-        // shape when they fail; not_ready's message is the one #291 gives.
+        // The probes answer as docs/admin-api.md, Probes, says, and with the
+        // error shape when they fail: /readyz fails "with `not_ready` ("the
+        // plain and TLS ports are not open yet") after that [the first
+        // definition set has loaded] and until smock listens on the plain
+        // and TLS ports", which the maintainer confirmed on 2026-11-17
+        // (#275), as #291's criterion gives it; openapi/admin.json's
+        // ErrorCode makes not_ready a 503.
         inspect(
           (
             $|while smock reads the certificate file:

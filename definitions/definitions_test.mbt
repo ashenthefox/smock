@@ -223,16 +223,23 @@ test "a JSON file with a duplicate key is rejected at the later key, as the equi
 }
 
 ///|
+/// A file named otherwise, `a.txt`, is not a Definition file: "The
+/// Definition files are the regular files at the top level whose names end
+/// in `.json`, `.yaml` or `.yml`" (docs/definition-files.md). The directory
+/// reader skips it, so only a set given to `load` holds it, and the
+/// problem is about the whole file, with no pointer (#283).
 test "YAML and JSON files are read together, in byte-wise name order" {
   inspect(
     problems([
       ("b.yml", "mocks: [{ name: b }]\nstubs: 7\n"),
       ("a.json", "{ \"stubs\": 7 }"),
       ("B.yaml", "mocks: yes\n"),
+      ("a.txt", ""),
     ]),
     content=(
       #|B.yaml: /mocks: "yes" may be read as a boolean; quote this value
       #|a.json: /stubs: must be an array
+      #|a.txt: a Definition file name ends in .json, .yaml or .yml
       #|b.yml: /stubs: must be an array
     ),
   )

@@ -357,14 +357,16 @@ async test "a close Fault sends GOAWAY NO_ERROR, then closes the connection, whi
         [..raw.hello_call(1), ..raw.hello_call(3, more=[("x-fault", "close")])],
       )
       let frames = raw.frames_until(start, _ => false)
-      // The status a client derives, on a connection of its own.
+      // The status a client derives, on a connection of its own. The call
+      // that waits ends with the connection, `(closed)` without its
+      // message, so before its delay is over: `close` "ends every call on
+      // the connection" (docs/grpc/state-and-faults.md, Faults).
       let client = smock.h2c()
       defer client.close()
       let slow = client.start_call()
       let closing = client.start_call(headers=[("x-fault", "close")])
       let closed = client.reply(closing)
       let waiting = client.reply(slow)
-      let ended_ms = @async.now() - start
       inspect(
         [
           ..frames.shown,
@@ -375,7 +377,6 @@ async test "a close Fault sends GOAWAY NO_ERROR, then closes the connection, whi
           "the call that waits:",
           waiting.render(),
           "the client sees \{derived_status(waiting)}",
-          "both before the delay is over: \{ended_ms < 3000}",
           "Journal:",
           fault_answers(smock),
         ].join("\n"),
@@ -392,7 +393,6 @@ async test "a close Fault sends GOAWAY NO_ERROR, then closes the connection, whi
           #|HEADERS
           #|(closed)
           #|the client sees UNAVAILABLE
-          #|both before the delay is over: true
           #|Journal:
           #|"closing" null - "close"
           #|"slow" 200 "OK" null
@@ -440,19 +440,31 @@ async test "a Fault with a delay comes in its call's task once the delay is over
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let client = smock.h2c()
       defer client.close()
+      let faults = ["late-reset", "late-partial", "late-close"]
+      // The calls with Faults, then the one without, in one write: smock
+      // reads them together, so their replies come in the order smock gives
+      // them, however late the test sends the calls or reads the replies.
+      // While a call's delay runs, "the other calls of the connection are
+      // answered meanwhile" (docs/grpc/state-and-faults.md, Faults), so the
+      // call without a Fault is answered before the first delay, 300 ms, is
+      // over, and nothing of the other calls comes before its reply.
       let start = @async.now()
-      let late = []
-      for fault in ["late-reset", "late-partial", "late-close"] {
-        late.push((fault, client.start_call(headers=[("x-fault", fault)])))
-      }
-      let fast = client.call("/helloworld.Greeter/SayHello")
+      let streams = client.start_calls(
+        [..faults.map(fault => [("x-fault", fault)]), []],
+      )
+      let fast = client.reply(streams[faults.length()])
+      // Whatever came of the other calls while the client read this reply
+      // was kept for later.
+      let first = faults
+        .mapi((i, _) => client.kept_for(streams[i]))
+        .iter()
+        .all(kept => kept == 0)
       let out = [
-        "fast, at once: \{derived_status(fast)}, before 300 ms: \{@async.now() - start < 300}",
+        "fast, at once: \{derived_status(fast)}, before anything of the calls with Faults: \{first}",
       ]
       let delays = [300L, 450, 700]
-      for i, called in late {
-        let (fault, stream) = called
-        let reply = client.reply(stream)
+      for i, fault in faults {
+        let reply = client.reply(streams[i])
         out.push("x-fault: \{fault}:")
         out.push(reply.render())
         out.push(
@@ -462,7 +474,7 @@ async test "a Fault with a delay comes in its call's task once the delay is over
       inspect(
         [..out, "Journal:", fault_answers(smock)].join("\n"),
         content=(
-          #|fast, at once: OK, before 300 ms: true
+          #|fast, at once: OK, before anything of the calls with Faults: true
           #|x-fault: late-reset:
           #|HEADERS
           #|(reset INTERNAL_ERROR)

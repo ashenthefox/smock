@@ -70,9 +70,11 @@ fn resolve_core(text : String) -> Result[Json, String] {
     return Ok(Json::string(text))
   }
   if core_decimal(text) is Some(json) {
-    // A decimal integer beyond 2^53 keeps its digits as `repr`.
+    // A decimal integer beyond 2^53 keeps its digits as `repr`, and a
+    // number beyond a Double's range keeps its text, so the JSON parser
+    // reads every number in JSON syntax.
     return Ok(@json.parse(json)) catch {
-      _ => Err("is not a number JSON can hold; quote this value")
+      _ => abort("core_decimal gives a number in JSON syntax")
     }
   }
   let radix = if text.has_prefix("0x") {

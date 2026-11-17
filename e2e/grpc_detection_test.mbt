@@ -46,36 +46,6 @@ async fn with_detection(
 }
 
 ///|
-/// An HTTP/2 client of smock's plain port for `"h2c"`, or of its TLS port
-/// for `"h2"`.
-async fn Smock::h2_on(self : Smock, port : String) -> H2Client {
-  if port == "h2c" {
-    self.h2c()
-  } else {
-    self.h2()
-  }
-}
-
-///|
-/// The reply in short: its `:status`, its `grpc-status` and `grpc-message`,
-/// from the trailers or from a Trailers-Only answer's HEADERS, how many DATA
-/// frames came, and how the stream ended.
-fn GrpcReply::outline(self : GrpcReply) -> String {
-  let out = []
-  let fields = match self.trailers {
-    Some(trailers) => [..self.head, ..trailers]
-    None => self.head
-  }
-  for field in fields {
-    if field.0 is (":status" | "grpc-status" | "grpc-message") {
-      out.push("\{field.0}: \{field.1}")
-    }
-  }
-  out.push("\{self.data.length()} DATA")
-  "\{out.join(", ")} (\{self.ended})"
-}
-
-///|
 /// The Journal's entries, one per line: the version, the request's
 /// `content-type` in any case, the Stub that matched, the HTTP status and the gRPC
 /// status, each as JSON, `-` for a member that is absent.

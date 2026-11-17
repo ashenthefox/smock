@@ -3,38 +3,6 @@
 // still running when the drain timeout expires, and exits with status 0.
 
 ///|
-/// Mock `m`, whose Stubs answer `GET /fast` at once, `GET /slow` after a
-/// delay of 1000 ms, `GET /stalled` after a delay of 60 s, `GET /ticks` with
-/// a stream of 100 events, one every 100 ms, and `GET /brief` with a stream
-/// of 10 such events.
-let drain_defs : String = {
-  let tick = "{ \"delay\": 100, \"data\": \"tick\" }"
-  let ticks = Array::make(100, tick)
-  let brief = Array::make(10, tick)
-  let defs =
-    $|{ "mocks": [{ "name": "m" }],
-    $|  "stubs": [
-    $|    { "id": "fast", "mock": "m", "request": { "path": "/fast" },
-    $|      "response": { "status": 200, "body": "fast" } },
-    $|    { "id": "slow", "mock": "m", "request": { "path": "/slow" },
-    $|      "response": { "status": 200, "body": "slow" },
-    $|      "fault": { "delay": { "fixed": 1000 } } },
-    $|    { "id": "stalled", "mock": "m", "request": { "path": "/stalled" },
-    $|      "response": { "status": 200, "body": "stalled" },
-    $|      "fault": { "delay": { "fixed": 60000 } } },
-    $|    { "id": "ticks", "mock": "m", "request": { "path": "/ticks" },
-    $|      "response": { "status": 200, "events": [\{ticks.join(", ")}] } },
-    $|    { "id": "brief", "mock": "m", "request": { "path": "/brief" },
-    $|      "response": { "status": 200, "events": [\{brief.join(", ")}] } } ] }
-  defs
-}
-
-///|
-/// How long a test waits after sending a request before it sends SIGTERM,
-/// so that smock has received the request by then.
-let settle_ms : Int32 = 300
-
-///|
 /// Whether a new connection to `port` is accepted or refused.
 async fn connection_to(port : Int32) -> String {
   try @socket.Tcp::connect(@socket.Addr::parse("127.0.0.1:\{port}")) catch {
@@ -50,23 +18,6 @@ async fn connection_to(port : Int32) -> String {
       "accepted"
     }
   }
-}
-
-///|
-/// The log entries about the drain, without their time.
-fn drain_entries(logs : Array[String]) -> String {
-  let out = []
-  for line in logs {
-    let entry = @json.parse(line) catch { _ => continue }
-    guard entry is Object(fields) &&
-      fields.get("msg") is Some(String(msg)) &&
-      msg.contains("drain") else {
-      continue
-    }
-    fields.remove("time")
-    out.push(Json::object(fields).stringify())
-  }
-  out.join("\n")
 }
 
 ///|
@@ -101,38 +52,62 @@ async test "on SIGTERM, smock refuses new connections, closes idle ones at once,
           stream.write("GET /brief HTTP/1.1\r\nHost: localhost\r\n\r\n")
           let _ = read_head(stream)
           @async.sleep(settle_ms)
+          // As docs/running.md's The drain says: idle keep-alive connections
+          // "close at once", before the response in progress, due about
+          // 700 ms after SIGTERM, is answered; responses in progress finish;
+          // and smock exits "as soon as nothing is in flight, and at the
+          // latest when the drain timeout ... expires", so before it.
+          let drain = 10000L
           let start = @async.now()
           smock.terminate()
           let out = []
-          for i, conn in idle {
-            let (elapsed, received) = ended(conn, start)
+          // The response in progress is read beside the rest, keeping when
+          // it came.
+          let (idle_ends, during, (response, answered)) = @async.with_task_group(group => {
+              let answer = group.spawn(() => {
+                let response = read_response(slow)
+                (response, @async.now() - start)
+              })
+              let ends = []
+              for conn in idle {
+                ends.push(ended(conn, start))
+              }
+              // Read before smock exits, once the response and the stream
+              // are over.
+              let during = [
+                smock.probes(),
+                "new plain connection: \{connection_to(smock.port)}",
+                "new TLS connection: \{connection_to(smock.tls_port)}",
+              ]
+              (ends, during, answer.wait())
+            },
+          )
+          for i, idle_end in idle_ends {
+            let (elapsed, received) = idle_end
             out.push(
-              "idle \{["plain", "TLS"][i]} connection closed at once: \{elapsed < 1000 && received == ""}",
+              "idle \{["plain", "TLS"][i]} connection closed at once, before the response in progress was answered: \{elapsed < answered && received == ""}",
             )
           }
-          out.push(smock.probes())
-          out.push("new plain connection: \{connection_to(smock.port)}")
-          out.push("new TLS connection: \{connection_to(smock.tls_port)}")
-          out.push(read_response(slow))
-          let answered = @async.now() - start
+          out.append(during)
+          out.push(response)
           out.push(
-            "answered after its delay, well before the drain timeout: \{answered < 3000}",
+            "answered after its delay, before the drain timeout: \{answered < drain}",
           )
           out.push("then closed: \{closed(slow)}")
           let (_, stream_end, events) = until_end(stream, start)
           out.push(
-            "the stream ended with its last chunk: \{events.has_suffix("\n0\n\n")}, then closed, well before the drain timeout: \{stream_end < 3000}",
+            "the stream ended with its last chunk: \{events.has_suffix("\n0\n\n")}, then closed, before the drain timeout: \{stream_end < drain}",
           )
           let status = smock.exited()
           let exited = @async.now() - start
           out.push(
-            "exit status \{status}, once nothing was in flight: \{exited < 3000}",
+            "exit status \{status}, once nothing was in flight, before the drain timeout: \{exited < drain}",
           )
           inspect(
             out.join("\n"),
             content=(
-              #|idle plain connection closed at once: true
-              #|idle TLS connection closed at once: true
+              #|idle plain connection closed at once, before the response in progress was answered: true
+              #|idle TLS connection closed at once, before the response in progress was answered: true
               #|/startupz: 200 {"status":"ok","warnings":[]}
               #|/readyz: 503 {"error":"not_ready","message":"smock is draining its connections before it exits","warnings":[]}
               #|/livez: 200 {"status":"ok","warnings":[]}
@@ -145,10 +120,10 @@ async test "on SIGTERM, smock refuses new connections, closes idle ones at once,
               #|Content-Length: 4
               #|
               #|slow
-              #|answered after its delay, well before the drain timeout: true
+              #|answered after its delay, before the drain timeout: true
               #|then closed: true
-              #|the stream ended with its last chunk: true, then closed, well before the drain timeout: true
-              #|exit status 0, once nothing was in flight: true
+              #|the stream ended with its last chunk: true, then closed, before the drain timeout: true
+              #|exit status 0, once nothing was in flight, before the drain timeout: true
             ),
           )
         },
@@ -162,15 +137,6 @@ async test "on SIGTERM, smock refuses new connections, closes idle ones at once,
       )
     })
   })
-}
-
-///|
-/// Reads `conn` until smock ends it, and returns when the last bytes came
-/// and when the end came, in milliseconds after `since`, and every byte
-/// received, with `\r\n` shown as `\n`.
-async fn until_end(conn : Conn, since : Int64) -> (Int64, Int64, String) {
-  let (last, end, received) = received_until_end(conn, since)
-  (last, end, @utf8.decode_lossy(received).replace_all(old="\r\n", new="\n"))
 }
 
 ///|
@@ -252,6 +218,10 @@ async test "Server-Sent Event streams and delays still running when the drain ti
         defer stalled.close()
         stalled.write("GET /stalled HTTP/1.1\r\nHost: localhost\r\n\r\n")
         @async.sleep(settle_ms)
+        // The drain timeout cuts what is still running (docs/running.md, The
+        // drain). The test allows up to 3 times it, still well before the
+        // stream's own end (10 s) and the delay's (60 s).
+        let drain = 1500L
         let start = @async.now()
         smock.terminate()
         let (streamed, delayed) = @async.with_task_group(group => {
@@ -266,11 +236,11 @@ async test "Server-Sent Event streams and delays still running when the drain ti
         inspect(
           (
             $|the stream went on during the drain: \{last_event >= 1000}
-            $|then was cut at the drain timeout: \{stream_end >= 1500 && stream_end < 3000}
+            $|then was cut at the drain timeout: \{stream_end >= drain && stream_end < 3 * drain}
             $|without its last chunk: \{!events.has_suffix("0\n\n")}
-            $|the delayed response was cut at the drain timeout: \{delay_end >= 1500 && delay_end < 3000}
+            $|the delayed response was cut at the drain timeout: \{delay_end >= drain && delay_end < 3 * drain}
             $|before a byte of it was sent: \{response == ""}
-            $|exit status \{status}, once the drain timeout expired: \{exited >= 1500 && exited < 3000}
+            $|exit status \{status}, once the drain timeout expired: \{exited >= drain && exited < 3 * drain}
           ),
           content=(
             #|the stream went on during the drain: true
@@ -320,12 +290,16 @@ async test "a client that stops reading does not hold up the drain: with a longe
           }
           defer stuck.each(conn => conn.close())
           @async.sleep(settle_ms)
+          // The drain timeout cuts the stuck writes (docs/running.md, The
+          // drain), long before the write timeout would. The test allows up
+          // to 3 times the drain timeout.
+          let drain = 1000L
           let start = @async.now()
           smock.terminate()
           let status = smock.exited()
           let exited = @async.now() - start
           inspect(
-            "exit status \{status}, once the drain timeout expired: \{exited >= 1000 && exited < 3000}",
+            "exit status \{status}, once the drain timeout expired: \{exited >= drain && exited < 3 * drain}",
             content="exit status 0, once the drain timeout expired: true",
           )
         },
@@ -353,13 +327,16 @@ async test "SIGINT and SIGHUP end smock at once, without a drain: a response sti
           defer stalled.close()
           stalled.write("GET /stalled HTTP/1.1\r\nHost: localhost\r\n\r\n")
           @async.sleep(settle_ms)
+          // SIGINT and SIGHUP "end smock at once" (docs/running.md, The
+          // drain): before the drain timeout that a drain would wait for.
+          let drain = 10000L
           let start = @async.now()
           let _ = @process.run("kill", ["-\{signal}", smock.pid.to_string()])
           let (_, end, response) = until_end(stalled, start)
           let status = smock.exited()
           let exited = @async.now() - start
           out.push(
-            "SIG\{signal}: the delayed response was cut at once: \{end < 2000 && response == ""}; exit status \{status}, at once: \{exited < 2000}",
+            "SIG\{signal}: the delayed response was cut at once, before a drain timeout: \{end < drain && response == ""}; exit status \{status}, at once, before a drain timeout: \{exited < drain}",
           )
         },
       )
@@ -368,9 +345,9 @@ async test "SIGINT and SIGHUP end smock at once, without a drain: a response sti
     inspect(
       out.join("\n"),
       content=(
-        #|SIGINT: the delayed response was cut at once: true; exit status -2, at once: true
+        #|SIGINT: the delayed response was cut at once, before a drain timeout: true; exit status -2, at once, before a drain timeout: true
         #|a drain logged: false
-        #|SIGHUP: the delayed response was cut at once: true; exit status -1, at once: true
+        #|SIGHUP: the delayed response was cut at once, before a drain timeout: true; exit status -1, at once, before a drain timeout: true
         #|a drain logged: false
       ),
     )

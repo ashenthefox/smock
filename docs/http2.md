@@ -678,7 +678,9 @@ says so, instead of 413 ([The body
 limit](grpc/unmatched-and-refused-calls.md#the-body-limit)).
 
 - A `content-length` over the limit gets `413 Content Too Large` at once,
-  before any of the body is read.
+  before any of the body is read. smock reads its digits until the length
+  reaches 4,294,967,296 (2^32), which is over every limit, so a longer one,
+  however many digits it has, gets 413 too.
 - A body that passes the limit as it arrives gets 413 then. smock keeps
   none of it past the limit.
 - When the client has not sent all of the request yet, the 413 is followed

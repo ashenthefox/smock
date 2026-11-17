@@ -7,41 +7,6 @@
 // checked against the OpenAPI document (contract_test.mbt).
 
 ///|
-/// The entries of `page`, a Journal page, one per line: the Stub, the HTTP
-/// status and the gRPC status, each as JSON, `-` for a member the entry
-/// does not have, then the `x-tenant` metadata the call sent, if any, and
-/// the template error, if any.
-fn answers(page : Json) -> String raise {
-  guard page is Object({ "entries": Array(entries), .. }) else {
-    fail("not a Journal page: \{page.stringify()}")
-  }
-  let lines = []
-  for entry in entries {
-    guard entry is Object(members) else { fail("not an entry") }
-    let shown = (name : String) => {
-      members.get(name).map_or("-", value => value.stringify())
-    }
-    let mut tenant = ""
-    if members.get("request") is Some(Object({ "headers": Array(headers), .. })) {
-      for header in headers {
-        if header
-          is Object({ "name": String("x-tenant"), "value": String(value), .. }) {
-          tenant = " x-tenant=\{value}"
-        }
-      }
-    }
-    let error = match members.get("templateError") {
-      Some(Null) | None => ""
-      Some(error) => " templateError=\{error.stringify()}"
-    }
-    lines.push(
-      "\{shown("stub")} \{shown("status")} \{shown("grpcStatus")}\{tenant}\{error}",
-    )
-  }
-  lines.join("\n")
-}
-
-///|
 async test "a call's entry records grpcStatus OK beside its HTTP status 200, an unmatched call's UNIMPLEMENTED, and queries, verification and the unmatched list take calls by Mock, POST, path and metadata" {
   let yaml =
     #|mocks:

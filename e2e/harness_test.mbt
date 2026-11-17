@@ -2,7 +2,10 @@
 // gets its own temporary definitions directory and its own ports (smock
 // binds port 0 and logs the port it got), so tests run in parallel. They
 // share one event loop, so a test computes for no more than about 20 ms
-// between awaits: see "Build and test" in CONTRIBUTING.md.
+// between awaits: see "Build and test" in CONTRIBUTING.md. It also holds
+// what several test files share and no other harness file is for: the
+// Definition files they serve, the requests they send, and what they read
+// back from responses, the Journal, the metrics, the logs and the status.
 
 ///|
 /// The binary under test: the native debug build of `cmd/smock`. Tests run
@@ -1080,4 +1083,1278 @@ fn startup_entry(logs : Array[String], msg : String) -> String {
     return Json::object(fields).stringify()
   }
   "no \{msg} entry in:\n\{logs.join("\n")}"
+}
+
+///|
+/// Runs `smock check <args>` with only `env` as its environment until it
+/// exits, and renders its exit status, then what it wrote to stdout and,
+/// if anything, to stderr.
+async fn check(
+  args : Array[String],
+  env~ : Map[String, String] = Map([]),
+) -> String {
+  exit_report(smock_output(["check", ..args], env~))
+}
+
+///|
+/// A Stub that answers `/users/1` whatever the method.
+let any_method : String =
+  #|{
+  #|  "mocks": [{ "name": "users" }],
+  #|  "stubs": [
+  #|    {
+  #|      "id": "user",
+  #|      "mock": "users",
+  #|      "request": { "path": "/users/1" },
+  #|      "response": {
+  #|        "status": 200,
+  #|        "headers": { "Content-Type": "application/json" },
+  #|        "body": "{\"id\":1,\"name\":\"Alice\"}"
+  #|      }
+  #|    }
+  #|  ]
+  #|}
+
+///|
+/// The log lines of a smock process, serving both ports, that wrote nothing
+/// between starting and draining when it was stopped.
+let startup_only : String =
+  #|{"level":"info","msg":"smock starting","version":"*","commit":"*","toolchain":"*","adminAuth":"on"}
+  #|{"level":"info","msg":"random seed","seed":"*"}
+  #|{"level":"info","msg":"journal byte bound","maxBytes":"*","source":"*","memoryLimit":"*"}
+  #|{"level":"info","msg":"state byte bound","maxBytes":"*","source":"*","memoryLimit":"*"}
+  #|{"level":"info","msg":"listening","listener":"admin","address":"0.0.0.0:*","protocols":["http/1.1"]}
+  #|{"level":"info","msg":"listening","listener":"plain","address":"0.0.0.0:*","protocols":["http/1.1","h2c"]}
+  #|{"level":"info","msg":"listening","listener":"tls","address":"0.0.0.0:*","protocols":["h2","http/1.1"],"certFile":"*/rsa-chain.pem","keyFile":"*/rsa-key.pem"}
+  #|{"level":"info","msg":"drain started","timeoutMs":20000}
+  #|{"level":"info","msg":"drain ended","connectionsCut":0}
+
+///|
+/// Reads a response head without a body, as sent for HEAD or for a 1xx
+/// status, and renders it with `\r\n` shown as `\n` and the current Date
+/// masked (`mask_date`), without the empty line that ends it.
+async fn read_head(conn : Conn) -> String {
+  let result = @async.with_timeout_opt(patience_ms, () => {
+    conn.read_until("\r\n\r\n")
+  })
+  guard result is Some(head) else { fail("no response head in time") }
+  match head {
+    Some(head) => mask_date(head.replace_all(old="\r\n", new="\n")) + "\n"
+    None => "closed"
+  }
+}
+
+///|
+/// The status line of `response`, as `read_response` renders it.
+fn status_line(response : String) -> String {
+  response[:response.find("\n").unwrap_or(response.length())].to_owned()
+}
+
+///|
+/// Waits until smock ends the connection, and returns how many milliseconds
+/// after `since` that was and what smock sent until then, with the current
+/// Date masked (`mask_date`). A reset ends the connection too.
+async fn ended(conn : Conn, since : Int64) -> (Int64, String) {
+  let (_, end, received) = received_until_end(conn, since)
+  (end, mask_date(@utf8.decode_lossy(received)))
+}
+
+///|
+/// A Mock whose `/slow` answers after a delay of 1000 ms and whose
+/// `/events` streams three events over 1200 ms: both outlast the timeouts
+/// that the tests which use it set.
+let outlasting : String =
+  #|{ "mocks": [{ "name": "users" }],
+  #|  "stubs": [
+  #|    { "id": "slow", "mock": "users", "request": { "path": "/slow" },
+  #|      "response": { "status": 200, "body": "slow" },
+  #|      "fault": { "delay": { "fixed": 1000 } } },
+  #|    { "id": "stream", "mock": "users", "request": { "path": "/events" },
+  #|      "response": { "status": 200,
+  #|        "events": [
+  #|          { "delay": 400, "data": "first" },
+  #|          { "delay": 400, "data": "second" },
+  #|          { "delay": 400, "data": "last" } ] } } ] }
+
+///|
+/// The ticket's example: the Mock `shop` with the bucket `orders`, keyed by
+/// `id`, from `files/orders.json`, which holds three orders, and `visits`,
+/// without `key`; `GET /api/v1/orders` answers `orders`.
+let shop_orders : Array[(String, String)] = [
+  (
+    "shop.yaml",
+    (
+      #|mocks:
+      #|  - name: shop
+      #|data:
+      #|  - { mock: shop, name: orders, key: id, jsonFile: orders.json }
+      #|  - { mock: shop, name: visits, json: 0 }
+      #|stubs:
+      #|  - id: list-orders
+      #|    mock: shop
+      #|    request: { method: GET, path: /api/v1/orders }
+      #|    response: { status: 200, template: true, json: "${data.orders}" }
+    ),
+  ),
+  (
+    "files/orders.json",
+    (
+      #|[{ "id": 1, "status": "paid" }, { "id": 2, "status": "pending" },
+      #| { "id": 3, "status": "paid" }]
+    ),
+  ),
+]
+
+///|
+/// A Definition file declaring one Stub of Mock `m` that answers `GET path`
+/// with 200 and `body`.
+fn stub_file(id : String, path : String, body : String) -> String {
+  (
+    $|{ "stubs": [{ "id": "\{id}", "mock": "m",
+    $|  "request": { "method": "GET", "path": "\{path}" },
+    $|  "response": { "status": 200, "body": "\{body}" } }] }
+  )
+}
+
+///|
+/// Mock `m`, whose Stubs answer `GET /fast` at once, `GET /slow` after a
+/// delay of 1000 ms, `GET /stalled` after a delay of 60 s, `GET /ticks` with
+/// a stream of 100 events, one every 100 ms, and `GET /brief` with a stream
+/// of 10 such events.
+let drain_defs : String = {
+  let tick = "{ \"delay\": 100, \"data\": \"tick\" }"
+  let ticks = Array::make(100, tick)
+  let brief = Array::make(10, tick)
+  let defs =
+    $|{ "mocks": [{ "name": "m" }],
+    $|  "stubs": [
+    $|    { "id": "fast", "mock": "m", "request": { "path": "/fast" },
+    $|      "response": { "status": 200, "body": "fast" } },
+    $|    { "id": "slow", "mock": "m", "request": { "path": "/slow" },
+    $|      "response": { "status": 200, "body": "slow" },
+    $|      "fault": { "delay": { "fixed": 1000 } } },
+    $|    { "id": "stalled", "mock": "m", "request": { "path": "/stalled" },
+    $|      "response": { "status": 200, "body": "stalled" },
+    $|      "fault": { "delay": { "fixed": 60000 } } },
+    $|    { "id": "ticks", "mock": "m", "request": { "path": "/ticks" },
+    $|      "response": { "status": 200, "events": [\{ticks.join(", ")}] } },
+    $|    { "id": "brief", "mock": "m", "request": { "path": "/brief" },
+    $|      "response": { "status": 200, "events": [\{brief.join(", ")}] } } ] }
+  defs
+}
+
+///|
+/// How long a test waits after sending a request before it sends SIGTERM,
+/// so that smock has received the request by then.
+let settle_ms : Int32 = 300
+
+///|
+/// The log entries about the drain, without their time.
+fn drain_entries(logs : Array[String]) -> String {
+  let out = []
+  for line in logs {
+    let entry = @json.parse(line) catch { _ => continue }
+    guard entry is Object(fields) &&
+      fields.get("msg") is Some(String(msg)) &&
+      msg.contains("drain") else {
+      continue
+    }
+    fields.remove("time")
+    out.push(Json::object(fields).stringify())
+  }
+  out.join("\n")
+}
+
+///|
+/// Reads `conn` until smock ends it, and returns when the last bytes came
+/// and when the end came, in milliseconds after `since`, and every byte
+/// received, with `\r\n` shown as `\n`.
+async fn until_end(conn : Conn, since : Int64) -> (Int64, Int64, String) {
+  let (last, end, received) = received_until_end(conn, since)
+  (last, end, @utf8.decode_lossy(received).replace_all(old="\r\n", new="\n"))
+}
+
+///|
+/// Mock `m` with Stubs that answer `GET /slow` after a fixed delay of
+/// 1500 ms, `GET /fast` at once, `/reset` by resetting the connection,
+/// `GET /close` by closing the connection, `GET /partial` with half its
+/// body, `GET /coin` by closing the connection half of the time, as the
+/// process generator decides, and `GET /flaky` by resetting the connection
+/// half of the time, as the Stub's own generator, seeded, decides.
+let faults : String =
+  #|{ "mocks": [{ "name": "m" }],
+  #|  "stubs": [
+  #|    { "id": "slow", "mock": "m", "request": { "path": "/slow" },
+  #|      "response": { "status": 200, "body": "slow" },
+  #|      "fault": { "delay": { "fixed": 1500 } } },
+  #|    { "id": "fast", "mock": "m", "request": { "path": "/fast" },
+  #|      "response": { "status": 200, "body": "fast" } },
+  #|    { "id": "reset", "mock": "m", "request": { "path": "/reset" },
+  #|      "response": { "status": 200, "body": "never sent" },
+  #|      "fault": { "connection": { "kind": "reset" } } },
+  #|    { "id": "close", "mock": "m", "request": { "path": "/close" },
+  #|      "response": { "status": 200, "body": "never sent" },
+  #|      "fault": { "connection": { "kind": "close" } } },
+  #|    { "id": "partial", "mock": "m", "request": { "path": "/partial" },
+  #|      "response": { "status": 200, "headers": { "Content-Type": "text/plain" },
+  #|        "body": "0123456789" },
+  #|      "fault": { "connection": { "kind": "partial", "probability": 1 } } },
+  #|    { "id": "coin", "mock": "m", "request": { "path": "/coin" },
+  #|      "response": { "status": 200, "body": "heads" },
+  #|      "fault": { "connection": { "kind": "close", "probability": 0.5 } } },
+  #|    { "id": "flaky", "mock": "m", "request": { "path": "/flaky" },
+  #|      "response": { "status": 200, "body": "answered" },
+  #|      "fault": { "connection": { "kind": "reset", "probability": 0.5 },
+  #|        "seed": 2026 } } ] }
+
+///|
+/// Every byte smock sends on `conn` until it closes the connection with a
+/// FIN, with `\r\n` shown as `\n` and the current Date masked
+/// (`mask_date`). A reset fails the test.
+async fn read_to_end(conn : Conn) -> String {
+  let received = @buffer.Buffer()
+  let result = @async.with_timeout_opt(patience_ms, () => {
+    while conn.read_some() is Some(bytes) {
+      received.write_bytes(bytes)
+    }
+  })
+  guard result is Some(_) else { fail("the connection stayed open") }
+  mask_date(
+    @utf8.decode_lossy(received.to_bytes()).replace_all(old="\r\n", new="\n"),
+  )
+}
+
+///|
+/// Whether `err` is the error a read gets when the peer resets the
+/// connection, ECONNRESET.
+fn is_reset(err : @os_error.OSError) -> Bool {
+  err.to_string().contains("Connection reset by peer")
+}
+
+///|
+/// How smock ends `conn`, waiting at most `within` milliseconds: how many
+/// bytes it sends first, then whether an RST (a connection-reset error) or
+/// a FIN (a clean end of stream) ends the connection, or it stays open.
+async fn how_it_ends(conn : Conn, within~ : Int32 = patience_ms) -> String {
+  let (received, ending) = sent_until_end(conn, within~)
+  "\{received.length()} bytes, then \{ending}"
+}
+
+///|
+/// Every byte smock sends on `conn` until the connection ends, waiting at
+/// most `within` milliseconds, and how it ends: `an RST`, `a FIN`, or
+/// `nothing yet: it is still open`.
+async fn sent_until_end(conn : Conn, within~ : Int32) -> (Bytes, String) {
+  let received = @buffer.Buffer()
+  let ending = @async.with_timeout_opt(within, () => {
+    for ;; {
+      let bytes = conn.read_some() catch {
+        @os_error.OSError(_, ..) as err if is_reset(err) => break "an RST"
+        err => break "an error: \{err}"
+      }
+      guard bytes is Some(bytes) else { break "a FIN" }
+      received.write_bytes(bytes)
+    }
+  })
+  (received.to_bytes(), ending.unwrap_or("nothing yet: it is still open"))
+}
+
+///|
+/// Two Mocks with Hosts, `users` marked default and `orders`, each with a
+/// Stub `GET /x` that answers with its name. With `default=false`, neither
+/// is the Default Mock.
+fn two_mocks(default~ : Bool) -> Array[(String, String)] {
+  [
+    (
+      "orders.json",
+      (
+        #|{ "mocks": [{ "name": "orders", "hosts": ["orders.example.com"] }],
+        #|  "stubs": [{ "id": "orders-x", "mock": "orders",
+        #|    "request": { "method": "GET", "path": "/x" },
+        #|    "response": { "status": 200, "body": "from orders" } }] }
+      ),
+    ),
+    (
+      "users.json",
+      (
+        $|{ "mocks": [{ "name": "users", "hosts": ["users.example.com", "[::1]:8080"],
+        $|    "default": \{default} }],
+        $|  "stubs": [{ "id": "users-x", "mock": "users",
+        $|    "request": { "method": "GET", "path": "/x" },
+        $|    "response": { "status": 200, "body": "from users" } }] }
+      ),
+    ),
+  ]
+}
+
+///|
+/// Sends each request in `requests` on its own connection, as
+/// `Smock::exchange` does, and renders the responses, separated by `---`.
+async fn exchange_each(
+  smock : Smock,
+  over : Over,
+  requests : Array[String],
+) -> String {
+  let out = []
+  for request in requests {
+    out.push(smock.exchange(over, request))
+  }
+  out.join("\n---\n")
+}
+
+///|
+/// Runs `smock import-openapi <args>` in the working directory `cwd` until
+/// it exits, and renders its exit status, then what it wrote to stdout and,
+/// if anything, to stderr, with `dir` written `<dir>`.
+async fn import_openapi(
+  args : Array[String],
+  dir~ : String = "",
+  cwd~ : String = ".",
+) -> String {
+  let report = exit_report(smock_output(["import-openapi", ..args], cwd~))
+  if dir == "" {
+    report
+  } else {
+    report.replace_all(old=dir, new="<dir>")
+  }
+}
+
+///|
+/// The entries of the Journal of `session`, in order, each an object.
+/// Fails when the Journal or an entry is not as smock writes it.
+async fn Smock::journal_entries(
+  self : Smock,
+  session : String,
+) -> Array[Map[String, Json]] {
+  let entries = match self.journal(session~) {
+    (200, Object({ "entries": Array(entries), .. })) => entries
+    (status, body) => fail("unexpected Journal: \{status} \{body.stringify()}")
+  }
+  let objects = []
+  for entry in entries {
+    guard entry is Object(entry) else {
+      fail("unexpected entry: \{entry.stringify()}")
+    }
+    objects.push(entry)
+  }
+  objects
+}
+
+///|
+/// What the Journal holds for `session`, in order: for each request, the
+/// Mock and the Stub that answered, and the status.
+async fn Smock::answered_by(self : Smock, session : String) -> Json {
+  let answered : Array[Json] = []
+  for entry in self.journal_entries(session) {
+    answered.push({
+      "mock": entry.get("mock").unwrap_or(Json::null()),
+      "stub": entry.get("stub").unwrap_or(Json::null()),
+      "status": entry.get("status").unwrap_or(Json::null()),
+    })
+  }
+  Json::array(answered)
+}
+
+///|
+/// The memory limit of the scopes smock runs in here: 52Mi, that of the
+/// smallest GKE Autopilot Pod where Pods may burst, in whole pages of 4 KiB
+/// and of 16 KiB.
+let scope_memory_max : String = "54525952"
+
+///|
+/// The command that runs the command after it in a new systemd user scope
+/// whose cgroup has the memory limit `scope_memory_max`. It becomes that
+/// command by exec, so the command keeps its process ID.
+let in_scope : Array[String] = [
+  "systemd-run",
+  "--user",
+  "--scope",
+  "--quiet",
+  "--collect",
+  "-p",
+  "MemoryMax=\{scope_memory_max}",
+  "--",
+]
+
+///|
+/// What `systemd-run --user` needs from the environment to reach the
+/// systemd user manager, since the harness gives smock no other variables.
+fn user_manager_env(env : Map[String, String]) -> Map[String, String] {
+  let out = Map::from_iter(env.iter())
+  for name in ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"] {
+    if @env.get_env_var(name) is Some(value) {
+      out[name] = value
+    }
+  }
+  out
+}
+
+///|
+/// Why smock cannot run in a scope with a memory limit here, or `None` when
+/// it can: a shell run as `in_scope` prints its own cgroup's memory.max,
+/// which must be the scope's limit.
+async fn scope_unavailable() -> String? {
+  let script = "cat \"/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup)/memory.max\""
+  let command = [..in_scope, "sh", "-c", script]
+  let (status, output) = @process.collect_output_merged(
+    command[0],
+    command[1:].to_owned(),
+  ) catch {
+    err => return Some("systemd-run cannot be run: \{err}")
+  }
+  let text = output.text().trim(chars="\n").to_owned()
+  if status != 0 {
+    Some("systemd-run --user failed with exit status \{status}: \{text}")
+  } else if text != scope_memory_max {
+    Some(
+      "a scope with MemoryMax=\{scope_memory_max} got memory.max \{text.escape()}: the systemd user manager needs the memory controller delegated to it (see bench/README.md)",
+    )
+  } else {
+    None
+  }
+}
+
+///|
+/// The value of the sample `name` without labels in the Prometheus `text`.
+fn metric_value(text : String, name : String) -> Double raise {
+  for line in metric_lines(text, name + " ") {
+    return @string.parse_double(line[name.length() + 1:]) catch { _ => break }
+  }
+  fail("no sample \{name} in:\n\{text}")
+}
+
+///|
+/// Two Mocks for their own Hosts, without a Default Mock: `users`, with a
+/// Stub, Stubs whose connection Faults close the connection or send half a
+/// response, and a stream of Server-Sent Events; and `orders`, whose
+/// Journal is off.
+let journal_defs : String =
+  #|{ "mocks": [
+  #|    { "name": "users", "hosts": ["users.example.com", "localhost"] },
+  #|    { "name": "orders", "hosts": ["orders.example.com"], "journal": false } ],
+  #|  "stubs": [
+  #|    { "id": "get-user", "mock": "users",
+  #|      "request": { "method": "GET", "path": { "pattern": "/users/[0-9]+" } },
+  #|      "response": { "status": 200, "body": "Alice" } },
+  #|    { "id": "close", "mock": "users", "request": { "path": "/close" },
+  #|      "response": { "status": 200 },
+  #|      "fault": { "connection": { "kind": "close" } } },
+  #|    { "id": "partial", "mock": "users", "request": { "path": "/partial" },
+  #|      "response": { "status": 200, "body": "0123456789" },
+  #|      "fault": { "connection": { "kind": "partial" } } },
+  #|    { "id": "events", "mock": "users", "request": { "path": "/events" },
+  #|      "response": { "status": 200, "events": [
+  #|        { "delay": 300, "data": "first" },
+  #|        { "delay": 300, "data": "second" },
+  #|        { "delay": 300, "data": "last" } ] } },
+  #|    { "id": "get-order", "mock": "orders", "request": { "path": "/orders/1" },
+  #|      "response": { "status": 200 } } ] }
+
+///|
+/// Queries the Journal as `session`, with the query `query`, checks the
+/// response against the document, and returns its status and body.
+async fn Smock::journal(
+  self : Smock,
+  session? : String,
+  query~ : String = "{}",
+) -> (Int32, Json) {
+  let response = self.admin(
+    "POST",
+    "/v1/journal/query",
+    headers=session_headers(session),
+    body=query,
+  )
+  (response.status, response.json())
+}
+
+///|
+/// The number of entries a query as `session` with `query` returns.
+async fn Smock::journal_count(
+  self : Smock,
+  session : String,
+  query : String,
+) -> Int32 {
+  match self.journal(session~, query~) {
+    (200, Object({ "entries": Array(entries), .. })) => entries.length()
+    (status, body) => fail("the query failed: \{status} \{body.stringify()}")
+  }
+}
+
+///|
+/// `json` with the values that differ from run to run replaced: when the
+/// entries were received, how long they took and the digest.
+fn journal_shown(json : Json) -> Json {
+  match json {
+    Object(members) => {
+      let out = Map([])
+      for name, value in members {
+        out[name] = match (name, value) {
+          ("receivedAt", String(_)) => Json::string("<time>")
+          ("durationMs", Number(_, ..)) => Json::string("<ms>")
+          ("digest", String(_)) => Json::string("<digest>")
+          _ => journal_shown(value)
+        }
+      }
+      Json::object(out)
+    }
+    Array(items) => Json::array(items.map(journal_shown))
+    _ => json
+  }
+}
+
+///|
+/// Sends `<meth> <target>` as raw bytes on a new connection to the plain
+/// port, with `headers` and `body` and no Host field but the one `headers`
+/// may hold, and reads the response.
+async fn Smock::request(
+  self : Smock,
+  meth : String,
+  target : String,
+  headers~ : Array[(String, String)] = [],
+  body~ : String = "",
+) -> String {
+  let conn = self.connect()
+  defer conn.close()
+  conn.write(raw_request(meth, target, headers~, body~))
+  read_response(conn)
+}
+
+///|
+/// A Mock that answers Chat Completions requests with an LLM response, its
+/// seed fixing the reply's id.
+let openai_chat : String =
+  #|{ "mocks": [{ "name": "openai" }],
+  #|  "stubs": [{ "id": "chat", "mock": "openai",
+  #|    "request": { "method": "POST", "path": "/v1/chat/completions" },
+  #|    "response": { "status": 200,
+  #|      "headers": { "x-ratelimit-remaining-requests": "59" },
+  #|      "llm": { "api": "openai-chat", "text": "Hello! 天気は晴れ 👍" } },
+  #|    "fault": { "seed": 7 } }] }
+
+///|
+/// `text` with the value of each of its `"created":` members shown as
+/// `<received>` when it is a second from `from` to `to` (milliseconds since
+/// the Unix epoch). Any other value stays as it is.
+fn mask_created(text : String, from~ : Int64, to~ : Int64) -> String {
+  let key = "\"created\":"
+  let out = StringBuilder()
+  let mut rest = text
+  while rest.find(key) is Some(start) {
+    let digits = start + key.length()
+    let mut end = digits
+    while end < rest.length() && rest[end] >= '0' && rest[end] <= '9' {
+      end += 1
+    }
+    let seconds = @string.parse_int64(rest[digits:end]) catch { _ => -1L }
+    out.write_string(rest[:digits].to_owned())
+    if seconds >= from / 1000L && seconds <= to / 1000L {
+      out.write_string("<received>")
+    } else {
+      out.write_string(rest[digits:end].to_owned())
+    }
+    rest = rest[end:].to_owned()
+  }
+  out.write_string(rest)
+  out.to_string()
+}
+
+///|
+/// The JSON body of a Chat Completions request for `gpt-6-astra` whose
+/// `stream` member is `stream`, given as JSON text.
+fn chat_request(stream : String) -> String {
+  "{\"model\":\"gpt-6-astra\",\"stream\":\{stream},\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}"
+}
+
+///|
+/// A Mock `openai` whose Stub `paced` streams `Hi there!` in three pieces,
+/// the first 1000 ms after the head, which leaves a slow runner room to
+/// read the head and the opening chunk before it, and each later one 300 ms
+/// after the one before, its seed fixing its request id. `/v1/ticks` streams 200 pieces, one every 50 ms, which would
+/// last 10 s, and `/hello` answers at once.
+let paced_openai : String =
+  $|{ "mocks": [{ "name": "openai" }],
+  $|  "stubs": [
+  $|    { "id": "paced", "mock": "openai",
+  $|      "request": { "method": "POST", "path": "/v1/chat/completions" },
+  $|      "response": { "status": 200,
+  $|        "llm": { "api": "openai-chat", "text": "Hi there!",
+  $|          "timing": { "first": { "fixed": 1000 }, "interval": { "fixed": 300 } } } },
+  $|      "fault": { "seed": 7 } },
+  $|    { "id": "ticks", "mock": "openai",
+  $|      "request": { "method": "POST", "path": "/v1/ticks" },
+  $|      "response": { "status": 200,
+  $|        "llm": { "api": "openai-chat", "text": "\{"tick".repeat(200)}",
+  $|          "timing": { "first": { "fixed": 50 }, "interval": { "fixed": 50 } } } } },
+  $|    { "id": "hello", "mock": "openai", "request": { "path": "/hello" },
+  $|      "response": { "status": 200, "body": "hello" } } ] }
+
+///|
+/// What the Chat Completions chunk `event`, as read from the wire, carries:
+/// the opening chunk, a piece, the closing chunk or the end marker.
+fn chunk_carries(event : String) -> String {
+  let data = event[event.find("data: ").unwrap_or(0) + 6:].to_owned()
+  let json = @json.parse(data) catch { _ => return data.trim().to_owned() }
+  match json {
+    { "choices": [{ "delta": { "role": _, .. }, .. }], .. } => "opening chunk"
+    { "choices": [{ "delta": { "content": String(piece), .. }, .. }], .. } =>
+      "piece \{piece.escape()}"
+    { "choices": [{ "finish_reason": String(_), .. }], .. } => "closing chunk"
+    _ => data
+  }
+}
+
+///|
+/// The version, the commit and the toolchain in a `smock --version` line,
+/// such as `smock 1.2.3 (commit 0123456789ab, moonc v0.10.20+65efd5b93)`.
+fn version_parts(line : String) -> (String, String, String) raise {
+  let line = line.trim()
+  guard line.strip_prefix("smock ") is Some(rest) &&
+    rest.find(" (commit ") is Some(i) &&
+    rest[i + " (commit ".length():].strip_suffix(")") is Some(inner) &&
+    inner.find(", ") is Some(j) else {
+    fail("not a version line: \{line}")
+  }
+  (
+    rest[:i].to_owned(),
+    inner[:j].to_owned(),
+    inner[j + ", ".length():].to_owned(),
+  )
+}
+
+///|
+/// The probes, in the order the tests show them.
+let probes : Array[String] = ["/startupz", "/readyz", "/livez"]
+
+///|
+/// Each probe's answer, without a token, as `<path>: <status> <body>`, one
+/// per line, each checked against the document.
+async fn Smock::probes(self : Smock) -> String {
+  let out = []
+  for path in probes {
+    let response = self.admin("GET", path, token=None)
+    out.push("\{path}: \{response.status} \{response.body}")
+  }
+  out.join("\n")
+}
+
+///|
+/// The resident set size of process `pid`, in bytes: VmRSS of
+/// /proc/<pid>/status, in KiB.
+async fn resident_set(pid : Int32) -> Double {
+  for line in @fs.read_file("/proc/\{pid}/status").text().split("\n") {
+    if line.strip_prefix("VmRSS:") is Some(rest) &&
+      rest.trim().strip_suffix(" kB") is Some(kib) {
+      return @string.parse_double(kib.trim()) * 1024.0
+    }
+  }
+  fail("no VmRSS in /proc/\{pid}/status")
+}
+
+///|
+/// Mock `media` with `GET /video.mp4`, which answers 200 from the body file
+/// `video.mp4`, and `GET /cut.mp4`, which answers the same with a partial
+/// Fault.
+let media_definitions : String =
+  #|mocks:
+  #|  - name: media
+  #|stubs:
+  #|  - id: get-video
+  #|    mock: media
+  #|    request: { method: GET, path: /video.mp4 }
+  #|    response:
+  #|      status: 200
+  #|      headers: { Content-Type: video/mp4 }
+  #|      bodyFile: video.mp4
+  #|  - id: cut-video
+  #|    mock: media
+  #|    request: { method: GET, path: /cut.mp4 }
+  #|    response:
+  #|      status: 200
+  #|      headers: { Content-Type: video/mp4 }
+  #|      bodyFile: video.mp4
+  #|    fault: { connection: { kind: partial } }
+
+///|
+/// The definitions directory of `media_definitions`, with the 26 letters
+/// as `video.mp4`.
+let media_files : Array[(String, String)] = [
+  ("media.yaml", media_definitions),
+  ("files/video.mp4", "abcdefghijklmnopqrstuvwxyz"),
+]
+
+///|
+/// The status, checked against the document.
+async fn Smock::status(self : Smock) -> Map[String, Json] {
+  let response = self.admin("GET", "/v1/status")
+  guard response.json() is Object(status) else { fail(response.body) }
+  status
+}
+
+///|
+/// Waits until status shows another last reload than `before` does, at
+/// most `within` milliseconds, and returns that status.
+async fn Smock::reloaded(
+  self : Smock,
+  before : Map[String, Json],
+  within~ : Int32 = reload_patience_ms,
+) -> Map[String, Json] {
+  let previous = before.get("lastReload")
+  let status = wait_for(within, () => {
+    let status = self.status()
+    if status.get("lastReload") != previous {
+      Some(status)
+    } else {
+      None
+    }
+  })
+  guard status is Some(status) else {
+    fail("no reload in time; status: \{Json::object(before).stringify()}")
+  }
+  status
+}
+
+///|
+/// The status and the body of the response to `GET path`, on one line.
+async fn Smock::brief(self : Smock, path : String) -> String {
+  let client = @http.Client("http://127.0.0.1:\{self.port}")
+  defer client.close()
+  let response = client.get(path)
+  "\{response.code} \{client.read_all().text()}"
+}
+
+///|
+/// The last reload of `status`: its result, then its errors, if any.
+fn last_reload(status : Map[String, Json]) -> String {
+  match status.get("lastReload") {
+    Some(Object(reload)) => {
+      let out = StringBuilder()
+      out.write_string(reload.get("result").map_or("?", r => r.stringify()))
+      if reload.get("errors") is Some(Array(errors)) {
+        for error in errors {
+          out.write_string("\n  \{error.stringify()}")
+        }
+      }
+      out.to_string()
+    }
+    other => other.map_or("missing", r => r.stringify())
+  }
+}
+
+///|
+/// The log entries about reloads, without their time, with each digest in
+/// `digests` shown as its name.
+fn reload_entries(
+  logs : Array[String],
+  digests : Array[(String, Json?)],
+) -> String {
+  let out = []
+  for line in logs {
+    let entry = @json.parse(line) catch { _ => continue }
+    guard entry is Object(fields) &&
+      fields.get("msg") is Some(String(msg)) &&
+      msg.contains("reload") else {
+      continue
+    }
+    fields.remove("time")
+    let mut text = Json::object(fields).stringify()
+    for digest in digests {
+      if digest.1 is Some(String(value)) {
+        text = text.replace_all(old=value, new=digest.0)
+      }
+    }
+    out.push(text)
+  }
+  out.join("\n")
+}
+
+///|
+/// Writes `files` into `dir` the way a ConfigMap volume does: into a new
+/// timestamped directory `..<version>`, then points `..data` at it with an
+/// atomic rename of a symlink, then removes the version it replaced, if
+/// any. The visible names are symlinks into `..data`, made once.
+async fn configmap_update(
+  dir : String,
+  version : String,
+  files : Array[(String, String)],
+  replaces? : String,
+) -> Unit {
+  for file in files {
+    write(dir, "..\{version}/\{file.0}", file.1)
+  }
+  @fs.symlink(target="..\{version}", "\{dir}/..data_tmp")
+  @fs.rename("\{dir}/..data_tmp", "\{dir}/..data")
+  if replaces is Some(old) {
+    @fs.rmdir("\{dir}/..\{old}", recursive=true)
+  }
+}
+
+///|
+/// Runs `smock render <args>` until it exits, with only `env` as its
+/// environment, and renders its exit status, then what it wrote to stdout
+/// and, if anything, to stderr.
+async fn render(
+  args : Array[String],
+  env~ : Map[String, String] = Map([]),
+) -> String {
+  exit_report(render_output(args, env~))
+}
+
+///|
+/// The time and the seed of a rendering: the values, when `given`, or
+/// `<time>` and `<seed>` when they change from run to run.
+fn time_and_seed(json : Json, time_given~ : Bool, seed_given~ : Bool) -> String {
+  guard json is { "time": String(time), "seed": Number(seed, ..), .. } else {
+    return "no time or seed"
+  }
+  let time = if time_given { time } else { "<time>" }
+  let seed = if seed_given { seed.to_int64().to_string() } else { "<seed>" }
+  "time \{time}, seed \{seed}"
+}
+
+///|
+/// Runs `smock render <args>` until it exits, with only `env` as its
+/// environment, and returns its exit status, stdout and stderr.
+async fn render_output(
+  args : Array[String],
+  env~ : Map[String, String] = Map([]),
+) -> (Int32, String, String) {
+  smock_output(["render", ..args], env~)
+}
+
+///|
+/// The body of the rendering `smock render` prints, without the replica
+/// and the warnings, as one line of JSON.
+fn rendered(json : Json) -> String {
+  guard json is Object(members) else { return "not an object" }
+  let out : Map[String, Json] = Map([])
+  for key in ["stub", "mock", "response", "failed"] {
+    out[key] = members.get(key).unwrap_or(Json::null())
+  }
+  Json::object(out).stringify()
+}
+
+///|
+/// Renders the Stub `id` for the sample in the file `sample` through the
+/// Admin API render operation, with `query` after the path, and checks the
+/// response against the OpenAPI document.
+async fn Smock::render(
+  self : Smock,
+  id : String,
+  sample? : String,
+  body? : String,
+  query~ : String = "",
+  token~ : String? = Some(test_token),
+) -> AdminResponse {
+  let body = match (sample, body) {
+    (Some(file), _) => Some(@fs.read_file(file).text())
+    (None, body) => body
+  }
+  let path = "/v1/stubs/\{@percent.encode(id)}/render\{query}"
+  let response = self.admin("POST", path, body?, token~)
+  response
+}
+
+///|
+/// What `rendering` says of data: the writes the Stub would make, the
+/// response and the template error, as one line of JSON.
+fn writes_response_and_error(rendering : Json) -> String {
+  guard rendering is Object(members) else { return "not an object" }
+  let out : Map[String, Json] = Map([])
+  for key in ["dataWrites", "response", "templateError"] {
+    out[key] = members.get(key).unwrap_or(Json::string("absent"))
+  }
+  Json::object(out).stringify()
+}
+
+///|
+/// Sends `meth target` with `headers` and `body` on a new connection, and
+/// renders the response with `read_response`.
+async fn Smock::send(
+  self : Smock,
+  meth : String,
+  target : String,
+  headers~ : Array[(String, String)] = [],
+  body~ : String = "",
+) -> String {
+  let conn = self.connect()
+  defer conn.close()
+  conn.write(raw_request(meth, target, host="localhost", headers~, body~))
+  read_response(conn)
+}
+
+///|
+/// The example of spec #48: `GET /orders/42` answers pending until `POST
+/// /orders/42/pay` moves the Scenario `checkout` to `Paid`, and paid after.
+let checkout : String =
+  #|{ "mocks": [{ "name": "payments" }],
+  #|  "stubs": [
+  #|    { "id": "order-pending", "mock": "payments",
+  #|      "request": { "method": "GET", "path": "/orders/42" },
+  #|      "scenario": { "name": "checkout", "requires": "Started" },
+  #|      "response": { "status": 200, "json": { "status": "pending" } } },
+  #|    { "id": "pay", "mock": "payments",
+  #|      "request": { "method": "POST", "path": "/orders/42/pay" },
+  #|      "scenario": { "name": "checkout", "requires": "Started", "moveTo": "Paid" },
+  #|      "response": { "status": 200 } },
+  #|    { "id": "order-paid", "mock": "payments",
+  #|      "request": { "method": "GET", "path": "/orders/42" },
+  #|      "scenario": { "name": "checkout", "requires": "Paid" },
+  #|      "response": { "status": 200, "json": { "status": "paid" } } } ] }
+
+///|
+/// `meth path` with a real HTTP client on a connection of its own, with
+/// the Session `session` in its baggage when given: the status and the
+/// body, if any.
+async fn Smock::order(
+  self : Smock,
+  meth : String,
+  path : String,
+  session? : String,
+) -> String {
+  let headers : @http.Headers = Map([])
+  if session is Some(session) {
+    let (name, value) = baggage(session)
+    headers[@http.CaseInsensitiveString(name)] = value
+  }
+  let client = @http.Client("http://127.0.0.1:\{self.port}", headers~)
+  defer client.close()
+  let response = if meth == "POST" {
+    client.post(path, "")
+  } else {
+    client.get(path)
+  }
+  match client.read_all().text() {
+    "" => "\{response.code}, no body"
+    body => "\{response.code} \{body}"
+  }
+}
+
+///|
+let users : String =
+  #|{
+  #|  "mocks": [{ "name": "users" }],
+  #|  "stubs": [
+  #|    {
+  #|      "id": "get-user",
+  #|      "mock": "users",
+  #|      "request": { "method": "GET", "path": "/users/1" },
+  #|      "response": {
+  #|        "status": 200,
+  #|        "headers": { "Content-Type": "application/json", "X-Source": "smock" },
+  #|        "body": "{\"id\":1,\"name\":\"Alice\"}"
+  #|      }
+  #|    }
+  #|  ]
+  #|}
+
+///|
+/// The `baggage` header that carries `session`, among other members.
+fn baggage(session : String) -> (String, String) {
+  ("baggage", "userId=alice,smock-session=\{session};ttl=60")
+}
+
+///|
+/// The `baggage` header that carries `session`, when it is given; none
+/// without.
+fn session_headers(session : String?) -> Array[(String, String)] {
+  match session {
+    Some(session) => [baggage(session)]
+    None => []
+  }
+}
+
+///|
+/// Calls the Admin API with the test token, as `session` when it is given,
+/// checks the response against the document, and returns its status and
+/// body.
+async fn Smock::call(
+  self : Smock,
+  meth : String,
+  path : String,
+  session? : String,
+  body? : String,
+) -> String {
+  let response = self.admin(meth, path, headers=session_headers(session), body?)
+  "\{response.status} \{response.body}"
+}
+
+///|
+/// `GET /users/1` on the plain port, with the Session `session` when it is
+/// given: the status line, the `Smock-Near-Miss` header if any, and the
+/// body.
+async fn Smock::user(
+  self : Smock,
+  session? : String,
+  meth~ : String = "GET",
+) -> String {
+  let response = self.send(meth, "/users/1", headers=session_headers(session))
+  let lines = response.split("\n").collect()
+  let near_miss = lines
+    .iter()
+    .filter(line => line.has_prefix("Smock-Near-Miss:"))
+    .map(line => " [\{line}]")
+    .collect()
+    .join("")
+  "\{lines[0]}\{near_miss} \{lines[lines.length() - 1]}"
+}
+
+///|
+/// An Ephemeral Stub that answers `GET /users/1` with `status` and `body`.
+fn ephemeral_user(status : Int32, body : String) -> String {
+  "{\"request\":{\"method\":\"GET\",\"path\":\"/users/1\"},\"response\":{\"status\":\{status},\"body\":\"\{body}\"}}"
+}
+
+///|
+/// When the events of `/events` in `news` are due, in milliseconds after
+/// the request. The head goes out at once, before the first event, and a
+/// test checks that order against the first event's time due: 1000 ms
+/// leaves a slow runner room.
+let news_due : Array[Int32] = [1000, 1300, 1300]
+
+///|
+/// `at <due> ms` when an event that arrived `elapsed` milliseconds after
+/// the request was due `due` milliseconds after it: not before, and before
+/// twice `due`. Otherwise when it arrived. The documents give when an event
+/// is due, by its delay or wait, and no time by which it must arrive, so
+/// the upper side is relative to that time rather than the runner's speed.
+/// `due` is above 0: a frame due at once is judged by the order it comes in
+/// (`H2Client::timeline`).
+fn arrival(elapsed : Int64, due : Int32) -> String {
+  // Timers and clocks tick in whole milliseconds.
+  if elapsed >= (due - 2).to_int64() && elapsed < (2 * due).to_int64() {
+    "at \{due} ms"
+  } else {
+    "at \{elapsed} ms, due at \{due} ms"
+  }
+}
+
+///|
+/// `before <first> ms` when the head arrived `elapsed` milliseconds after
+/// the request, before the first event was due at `first`. Otherwise when
+/// it arrived. smock "sends the status and the headers at once", then
+/// waits the first event's delay (docs/definition-files/responses.md,
+/// Server-Sent Events): the head comes before the first event, and on one
+/// connection only the time the event is due tells the two apart. The
+/// streams that use this make that time long enough to leave a slow runner
+/// room, rather than loosening the bound.
+fn head_arrival(elapsed : Int64, first : Int32) -> String {
+  if elapsed < first.to_int64() {
+    "before \{first} ms"
+  } else {
+    "at \{elapsed} ms, after the first event was due"
+  }
+}
+
+///|
+/// How many files, sockets included, the process `pid` has open.
+async fn open_files(pid : Int32) -> Int32 {
+  @fs.readdir("/proc/\{pid}/fd").length()
+}
+
+///|
+/// `GET /users/1`, asking smock to close the connection after answering.
+let get_user : String = "GET /users/1 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+
+///|
+/// Sends `request` on a new connection and reads one response.
+async fn Smock::exchange(self : Smock, over : Over, request : String) -> String {
+  let conn = self.connect(over~)
+  defer conn.close()
+  conn.write(request)
+  read_response(conn)
+}
+
+///|
+/// `/metrics`, fetched without a token and checked against the OpenAPI
+/// document, read as the Prometheus text format.
+async fn Smock::metrics(self : Smock) -> (String, Array[Sample]) {
+  let response = self.admin("GET", "/metrics", token=None)
+  (response.body, parse_prometheus(response.body))
+}
+
+///|
+/// The lines of `/metrics` about the metrics whose names start with
+/// `prefix`, as `metric_lines` picks them, one per line.
+async fn Smock::metric(
+  self : Smock,
+  prefix : String,
+  help~ : Bool = false,
+) -> String {
+  metric_lines(self.admin("GET", "/metrics").body, prefix, help~).join("\n")
+}
+
+///|
+/// Whether `name` is the name of a sample of the request traffic metrics.
+fn is_traffic(name : String) -> Bool {
+  name.has_prefix("smock_request_duration_seconds") ||
+  name == "smock_requests_total" ||
+  name == "smock_unmatched_requests_total"
+}
+
+///|
+/// The request traffic metrics in `/metrics`, `text`, with its `samples`:
+///
+/// - their `# TYPE` lines;
+/// - their samples, one per line, sorted, without the latency histogram's
+///   buckets and sum, whose values depend on timing;
+/// - the label names of each sample name, buckets and sum included.
+fn traffic(text : String, samples : Array[Sample]) -> String {
+  let out = []
+  for line in text.split("\n") {
+    if line.strip_prefix("# TYPE ") is Some(rest) &&
+      is_traffic(rest.split(" ").next().unwrap_or("").to_owned()) {
+      out.push(line.to_owned())
+    }
+  }
+  let lines = samples
+    .filter(sample => {
+      is_traffic(sample.name) &&
+      !sample.name.has_suffix("_bucket") &&
+      !sample.name.has_suffix("_sum")
+    })
+    .map(sample => sample.line())
+  lines.sort_by((a, b) => a.lexical_compare(b))
+  out.push_iter(lines.iter())
+  let labels : Map[String, Array[String]] = Map([])
+  for sample in samples {
+    if is_traffic(sample.name) {
+      let names = sample.labels.map(label => label.0).join(", ")
+      match labels.get(sample.name) {
+        Some(seen) if seen.contains(names) => ()
+        Some(seen) => seen.push(names)
+        None => labels[sample.name] = [names]
+      }
+    }
+  }
+  for name, names in labels {
+    out.push("labels of \{name}: \{names.join(" | ")}")
+  }
+  out.join("\n")
+}
+
+///|
+/// A Mock whose `/delayed` answers after a delay of 1 s, whose `/quick`
+/// answers at once, and whose `/stream` sends one event at once and the
+/// last one 1 s later.
+let slow : String =
+  #|{ "mocks": [{ "name": "slow" }],
+  #|  "stubs": [
+  #|    { "id": "delayed", "mock": "slow", "request": { "path": "/delayed" },
+  #|      "fault": { "delay": { "fixed": 1000 } },
+  #|      "response": { "status": 200, "body": "late" } },
+  #|    { "id": "quick", "mock": "slow", "request": { "path": "/quick" },
+  #|      "response": { "status": 200, "body": "quick" } },
+  #|    { "id": "stream", "mock": "slow", "request": { "path": "/stream" },
+  #|      "response": { "status": 200,
+  #|        "events": [{ "data": "first" }, { "delay": 1000, "data": "last" }] } } ] }
+
+///|
+/// The example of ticket #87: `POST /login` stores the user it is sent and
+/// the one stored before, and echoes both; `GET /me` reads the user back.
+let who_logged_in : String =
+  #|mocks:
+  #|  - name: shop
+  #|stubs:
+  #|  - id: login
+  #|    mock: shop
+  #|    request: { method: POST, path: /login }
+  #|    variables:
+  #|      user: ${body.user}
+  #|      previous: ${vars.user ?? null}
+  #|    response:
+  #|      status: 200
+  #|      template: true
+  #|      json: { user: "${vars.user}", previous: "${vars.previous}" }
+  #|  - id: whoami
+  #|    mock: shop
+  #|    request: { method: GET, path: /me }
+  #|    response:
+  #|      status: 200
+  #|      template: true
+  #|      json: { user: "${vars.user ?? null}" }
+
+///|
+/// Sends `GET <target>` to the Mock `users` of `journal_defs`, as
+/// `session`.
+async fn Smock::get_user(
+  self : Smock,
+  target : String,
+  session : String,
+) -> Unit {
+  let _ = self.request("GET", target, headers=[
+    ("Host", "localhost"),
+    baggage(session),
+  ])
+}
+
+///|
+/// The unmatched requests of `session`, at most `limit` of them when it is
+/// given, checked against the document: the status and the body.
+async fn Smock::unmatched(
+  self : Smock,
+  session : String,
+  limit? : String,
+) -> (Int32, Json) {
+  let path = match limit {
+    Some(limit) => "/v1/journal/unmatched?limit=\{limit}"
+    None => "/v1/journal/unmatched"
+  }
+  let response = self.admin("GET", path, headers=[baggage(session)])
+  (response.status, response.json())
+}
+
+///|
+/// One line of the large body file.
+let big_line : String = "0123456789abcde\n"
+
+///|
+/// The size of the large body file, 16 MiB: more than the socket buffers of
+/// both ends hold on loopback, so that smock's write waits on a client that
+/// reads slowly or not at all.
+let big_size : Int32 = 16 * 1024 * 1024
+
+///|
+/// Mock `big`, whose Stubs answer `GET /big` with the large body file at
+/// once, `GET /delayed` with it after a delay of 100 ms, `GET /half` with
+/// half of it (a partial Fault), and `GET /events` with a stream of four
+/// events of 16 KiB each, without delays.
+let big_defs : String = {
+  let data = "x".repeat(16 * 1024)
+  let event = "{ \"data\": \"\{data}\" }"
+  let defs =
+    $|{ "mocks": [{ "name": "big" }],
+    $|  "stubs": [
+    $|    { "id": "big", "mock": "big", "request": { "path": "/big" },
+    $|      "response": { "status": 200, "bodyFile": "big.txt" } },
+    $|    { "id": "delayed", "mock": "big", "request": { "path": "/delayed" },
+    $|      "response": { "status": 200, "bodyFile": "big.txt" },
+    $|      "fault": { "delay": { "fixed": 100 } } },
+    $|    { "id": "half", "mock": "big", "request": { "path": "/half" },
+    $|      "response": { "status": 200, "bodyFile": "big.txt" },
+    $|      "fault": { "connection": { "kind": "partial" } } },
+    $|    { "id": "events", "mock": "big", "request": { "path": "/events" },
+    $|      "response": { "status": 200,
+    $|        "events": [\{event}, \{event}, \{event}, \{event}] } } ] }
+  defs
+}
+
+///|
+/// The text of the large body file: `big_line` over and over, `big_size`
+/// bytes in all. It is built once, as the test process starts, and by
+/// doubling, a few copies of memory in all: `String::repeat` appends one
+/// line at a time, which took 50 to 140 ms on each call, in which no other
+/// test of the package ran.
+let big_text : String = {
+  let mut text = big_line
+  while text.length() < big_size {
+    text = text + text[:big_size - text.length()].to_owned()
+  }
+  text
+}
+
+///|
+/// The definitions directory of Mock `big`: its Definition file and its
+/// large body file.
+fn big_files() -> Array[(String, String)] {
+  [("big.json", big_defs), ("files/big.txt", big_text)]
 }

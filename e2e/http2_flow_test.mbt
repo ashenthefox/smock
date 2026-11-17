@@ -4,57 +4,6 @@
 // connection's other streams go on.
 
 ///|
-/// A body of `lines` lines, each a number of seven digits and a newline,
-/// counting from 0, so that a part sent twice, lost or out of order shows.
-fn numbered(lines : Int32) -> String {
-  let out = StringBuilder()
-  for i in 0..<lines {
-    let digits = i.to_string()
-    out.write_string("0".repeat(7 - digits.length()))
-    out.write_string(digits)
-    out.write_char('\n')
-  }
-  out.to_string()
-}
-
-///|
-/// The body of `GET /big`: 150,000 octets, more than both of the windows a
-/// client starts with (65,535 octets each).
-let big_body : String = numbered(18_750)
-
-///|
-/// The body of `GET /medium`: 65,544 octets, nine more than the connection
-/// window a client starts with.
-let medium_body : String = numbered(8193)
-
-///|
-/// Mock `m`, for `localhost`, with Stubs that answer `GET /big` with
-/// `big_body`, `GET /medium` with `medium_body`, `GET /item` with a short
-/// body, and `GET /slow-big` with `big_body` after a delay of 300 ms.
-fn flow_definitions() -> Array[(String, String)] {
-  [
-    (
-      "m.json",
-      (
-        #|{ "mocks": [{ "name": "m", "hosts": ["localhost"] }],
-        #|  "stubs": [
-        #|    { "id": "big", "mock": "m", "request": { "path": "/big" },
-        #|      "response": { "status": 200, "bodyFile": "big.txt" } },
-        #|    { "id": "medium", "mock": "m", "request": { "path": "/medium" },
-        #|      "response": { "status": 200, "bodyFile": "medium.txt" } },
-        #|    { "id": "item", "mock": "m", "request": { "path": "/item" },
-        #|      "response": { "status": 200, "body": "hello" } },
-        #|    { "id": "slow-big", "mock": "m", "request": { "path": "/slow-big" },
-        #|      "response": { "status": 200, "bodyFile": "big.txt" },
-        #|      "fault": { "delay": { "fixed": 300 } } } ] }
-      ),
-    ),
-    ("files/big.txt", big_body),
-    ("files/medium.txt", medium_body),
-  ]
-}
-
-///|
 /// A response as a test shows it, with its body replaced by whether it is
 /// `expected`, and its length.
 fn H2Response::checked(self : H2Response, expected : String) -> String {
@@ -71,7 +20,7 @@ async test "h2c: a response body larger than both of the client's windows goes o
       let client = smock.h2c()
       defer client.close()
       let response = client.request("GET", "/big", authority="localhost")
-      let entries = smock.journal_once(1, within=1000)
+      let entries = smock.journal_once(1, within=patience_ms)
       inspect(
         [response.checked(big_body), ..entries].join("\n"),
         content=(
@@ -87,75 +36,6 @@ async test "h2c: a response body larger than both of the client's windows goes o
     })
   })
 }
-
-///|
-/// Reads frames until `stop` holds for one, or smock ends the connection,
-/// and shows each as `render_frame` does, one per line, except that DATA
-/// frames in a row on one stream show as one line: how many there are,
-/// their octets, and whether the last ends the stream.
-async fn RawH2::runs_until(
-  self : RawH2,
-  stop : (@http2.Frame) -> Bool,
-) -> String {
-  let out = []
-  // The stream, frame count and octets of the DATA frames in a row so far.
-  let mut run = (0, 0, 0)
-  let flush = (end : Bool) => {
-    let (stream, frames, octets) = run
-    if frames > 0 {
-      let ended = if end { " END_STREAM" } else { "" }
-      out.push("DATA \{stream}\{ended}: \{frames} frames, \{octets} octets")
-    }
-    run = (0, 0, 0)
-  }
-  for ;; {
-    guard self.read_frame() is Some(frame) else {
-      flush(false)
-      out.push("closed")
-      break
-    }
-    match frame {
-      Data(stream_id~, data~, end_stream~, ..) => {
-        if run.0 != stream_id {
-          flush(false)
-        }
-        run = (stream_id, run.1 + 1, run.2 + data.length())
-        if end_stream {
-          flush(true)
-        }
-      }
-      _ => {
-        flush(false)
-        out.push(self.render_frame(frame))
-      }
-    }
-    if stop(frame) {
-      flush(false)
-      break
-    }
-  }
-  out.join("\n")
-}
-
-///|
-/// Whether `frame` ends `stream`: DATA or HEADERS with END_STREAM, or
-/// RST_STREAM.
-fn ends_stream(frame : @http2.Frame, stream : Int32) -> Bool {
-  match frame {
-    Data(stream_id~, end_stream=true, ..)
-    | Headers(stream_id~, end_stream=true, ..)
-    | RstStream(stream_id~, ..) => stream_id == stream
-    _ => false
-  }
-}
-
-///|
-/// A PING from the client, whose acknowledgement shows where smock's
-/// answers to the frames before it end.
-let fence : @http2.Frame = Ping(
-  payload=b"\x00\x00\x00\x00\x00\x00\x00\x01",
-  ack=false,
-)
 
 ///|
 async test "h2c: a client SETTINGS frame that raises the initial window resumes a stream waiting for window, as h2spec's http2/6.9.2/1 checks" {
@@ -301,7 +181,7 @@ async test "h2c: two bodies larger than the windows, on one connection, both arr
           "---",
           second_response.checked(big_body),
           "---",
-          ..smock.journal_once(2, within=1000),
+          ..smock.journal_once(2, within=patience_ms),
         ].join("\n"),
         content=(
           #|200
@@ -324,19 +204,6 @@ async test "h2c: two bodies larger than the windows, on one connection, both arr
       )
     })
   })
-}
-
-///|
-/// A predicate on frames that holds once `octets` of DATA on `stream` have
-/// come, counting from when it is made.
-fn data_seen(stream : Int32, octets : Int32) -> (@http2.Frame) -> Bool {
-  let mut seen = 0
-  frame => {
-    if frame is Data(stream_id~, data~, ..) && stream_id == stream {
-      seen += data.length()
-    }
-    seen >= octets
-  }
 }
 
 ///|
@@ -441,7 +308,7 @@ async test "h2c: a fast stream is answered at once while a large body on the sam
       ])
       out.push(raw.runs_until(frame => ends_stream(frame, 1)))
       out.push("---")
-      out.append(smock.journal_once(2, within=1000))
+      out.append(smock.journal_once(2, within=patience_ms))
       inspect(
         out.join("\n"),
         content=(
@@ -493,7 +360,7 @@ async test "h2c: a stream reset while its body waits for window ends its slow wr
       let more = raw.frames_until_ping_ack()
       out.push(if more == "" { "(no frame)" } else { more })
       out.push("---")
-      out.append(smock.journal_once(2, within=1000))
+      out.append(smock.journal_once(2, within=patience_ms))
       inspect(
         out.join("\n"),
         content=(
@@ -590,7 +457,7 @@ async test "h2c: a stream reset while its task writes part of its body to a clie
       let more = raw.frames_until_ping_ack()
       out.push(if more == "" { "(no frame)" } else { more })
       out.push("---")
-      out.append(smock.journal_once(2, within=1000))
+      out.append(smock.journal_once(2, within=patience_ms))
       inspect(
         out.join("\n"),
         content=(

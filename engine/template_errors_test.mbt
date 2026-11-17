@@ -30,6 +30,22 @@ fn templated(i : Int32, members : String) -> String {
 
 ///|
 test "a text template that does not parse is reported with the file, the JSON Pointer of the field and the column of the problem" {
+  // The last three bodies hold literals that are not JSON numbers
+  // (templates.md: a literal is "a JSON number"), with the messages #281's
+  // acceptance criteria name. Their columns, and those of the other
+  // malformed literals (`${007}`, `${1.}`) and of every message that says
+  // what it found, follow templates.md, Errors when loading: "For a literal
+  // that is not well-formed, such as the number `1e` in `${1e}`, the column
+  // is the literal's first character. For a message that says what it
+  // found, such as `expected } to end the ${, found "q"`, it is the
+  // character found." The maintainer confirmed that rule on 2026-11-17
+  // (#275). The columns of the unknown names and helpers, and of the
+  // references and calls that are wrong as a whole (`${fake.int(1)}`,
+  // `${path.x}`, `${query.a.b}`, `${method.x}`, ...), follow the next
+  // sentence there: "For an unknown name or helper, or a reference or a
+  // call that is wrong as a whole, such as `${path.x}` or `${fake.int(1)}`,
+  // it is the first character of the reference or the call", which the
+  // maintainer confirmed too.
   let bodies = [
     "abc ${query.x", "${}", "${ }", "${query.}", "${query.x query.y}", "${user.id}",
     "${item.sku}", "${fake.phone()}", "${fake.int(1)}", "${now(1, 2)}", "${fake.int('a', 2)}",
@@ -40,6 +56,7 @@ test "a text template that does not parse is reported with the file, the JSON Po
     "${header[0]}", "${method.x}", "${bodyText[0]}", "${'open}", "${'a\\nb'}", "${007}",
     "${1.}", "${body.a == 1}", "${!body.a}", "${range('1', 3)}", "${range(1, 1001)}",
     "${number()}", "${json(body, 1)}", "${body[01]}", "${body[}", "${query['a'}",
+    "${-x}", "${1e}", "${1x}",
   ]
   inspect(
     template_problems(
@@ -92,6 +109,9 @@ test "a text template that does not parse is reported with the file, the JSON Po
       #|m.yaml: /stubs/41/response/body: template: column 8: an index is an integer from 0 to 999999999
       #|m.yaml: /stubs/42/response/body: template: column 8: expected an index or a quoted name in [ ], found "}"
       #|m.yaml: /stubs/43/response/body: template: column 12: expected ], found "}"
+      #|m.yaml: /stubs/44/response/body: template: column 3: expected a number
+      #|m.yaml: /stubs/45/response/body: template: column 3: expected digits in the exponent
+      #|m.yaml: /stubs/46/response/body: template: column 4: expected the number to end, found "x"
     ),
   )
 }
@@ -232,6 +252,15 @@ test "each value of a header given an array is its own text template, reported a
 
 ///|
 test "a structured template that does not parse is reported at the JSON Pointer of the value, every problem in it" {
+  // `x` and `z` give two messages #281's acceptance criteria name: only
+  // `loop.index` is under `loop` (templates.md), and `as` is a name. `x`'s
+  // message has the form of a reference's error, `<reference>: <reason>`,
+  // as `path.x` and `query.a.b` have in the text-template test: the code's
+  // form, which the maintainer confirmed on 2026-11-17 (#275). Its column,
+  // 3, is where the reference starts, as templates.md, Errors when loading,
+  // says: "For an unknown name or helper, or a reference or a call that is
+  // wrong as a whole, ..., it is the first character of the reference or
+  // the call".
   inspect(
     template_problems(
       (
@@ -264,6 +293,8 @@ test "a structured template that does not parse is reported at the JSON Pointer 
         #|        u: { $each: "range(1, 1001)", as: i, do: 1 }
         #|        v: [ { $if: body.a, then: 1 } ]
         #|        w: { $each: body.items, as: i, do: { $if: "loop.index == 0", then: "${loop.index}" } }
+        #|        x: { $each: body.items, as: i, do: "${loop.count}" }
+        #|        z: { $each: body.items, as: 5, do: 1 }
         #|  - id: root-if
         #|    mock: m
         #|    response:
@@ -319,6 +350,8 @@ test "a structured template that does not parse is reported at the JSON Pointer 
       #|m.yaml: /stubs/0/response/json/s/$if: template: column 11: == compares with a literal: a string, a number, true, false or null
       #|m.yaml: /stubs/0/response/json/t/$if: template: column 8: expected the expression to end, found "b"
       #|m.yaml: /stubs/0/response/json/u/$each: template: column 1: range(1, 1001) gives 1001 values; range gives at most 1000
+      #|m.yaml: /stubs/0/response/json/x/do: template: column 3: loop.count: loop has only loop.index
+      #|m.yaml: /stubs/0/response/json/z/as: template: "as" must be a string
       #|m.yaml: /stubs/1/response/json: template: a $if at the root of json needs "else", so that it always gives a value
       #|m.yaml: /stubs/2/response/json/then: template: a $if at the root of json needs "else", so that it always gives a value
       #|m.yaml: /stubs/3/response/events/0/event: template: column 9: expected a name after .

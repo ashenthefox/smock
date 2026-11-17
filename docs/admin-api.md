@@ -85,8 +85,10 @@ when they fail:
   definitions.
 - `GET /readyz` passes while smock serves, also after a reload that
   failed, since the previous definition set keeps serving. It fails with
-  `not_started` before startup completes and with `not_ready` from the
-  moment SIGTERM arrives.
+  `not_started` until the first definition set has loaded, with
+  `not_ready` ("the plain and TLS ports are not open yet") after that and
+  until smock listens on the plain and TLS ports, and with `not_ready`
+  again from the moment SIGTERM arrives.
 - `GET /livez` passes while the event loop answers, during
   [the drain](running.md#the-drain) too, so that Kubernetes does not kill a
   draining Pod early.

@@ -45,14 +45,6 @@ async test "h2c: a request is answered by the Stub of the Mock its :authority na
 }
 
 ///|
-/// A Mock that answers every Host, with a Stub that takes uploads.
-let uploads : String =
-  #|{ "mocks": [{ "name": "files" }],
-  #|  "stubs": [{ "id": "upload", "mock": "files",
-  #|    "request": { "method": "POST", "path": "/upload" },
-  #|    "response": { "status": 201, "body": "stored" } }] }
-
-///|
 async test "h2c: a request body larger than the initial windows arrives in full, since smock hands back the DATA octets it takes" {
   with_definitions([("files.json", uploads)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
@@ -198,21 +190,27 @@ async test "h2c: a lone P, and a proper prefix of the preface, then a stall, are
       ],
       smock => {
         let out = []
+        // From the first octet, the preface "has the read timeout instead"
+        // of the idle timeout (docs/http2.md, Timeouts), so the connection
+        // ends before the idle timeout, the competing event, timed from
+        // before the connection opened, could end it.
+        let idle = 10000L
         for first in ["P", "PRI * HTTP/2.0\r\n\r\nSM\r\n"] {
+          let opened = @async.now()
           let conn = smock.connect()
           defer conn.close()
           let since = @async.now()
           conn.write(first)
           let (elapsed, rest) = ended(conn, since)
           out.push(
-            "\{first.escape()}: \{rest.escape()}, ended after at least 300 ms: \{elapsed >= 300}, long before the idle timeout: \{elapsed < 5000}",
+            "\{first.escape()}: \{rest.escape()}, ended after at least 300 ms: \{elapsed >= 300}, before the idle timeout: \{since - opened + elapsed < idle}",
           )
         }
         inspect(
           out.join("\n"),
           content=(
-            #|"P": "", ended after at least 300 ms: true, long before the idle timeout: true
-            #|"PRI * HTTP/2.0\r\n\r\nSM\r\n": "", ended after at least 300 ms: true, long before the idle timeout: true
+            #|"P": "", ended after at least 300 ms: true, before the idle timeout: true
+            #|"PRI * HTTP/2.0\r\n\r\nSM\r\n": "", ended after at least 300 ms: true, before the idle timeout: true
           ),
         )
       },

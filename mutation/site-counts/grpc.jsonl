@@ -1,0 +1,26 @@
+{"file":"grpc/content_type.mbt","definition":"content_type","text":"2c4e7c8f770c5b6b","pinned":{"STR":1},"full":{"STR":2}}
+{"file":"grpc/content_type.mbt","definition":"content_type_octets","text":"8949c913b35f4638","pinned":{"STR":1},"full":{"STR":2}}
+{"file":"grpc/content_type.mbt","definition":"content_subtype","text":"177778dd6020ceaa","pinned":{"BODY":1,"ROR":1,"IFC":4,"AOR":1,"INT":2},"full":{"BODY":1,"ROR":1,"IFC":8,"AOR":1,"INT":4}}
+{"file":"grpc/framing.mbt","definition":"prefix_length","text":"740edbf7337f9dd5","pinned":{"INT":1},"full":{"INT":3}}
+{"file":"grpc/framing.mbt","definition":"Deframer::Deframer","text":"46faf196ebac120c","pinned":{"INT":5},"full":{"INT":10}}
+{"file":"grpc/framing.mbt","definition":"Deframer::take","text":"1e98b4b3f0a4c6e1","pinned":{"ROR":3,"IFC":4,"DEL":11,"AOR":9,"INT":21},"full":{"ROR":3,"IFC":8,"DEL":11,"AOR":9,"INT":36}}
+{"file":"grpc/framing.mbt","definition":"Deframer::whole_messages","text":"6e68ff76b78c6fd5","pinned":{"BODY":1,"ROR":1,"IFC":1,"AOR":1,"INT":3},"full":{"BODY":1,"ROR":1,"IFC":2,"AOR":1,"INT":4}}
+{"file":"grpc/framing.mbt","definition":"Deframer::ending","text":"ef74d30d07d23301","pinned":{"ROR":2,"IFC":2,"INT":4},"full":{"ROR":2,"IFC":4,"INT":4}}
+{"file":"grpc/framing.mbt","definition":"frame","text":"85931d231c827f67","pinned":{"BODY":1,"DEL":5,"AOR":1,"INT":11},"full":{"BODY":1,"DEL":5,"AOR":1,"INT":20}}
+{"file":"grpc/metadata.mbt","definition":"is_metadata_name","text":"001a24c07445d740","pinned":{"BODY":1,"IFC":2,"NOT":1,"BOOL":3,"INT":2},"full":{"BODY":1,"IFC":4,"NOT":1,"BOOL":3,"INT":2}}
+{"file":"grpc/metadata.mbt","definition":"is_reserved_name","text":"a6dd6d9182b6996d","pinned":{"BODY":1,"LCR":2,"STR":3},"full":{"BODY":1,"LCR":2,"STR":6}}
+{"file":"grpc/metadata.mbt","definition":"is_binary_name","text":"3e764342e5da79b5","pinned":{"BODY":1,"STR":1},"full":{"BODY":1,"STR":2}}
+{"file":"grpc/metadata.mbt","definition":"is_ascii_value","text":"1d9ffe1494018cf2","pinned":{"BODY":1,"ROR":2,"IFC":1,"LCR":1,"BOOL":2},"full":{"BODY":1,"ROR":2,"IFC":2,"LCR":1,"BOOL":2}}
+{"file":"grpc/metadata.mbt","definition":"unpadded_base64","text":"4043f93d42d43430","pinned":{"BODY":1,"ROR":3,"IFC":3,"LCR":4,"NOT":1,"DEL":1,"AOR":3,"INT":17},"full":{"BODY":1,"ROR":3,"IFC":6,"LCR":4,"NOT":1,"DEL":1,"AOR":3,"INT":23}}
+{"file":"grpc/metadata.mbt","definition":"unpadded_elements","text":"c1d42263555ff505","pinned":{"BODY":1,"ROR":4,"IFC":6,"LCR":4,"DEL":6,"BOOL":2,"AOR":6,"INT":11},"full":{"BODY":1,"ROR":4,"IFC":12,"LCR":4,"DEL":6,"BOOL":2,"AOR":6,"INT":16}}
+{"file":"grpc/status.mbt","definition":"Status::code","text":"0b9b741104ed7ea4","pinned":{"BODY":1,"INT":17},"full":{"BODY":1,"INT":49}}
+{"file":"grpc/status.mbt","definition":"Status::name","text":"e37fdfab277a9f60","pinned":{"BODY":1,"STR":17},"full":{"BODY":1,"STR":34}}
+{"file":"grpc/status.mbt","definition":"impl Show for Status with output","text":"d42adca6e6cdb3ff","pinned":{"BODY":1},"full":{"BODY":1}}
+{"file":"grpc/status.mbt","definition":"Status::from_code","text":"064d4e7f021b5951","pinned":{"BODY":1,"ROR":2,"IFC":1,"LCR":1,"INT":2},"full":{"BODY":1,"ROR":2,"IFC":2,"LCR":1,"INT":2}}
+{"file":"grpc/status.mbt","definition":"Status::from_name","text":"835b693bd3694ab6","pinned":{"BODY":1,"IFC":1},"full":{"BODY":1,"IFC":2}}
+{"file":"grpc/status_message.mbt","definition":"percent_encode","text":"44af2fa09f227c0d","pinned":{"BODY":1,"ROR":13,"IFC":8,"LCR":9,"NOT":1,"DEL":9,"AOR":6,"INT":54},"full":{"BODY":1,"ROR":13,"IFC":16,"LCR":9,"NOT":1,"DEL":9,"AOR":6,"INT":122}}
+{"file":"grpc/status_message.mbt","definition":"escape","text":"6f124597a43ee033","pinned":{"BODY":1,"DEL":3,"INT":2},"full":{"BODY":1,"DEL":3,"INT":6}}
+{"file":"grpc/status_message.mbt","definition":"hex_digit","text":"1c488b50d63ae96e","pinned":{"BODY":1,"ROR":1,"IFC":1,"AOR":3,"INT":5},"full":{"BODY":1,"ROR":1,"IFC":2,"AOR":3,"INT":12}}
+{"file":"grpc/timeout.mbt","definition":"max_nanoseconds","text":"8440759ed6f39d33","pinned":{"INT":1},"full":{"INT":2}}
+{"file":"grpc/timeout.mbt","definition":"timeout_ns","text":"d1ca5072e87386ae","pinned":{"BODY":1,"ROR":5,"IFC":3,"LCR":2,"DEL":1,"AOR":6,"INT":14},"full":{"BODY":1,"ROR":5,"IFC":6,"LCR":2,"DEL":1,"AOR":6,"INT":31}}
+{"file":"grpc/timeout.mbt","definition":"timeout_ms","text":"5a2384f339e96422","pinned":{"BODY":1,"ROR":1,"IFC":1,"AOR":2,"INT":6},"full":{"BODY":1,"ROR":1,"IFC":3,"AOR":2,"INT":10}}

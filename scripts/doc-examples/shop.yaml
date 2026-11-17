@@ -1,0 +1,4 @@
+# The Mock shop, which the examples of Data buckets and CRUD Stubs use and
+# no document declares.
+mocks:
+  - name: shop
