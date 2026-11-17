@@ -467,7 +467,9 @@ on it is. A summary gives the totals inside and outside `server` and
 `cmd/smock`, which only the binary runs. The packages that build on
 wasm-gc run there, except `yaml`, whose deepest nesting test overflows
 wasm-gc's stack when instrumented; `yaml` and the native-only packages
-run natively, with at most two build jobs (`--jobs`). `e2e` does not run.
+run natively, with at most two build jobs (`--jobs`). `e2e` does not run,
+nor does the mutation runner's fixture module, which is not a member of
+the workspace.
 `cmd/smock` has no tests, so its points come from an instrumented build
 that nothing runs. The first run builds everything with coverage and
 takes a few minutes; a later run rebuilds only what changed. It reads

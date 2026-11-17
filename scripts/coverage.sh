@@ -11,9 +11,14 @@
 # - Every package that builds on wasm-gc runs there, except yaml: its test
 #   of 1,024 levels of nesting overflows wasm-gc's stack when instrumented.
 # - yaml and the native-only packages run natively, server's white-box
-#   tests included, with at most two build jobs: an instrumented native
-#   build of the engine needs more than 2 GB at the default number of jobs.
+#   tests and the testees of protobuf's conformance suite and of the YAML
+#   test suite (protobuf-conformance, yaml-test-suite) included, with at
+#   most two build jobs: an instrumented native build of the engine needs
+#   more than 2 GB at the default number of jobs.
 # - e2e does not run: its tests run the binary, which writes no coverage.
+# - The mutation runner's fixture module (scripts/mutation/fixture) does
+#   not run: it is not a member of the workspace, and moon builds none of
+#   its packages from the root.
 # - cmd/smock has no tests. Its points come from an instrumented build of
 #   the binary that nothing runs, so all of them count as uncovered.
 #
@@ -70,7 +75,7 @@ wasm_gc=""
 native=yaml
 for package in $(git ls-files '*moon.pkg' | sed 's|/\{0,1\}moon\.pkg$||' | sort); do
   case $package in
-  yaml | e2e | cmd/smock) ;;
+  yaml | e2e | cmd/smock | scripts/mutation/fixture/*) ;;
   *)
     if on_wasm_gc "$package"; then
       wasm_gc="$wasm_gc $package"
