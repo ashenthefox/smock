@@ -36,8 +36,11 @@ pub fn certificate_expiry(pem : Bytes) -> Int64? {
 }
 
 ///|
-/// The DER bytes of the first PEM block in `pem` whose label ends with
-/// `CERTIFICATE`.
+/// The DER bytes of the first PEM block in `pem` that OpenSSL loads as the
+/// leaf of the TLS port's chain (`PEM_read_bio_X509_AUX`): one labelled
+/// `CERTIFICATE`, the old `X509 CERTIFICATE` or OpenSSL's
+/// `TRUSTED CERTIFICATE`. Blocks of other labels are skipped, as OpenSSL
+/// skips them, an `ATTRIBUTE CERTIFICATE` included.
 fn first_certificate_der(pem : Bytes) -> BytesView? {
   let base64 = StringBuilder()
   let mut inside = false
@@ -51,8 +54,10 @@ fn first_certificate_der(pem : Bytes) -> BytesView? {
         return Some(der[:])
       }
       base64.write_string(line.to_owned())
-    } else if line.has_prefix("-----BEGIN ") &&
-      line.has_suffix("CERTIFICATE-----") {
+    } else if line
+      is ("-----BEGIN CERTIFICATE-----"
+      | "-----BEGIN X509 CERTIFICATE-----"
+      | "-----BEGIN TRUSTED CERTIFICATE-----") {
       inside = true
     }
   }
