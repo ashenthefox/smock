@@ -22,7 +22,6 @@ usage: python3 -m unittest discover -s scripts/mutation -v
 import json
 import re
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -38,8 +37,8 @@ PACKAGES = ("calc", "forms", "log", "shapes")
 
 def git(repo, *args):
     """Runs git in repo, as an author of its own, and gives its output."""
-    result = subprocess.run(["git", "-C", str(repo), "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
-                             "-c", "commit.gpgsign=false", *args], capture_output=True, text=True)
+    author = ["-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false"]
+    result = subprocess.run(["git", "-C", str(repo), *author, *args], capture_output=True, text=True)
     if result.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed:\n{result.stderr}")
     return result.stdout
@@ -122,7 +121,8 @@ class MergeTest(unittest.TestCase):
         (cls.root / "empty").mkdir()
         (cls.root / "empty" / "moon.pkg").write_text("")
         (cls.root / "empty" / "empty.mbt").write_text(
-            '///|\n/// A text, which is no site: STR\'s scope does not hold this package.\npub let text : String = "a"\n')
+            "///|\n/// A text, which is no site: STR's scope does not hold this package.\n"
+            'pub let text : String = "a"\n')
         cls.packages = ("--set", "full", "log", "empty")
         cls.whole = cls.run_once(cls.tmp / "whole")
         cls.shards = [cls.run_once(cls.tmp / f"shard-{k}", "--shard", f"{k}/3") for k in (1, 2, 3)]
@@ -169,7 +169,8 @@ class MergeTest(unittest.TestCase):
         self.assertEqual(without_timings((self.merged / "report.md").read_text()),
                          without_timings((self.whole / "report.md").read_text()))
         # The merge prints the report, as a run does.
-        self.assertEqual(without_timings(self.result.stdout), without_timings((self.whole / "report.md").read_text()) + "\n")
+        self.assertEqual(without_timings(self.result.stdout),
+                         without_timings((self.whole / "report.md").read_text()) + "\n")
 
     def test_the_package_without_a_mutant_runs_in_the_first_shard(self):
         packages = [[p["directory"] for p in json.loads((s / "summary.json").read_text())["packages"]]
@@ -347,7 +348,8 @@ class ListedByOffsetTest(unittest.TestCase):
         listed = write_list(self.tmp / "wrong.jsonl", [dict(self.entries[0], offset=offset_of(self.text, 17, 16))])
         result = run_runner(self.root, self.tmp / "wrong-out", "--sites-only", "--list", str(listed))
         self.assertEqual(result.returncode, 1)
-        self.assertIn(f"{listed}:1: calc/calc.mbt does not hold \"<=\" at offset {offset_of(self.text, 17, 16)}", result.stderr)
+        offset = offset_of(self.text, 17, 16)
+        self.assertIn(f'{listed}:1: calc/calc.mbt does not hold "<=" at offset {offset}', result.stderr)
 
 
 NEXT = "///|\n/// The number after `n`.\npub fn next(n : Int32) -> Int32 {\n  n + 1\n}\n\n"
@@ -559,7 +561,8 @@ class TotalsOnlyTest(unittest.TestCase):
                          (self.root / "calc" / "calc.mbt").read_text())
 
     def test_totals_only_needs_a_listed_set_and_a_run_of_its_own(self):
-        for args in (["calc"], ["--list", str(self.list), "--sites-only"], ["--list", str(self.list), "--shard", "1/2"]):
+        listed = ["--list", str(self.list)]
+        for args in (["calc"], [*listed, "--sites-only"], [*listed, "--shard", "1/2"]):
             result = run_runner(self.root, self.tmp / "refused", "--totals-only", *args, work=self.work)
             self.assertEqual(result.returncode, 2, args)
             self.assertIn("--totals-only", result.stderr)

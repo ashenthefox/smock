@@ -5,7 +5,8 @@ report (CONTRIBUTING.md, "Mutation runner").
 
 usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir>]
            [--set pinned|full] [--mutant <id>]... [--sites-only] [--workers <n>]
-           [--moon <moon>] [--finder <command>] <package directory>...
+           [--list <file> [--totals-only]] [--sample <n> [--seed <s>]] [--shard <k>/<n>]
+           [--moon <moon>] [--finder <command>] [<package directory>...]
 
 <package directory> is relative to <root>, the workspace or module to
 mutate: the current directory unless it is given. The site finder
@@ -19,7 +20,35 @@ alternative of every operator at every position. --mutant runs only the
 mutant with that id, which must be in the set, and may be given more than
 once; a package given that holds none of the ids is not run.
 --sites-only runs no mutant: it writes the counts of sites, positions and
-skipped sites of each package, in both sets.
+skipped sites of each package, in both sets, and the mutants a run would
+make, in chosen.jsonl.
+
+Three more options choose the mutants, for bulk runs (choice.py says how):
+
+  --list <file>    runs the mutants a file lists, in its order, in place
+                   of a set: by offset on a commit, or by key on any
+                   later commit. A mutant that no site of operator set v1
+                   makes is outside v1, and its record says so
+                   (in_operator_set). The packages are those of the
+                   listed files, unless given. A key that no longer
+                   finds its text is written, with why, to
+                   unapplied.jsonl, and the report counts it. With
+                   --totals-only, the run writes only per-package and
+                   total counts into summary.json and report.md; it
+                   removes from <out> the files of an earlier run that
+                   name mutants and from <work> the workers' builds, and
+                   prints no mutant's id, no output of a build or a test,
+                   and not the reason it stops, which may name a mutant.
+  --sample <n>     runs a sample of n of the set's mutants, stratified by
+                   package, which --seed (0 unless given) fixes.
+  --shard <k>/<n>  runs the k-th of n parts of the mutants, in the run's
+                   order, whose sizes differ by one at most;
+                   scripts/mutation/merge.py merges the outputs of a
+                   run's shards into the output of the run without them.
+
+Without --mutant, --list or --sample, every package given runs, one that
+has no mutant at all in the first shard; with one of them, only the
+packages that hold one of the shard's mutants run.
 
 For each worker, the runner copies <root> into <work>/tree-<n>, the files
 that git tracks and the untracked ones it does not ignore, and builds
@@ -49,7 +78,8 @@ It writes into <out> (<work>/out unless it is given):
                  the tests that killed it, the backend, the timings
                  (build_s, run_s and the run's limit_s), the compiler's
                  message for an unviable one, and a survivor's diff;
-  summary.json   the operator set's version and the set that ran, and per
+  summary.json   the operator set's version, the set that ran (listed for
+                 --list), what chose the mutants (selection), and per
                  package: the baseline, the counts of sites and positions
                  in the set that ran and in both sets, the sites each rule
                  skipped, the counts of mutants and each outcome, and the
@@ -62,7 +92,10 @@ It writes into <out> (<work>/out unless it is given):
                  survivor's diff with its whole enclosing definition (for
                  the full set, the survivors at the pinned alternatives and
                  those at the other alternatives apart), which it also
-                 prints.
+                 prints; for a listed set, then, per package, the
+                 mutants listed, run, no longer applying and outside v1,
+                 each listed mutant with its outcome, and each key that
+                 no longer applies, with why.
 
 A position is the place of one or more sites: their file, operator, line
 and column.
@@ -625,7 +658,8 @@ def main():
         with open(out / "unapplied.jsonl", "w", encoding="utf-8") as f:
             for directory in args.packages:
                 for entry, why in unapplied[directory]:
-                    f.write(json.dumps({"directory": directory, "listed": entry, "why": why}, ensure_ascii=False) + "\n")
+                    line = {"directory": directory, "listed": entry, "why": why}
+                    f.write(json.dumps(line, ensure_ascii=False) + "\n")
     if args.sites_only:
         with open(out / "chosen.jsonl", "w", encoding="utf-8") as f:
             for directory in args.packages:

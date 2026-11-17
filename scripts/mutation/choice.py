@@ -225,7 +225,8 @@ class Files:
         """The file's text as a finder.SourceFile, or None when it is gone."""
         if file not in self.read:
             path = self.root / file
-            self.read[file] = finder.SourceFile(Path(file), path.read_text(encoding="utf-8")) if path.is_file() else None
+            text = path.read_text(encoding="utf-8") if path.is_file() else None
+            self.read[file] = None if text is None else finder.SourceFile(Path(file), text)
         return self.read[file]
 
     def definitions(self, file):
