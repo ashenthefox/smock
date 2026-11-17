@@ -46,10 +46,10 @@ NJ66     differs  A key of a flow mapping spans lines, or its ":" is on the next
 UT92     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). smock refuses it: "a key must be on a single line".
 VJP3/01  differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). smock refuses it: "a key must be on a single line".
 
-# Tabs after the spaces at the start of a line.
-6CA3     differs  A tab follows the spaces at the start of a line, before content. YAML reads it as separation, since only spaces indent (YAML 1.2.2, 6.1). smock reads it as indentation, which the documents say it refuses ("tabs in indentation"): "tabs are not allowed in indentation".
-DK95/00  differs  A tab follows the spaces at the start of a line, before content. YAML reads it as separation, since only spaces indent (YAML 1.2.2, 6.1). smock reads it as indentation, which the documents say it refuses ("tabs in indentation"): "tabs are not allowed in indentation".
-Q5MG     differs  A tab follows the spaces at the start of a line, before content. YAML reads it as separation, since only spaces indent (YAML 1.2.2, 6.1). smock reads it as indentation, which the documents say it refuses ("tabs in indentation"): "tabs are not allowed in indentation".
+# Tabs in the white space at the start of a line.
+6CA3     differs  The white space at the start of a line holds a tab, before content. YAML reads the tab as separation, since only spaces indent (YAML 1.2.2, 6.1). smock reads it as indentation, which the documents say it refuses ("tabs in indentation"): "tabs are not allowed in indentation".
+DK95/00  differs  The white space at the start of a line holds a tab, before content. YAML reads the tab as separation, since only spaces indent (YAML 1.2.2, 6.1). smock reads it as indentation, which the documents say it refuses ("tabs in indentation"): "tabs are not allowed in indentation".
+Q5MG     differs  The white space at the start of a line holds a tab, before content. YAML reads the tab as separation, since only spaces indent (YAML 1.2.2, 6.1). smock reads it as indentation, which the documents say it refuses ("tabs in indentation"): "tabs are not allowed in indentation".
 
 # Bugs.
 6XDY      #323     A bug: two document markers, ---, with nothing between them, are read as one document that holds the plain scalar "---". The documents say multiple documents are refused.
