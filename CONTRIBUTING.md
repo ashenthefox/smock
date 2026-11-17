@@ -1411,7 +1411,9 @@ packages, the ids, the list's SHA-256, the sample and the shard.
     later commit where it still finds its text.
 
   A listed mutant that a site of operator set v1 makes is that site, with
-  its id. Any other is outside v1: its record says
+  its id: by offset, one whose change is the site's, but for white space
+  at its edges, as the finder tells two sites that make the same mutant.
+  Any other is outside v1: its record says
   `"in_operator_set": false`. It is named as a site is, with the operator
   its entry gives (`OTHER` when an entry by offset gives none), and an
   ordinal that counts the places in its definition where the same

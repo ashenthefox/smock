@@ -268,6 +268,11 @@ class ListedByOffsetTest(unittest.TestCase):
             # which survives (calc.mbt's comment beside it).
             {"file": "calc/calc.mbt", "offset": at(17, 17), "original": "<=", "replacement": "<",
              "commit": cls.commit},
+            # The mutant of a site of v1, written otherwise: halve_until's
+            # `x = x / 2` deleted with its indentation, which v1's DEL
+            # deletes without it. It does not build (calc.mbt's comment).
+            {"file": "calc/calc.mbt", "offset": at(36, 1), "original": "    x = x / 2", "replacement": "",
+             "commit": cls.commit},
             # Outside it, with an operator of v1's name: `==` to `!=` in
             # is_odd, which v1's ROR never makes (ADR 0006); 3 is then
             # not odd, so "3 is odd" fails.
@@ -295,6 +300,7 @@ class ListedByOffsetTest(unittest.TestCase):
         self.assertEqual([(m["id"], m["line"], m["column"], m["in_operator_set"], m["pinned"]) for m in chosen], [
             # The site of v1 that makes the same mutant: its id.
             ("calc/calc.mbt,in_range,ROR,<=,<,1", 17, 17, True, True),
+            ("calc/calc.mbt,halve_until,DEL,x = x / 2,,0", 36, 5, True, True),
             # CONTRIBUTING, "Mutation runner": a mutant outside v1 is named
             # as a site is, with the operator it gives (OTHER when it gives
             # none), and an ordinal that counts the same original text
@@ -303,7 +309,7 @@ class ListedByOffsetTest(unittest.TestCase):
             ("calc/calc.mbt,halve_until,OTHER,x / 2,2 / x,0", 36, 9, False, False),
         ])
         self.assertEqual([m["listed"] for m in chosen], self.entries)
-        self.assertEqual(chosen[2]["definition_lines"], [22, 39])
+        self.assertEqual(chosen[3]["definition_lines"], [22, 39])
         # The packages run are those of the listed files.
         summary = json.loads((out / "summary.json").read_text())
         self.assertEqual([p["directory"] for p in summary["packages"]], ["calc"])
@@ -316,19 +322,21 @@ class ListedByOffsetTest(unittest.TestCase):
         records = read_lines(out / "mutants.jsonl")
         self.assertEqual([(r["id"], r["outcome"], r["in_operator_set"], r["set"]) for r in records], [
             ("calc/calc.mbt,in_range,ROR,<=,<,1", "survived", True, "listed"),
+            ("calc/calc.mbt,halve_until,DEL,x = x / 2,,0", "unviable", True, "listed"),
             ("calc/calc.mbt,is_odd,ROR,==,!=,0", "killed", False, "listed"),
             ("calc/calc.mbt,halve_until,OTHER,x / 2,2 / x,0", "survived", False, "listed"),
         ])
-        self.assertEqual([t["name"] for t in records[1]["killing_tests"]], ["3 is odd"])
+        self.assertEqual([t["name"] for t in records[2]["killing_tests"]], ["3 is odd"])
         report = (out / "report.md").read_text()
         self.assertIn("Operator set v1, a listed set.", report)
         self.assertIn("## Listed mutants\n\n"
                       "| package | listed | run | no longer apply | outside operator set v1 |\n"
                       "|---|---:|---:|---:|---:|\n"
-                      "| calc | 3 | 3 | 0 | 2 |\n\n"
+                      "| calc | 4 | 4 | 0 | 2 |\n\n"
                       "| mutant | operator set v1 | outcome |\n"
                       "|---|---|---|\n"
                       "| `calc/calc.mbt,in_range,ROR,<=,<,1` | in it | survived |\n"
+                      "| `calc/calc.mbt,halve_until,DEL,x = x / 2,,0` | in it | unviable |\n"
                       "| `calc/calc.mbt,is_odd,ROR,==,!=,0` | outside it | killed |\n"
                       "| `calc/calc.mbt,halve_until,OTHER,x / 2,2 / x,0` | outside it | survived |\n", report)
         # The survivor outside v1 is shown with its diff, as every survivor.

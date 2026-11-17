@@ -20,8 +20,10 @@ by key:
              and "ordinal": the fields of a mutant's id, which an
              exclusion names it by, with the texts whole.
 
-A mutant that a site of operator set v1 makes is that site, with its id.
-Any other is outside v1, and is named as a site would be: its file, its
+A mutant that a site of operator set v1 makes is that site, with its id:
+by offset, one whose change is the site's, but for white space at its
+edges, as the finder tells two sites that make the same mutant. Any other
+is outside v1, and is named as a site would be: its file, its
 enclosing definition, its operator (OTHER when an entry by offset names
 none), its texts and an ordinal, which counts the places in its
 definition where the same original text starts before it, outside
@@ -220,6 +222,7 @@ class Files:
         self.root = root
         self.moonc = moonc
         self.read = {}
+        self.effects = {}
 
     def source(self, file):
         """The file's text as a finder.SourceFile, or None when it is gone."""
@@ -228,6 +231,19 @@ class Files:
             text = path.read_text(encoding="utf-8") if path.is_file() else None
             self.read[file] = None if text is None else finder.SourceFile(Path(file), text)
         return self.read[file]
+
+    def made_by(self, file, sites):
+        """The sites of v1 in a file, by what each changes in it (its
+        effect, as the finder compares sites)."""
+        if file not in self.effects:
+            source = self.source(file)
+            self.effects[file] = {}
+            for site in sites:
+                if site["file"] == file:
+                    start = source.offset(site["line"], site["column"])
+                    effect = finder.effect(source, start, start + len(site["original"]), site["replacement"])
+                    self.effects[file].setdefault(effect, site)
+        return self.effects[file]
 
     def definitions(self, file):
         """The file's top-level definitions but its tests: (name, [first
@@ -272,11 +288,10 @@ def by_offset(files, where, entry, sites):
         raise ChoiceError(f"{where}: {file} differs from its text at {entry['commit']}")
     if source.text[offset : offset + len(original)] != original:
         raise ChoiceError(f"{where}: {file} does not hold {json.dumps(original)} at offset {offset}")
+    site = files.made_by(file, sites).get(finder.effect(source, offset, offset + len(original), entry["replacement"]))
+    if site is not None:
+        return dict(site, in_operator_set=True)
     line, column = source.position(offset)
-    for site in sites:
-        if ((site["file"], site["line"], site["column"], site["original"], site["replacement"])
-                == (file, line, column, original, entry["replacement"])):
-            return dict(site, in_operator_set=True)
     end = source.position(offset + len(original))[0]
     for name, lines in files.definitions(file):
         if lines[0] <= line and end <= lines[1]:
