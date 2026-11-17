@@ -39,7 +39,7 @@ async test "h2c: a client that keeps the connection window at zero is closed at 
             "ended by \{frames.how}, after at least 500 ms: \{frames.end_ms >= write}, within 4 times the write timeout: \{frames.end_ms < 4 * write}",
             "a new connection: \{after.brief()}",
             "Journal:",
-            ..smock.journal_once(2, within=1000),
+            ..smock.journal_once(2, within=patience_ms),
           ].join("\n"),
           content=(
             #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
@@ -100,7 +100,7 @@ async test "h2c: a stream whose own window stays at zero for the write timeout w
         raw.send([raw.get(5, "/item"), WindowUpdate(stream_id=5, increment=5)])
         out.push(raw.frames_until_stream_ends(5))
         out.push("---")
-        out.append(smock.journal_once(3, within=1000))
+        out.append(smock.journal_once(3, within=patience_ms))
         inspect(
           out.join("\n"),
           content=(
@@ -239,7 +239,7 @@ async test "h2c: a client that widens its windows slowly but steadily keeps its 
           "by WINDOW_UPDATE on the connection, longer than the write timeout: \{@async.now() - start > 500}",
         )
         out.push("---")
-        out.append(smock.journal_once(3, within=1000))
+        out.append(smock.journal_once(3, within=patience_ms))
         inspect(
           out.join("\n"),
           content=(
@@ -322,7 +322,7 @@ async test "h2c: a Stub's delay longer than the write timeout does not count tow
         raw.send([WindowUpdate(stream_id=0, increment=100_000)])
         out.push(raw.runs_until(frame => ends_stream(frame, 1)))
         out.push("---")
-        out.append(smock.journal_once(3, within=1000))
+        out.append(smock.journal_once(3, within=patience_ms))
         inspect(
           out.join("\n"),
           content=(
