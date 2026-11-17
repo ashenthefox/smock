@@ -219,18 +219,21 @@ def plan_run(args):
         shards = [{"name": f"{k}-of-{count}", "index": k, "count": count, "workers": args.workers}
                   for k in range(1, count + 1)]
         width = min(args.width, count)
+    # The packages the run is over: those given or found, or, for a list
+    # alone, those of its mutants. A sample may leave some with none.
+    directories = packages or [p["directory"] for p in summary["packages"]]
     per_package = {}
-    for package in summary["packages"]:
-        mine = [s for s in chosen if s.get("file", "").rsplit("/", 1)[0] == package["directory"]]
-        per_package[package["directory"]] = {"package": package["package"], "mutants": len(mine),
-                                             "unchecked_access": sum(1 for s in mine if s.get("unchecked_access"))}
+    for directory in directories:
+        mine = [s for s in chosen if s.get("file", "").rsplit("/", 1)[0] == directory]
+        per_package[directory] = {"mutants": len(mine),
+                                  "unchecked_access": sum(1 for s in mine if s.get("unchecked_access"))}
     plan = {
         "mode": args.mode,
         "set": "listed" if args.mode == "list" else args.set,
         "size": args.size,
         "seed": args.seed,
         "list": args.list,
-        "packages": [p["directory"] for p in summary["packages"]],
+        "packages": directories,
         "args": options,
         "mutants": mutants,
         "per_package": per_package,
@@ -241,7 +244,8 @@ def plan_run(args):
     }
     (out / "plan.json").write_text(json.dumps(plan, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     lines = [f"# Plan: {MODES[args.mode]}", "",
-             f"{describe(plan)[0].upper()}{describe(plan)[1:]}: {mutants} mutants, {describe_shards(plan)}.", "",
+             f"{describe(plan)[0].upper()}{describe(plan)[1:]}: {mutants} mutant{'s' if mutants != 1 else ''},"
+             f" {describe_shards(plan)}.", "",
              f"run.py {shlex.join(options)}", "",
              "| package | mutants | at an unchecked access |", "|---|---:|---:|"]
     lines += [f"| {d} | {p['mutants']} | {p['unchecked_access']} |" for d, p in per_package.items()]

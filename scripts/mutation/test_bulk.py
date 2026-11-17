@@ -178,6 +178,14 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("--mode list needs --list", result.stderr)
 
+    def test_a_package_the_sample_leaves_out_is_still_one_of_the_runs(self):
+        # A sample of 1 of calc's 25 and log's 6 mutants takes calc's: log
+        # is still among the packages the run is over.
+        plan, _ = self.plan("one", "--mode", "sample", "--size", "1", "--packages", "calc log")
+        self.assertEqual(plan["packages"], ["calc", "log"])
+        self.assertEqual({d: p["mutants"] for d, p in plan["per_package"].items()}, {"calc": 1, "log": 0})
+        self.assertIn("of the pinned set over 2 packages: 1 mutant,", (self.tmp / "one" / "plan.md").read_text())
+
     def test_the_plan_says_what_it_runs(self):
         plan, _ = self.plan("said", "--mode", "sample", "--size", "10", "--seed", "7", "--packages", "calc log",
                             "--width", "2")
