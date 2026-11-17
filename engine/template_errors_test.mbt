@@ -32,7 +32,14 @@ fn templated(i : Int32, members : String) -> String {
 test "a text template that does not parse is reported with the file, the JSON Pointer of the field and the column of the problem" {
   // The last three bodies hold literals that are not JSON numbers
   // (templates.md: a literal is "a JSON number"), with the messages #281's
-  // acceptance criteria name.
+  // acceptance criteria name. Their columns, and those of the other
+  // malformed literals (`${007}`, `${1.}`) and of every message that says
+  // what it found, follow templates.md, Errors when loading: "For a literal
+  // that is not well-formed, such as the number `1e` in `${1e}`, the column
+  // is the literal's first character. For a message that says what it
+  // found, such as `expected } to end the ${, found "q"`, it is the
+  // character found." The maintainer confirmed that rule on 2026-11-17
+  // (#275).
   let bodies = [
     "abc ${query.x", "${}", "${ }", "${query.}", "${query.x query.y}", "${user.id}",
     "${item.sku}", "${fake.phone()}", "${fake.int(1)}", "${now(1, 2)}", "${fake.int('a', 2)}",
