@@ -254,18 +254,16 @@ async test "h2c: streams waiting on the connection window get it in the order th
       // connection window, they get it in the order they began to wait, and
       // a stream that has sent what it was given waits behind the others"
       // (docs/http2.md, Streams that wait). So a widening of the 83,965
-      // octets left of its body goes to it alone. Stream 5's task looks at
-      // the windows only once stream 1's DATA, queued before, has gone out
-      // (The output bound), and may not have looked when the widening comes.
-      // A wider one would leave a free part, which that task could then send
-      // from before stream 3's DATA.
+      // octets left of its body goes to it alone. A wider one would give
+      // streams 5 and 1 their shares too, and their tasks could send them
+      // between stream 3's DATA frames.
       out.push("--- the connection window widened by 83965")
       raw.send([WindowUpdate(stream_id=0, increment=83_965)])
       out.push(raw.runs_until(data_total(83_965)))
-      // Then the 149,505 octets left of the bodies of streams 1 and 5. The
-      // document does not say whether stream 5 began to wait when its
-      // HEADERS went out without its body, before stream 1 sent, or when its
-      // task looked at the windows, after: their order is not checked.
+      // Then the 149,505 octets left of the bodies of streams 1 and 5, which
+      // one widening gives to both: their tasks may send in either order,
+      // which is not checked here. The next test checks which of the two
+      // waits first.
       out.push("--- the connection window widened by 149505")
       raw.send([WindowUpdate(stream_id=0, increment=149_505)])
       let rest = raw.runs_until(data_total(149_505)).split("\n").collect()
@@ -331,10 +329,10 @@ async test "h2c: a response queued without all of its body waits for the connect
       // the order they began to wait, and a stream that has sent what it was
       // given waits behind the others" (docs/http2.md, Streams that wait).
       // Stream 3 has waited longest, so the 83,965 octets left of its body
-      // go to it. Stream 5 began to wait when its response was queued
-      // without its body, before stream 1 sent its 500 octets (the
-      // maintainer, 2026-11-18, #381), so the next 5 octets go to stream 5,
-      // and stream 1 gets the rest of the window after it.
+      // go to it. "A stream begins to wait as soon as smock queues its
+      // response without all of its body" (the same section, #381): stream
+      // 5 began to wait before stream 1 sent its 500 octets, so the next 5
+      // octets go to stream 5, and stream 1 gets the rest after it.
       out.push("--- the connection window widened by 83965")
       raw.send([WindowUpdate(stream_id=0, increment=83_965)])
       out.push(raw.runs_until(data_total(83_965)))

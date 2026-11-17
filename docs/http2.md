@@ -484,8 +484,11 @@ or with a SETTINGS frame that raises the initial window. So a client with
 small windows still gets the whole body, and the other streams of the
 connection go on meanwhile. When several streams wait for the connection
 window, they get it in the order they began to wait, and a stream that has
-sent what it was given waits behind the others. Priority signals are
-accepted and ignored.
+sent what it was given waits behind the others. A stream begins to wait as
+soon as smock queues its response without all of its body, or an event
+without all of its data. So a response queued while another stream is
+about to send what it was given waits ahead of that stream. Priority
+signals are accepted and ignored.
 
 A client that keeps a window at zero does not hold a body for good: the
 write timeout runs while the body waits ([Timeouts](#timeouts)). Nor does a
