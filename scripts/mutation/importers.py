@@ -130,12 +130,18 @@ def merge(record, again, packages, summary):
     record["timings"]["importers"] = again["timings"]
     summary["reran"] += 1
     if again["outcome"] == "survived":
+        # Its importers' tests that failed but give no kill credit.
+        if again.get("no_credit"):
+            record["no_credit"] = record.get("no_credit", []) + again["no_credit"]
         return
-    record.pop("diff", None)
+    if again["outcome"] != "unconfirmed":
+        record.pop("diff", None)
     record.update(outcome=again["outcome"], killing_tests=again["killing_tests"])
-    if "message" in again:
-        record["message"] = again["message"]
-    if again["outcome"] == "killed":
+    for field in ("message", "confirmation", "first_outcome", "failed_first", "no_credit"):
+        if field in again:
+            record[field] = again[field]
+    # A confirmed time-out counts as killed.
+    if again["outcome"] in ("killed", "timed out"):
         summary["killed"] += 1
         for name in sorted({t["package"] for t in again["killing_tests"] if t.get("package")}):
             summary["killed_by"][name] = summary["killed_by"].get(name, 0) + 1

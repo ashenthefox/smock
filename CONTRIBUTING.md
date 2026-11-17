@@ -989,6 +989,9 @@ version.
 - **Killed**: a test fails with the mutant on.
 - **Timed out**: the run takes longer than 1.25 times the baseline run
   plus 4 s. A confirmed time-out counts as killed, and is listed.
+- **Unconfirmed**: a kill or a time-out that kill confirmation (below)
+  does not bear out. It counts neither as killed nor as survived, and is
+  listed with the reason.
 - **Unviable**: the mutant does not compile. It counts neither as killed
   nor as survived.
 - **Survived**: every test passes.
@@ -997,9 +1000,12 @@ version.
 again with the mutant on and pass with it off. A time-out counts only
 when the mutant times out again and the run without it finishes within
 the limit; otherwise it is recorded as unconfirmed. The baseline runs
-twice before any mutant. The runner records each test's flake rate, and a
+twice before any mutant, and a test that fails in either run gives no
+kill credit in that run. The runner records each test's flake rate, and a
 test above the flake threshold, which the maintainer sets, gives no kill
-credit until it is fixed.
+credit until it is fixed. The flake threshold is 1% of a test's runs,
+over the latest 10 runs whose flake records the runner reads;
+`mutation/flakes.toml` holds both numbers.
 
 **Kill credit for a pure package.** Any wasm-gc test of any package of
 the workspace gives credit. The package's own tests run first. For the
@@ -1405,13 +1411,51 @@ copies the workspace, the files git tracks and the untracked ones it does
 not ignore, into `_build/mutation/tree-<n>`, and builds there into
 `_build/mutation/target-<n>`: a build directory at a stable path, with a
 target directory of the runner's own, so that a plain build and a mutant
-build never rebuild each other. For each package, it first builds and runs
-the package's tests without a mutant, and stops if they fail. Then, for
-each mutant, it writes the mutated file into the tree, builds the
-package's tests with `moon test --target wasm-gc -p <package>
---build-only`, and runs them. It checks the build's exit status, so a
-mutant that does not build never runs the binary of an earlier build, and
-it never passes `-u`.
+build never rebuild each other. For each package, it first builds the
+package's tests without a mutant and runs them twice. It stops if they do
+not build, or if a run fails without naming a test that failed; a test
+that fails in either run is listed, and gives no kill credit in this run.
+The longer run sets the time limit. Then, for each mutant, it writes the
+mutated file into the tree, builds the package's tests with
+`moon test --target wasm-gc -p <package> --build-only`, and runs them. It
+checks the build's exit status, so a mutant that does not build never
+runs the binary of an earlier build, and it never passes `-u`.
+
+**Confirmation.** A kill and a time-out are each checked once more, as
+[Outcomes and kill credit](#outcomes-and-kill-credit) asks, by
+`scripts/mutation/confirm.py`. For a kill, the runner runs the tests
+again with the mutant on, then without it; the kill counts only if some
+of the tests that failed fail again and pass without the mutant, and the
+record then names those tests alone. For a time-out, the mutant must time
+out again, and the run without it must finish within the limit. A kill or
+a time-out that is not borne out is **unconfirmed**, and its record says
+why. Each run is the whole `moon test` of the package, as the first was,
+so properties run with their committed seeds every time; the runner sets
+no seed. A test whose failures all give no kill credit makes no kill: the
+mutant survives, and its record names those tests.
+
+**Flake rates.** The runner counts each test's flaky results: a failure
+without a mutant, in the two runs before any mutant or in the run that
+confirms a kill, and a pass when a kill runs again with the mutant on.
+Every test of a package runs whenever its package's tests run without a
+mutant, so a run's record counts those runs per package, and per test its
+flaky results and its runs again with a mutant on. A test's flake rate is
+its flaky results over its runs, across the latest runs that
+`mutation/flakes.toml` names, and a test above the flake threshold there
+gives no kill credit, until enough later runs without a flaky result have
+pushed its flaky ones out of the latest. Each run writes `flakes.json`
+beside its report: the latest runs' records, this one included, and the
+rate of each test that had a flaky result among them. The next run reads
+it with `--flakes <file>`. The records live in the report artifact of the
+latest weekly run on GitHub Actions, which the next weekly run downloads
+and passes to the runner; the weekly workflow
+([#314](https://github.com/hirunefu/smock/issues/314)) does both. A run
+made of shards, as the weekly run is, keeps one file: its shards each
+read the same records, and
+`python3 scripts/mutation/confirm.py merge <flakes.json>...` sums their
+counts of this run into one record. A run
+without `--flakes`, as on a laptop, starts with no records, so only its
+own two runs without a mutant take credit away.
 
 **Importers' tests.** A mutant that survives the package's own tests runs
 again, the same way, with the tests of the package's importers, which
@@ -1426,32 +1470,39 @@ tests build on wasm-gc (`moon test --target wasm-gc -p <importer>
 --dry-run`). Those that build only natively, `server`, `defdir`, `schema`,
 `protobuf-conformance` and `e2e` among them, give no credit, since a pure
 package's verdict is taken on wasm-gc. The importers' tests first run
-without a mutant, and the run stops if they fail; their time limit comes
-from that run. A record names the package of each test that killed its
+twice without a mutant, as the package's own do, and their time limit
+comes from those runs. A record names the package of each test that killed its
 mutant, and the importers whose tests ran it again. To see a package's
 importers: `python3 scripts/mutation/importers.py template`.
 
 Each mutant's outcome, after both runs, is one of:
 
-- **killed**: a test failed;
-- **timed out**: the run took longer than 1.25 times the run without a
-  mutant plus 4 s, and was stopped. Time-outs are listed apart: until a
-  later step of the review confirms them, they do not count as killed;
+- **killed**: a test failed, and the kill is confirmed;
+- **timed out**: the run took longer than 1.25 times the longer run
+  without a mutant plus 4 s, and was stopped, and the time-out is
+  confirmed. It counts as killed, and is listed apart;
+- **unconfirmed**: a kill or a time-out that its confirmation did not
+  bear out. It counts neither as killed nor as survived, and is listed
+  with the reason and the mutant's diff;
 - **unviable**: the mutant does not build. It counts neither as killed
   nor as survived;
-- **survived**: every test passed.
+- **survived**: every test that gives kill credit passed.
 
 It writes into `_build/mutation/out/`: `mutants.jsonl`, one record per
 mutant with its site, the set that ran, its outcome, the tests that
-killed it, the importers whose tests ran it again, the backend and the
-timings; `summary.json`, the operator set's version and the set, and per
-package the counts of sites and positions in both sets, the sites each
-rule skipped, the counts of each outcome and the run without a mutant,
+killed it, the importers whose tests ran it again, how its confirmation
+went, the backend and the timings; `summary.json`, the operator set's
+version and the set, the flake threshold with the tests above it and the
+tests with a flaky result in this run, and per package the counts of
+sites and positions in both sets, the sites each rule skipped, the counts
+of each outcome and the runs without a mutant with the tests that failed
+in them,
 the same counts with the package's own tests alone, and its importers:
 those on wasm-gc and those left out, the survivors their tests ran again
-and how many the tests of each importer killed; and `report.md`, the same
-counts, the time-outs, and each survivor's diff with its whole enclosing
-definition, which the runner also prints. A run of the full set counts
+and how many the tests of each importer killed; `report.md`, the same
+counts, the time-outs, the unconfirmed mutants, each survivor's diff with
+its whole enclosing definition, and the flaky tests, which the runner
+also prints; and `flakes.json`, the flake records. A run of the full set counts
 the mutants at the pinned alternatives and at the other alternatives
 apart, and lists their survivors apart: L4 reads only the former.
 `--sites-only` runs no mutant, and writes only the counts. `--work` and
@@ -1486,7 +1537,11 @@ known outcome with `units`' own tests and, for those that survive them,
 with its importers' tests: `meter` imports `units`, `dial` imports
 `meter`, for its tests only, and each kills one survivor; `probe` imports
 `units` but builds only natively, so the one survivor that only its test
-would kill stays a survivor. `moon fmt --check`
+would kill stays a survivor. The tests of confirmation run calc's
+mutants with a moon that answers the runs of tests from a script (a
+failure, then a pass; a time-out, then a run within the limit), so that a
+flaky failure and a time-out that does not repeat happen every time; the
+real moon builds. `moon fmt --check`
 at the root does not read the fixture: run `moon fmt` inside it after a
 change.
 
