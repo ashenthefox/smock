@@ -401,10 +401,10 @@ value in_place 'test("a/a_test.mbt", "a total counts one request")["commit"]' "\
 value in_place 'test("a/a_test.mbt", "a total counts no request")["commit"]' "\"$introduced\""
 value in_place '[t["issue"] for t in out["tests"]]' '[40,40]'
 
-# A test whose name changes keeps the commit that introduced its block:
-# the commit that renamed it wrote no other line of the block, so the
-# block's commit is the one that wrote most of its lines, though another
-# commit wrote the first of them.
+# A test whose name changes is, for moon and for its header line, a new
+# test: its link is the commit that gave it the name it has, though that
+# commit wrote no other line of it. So it stays when its file is renamed
+# later, and blame finds the header in the file's old path, as the rest.
 tree
 file a/a_test.mbt <<'EOF'
 ///|
@@ -415,38 +415,31 @@ test "a total counts requests" {
 }
 EOF
 commit "Count requests in totals (#50)"
-introduced=$(head)
-file a/a_test.mbt <<'EOF'
-///|
-test "a total counts requests" {
-  inspect(@a.Total::new().count(), content="0")
-  let total = @a.Total::new()
-  total.add(1)
-  inspect(total.count(), content="1")
-}
-EOF
-commit "Check that a total starts at zero (#52)"
 file a/a_test.mbt <<'EOF'
 ///|
 test "a total counts each request once" {
-  inspect(@a.Total::new().count(), content="0")
   let total = @a.Total::new()
   total.add(1)
   inspect(total.count(), content="1")
 }
 EOF
 commit "Say that a total counts each request once (#51)"
+renamed=$(head)
+git -C "$repo" mv a/a_test.mbt a/totals_test.mbt
+commit "Name the file of the tests of totals after them (#53)"
 links renamed
-value renamed 'test("a/a_test.mbt", "a total counts each request once")["commit"]' "\"$introduced\""
-value renamed 'test("a/a_test.mbt", "a total counts each request once")["issue"]' '50'
+value renamed 'test("a/totals_test.mbt", "a total counts each request once")["commit"]' "\"$renamed\""
+value renamed 'test("a/totals_test.mbt", "a total counts each request once")["introduced_in"]' '"a/a_test.mbt"'
+value renamed 'test("a/totals_test.mbt", "a total counts each request once")["issue"]' '51'
 
 # A new test that takes the name of an older test in another package is
-# not a copy of it: blame finds the header line in the older file, but no
-# other line of the block, so the block's commit is the one that wrote
-# the rest. (xml/path_test.mbt has such a test: its name is a test's of
-# re2/regex_test.mbt.) A line without a letter or a digit, such as the
-# blank line that blame finds beside the header in the older file, does
-# not count.
+# not a copy of it: blame takes its header line from the older file, but
+# no other line of the block. The block's commit is then the one that
+# wrote most of the block's other lines, though another commit wrote the
+# first of them. (xml/path_test.mbt has such a test: its name is a test's
+# of re2/regex_test.mbt.) A line without a letter or a digit, such as the
+# blank line that blame takes from beside the header in the older file,
+# does not count.
 tree
 file r/r_test.mbt <<'EOF'
 ///|
@@ -461,10 +454,21 @@ file x/x_test.mbt <<'EOF'
 test "a compile error position counts characters, not bytes" {
 
   inspect(@x.path_errors(["/名😀/*"]), content="position 4: wildcard * is not supported")
+  inspect(@x.path_errors(["/名😀/@😀[1]"]), content="position 6: predicate is not supported")
 }
 EOF
 commit "Add the XML paths (#66)"
 named=$(head)
+file x/x_test.mbt <<'EOF'
+///|
+test "a compile error position counts characters, not bytes" {
+
+  inspect(@x.path_errors(["/名"]), content="")
+  inspect(@x.path_errors(["/名😀/*"]), content="position 4: wildcard * is not supported")
+  inspect(@x.path_errors(["/名😀/@😀[1]"]), content="position 6: predicate is not supported")
+}
+EOF
+commit "Check a path of one name (#67)"
 links same_name
 value same_name 'test("x/x_test.mbt", "a compile error position counts characters, not bytes")["commit"]' "\"$named\""
 value same_name 'test("x/x_test.mbt", "a compile error position counts characters, not bytes")["introduced_in"]' '"x/x_test.mbt"'
