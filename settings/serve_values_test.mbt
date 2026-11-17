@@ -320,6 +320,27 @@ test "values: the plain, TLS and admin ports, by their flags or variables, must 
 }
 
 ///|
+test "values: a plain or TLS port that is the admin port's default is refused, and the refusal names the admin port" {
+  // The same rule as above: the admin port is "separate from the plain and
+  // TLS ports", 9090 by default (docs/running.md, Settings). Which of the
+  // two ports the refusal names, here the admin port that the user did not
+  // set, is the code's, which #320 takes to the maintainer.
+  let ports = (settings : @settings.ServeSettings) => {
+    "\{settings.port} \{settings.tls_port} \{settings.admin_port}"
+  }
+  inspect(
+    [
+      serve_shows(["--port", "9090"], ports),
+      serve_shows([], ports, env={ "SMOCK_TLS_PORT": "9090" }),
+    ].join("\n"),
+    content=(
+      #|invalid value "9090" for --admin-port (SMOCK_ADMIN_PORT): must differ from --port (SMOCK_PORT)
+      #|invalid value "9090" for --admin-port (SMOCK_ADMIN_PORT): must differ from --tls-port (SMOCK_TLS_PORT)
+    ),
+  )
+}
+
+///|
 /// The certificates of single Mocks that settings hold, one Mock after
 /// another, sorted, or `none`.
 fn mock_certs(settings : @settings.ServeSettings) -> String {
