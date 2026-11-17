@@ -20,7 +20,7 @@ async test "h2c: a response body larger than both of the client's windows goes o
       let client = smock.h2c()
       defer client.close()
       let response = client.request("GET", "/big", authority="localhost")
-      let entries = smock.journal_once(1, within=1000)
+      let entries = smock.journal_once(1, within=patience_ms)
       inspect(
         [response.checked(big_body), ..entries].join("\n"),
         content=(
@@ -181,7 +181,7 @@ async test "h2c: two bodies larger than the windows, on one connection, both arr
           "---",
           second_response.checked(big_body),
           "---",
-          ..smock.journal_once(2, within=1000),
+          ..smock.journal_once(2, within=patience_ms),
         ].join("\n"),
         content=(
           #|200
@@ -308,7 +308,7 @@ async test "h2c: a fast stream is answered at once while a large body on the sam
       ])
       out.push(raw.runs_until(frame => ends_stream(frame, 1)))
       out.push("---")
-      out.append(smock.journal_once(2, within=1000))
+      out.append(smock.journal_once(2, within=patience_ms))
       inspect(
         out.join("\n"),
         content=(
@@ -360,7 +360,7 @@ async test "h2c: a stream reset while its body waits for window ends its slow wr
       let more = raw.frames_until_ping_ack()
       out.push(if more == "" { "(no frame)" } else { more })
       out.push("---")
-      out.append(smock.journal_once(2, within=1000))
+      out.append(smock.journal_once(2, within=patience_ms))
       inspect(
         out.join("\n"),
         content=(
@@ -457,7 +457,7 @@ async test "h2c: a stream reset while its task writes part of its body to a clie
       let more = raw.frames_until_ping_ack()
       out.push(if more == "" { "(no frame)" } else { more })
       out.push("---")
-      out.append(smock.journal_once(2, within=1000))
+      out.append(smock.journal_once(2, within=patience_ms))
       inspect(
         out.join("\n"),
         content=(
