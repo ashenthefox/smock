@@ -237,14 +237,12 @@ let long_message_name : String = String::make(65529, 'M')
 ///|
 /// A set of one file in the package `pkg`, holding one message named
 /// `long_message_name` with 255 fields of type int32, numbered 1 to 255 and
-/// named `aa` to `po`, the first with `extra` more letters `a`. The package
-/// takes 3 characters and the message's full name 65,533, which make
-/// 65,536; the full name of each field, such as `pkg.MMM….aa`, takes 65,536
-/// as well. So its full names take 256 times 65,536 characters, 16 MiB, and
-/// `extra` more. Every full name in it but the package's has a prefix, and
-/// it has one file, no method and no enum value, so smock's count, which
-/// leaves out a name without a prefix but counts a package's, comes to the
-/// same total as counting every full name of the set once.
+/// named `aa` to `po`, the first with `extra` more letters `a`. Counted as
+/// docs/grpc.md counts them under "What smock checks", the package takes 3
+/// characters and the message's full name 65,533, which make 65,536; the
+/// full name of each field, such as `pkg.MMM….aa`, takes 65,536 as well. So
+/// its full names take 256 times 65,536 characters, 16 MiB, and `extra`
+/// more.
 fn names_set(extra : Int32) -> Bytes {
   let letter = (n : Int32) => ('a'.to_int() + n).unsafe_to_char()
   nested(w => {
@@ -297,11 +295,12 @@ let names_past_16_mib : Bytes = names_set(1)
 ///|
 test "a set whose full names would take more than 16 MiB is refused as soon as they do" {
   // docs/grpc.md, "What smock checks": smock refuses a set when "the full
-  // names of the set take more than 16 MiB". Every full name in these two
-  // sets but the package's has a prefix, so the set of 16 MiB exactly is
-  // read, and the one of a character more is refused with that problem.
-  // Only the problem is shown, so that a set read by mistake is not
-  // rendered whole.
+  // names of the set take more than 16 MiB", and "The 16 MiB of full names
+  // is 16,777,216 UTF-16 code units". "Each full name made by joining a
+  // name to a package, a message or a service with a dot counts", and "A
+  // package counts itself". So the set of 16 MiB exactly is read, and the
+  // one of a character more is refused with that problem. Only the problem
+  // is shown, so that a set read by mistake is not rendered whole.
   inspect(set_outcome(names_of_16_mib[:]), content="read")
   let problem = try @protobuf.read_descriptor_set(names_past_16_mib[:]) catch {
     err => "error: \{err}"
@@ -314,9 +313,10 @@ test "a set whose full names would take more than 16 MiB is refused as soon as t
       #|error: the full names of the set take more than 16 MiB
     ),
   )
-  // A message with a name of 65535 letters and fields without a name: each
-  // field's full name takes 65536 characters, so the 257th field passes
-  // 16 MiB.
+  // A message with a name of 65535 letters, in no package, and fields
+  // without a name. The message's name has nothing before it, so it "counts
+  // nothing"; each field's full name takes 65536 characters, so the 257th
+  // field passes 16 MiB.
   let fields = (count : Int32) => {
     nested(w => {
       message_field(
@@ -338,8 +338,9 @@ test "a set whose full names would take more than 16 MiB is refused as soon as t
       )
     })
   }
-  // A package of 8192 one-letter names, a.a.a and so on, defines a
-  // package for each prefix, whose names take more than 16 MiB together.
+  // A package of 8192 one-letter names, a.a.a and so on, counts itself and
+  // each prefix of it that ends before a dot, which take more than 16 MiB
+  // together.
   let package_of = (count : Int32) => {
     let package_name = Array::make(count, "a").join(".")
     nested(w => {
