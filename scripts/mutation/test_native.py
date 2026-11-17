@@ -20,6 +20,7 @@ usage: python3 -m unittest discover -s scripts/mutation -v
 import json
 import os
 import platform
+import re
 import shutil
 import stat
 import subprocess
@@ -57,6 +58,15 @@ BOUNDS = [
     ("bounds/bounds.mbt,is_empty_name,BODY,{…},{ false },0", False, "killed", None),
     ("bounds/bounds.mbt,is_empty_name,INT,0,1,0", False, "killed", None),
     ("bounds/bounds.mbt,is_empty_name,INT,0,-1,0", False, "killed", None),
+]
+
+# The mutants of host's pinned set, a package that builds only natively:
+# each one's id and the outcome that the comment beside its site gives.
+HOST = [
+    ("host/host.mbt,is_system,BODY,{…},{ false },0", "killed"),
+    ("host/host.mbt,is_system,ROR,<,<=,0", "survived"),
+    ("host/host.mbt,is_system,INT,1000,1001,0", "survived"),
+    ("host/host.mbt,is_system,INT,1000,999,0", "killed"),
 ]
 
 
@@ -175,9 +185,10 @@ def names(tests):
 
 
 class NativeTest(unittest.TestCase):
-    """One run of bounds' pinned set, whose mutants at sites that use an
-    unchecked array access run natively as well, with moon's variables for
-    another C compiler set to ones that do not exist."""
+    """One run of the pinned sets of bounds, whose mutants at sites that use
+    an unchecked array access run natively as well, and of host, which
+    builds only natively, with moon's variables for another C compiler set
+    to ones that do not exist."""
 
     @classmethod
     def setUpClass(cls):
@@ -189,12 +200,14 @@ class NativeTest(unittest.TestCase):
                            MOON_CC_WRAPPER=str(cls.tmp / "no-wrapper"))
         cls.result = subprocess.run(
             [sys.executable, str(RUN), "--root", str(FIXTURE), "--work", str(cls.tmp / "work"), "--out", str(cls.out),
-             "--moon", str(cls.moon), "bounds"],
+             "--moon", str(cls.moon), "bounds", "host"],
             capture_output=True, text=True, env=environment)
         if cls.result.returncode != 0:
             raise AssertionError(f"run.py failed ({cls.result.returncode}):\n{cls.result.stderr}")
-        cls.records = [json.loads(line) for line in (cls.out / "mutants.jsonl").read_text().splitlines()]
-        cls.summary = json.loads((cls.out / "summary.json").read_text())["packages"][0]
+        records = [json.loads(line) for line in (cls.out / "mutants.jsonl").read_text().splitlines()]
+        cls.records = [r for r in records if r["package"] == "mutation/fixture/bounds"]
+        cls.host = [r for r in records if r["package"] == "mutation/fixture/host"]
+        cls.summary, cls.host_summary = json.loads((cls.out / "summary.json").read_text())["packages"]
         cls.report = (cls.out / "report.md").read_text()
 
     @classmethod
@@ -259,12 +272,11 @@ class NativeTest(unittest.TestCase):
         self.assertEqual(len(native["baseline"]["runs_s"]), 2)
         self.assertAlmostEqual(native["limit_s"], 1.25 * native["baseline"]["run_s"] + 4, places=2)
         self.assertEqual(native["baseline"]["tests"], 4)
-        # Each native build and run is of bounds' tests, and none passes -u.
+        # Of bounds' tests, natively: none passes -u.
         native_runs = [line.split() for line in self.log.read_text().splitlines()
-                       if "--target native" in line and "--dry-run" not in line]
+                       if "--target native" in line and "mutation/fixture/bounds" in line.split()]
         self.assertTrue(native_runs)
         for words in native_runs:
-            self.assertEqual(words[words.index("-p") + 1], "mutation/fixture/bounds")
             self.assertNotIn("-u", words)
             self.assertNotIn("--update", words)
         # A build of the baseline, of each mutant, and of each kill's two
@@ -290,3 +302,35 @@ class NativeTest(unittest.TestCase):
             self.assertIn(f"On {MACHINE}, the native verdict is recorded, and the wasm-gc verdict counts:"
                           " only amd64's native verdict decides.", self.report)
             self.assertIn("### Survivors (0)", self.report)
+
+    def test_a_package_that_builds_only_natively_runs_wholly_natively(self):
+        # #307: the runner can run a whole native-only package natively,
+        # with its own in-process tests, as step 5 does for defdir, watch,
+        # openssl and protobuf-conformance.
+        self.assertEqual([(r["id"], r["outcome"]) for r in self.host], HOST)
+        for record in self.host:
+            self.assertEqual(record["backend"], "native")
+            self.assertNotIn("verdicts", record)
+        summary = self.host_summary
+        self.assertEqual(summary["backend"], "native")
+        self.assertEqual({k: summary[k] for k in ("mutants", "killed", "survived", "unviable")},
+                         {"mutants": 4, "killed": 2, "survived": 2, "unviable": 0})
+        self.assertEqual(summary["baseline"]["tests"], 2)
+        self.assertEqual(summary["native"]["builds_only_natively"], True)
+        # Its self-test ran natively too, and its own tests saw it: natively,
+        # the abort stops the test program, so moon names no failed test.
+        self.assertEqual((summary["self_test"]["outcome"], summary["self_test"]["failed_tests"]), ("killed", 0))
+        self.assertIn("Self-test: `abort(\"mutation self-test\")` at the start of 1 functions, killed: the test"
+                      " program stopped before it named a failed test, as an abort stops it natively.", self.report)
+        # Every build and run of host's tests is native; moon is asked only
+        # whether they build on wasm-gc.
+        for line in self.log.read_text().splitlines():
+            words = line.split()
+            if "mutation/fixture/host" in words and "--dry-run" not in words:
+                self.assertEqual(words[words.index("--target") + 1], "native", line)
+        self.assertIn("- It builds only natively, so every mutant ran natively on", self.report)
+        # The abort wrote no core dump into the worker's tree: native runs
+        # dump none.
+        dumps = [p for p in (self.tmp / "work").rglob("core*") if p.is_file() and re.fullmatch(r"core(\.\d+)?", p.name)]
+        self.assertEqual(dumps, [])
+        self.assertIn("#### `host/host.mbt,is_system,ROR,<,<=,0`", self.report)

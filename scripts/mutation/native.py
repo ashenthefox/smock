@@ -36,6 +36,7 @@ sites are few.
 import copy
 import os
 import platform
+import resource
 
 import importers
 
@@ -81,11 +82,21 @@ def unset_c_variables():
             UNSET.append(name)
 
 
+def dump_no_core():
+    """Sets the runner's limit on core dumps, which every moon it starts
+    and every test program inherits, to none: natively, a mutant that
+    aborts or reads out of bounds often stops the test program, which would
+    otherwise dump its core into the worker's tree."""
+    _, hard = resource.getrlimit(resource.RLIMIT_CORE)
+    resource.setrlimit(resource.RLIMIT_CORE, (0, hard))
+
+
 def twins(workers):
     """Workers that build and run natively in the same trees and target
     directories as the given ones (moon keeps each backend's builds apart
     there)."""
     unset_c_variables()
+    dump_no_core()
     found = []
     for worker in workers:
         twin = copy.copy(worker)
