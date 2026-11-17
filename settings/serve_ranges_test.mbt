@@ -81,3 +81,22 @@ test "ranges: --header-count-limit takes 1073741824 and refuses 1073741825" {
     ),
   )
 }
+
+///|
+test "ranges: --journal-max-entries takes 1073741824 and refuses 1073741825" {
+  // docs/running.md, Settings: --journal-max-entries takes 1 to 1073741824
+  // (2^30).
+  let journal_max_entries = (settings : @settings.ServeSettings) => {
+    settings.journal_max_entries
+  }
+  inspect(
+    [
+      serve_with(["--journal-max-entries", "1073741824"], journal_max_entries),
+      serve_with(["--journal-max-entries", "1073741825"], journal_max_entries),
+    ].join("\n"),
+    content=(
+      #|1073741824
+      #|invalid value "1073741825" for --journal-max-entries (SMOCK_JOURNAL_MAX_ENTRIES): must be an integer from 1 to 1073741824
+    ),
+  )
+}
