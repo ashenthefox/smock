@@ -171,6 +171,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-h2spec-verdict.sh
 
+      # The job yaml-test-suite below judges the answers of smock's YAML
+      # parser with scripts/yaml-test-suite-verdict.py. This tests the
+      # verdict on small made-up suites.
+      - name: Test the yaml-test-suite verdict
+        if: ${{ !cancelled() }}
+        run: scripts/test-yaml-test-suite-verdict.sh
+
       # build-test.yml cross-checks the JSON Schema with smock on every
       # fixture (scripts/check-schema.sh). This tests that check with a
       # validator and a smock that answer as the test tells them.
@@ -259,6 +266,29 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-helm-chart.sh
 
+  # yaml-test-suite against smock's YAML parser, smock/yaml, in both of its
+  # modes (yaml-test-suite/README.md): scripts/check-yaml-test-suite.sh
+  # fetches the pinned release of the suite, checked against its SHA-256,
+  # builds the testee with moon, and judges every case in each mode against
+  # the mode's list of the cases that do not pass, yaml-test-suite/safe.txt
+  # and yaml-test-suite/openapi.txt. It runs beside the other jobs, so that
+  # it adds nothing to the run's wall time, and keep waits for it.
+  yaml-test-suite:
+    name: yaml-test-suite against smock/yaml
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install MoonBit (pinned)
+        run: scripts/install-moonbit.sh pinned
+
+      - name: Update the mooncakes registry index
+        run: moon update
+
+      - name: Run yaml-test-suite against smock/yaml in both modes
+        run: scripts/check-yaml-test-suite.sh
+
   # Keeps the release binary of each architecture for a machine that cannot
   # build it: the GKE benchmark of amd64 from an arm64 machine takes it
   # (scripts/gke-bench.sh --arch amd64 --smock). It runs after every other
@@ -269,8 +299,8 @@ jobs:
   # release handed over, and removes the handed-over copy.
   keep:
     name: Keep the release binaries
-    needs: [build-test, scripts]
-    if: ${{ !cancelled() && needs.build-test.result == 'success' && needs.scripts.result == 'success' }}
+    needs: [build-test, scripts, yaml-test-suite]
+    if: ${{ !cancelled() && needs.build-test.result == 'success' && needs.scripts.result == 'success' && needs.yaml-test-suite.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

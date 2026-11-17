@@ -220,5 +220,9 @@ such as Mock, Stub and Session.
   the Descriptor sets that tests read are built, and
   [`protobuf-conformance/README.md`](../protobuf-conformance/README.md)
   how protobuf's conformance suite checks the codec.
+- [`yaml-test-suite/README.md`](../yaml-test-suite/README.md) says how
+  the YAML test suite checks the YAML parser behind YAML Definition files
+  and OpenAPI documents, and how its lists of the cases that do not pass
+  are kept.
 - [agents/](agents/) tells coding agents where issues live, which triage
   labels to use, and how to read the glossary and the ADRs.
