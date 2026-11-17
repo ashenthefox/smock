@@ -92,12 +92,16 @@ title = 'A test that a seeded floating-point result is the same on every target 
 source = """
 #275, The removal rule and its proof, (C): backend-agreement and
 release-mode tests (engine tests of seeded floating-point results).
-CONTRIBUTING.md, Build and test: prebuild.py "compiles every executable that
-holds the engine with -ffp-contract=off, so that a release build on arm64
-does not fuse floating-point multiply-adds and a seeded delay is the same as
-on wasm-gc; CI tests the engine in a release build to check it." CI reruns
-every engine test in a release build (build-test.yml's job release-test),
-but only the tests below are kept for that reason.
+CONTRIBUTING.md, Build and test: "A release build on arm64 fuses
+floating-point multiply-adds unless it is told not to, and a seeded delay
+could then differ from the one wasm-gc draws. moon passes -ffp-contract=off
+to each C compile itself, so nothing in this repository adds it. The engine
+test "Fault arithmetic is never fused into multiply-adds, so a seeded delay
+is the same on every target" (engine/faults_test.mbt) fails if they are
+fused, and CI runs the engine's tests in a release build on amd64 and on
+arm64 to check it." CI reruns every engine test in a release build
+(build-test.yml's job release-test), but only the tests below are kept for
+that reason.
 """
 search = [
   '''git grep -n -i -E '\bfused\b|multiply-add|fp-contract|on every target' -- 'engine/*_test.mbt'''',
