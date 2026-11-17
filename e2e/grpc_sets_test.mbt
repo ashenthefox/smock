@@ -21,37 +21,6 @@ async fn hello_v2_request() -> Bytes {
 }
 
 ///|
-/// The entries of the Journal, one per line: the Mock, the Stub, the gRPC
-/// status and the body's data and size, each as JSON.
-async fn answered_by(smock : Smock) -> String {
-  let (_, journal) = smock.journal()
-  guard journal is Object({ "entries": Array(entries), .. }) else {
-    fail("no entries: \{journal.stringify()}")
-  }
-  let out = []
-  for entry in entries {
-    guard entry
-      is Object(
-        {
-          "mock": mock,
-          "stub": stub,
-          "grpcStatus": grpc_status,
-          "request": Object(
-            { "body": Object({ "data": data, "size": size, .. }), .. }
-          ),
-          ..
-        }
-      ) else {
-      fail("not an entry: \{entry.stringify()}")
-    }
-    out.push(
-      "\{mock.stringify()} \{stub.stringify()} \{grpc_status.stringify()} \{data.stringify()}/\{size.stringify()}",
-    )
-  }
-  out.join("\n")
-}
-
-///|
 /// Two Mocks whose sets are versions 1 and 2 of helloworld.proto, each with
 /// a Stub on SayHello: `greeter-v1`, the Default Mock, and `greeter-v2`,
 /// for the Host `v2.greeter.svc`, whose Stub requires the field `version`
@@ -148,85 +117,6 @@ async test "two Mocks whose sets define one package in two versions each decode 
       )
     })
   })
-}
-
-///|
-/// The Definition file of the Default Mock `greeter`, whose set is
-/// `greeter.binpb`, with one Stub on SayHello for `version`, 1 or 2, of
-/// helloworld.proto: `hello-v1` answers every call; `hello-v2` answers a
-/// call whose message has the field `version`, which only version 2's set
-/// decodes, and replies with it, which only version 2's set encodes, so
-/// version 1's set refuses this file.
-fn versioned_greeter(version : Int32) -> String {
-  let stub = if version == 1 {
-    (
-      #|  - id: hello-v1
-      #|    mock: greeter
-      #|    request: { path: /helloworld.Greeter/SayHello }
-      #|    response: { json: { message: Hello from v1 } }
-    )
-  } else {
-    (
-      #|  - id: hello-v2
-      #|    mock: greeter
-      #|    request: { path: /helloworld.Greeter/SayHello, body: { json: { version: 2 } } }
-      #|    response: { json: { message: Hello from v2, version: 2 } }
-    )
-  }
-  (
-    #|mocks:
-    #|  - name: greeter
-    #|    grpc: { descriptorSet: greeter.binpb }
-    #|stubs:
-    #|
-  ) +
-  stub
-}
-
-///|
-/// Waits until a reload after the status `before` swaps in a new
-/// definition set, through at most two reloads that do not, and returns
-/// the status then.
-async fn Smock::swapped(
-  self : Smock,
-  before : Map[String, Json],
-) -> Map[String, Json] {
-  let mut last = before
-  for _ in 0..<3 {
-    let status = self.reloaded(last)
-    if status.get("lastReload")
-      is Some(Object({ "result": String("swapped"), .. })) {
-      return status
-    }
-    last = status
-  }
-  fail("no reload swapped: \{last_reload(last)}")
-}
-
-///|
-/// Moves the definitions in `dir` to `version`, 1 or 2, of helloworld.proto
-/// and its Stub (`versioned_greeter`), and waits until a reload swaps them
-/// in. The file version 1's set refuses is written while version 1's set is
-/// there, so that no reload serves a set with the Stub of the other
-/// version: to version 2, the Definition file first, then the set; to
-/// version 1, the set first.
-async fn Smock::switch_to(self : Smock, dir : String, version : Int32) -> Unit {
-  let before = self.status()
-  let set = if version == 1 { greeter_set_path } else { greeter_v2_set_path }
-  let write_file = () => {
-    @fs.write_file("\{dir}/greeter.yaml", versioned_greeter(version))
-  }
-  let write_set = () => {
-    write_bytes(dir, "files/greeter.binpb", @fs.read_file(set).binary())
-  }
-  if version == 1 {
-    write_set()
-    write_file()
-  } else {
-    write_file()
-    write_set()
-  }
-  let _ = self.swapped(before)
 }
 
 ///|

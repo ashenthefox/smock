@@ -9,48 +9,6 @@
 // against itself.
 
 ///|
-/// The directory of the users fixtures.
-let users_dir : String = "fixtures/protobuf/users"
-
-///|
-/// The framed message that protoc encoded from `<name>.txtpb` in the users
-/// fixtures.
-async fn users_message(name : String) -> Bytes {
-  framed(@fs.read_file("\{users_dir}/\{name}.binpb").binary())
-}
-
-///|
-/// Runs `f` with a definitions directory holding `users.yaml`, whose text
-/// is `yaml`, and the set of users.proto at `files/users.binpb`.
-async fn with_users_set(yaml : String, f : async (String) -> Unit) -> Unit {
-  with_definitions([("users.yaml", yaml)], dir => {
-    @fs.mkdir("\{dir}/files")
-    write_bytes(
-      dir,
-      "files/users.binpb",
-      @fs.read_file("\{users_dir}/users.binpb").binary(),
-    )
-    f(dir)
-  })
-}
-
-///|
-/// The `grpc-status` of `reply`: from its trailers, or from its HEADERS
-/// when it is Trailers-Only.
-fn GrpcReply::status(self : GrpcReply) -> String {
-  let fields = match self.trailers {
-    Some(trailers) => trailers
-    None => self.head
-  }
-  for field in fields {
-    if field.0 == "grpc-status" {
-      return field.1
-    }
-  }
-  "none"
-}
-
-///|
 async test "the ticket's example: a condition with a proto name and an enum number meets a call that sends those values, and an unmatched call's Near miss shows it normalised" {
   let yaml =
     #|mocks:

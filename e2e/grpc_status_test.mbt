@@ -19,42 +19,6 @@ let grpc_status_names : Array[String] = [
 ]
 
 ///|
-/// The value of the field `name` of the reply, as a client reads its
-/// status: from its trailers, or from its one HEADERS block when the reply
-/// is Trailers-Only.
-fn GrpcReply::status_field(self : GrpcReply, name : String) -> String? {
-  let fields = match self.trailers {
-    Some(trailers) => trailers
-    None => self.head
-  }
-  for field in fields {
-    if field.0 == name {
-      return Some(field.1)
-    }
-  }
-  None
-}
-
-///|
-/// How the client reads the reply's end: its `grpc-status`, whether it came
-/// as Trailers-Only or after a reply message, and its `grpc-message`, as
-/// sent and as the client percent-decodes it, when it has one.
-fn GrpcReply::status_line(self : GrpcReply) -> String raise {
-  let form = if self.trailers is None && self.data.is_empty() {
-    "trailers-only"
-  } else {
-    "message, then trailers"
-  }
-  let status = self.status_field("grpc-status").unwrap_or("none")
-  let line = "grpc-status \{status}, \{form}"
-  match self.status_field("grpc-message") {
-    Some(sent) =>
-      "\{line}\n  sent: \{sent}\n  decoded: \{@percent.decode(sent).escape()}"
-    None => line
-  }
-}
-
-///|
 /// The gRPC status of each entry of `page`, a Journal page, with its HTTP
 /// status, one entry per line.
 fn grpc_statuses(page : Json) -> Array[String] raise {

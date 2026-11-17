@@ -2,7 +2,7 @@
 // definitions directory, and the Admin render operation, checked against
 // the OpenAPI document (contract_test.mbt). The Mock is `greeter`, with the
 // set of gRPC's helloworld.proto and googleapis' error_details.proto
-// (`with_details`, grpc_details_test.mbt). Both are given the time and the
+// (`with_details`, grpc_harness_test.mbt). Both are given the time and the
 // seed, so their renderings are the same, and are shown whole.
 
 ///|
