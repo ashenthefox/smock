@@ -66,7 +66,9 @@ pub fn involuntary_context_switches(proc_status : String) -> Int64? {
 /// How long the task was ready to run but waited for a CPU, in seconds:
 /// the second field (`run_delay`) of `schedstat`, the text of
 /// `/proc/<pid>/schedstat`, in nanoseconds, which counts the process's
-/// main thread. `None` when it is not such a line.
+/// main thread. Only the second field is read, so a line of two fields
+/// is read too, though the kernel writes three. `None` when it is not
+/// such a line.
 pub fn scheduling_delay_seconds(schedstat : String) -> Double? {
   let fields = schedstat.trim_end(chars="\n").split(" ").collect()
   guard fields.length() >= 2 && decimal(fields[1]) is Some(ns) else {

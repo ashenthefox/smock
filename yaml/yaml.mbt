@@ -5,8 +5,11 @@
 ///
 /// For a value that is not read, such as a tag or an ambiguous plain
 /// scalar, the pointer names that value; for a key, it names the member.
-/// For a syntax error, it names the deepest node the parser reached. It is
-/// `""` for the whole document.
+/// A key written over several lines, which YAML allows only on one line,
+/// names the member by its text with the lines folded, as a scalar over
+/// several lines is read: `a\n b: 1` gives `/a b`. For a syntax error, it
+/// names the deepest node the parser reached. It is `""` for the whole
+/// document.
 #derive(Debug, Eq)
 pub(all) suberror ParseError {
   ParseError(pointer~ : String, message~ : String)
@@ -54,6 +57,15 @@ pub impl Show for ParseError with fn output(self, logger) {
 /// reads them as null; write `null`), tabs in indentation, control
 /// characters, and nesting deeper than 1024 collections, the limit of
 /// `@json.parse`.
+///
+/// Rejected too, on purpose, though YAML allows them: a text with no
+/// document, such as an empty one or one of comments only; a key that is a
+/// collection, such as `[a, b]: 1`; a `key: value` pair in a flow sequence
+/// without braces (a single pair mapping), such as `[a: 1]`; a key of a
+/// flow mapping written over several lines, such as a plain key whose `:`
+/// is on the next line; and a tab in the white space at the start of a
+/// line, even where YAML reads it as separation rather than as
+/// indentation.
 ///
 /// With `openapi=true`, `parse` reads the text as OpenAPI asks YAML to be
 /// read: by the YAML 1.2 core schema, with every key a string. This mode is

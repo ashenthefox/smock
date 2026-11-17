@@ -4,57 +4,58 @@
 # scripts/yaml-test-suite-verdict.py judges the testee's answers against
 # this list. A line gives the case, why it is listed, and the reason:
 #
-#   differs   a known difference: smock reads the case otherwise on purpose.
+#   differs   a known difference: smock reads the case otherwise on purpose,
+#             and the documents list it.
 #   skipped   the testee skips the case.
 #   #<issue>  a bug: the case fails until that issue is done.
 #
 # A case that fails or is skipped without being listed so fails the run,
-# and so does a listed case that passes: it must come off. A case with a
-# construct that the documents say the safe subset refuses is never listed here:
-# it passes when smock refuses it with the message the documents give for
-# that construct (yaml-test-suite/README.md). Before a branch merges into
-# main, this list may keep its bugs, each with its issue, until yaml's L4
-# ticket (#323) triages them (docs/merging-into-main.md).
+# and so does a listed case that passes: it must come off. A case with one
+# of the constructs of yaml-test-suite/README.md's table is never listed
+# here: it passes when smock refuses it with the message the documents
+# give for that construct. Before a branch merges into main, this list may
+# keep its bugs, each with its issue, until yaml's L4 ticket (#323) fixes
+# them (docs/merging-into-main.md).
 
 # No document in the stream.
-8G76  differs  The stream holds no document. smock reads exactly one ("Parses one YAML document", yaml/yaml.mbt), and refuses a stream without one: "the document is empty".
-98YD  differs  The stream holds no document. smock reads exactly one ("Parses one YAML document", yaml/yaml.mbt), and refuses a stream without one: "the document is empty".
-AVM7  differs  The stream holds no document. smock reads exactly one ("Parses one YAML document", yaml/yaml.mbt), and refuses a stream without one: "the document is empty".
-HWV9  differs  The stream holds no document. smock reads exactly one ("Parses one YAML document", yaml/yaml.mbt), and refuses a stream without one: "the document is empty".
-QT73  differs  The stream holds no document. smock reads exactly one ("Parses one YAML document", yaml/yaml.mbt), and refuses a stream without one: "the document is empty".
+8G76  differs  The stream holds no document. The documents list it among the valid YAML that smock refuses on purpose: "a file with no document" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "the document is empty".
+98YD  differs  The stream holds no document. The documents list it among the valid YAML that smock refuses on purpose: "a file with no document" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "the document is empty".
+AVM7  differs  The stream holds no document. The documents list it among the valid YAML that smock refuses on purpose: "a file with no document" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "the document is empty".
+HWV9  differs  The stream holds no document. The documents list it among the valid YAML that smock refuses on purpose: "a file with no document" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "the document is empty".
+QT73  differs  The stream holds no document. The documents list it among the valid YAML that smock refuses on purpose: "a file with no document" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "the document is empty".
 
 # Keys that are collections.
-4FJ6  differs  A key is a collection, which no JSON key can be, and the suite gives no JSON. smock refuses it inside a flow sequence: "a key: value pair in a flow sequence needs braces".
-LX3P  differs  A key is a collection, which no JSON key can be, and the suite gives no JSON. smock refuses it: "a key must be a plain or quoted scalar".
-Q9WF  differs  A key is a collection, which no JSON key can be, and the suite gives no JSON. smock refuses it: "a key must be a plain or quoted scalar".
-SBG9  differs  A key is a collection, which no JSON key can be, and the suite gives no JSON. smock refuses it: "a key must be a plain or quoted scalar".
+4FJ6  differs  A key is a collection, which no JSON key can be, and the suite gives no JSON. The documents list it among the valid YAML that smock refuses on purpose: "a key that is a collection" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it inside a flow sequence: "a key: value pair in a flow sequence needs braces".
+LX3P  differs  A key is a collection, which no JSON key can be, and the suite gives no JSON. The documents list it among the valid YAML that smock refuses on purpose: "a key that is a collection" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key must be a plain or quoted scalar".
+Q9WF  differs  A key is a collection, which no JSON key can be, and the suite gives no JSON. The documents list it among the valid YAML that smock refuses on purpose: "a key that is a collection" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key must be a plain or quoted scalar".
+SBG9  differs  A key is a collection, which no JSON key can be, and the suite gives no JSON. The documents list it among the valid YAML that smock refuses on purpose: "a key that is a collection" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key must be a plain or quoted scalar".
 
 # Single pair mappings in flow sequences.
-87E4  differs  A flow sequence holds a key: value pair without braces, a single pair mapping (YAML 1.2.2, 7.4.2, Example 7.19). smock refuses it: "a key: value pair in a flow sequence needs braces".
-8UDB  differs  A flow sequence holds a key: value pair without braces, a single pair mapping (YAML 1.2.2, 7.4.2, Example 7.19). smock refuses it: "a key: value pair in a flow sequence needs braces".
-9MMW  differs  A flow sequence holds a key: value pair without braces, a single pair mapping (YAML 1.2.2, 7.4.2, Example 7.19). smock refuses it: "a key: value pair in a flow sequence needs braces".
-L9U5  differs  A flow sequence holds a key: value pair without braces, a single pair mapping (YAML 1.2.2, 7.4.2, Example 7.19). smock refuses it: "a key: value pair in a flow sequence needs braces".
-LQZ7  differs  A flow sequence holds a key: value pair without braces, a single pair mapping (YAML 1.2.2, 7.4.2, Example 7.19). smock refuses it: "a key: value pair in a flow sequence needs braces".
-QF4Y  differs  A flow sequence holds a key: value pair without braces, a single pair mapping (YAML 1.2.2, 7.4.2, Example 7.19). smock refuses it: "a key: value pair in a flow sequence needs braces".
+87E4  differs  A flow sequence holds a key: value pair without braces, a single pair mapping (YAML 1.2.2, 7.4.2, Example 7.19). The documents list it among the valid YAML that smock refuses on purpose: "a `key: value` pair in a flow sequence without braces" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key: value pair in a flow sequence needs braces".
+8UDB  differs  A flow sequence holds a key: value pair without braces, a single pair mapping (YAML 1.2.2, 7.4.2, Example 7.19). The documents list it among the valid YAML that smock refuses on purpose: "a `key: value` pair in a flow sequence without braces" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key: value pair in a flow sequence needs braces".
+9MMW  differs  A flow sequence holds a key: value pair without braces, a single pair mapping (YAML 1.2.2, 7.4.2, Example 7.19). The documents list it among the valid YAML that smock refuses on purpose: "a `key: value` pair in a flow sequence without braces" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key: value pair in a flow sequence needs braces".
+L9U5  differs  A flow sequence holds a key: value pair without braces, a single pair mapping (YAML 1.2.2, 7.4.2, Example 7.19). The documents list it among the valid YAML that smock refuses on purpose: "a `key: value` pair in a flow sequence without braces" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key: value pair in a flow sequence needs braces".
+LQZ7  differs  A flow sequence holds a key: value pair without braces, a single pair mapping (YAML 1.2.2, 7.4.2, Example 7.19). The documents list it among the valid YAML that smock refuses on purpose: "a `key: value` pair in a flow sequence without braces" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key: value pair in a flow sequence needs braces".
+QF4Y  differs  A flow sequence holds a key: value pair without braces, a single pair mapping (YAML 1.2.2, 7.4.2, Example 7.19). The documents list it among the valid YAML that smock refuses on purpose: "a `key: value` pair in a flow sequence without braces" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key: value pair in a flow sequence needs braces".
 
 # Keys of flow mappings over several lines.
-4MUZ/02  differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). smock refuses it: "a key must be on a single line".
-9SA2     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). smock refuses it: "a key must be on a single line".
-NJ66     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). smock refuses it: "a key must be on a single line".
-UT92     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). smock refuses it: "a key must be on a single line".
-VJP3/01  differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). smock refuses it: "a key must be on a single line".
+4MUZ/02  differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
+9SA2     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
+NJ66     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
+UT92     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
+VJP3/01  differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
 
 # Tabs in the white space at the start of a line.
-6CA3     differs  The white space at the start of a line holds a tab, before content. YAML reads the tab as separation, since only spaces indent (YAML 1.2.2, 6.1). smock reads it as indentation, which the documents say it refuses ("tabs in indentation"): "tabs are not allowed in indentation".
-DK95/00  differs  The white space at the start of a line holds a tab, before content. YAML reads the tab as separation, since only spaces indent (YAML 1.2.2, 6.1). smock reads it as indentation, which the documents say it refuses ("tabs in indentation"): "tabs are not allowed in indentation".
-Q5MG     differs  The white space at the start of a line holds a tab, before content. YAML reads the tab as separation, since only spaces indent (YAML 1.2.2, 6.1). smock reads it as indentation, which the documents say it refuses ("tabs in indentation"): "tabs are not allowed in indentation".
+6CA3     differs  The white space at the start of a line holds a tab, before content. YAML reads the tab as separation, since only spaces indent (YAML 1.2.2, 6.1). The documents list it among the valid YAML that smock refuses on purpose: "a tab in the white space at the start of a line" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "tabs are not allowed in indentation".
+DK95/00  differs  The white space at the start of a line holds a tab, before content. YAML reads the tab as separation, since only spaces indent (YAML 1.2.2, 6.1). The documents list it among the valid YAML that smock refuses on purpose: "a tab in the white space at the start of a line" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "tabs are not allowed in indentation".
+Q5MG     differs  The white space at the start of a line holds a tab, before content. YAML reads the tab as separation, since only spaces indent (YAML 1.2.2, 6.1). The documents list it among the valid YAML that smock refuses on purpose: "a tab in the white space at the start of a line" (docs/definition-files.md, Writing Definition files in YAML; yaml/yaml.mbt, parse). smock refuses it: "tabs are not allowed in indentation".
 
 # Bugs.
-6XDY      #323     A bug: two document markers, ---, with nothing between them, are read as one document that holds the plain scalar "---". The documents say multiple documents are refused.
-9JBA      #323     A bug: smock reads a comment that no white space separates from what comes before it, which YAML refuses (YAML 1.2.2, 6.6: "Comments must be separated from other tokens by white space characters").
-CVW2      #323     A bug: smock reads a comment that no white space separates from what comes before it, which YAML refuses (YAML 1.2.2, 6.6: "Comments must be separated from other tokens by white space characters").
-SU5Z      #323     A bug: smock reads a comment that no white space separates from what comes before it, which YAML refuses (YAML 1.2.2, 6.6: "Comments must be separated from other tokens by white space characters").
-JEF9/02   #323     A bug: the last line of a block scalar ends the input, with no line break. The suite reads a line break there, and smock reads none.
-L24T/01   #323     A bug: the last line of a block scalar ends the input, with no line break. The suite reads a line break there, and smock reads none.
-Y79Y/000  #323     A bug: a line of a block scalar holds a tab where its content would be indented, which YAML refuses: only spaces indent (YAML 1.2.2, 6.1 and 8.1.1.1). smock reads an empty line.
-Y79Y/001  #323     A bug: a line of a block scalar holds a tab after its indentation, and nothing else. YAML reads the tab as content, since only spaces indent (YAML 1.2.2, 8.1.1.1, Example 8.2). smock reads an empty line.
+6XDY      #365     A bug: two document markers, ---, with nothing between them, are read as one document that holds the plain scalar "---". The documents say multiple documents are refused.
+9JBA      #366     A bug: smock reads a comment that no white space separates from what comes before it, which YAML refuses (YAML 1.2.2, 6.6: "Comments must be separated from other tokens by white space characters").
+CVW2      #366     A bug: smock reads a comment that no white space separates from what comes before it, which YAML refuses (YAML 1.2.2, 6.6: "Comments must be separated from other tokens by white space characters").
+SU5Z      #366     A bug: smock reads a comment that no white space separates from what comes before it, which YAML refuses (YAML 1.2.2, 6.6: "Comments must be separated from other tokens by white space characters").
+JEF9/02   #368     A bug: the last line of a block scalar ends the input, with no line break. The suite reads a line break there, and smock reads none.
+L24T/01   #368     A bug: the last line of a block scalar ends the input, with no line break. The suite reads a line break there, and smock reads none.
+Y79Y/000  #369     A bug: a line of a block scalar holds a tab where its content would be indented, which YAML refuses: only spaces indent (YAML 1.2.2, 6.1 and 8.1.1.1). smock reads an empty line.
+Y79Y/001  #369     A bug: a line of a block scalar holds a tab after its indentation, and nothing else. YAML reads the tab as content, since only spaces indent (YAML 1.2.2, 8.1.1.1, Example 8.2). smock reads an empty line.

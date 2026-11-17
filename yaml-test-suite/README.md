@@ -39,17 +39,18 @@ such a file before parsing it.
 `scripts/yaml-test-suite-verdict.py` judges the answers of one mode:
 
 - Where the suite marks the input an error, smock must refuse it.
-- Where the input has a construct that the documents say the mode refuses,
-  smock must refuse it with the message the documents give for that
-  construct. A refusal for another reason fails, so that it cannot pass
-  as "outside the subset".
+- Where the input has one of the constructs of the table below, which
+  the documents say the mode refuses, smock must refuse it with the
+  message the documents give for that construct. A refusal for another
+  reason fails, so that it cannot pass as "outside the subset".
 - Otherwise, where the suite gives JSON, smock must read that JSON: the
   same values, and the members of each object in the same order.
 - Otherwise, the suite gives no JSON, and smock must read the input.
 
 The constructs are those that `parse`'s documentation and
 [Writing Definition files in YAML](../docs/definition-files.md#writing-definition-files-in-yaml)
-name, each found from the suite's events or from the input:
+name with their messages, each found from the suite's events or from the
+input:
 
 | Construct | Found from | Refused in | The message |
 |---|---|---|---|
@@ -79,11 +80,16 @@ and the reason:
 
 - `differs`: a known difference, where smock reads the case otherwise on
   purpose, such as a key that is a collection, which no JSON key can be.
+  The documents list each one among the valid YAML that smock refuses:
+  a file with no document, a key that is a collection, a `key: value`
+  pair in a flow sequence without braces, a key of a flow mapping written
+  over several lines, and a tab in the white space at the start of a
+  line. Each entry quotes and cites the sentence.
 - `skipped`: the testee skips the case.
 - `#<issue>`: a bug, which fails until the issue is done.
 
-A case with a construct that the documents say the mode refuses is never
-listed: it passes when smock refuses it as the documents say, and fails
+A case with one of the constructs of the table is never listed: it
+passes when smock refuses it as the documents say, and fails
 otherwise. The run fails on a case that fails or is skipped without being
 listed so, on a listed case that passes, which must come off the list, and
 on a listed case that the suite does not have. Its output lists every
@@ -91,8 +97,8 @@ listed case with its outcome and reason.
 
 Unlike h2spec's lists, these may keep entries marked as bugs, each with
 its issue, when a branch merges into `main`, until yaml's L4 ticket (#323)
-triages them ([Before merging into main](../docs/merging-into-main.md)).
-Until each bug has an issue of its own, its entries name #323.
+fixes them ([Before merging into main](../docs/merging-into-main.md)).
+Each bug has an issue of its own, which its entries name: #365 to #369.
 
 ## How it runs
 

@@ -284,7 +284,8 @@ test "text, comments, CDATA sections and processing instructions must be well-fo
 /// XML 1.0 §2.8 [24] forbids: `VersionInfo ::= S 'version' Eq ("'"
 /// VersionNum "'" | '"' VersionNum '"')`, as [80] and [32] quote the
 /// encoding and standalone values. Its error is at the byte where the
-/// quote is missing, as `ParseError`'s position is documented.
+/// quote is missing, as `ParseError`'s position is documented, and its
+/// message is the one #283 names: "expected a quoted value".
 test "an XML declaration must come first, and be well-formed" {
   inspect(
     errors([

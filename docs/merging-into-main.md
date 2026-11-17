@@ -39,7 +39,7 @@ pre-merge run compares with them.
   Unlike h2spec's lists, its lists of the cases that do not pass,
   `yaml-test-suite/safe.txt` and `yaml-test-suite/openapi.txt`, may keep
   entries marked as bugs, each with its issue, until yaml's L4 ticket
-  (#323) triages them. A listed case that passes already fails the run.
+  (#323) fixes them. A listed case that passes already fails the run.
 - [ ] **If the branch raises moonhttp**, it has passed the gate of
   [Upgrading moonhttp](releasing.md#upgrading-moonhttp): h2spec against
   both traffic ports, the e2e tests, and the interop check by hand with

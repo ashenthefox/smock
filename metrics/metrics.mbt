@@ -63,7 +63,10 @@ pub struct CounterSeries {
 ///|
 /// Registers a counter named `name`, with the help text `help` and the
 /// label names `labels`. Every series of it gives a value for each label,
-/// in the same order.
+/// in the same order. `name` is a Prometheus metric name, as the text
+/// format allows it: ASCII letters, digits, `_` and `:`, not starting with
+/// a digit. A name with `:` is accepted, though Prometheus keeps `:` for
+/// recording rules.
 pub fn Registry::counter(
   self : Registry,
   name : String,

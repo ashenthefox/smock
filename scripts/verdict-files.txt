@@ -33,3 +33,5 @@ scripts/check-weekly-run.*             the release's check of the latest weekly 
 docs/adr/0006-*                        ADR 0006, which pins operator set v1 and its alternative rule (#277)
 protobuf-conformance/failure_list.txt  the cases of protobuf's conformance suite that may fail
 scripts/h2spec/                        the cases of h2spec that may fail or be skipped on each port
+yaml-test-suite/safe.txt               the cases of the YAML test suite that may fail or be skipped in the safe subset
+yaml-test-suite/openapi.txt            the cases of the YAML test suite that may fail or be skipped in the mode for OpenAPI documents

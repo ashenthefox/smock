@@ -349,6 +349,10 @@ smock serve --dir defs --tls-cert-file /etc/smock/tls/tls.crt --tls-key-file /et
   certificate. A handshake without SNI, or whose SNI is no Host of a listed
   Mock, gets the default certificate: `--tls-cert-file`, or without it the
   generated self-signed certificate ([below](#the-self-signed-certificate)).
+- smock reads the SNI from the octets the client has sent so far, each
+  time more arrive. Once it has received 65,536 octets or more, counting
+  every octet received and not only the ClientHello's, it reads no name,
+  and the handshake gets the default certificate.
 - SNI follows the Hosts of the definition set served, reloads included. It
   only chooses the certificate: the Host header, or `:authority` over
   HTTP/2, still chooses the Mock.

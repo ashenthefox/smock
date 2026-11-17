@@ -588,6 +588,11 @@ test "is_well_known tells each well-known type the README lists, every wrapper i
   // ListValue, NullValue and Any, each "known by its full name, such as
   // `google.protobuf.Duration`". The nine wrappers are the messages of
   // protobuf's wrappers.proto (fixtures/protobuf/wellknown/google/protobuf/).
+  // The README decides the set, not ProtoJSON's list: Empty is in it
+  // ("Empty prints as `{}`"), as the maintainer confirmed on 2026-11-17
+  // (#275). ProtoJSON's guide is known to say otherwise: "Note that
+  // `google.protobuf.Empty` is not considered to have any special JSON
+  // mapping; it is simply a normal message that has zero fields."
   inspect(
     told_well_known([
       "google.protobuf.Timestamp", "google.protobuf.Duration", "google.protobuf.FieldMask",
@@ -622,7 +627,12 @@ test "is_well_known tells each well-known type the README lists, every wrapper i
   // indexes them (https://protobuf.dev/reference/protobuf/google.protobuf/),
   // are printed by ProtoJSON as ordinary messages and enums: its list of
   // "message types with special JSON encodings" holds none of them
-  // (https://protobuf.dev/programming-guides/json/). Nor does a type of
+  // (https://protobuf.dev/programming-guides/json/). The reference page is
+  // cited only for the list of the package's types. Its sentence that
+  // "Well-Known Types that end in “Value” are wrapper messages for other
+  // types, such as BoolValue and EnumValue" does not make EnumValue a
+  // wrapper here: the wrappers are the nine messages of wrappers.proto, and
+  // EnumValue is a message of type.proto. Nor does a type of
   // another package with a well-known type's name: "No message type outside
   // of the `google.protobuf` package has a special ProtoJSON handling". Nor
   // does a name without its package, since a type is known by its full name.

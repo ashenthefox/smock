@@ -177,6 +177,10 @@ test "the document must be UTF-8 JSON, an object without a repeated key; a leadi
   // A conversion never given the root document has nothing to convert. The
   // error names the root as `root_label` does, as `smock check` prints a
   // problem about a whole file, and its message is the one #283 names.
+  // Nothing is written, since it is an error ("an error, which stops the
+  // file from being written", `Problem`), and the conversion needs no other
+  // document: `Needs` holds only "the documents that references name and
+  // the conversion does not have yet".
   inspect(
     rendered(@importopenapi.convert([], options)),
     content=(
