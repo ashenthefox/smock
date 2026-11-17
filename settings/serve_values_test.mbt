@@ -398,3 +398,19 @@ test "values: --tls-mock-certs, by its flag or SMOCK_TLS_MOCK_CERTS, takes a JSO
     ),
   )
 }
+
+///|
+test "values: --tls-mock-certs refuses an entry with a member beside its two files" {
+  // docs/running.md, Certificates for single Mocks, names the two members of
+  // an entry, `certFile` and `keyFile`, and says nothing of a third. That
+  // the code refuses one is a finding, which #320 takes to the maintainer.
+  inspect(
+    by_flag_and_variable(
+      "--tls-mock-certs", "SMOCK_TLS_MOCK_CERTS", "{\"users\":{\"certFile\":\"u.crt\",\"keyFile\":\"u.key\",\"ca\":\"ca.crt\"}}",
+      mock_certs,
+    ),
+    content=(
+      #|{"users":{"certFile":"u.crt","keyFile":"u.key","ca":"ca.crt"}}: invalid value "{\"users\":{\"certFile\":\"u.crt\",\"keyFile\":\"u.key\",\"ca\":\"ca.crt\"}}" for --tls-mock-certs (SMOCK_TLS_MOCK_CERTS): the entry of the Mock "users" must be {"certFile": <path>, "keyFile": <path>}, with paths that are not empty
+    ),
+  )
+}
