@@ -57,6 +57,3 @@ Q5MG     differs  The white space at the start of a line holds a tab, before con
 # Bugs.
 JEF9/02   #368     A bug: the last line of a block scalar ends the input, with no line break. The suite reads a line break there, and smock reads none.
 L24T/01   #368     A bug: the last line of a block scalar ends the input, with no line break. The suite reads a line break there, and smock reads none.
-Y79Y/000  #369     A bug: a line of a block scalar holds a tab where its content would be indented, which YAML refuses: only spaces indent (YAML 1.2.2, 6.1 and 8.1.1.1). smock reads an empty line.
-Y79Y/001  #369     A bug: a line of a block scalar holds a tab after its indentation, and nothing else. YAML reads the tab as content, since only spaces indent (YAML 1.2.2, 8.1.1.1, Example 8.2). smock reads an empty line.
-R4YG      #369     A bug: a line of a block scalar holds a tab after its indentation, and nothing else. YAML reads the tab as content, since only spaces indent (YAML 1.2.2, 8.1.1.1, Example 8.2). smock reads an empty line.

@@ -722,24 +722,31 @@ fn Parser::block_scalar(self : Parser, parent : Int32) -> Json raise ParseError 
       spaces += 1
     }
     if indent < 0 || spaces < indent {
-      // Fewer spaces than the content: an empty line, or the end.
+      // Fewer spaces than the content, or before its first line: an empty
+      // line, the first line, or the end.
       let blank_end = self.pos
       self.skip_space()
-      if self.peek() == '\n' {
+      if self.pos > blank_end && self.peek() is ('\n' | EOF) {
+        // White space with a tab after the spaces. An empty line holds only
+        // spaces (YAML 1.2.2, section 6.4), so the tab is the first line's
+        // text after its indentation (section 8.1.1.1, Example 8.2), or it
+        // is in the indentation.
+        if indent >= 0 || spaces <= parent {
+          self.fail("tabs are not allowed in indentation")
+        }
+      } else if self.peek() == '\n' {
         empty += 1
         if indent < 0 && spaces > leading_spaces {
           leading_spaces = spaces
         }
         continue
-      }
-      if self.at_eof() {
+      } else if self.at_eof() {
         break
-      }
-      self.pos = blank_end
-      if indent >= 0 || spaces <= parent {
+      } else if indent >= 0 || spaces <= parent {
         self.pos = line_start
         break
       }
+      self.pos = blank_end
       // YAML versions disagree on what such a line means.
       if leading_spaces > spaces {
         self.fail(

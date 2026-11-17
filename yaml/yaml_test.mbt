@@ -702,6 +702,41 @@ test "tabs in indentation give an error; tabs elsewhere are white space" {
       #|"-\tbaz" -> ["baz"]
     ),
   )
+  // In a block scalar, only spaces indent. "The content indentation level
+  // is equal to the number of leading spaces on the first non-empty line"
+  // (YAML 1.2.2, section 8.1.1.1), and a line of text is that many spaces
+  // and then any characters (`s-indent(n) nb-char+`, section 8.1.2), so a
+  // tab after them is text, as the last item of Example 8.2 shows. An empty
+  // line is spaces, as many as the indentation or fewer, and then the line
+  // break (`l-empty`, section 6.4). A tab after fewer spaces than the
+  // indentation is in neither, so when the document goes on after that
+  // line, `parse` rejects the tab as a tab in indentation, with the message
+  // above. yaml-test-suite reads the first input, Y79Y/001, as
+  // {"foo": "\t\n", "bar": 1}, and marks the second, Y79Y/000, as an
+  // error. "It is an error for any of the leading empty lines to contain
+  // more spaces than the first non-empty line" (section 8.1.1.1): the
+  // message is the one the test above gives for that. The nearest inputs
+  // that stay valid follow: a tab after the indentation once it is known,
+  // and a line of fewer spaces with no tab, which is an empty line.
+  inspect(
+    each([
+      "foo: |\n \t\nbar: 1", "foo: |\n\t\nbar: 1", "- >\n \t\n detected\n", "a: |\n  \t\n  x\n",
+      "a: |\n \n  \t\n", "a: |\n   \n \t\n", "a: |\n  x\n \t\n  y\n", "a: |\n  x\n\t\nb: 1",
+      "a: |\n  x\n  \t\n", "a: |\n  x\n \n  y\n",
+    ]),
+    content=(
+      #|"foo: |\n \t\nbar: 1" -> {"foo":"\t\n","bar":1}
+      #|"foo: |\n\t\nbar: 1" -> error /foo: tabs are not allowed in indentation
+      #|"- >\n \t\n detected\n" -> ["\t\ndetected\n"]
+      #|"a: |\n  \t\n  x\n" -> {"a":"\t\nx\n"}
+      #|"a: |\n \n  \t\n" -> {"a":"\n\t\n"}
+      #|"a: |\n   \n \t\n" -> error /a: a leading empty line of a block scalar has more spaces than its first line
+      #|"a: |\n  x\n \t\n  y\n" -> error /a: tabs are not allowed in indentation
+      #|"a: |\n  x\n\t\nb: 1" -> error /a: tabs are not allowed in indentation
+      #|"a: |\n  x\n  \t\n" -> {"a":"x\n\t\n"}
+      #|"a: |\n  x\n \n  y\n" -> {"a":"x\n\ny\n"}
+    ),
+  )
 }
 
 ///|

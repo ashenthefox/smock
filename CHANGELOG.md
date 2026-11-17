@@ -734,6 +734,14 @@ of each GitHub release include its section
   after the first `-` indents the nested sequence. smock read it as a
   nested sequence, and in an OpenAPI document `-<tab>-` read as `[[null]]`
   ([smock#367](https://github.com/hirunefu/smock/issues/367)).
+- In a YAML block scalar, a tab after the spaces of the indentation is now
+  text, as YAML says, also on a line that holds nothing else. smock read
+  such a line as an empty line and dropped the tab: `foo: |`, then a line
+  of one space and a tab, then `bar: 1`, read `foo` as `""`, and now reads
+  it as `"\t\n"`. On a line of white space, a tab after fewer spaces than
+  the indentation is now rejected as a tab in indentation; smock read that
+  line as an empty line too
+  ([smock#369](https://github.com/hirunefu/smock/issues/369)).
 
 ## [0.4.0] - 2026-11-01
 

@@ -330,6 +330,23 @@ test "in the OpenAPI mode, indentation indicators set a block scalar's indentati
       #|"a: |2\n  x\n y\n" -> error /a: bad indentation
     ),
   )
+  // Example 8.2 of YAML 1.2.2, section 8.1.1.1, which yaml-test-suite has
+  // as R4YG: in its last item, a tab follows the one space of the
+  // indentation, so it is text. With an indicator, a tab after as many
+  // spaces as it gives is text too, and a tab after fewer is in no empty
+  // line, which holds spaces only (`l-empty`, section 6.4): the document
+  // goes on after it, so it is a tab in indentation.
+  inspect(
+    openapi_each([
+      "- |\n detected\n- >\n \n  \n  # detected\n- |1\n  explicit\n- >\n \t\n detected\n",
+      "a: |1\n \t\n", "a: |2\n \t\n  x\n",
+    ]),
+    content=(
+      #|"- |\n detected\n- >\n \n  \n  # detected\n- |1\n  explicit\n- >\n \t\n detected\n" -> ["detected\n","\n\n# detected\n"," explicit\n","\t\ndetected\n"]
+      #|"a: |1\n \t\n" -> {"a":"\t\n"}
+      #|"a: |2\n \t\n  x\n" -> error /a: tabs are not allowed in indentation
+    ),
+  )
 }
 
 ///|
@@ -501,6 +518,24 @@ test "malformed text gives the same error in both modes" {
       #|"-\t- x"
       #|  safe: error /0: tabs are not allowed in indentation
       #|  openapi: error /0: tabs are not allowed in indentation
+    ),
+  )
+  // In a block scalar, a tab after fewer spaces than the indentation is in
+  // no empty line, which holds spaces only (YAML 1.2.2, section 6.4), and in
+  // no line of text, which starts with the indentation's spaces (section
+  // 8.1.2). yaml-test-suite marks the first, Y79Y/000, as an error. Both
+  // modes refuse it as a tab in indentation, which
+  // docs/openapi/references-and-yaml.md lists among the errors "at its
+  // pointer, with a message that names it".
+  inspect(
+    both(["foo: |\n\t\nbar: 1", "a: |\n  x\n \t\n  y\n"]),
+    content=(
+      #|"foo: |\n\t\nbar: 1"
+      #|  safe: error /foo: tabs are not allowed in indentation
+      #|  openapi: error /foo: tabs are not allowed in indentation
+      #|"a: |\n  x\n \t\n  y\n"
+      #|  safe: error /a: tabs are not allowed in indentation
+      #|  openapi: error /a: tabs are not allowed in indentation
     ),
   )
 }
