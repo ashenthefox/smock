@@ -210,22 +210,31 @@ def fetch_issues(repo):
 
 
 HEADING = re.compile(r"(#{1,6})\s+(.*?)\s*#*\s*$")
+# A line that is only a bold label, such as **Acceptance criteria:**, as
+# the Agent Brief of a bug report has.
+LABEL = re.compile(r"\*\*([^*]+)\*\*\s*:?\s*$")
 ITEM = re.compile(r"(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.*)$")
 
 
 def is_criteria_title(text):
-    """Whether a heading's text is "Acceptance criteria"."""
+    """Whether a heading's or a label's text is "Acceptance criteria"."""
     return text.strip().rstrip(":").strip().lower() == "acceptance criteria"
 
 
 def criteria_of(body):
     """The acceptance criteria of an issue's body, or None when it has no
-    heading for them."""
-    lines = (body or "").replace("\r\n", "\n").split("\n")
-    start = level = None
+    heading or label for them. A heading's section ends at the next
+    heading of its level or above; a label's at the next heading or line
+    of text that is not indented, such as the next label."""
+    lines = (body or "").split("\n")
+    start = level = label = None
     for i, line in enumerate(lines):
         if (match := HEADING.match(line)) and is_criteria_title(match.group(2)):
-            start, level = i + 1, len(match.group(1))
+            start, level, label = i + 1, len(match.group(1)), False
+            break
+        if (match := LABEL.match(line)) and is_criteria_title(match.group(1)):
+            # Any heading ends a label's section.
+            start, level, label = i + 1, 6, True
             break
     if start is None:
         return None
@@ -241,6 +250,8 @@ def criteria_of(body):
             if current is not None:
                 current.append(line.rstrip())
         elif line.strip():
+            if label:
+                break
             current = None
     return ["\n".join(item) for item in items]
 

@@ -361,6 +361,72 @@ value subjects 'sorted(out["issues"])' '["12","134","39","40","999"]'
 value subjects 'out["issues"]["999"]' '{"found":false}'
 value subjects 'out["issues"]["134"]["title"]' '"Spec: gRPC unary calls"'
 
+# --- An issue's acceptance criteria -----------------------------------------
+
+# The criteria are the items of the list under the heading, or under the
+# bold label that a bug's Agent Brief uses, each with the lines indented
+# under it, and without its check box, ticked or not. A paragraph between
+# items is not a criterion, and the section ends at the next heading of its
+# level or above, or, after a label, at the next label. An issue without
+# them, such as a spec, has null.
+tree
+subject 1 "Add the first feature (#61)"
+subject 2 "Fix the bug the Agent Brief describes (#62)"
+subject 3 "Start the spec (#63)"
+subject 4 "Add the second feature (#64)"
+issue 61 "First feature" closed <<'EOF'
+## What to build
+
+- Not a criterion either.
+
+## Acceptance criteria
+
+- [ ] **Copies.** A Session reads a bucket's initial value.
+  - Copies are kept per Mock.
+  - The store is sparse.
+- [x] **Docs.** The guide says so.
+
+Some prose that is not a criterion.
+
+1. A numbered criterion.
+   It goes on here.
+
+### A sub-heading inside the section
+
+- [ ] The last criterion.
+
+## Notes
+
+- [ ] Not a criterion.
+EOF
+issue 62 "A bug" closed bug <<'EOF'
+## Agent Brief
+
+**Category:** bug
+
+**Acceptance criteria:**
+- [ ] A test that creates and writes files.
+- [ ] An idle poll reads no file's contents, as now.
+
+**Out of scope:**
+- Patching moonbitlang/async.
+EOF
+issue 63 "Spec: everything" open <<'EOF'
+## User Stories
+
+1. As a user, I want everything.
+EOF
+printf '## Acceptance criteria\r\n\r\n- [ ] A criterion written on Windows.\r\n' |
+  issue 64 "Second feature" closed
+links criteria
+exits criteria 0
+value criteria 'out["issues"]["61"]["criteria"]' '["**Copies.** A Session reads a bucket'"'"'s initial value.\n  - Copies are kept per Mock.\n  - The store is sparse.","**Docs.** The guide says so.","A numbered criterion.\n   It goes on here.","The last criterion."]'
+value criteria 'out["issues"]["62"]["criteria"]' '["A test that creates and writes files.","An idle poll reads no file'"'"'s contents, as now."]'
+value criteria 'out["issues"]["62"]["labels"]' '["bug"]'
+value criteria 'out["issues"]["63"]["criteria"]' 'null'
+value criteria 'out["issues"]["63"]["state"]' '"open"'
+value criteria 'out["issues"]["64"]["criteria"]' '["A criterion written on Windows."]'
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" = 0 ]
