@@ -255,6 +255,67 @@ else
   pass "saved: does not ask gh"
 fi
 
+# Paths limit the files read, as for the packages a batch touches, and
+# the issues to those that the tests read name. What was read is counted
+# on the standard error, for CI's log.
+links only_b --issues "$tmp/saved.jsonl" b
+exits only_b 0
+value only_b '[t["name"] for t in out["tests"]]' '["b reads a total back","a total counts every request"]'
+value only_b 'sorted(out["issues"])' '["12"]'
+if grep -qxF "trace-links: 2 tests, 2 with a ticket; 1 ticket, 0 of them without acceptance criteria" "$tmp/only_b.err"; then
+  pass "only_b: counts what it read"
+else
+  fail "only_b: says $(cat "$tmp/only_b.err")"
+fi
+
+# --- When it cannot answer ---------------------------------------------------
+
+# It exits with 2, saying why, when git or gh cannot answer, and prints no
+# links then.
+links bad_rev --rev no-such-commit
+exits bad_rev 2
+links no_file --issues "$tmp/no-such-file.jsonl"
+exits no_file 2
+touch "$tmp/gh.fails"
+links gh_fails
+exits gh_fails 2
+for name in bad_rev no_file gh_fails; do
+  if [ -s "$tmp/$name.json" ]; then
+    fail "$name: prints links"
+  else
+    pass "$name: prints no links"
+  fi
+done
+if grep -q "Bad credentials" "$tmp/gh_fails.err"; then
+  pass "gh_fails: says what gh said"
+else
+  fail "gh_fails: says $(cat "$tmp/gh_fails.err")"
+fi
+if grep -q "no-such-file.jsonl" "$tmp/no_file.err"; then
+  pass "no_file: names the file"
+else
+  fail "no_file: says $(cat "$tmp/no_file.err")"
+fi
+
+# A history without tests has no links, and gh is not asked.
+tree
+file a/a.mbt <<'EOF'
+///|
+pub fn one() -> Int {
+  1
+}
+EOF
+commit "Add a package without tests (#5)"
+links no_tests
+exits no_tests 0
+value no_tests 'out["tests"]' '[]'
+value no_tests 'out["issues"]' '{}'
+if [ -e "$tmp/gh.args" ]; then
+  fail "no_tests: asks gh"
+else
+  pass "no_tests: does not ask gh"
+fi
+
 # A test copied into a file that was there before, and removed from its
 # first file in a later commit: blame must look for copies from any file
 # of any commit (-C three times) to find where it came from.

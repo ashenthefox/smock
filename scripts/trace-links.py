@@ -459,6 +459,11 @@ def moonbit_files(repo, rev, paths, modules):
     return files
 
 
+def counted(n, noun):
+    """n and the noun, in the plural unless n is 1."""
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
 def issues_from(path):
     """The text of a file that --dump-issues wrote."""
     try:
@@ -499,7 +504,13 @@ def main():
     json.dump({"rev": rev, "tests": tests, "issues": issues}, sys.stdout, indent=1,
               ensure_ascii=False)
     print()
+    linked = sum(1 for t in tests if t["issue"] is not None)
+    without = sum(1 for i in issues.values() if i.get("criteria") is None)
+    print(f"trace-links: {counted(len(tests), 'test')}, {linked} with a ticket;"
+          f" {counted(len(issues), 'ticket')}, {without} of them without acceptance criteria",
+          file=sys.stderr)
     return 0
+
 
 
 if __name__ == "__main__":
