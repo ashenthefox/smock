@@ -1582,9 +1582,39 @@ packages, the ids, the list's SHA-256, the sample and the shard.
   name mutants, and from its work directory the workers' builds, which
   hold the last mutants. It takes no shard.
 
-Without `--mutant`, `--list` or `--sample`, every package given runs, as
-before; with one of them, only the packages that hold one of the
-mutants.
+Without `--mutant`, `--list`, `--sample` or `--changed`, every package
+given runs, as before; with one of them, only the packages that hold one
+of the mutants.
+
+**Mutants on the changed lines.** Before you push a branch, run the
+mutants on the lines it changes. It is the one run larger than a single
+mutant that is meant for a laptop:
+
+```sh
+python3 scripts/mutation/run.py --changed
+python3 scripts/mutation/run.py --changed --base <ref>
+```
+
+`--changed` takes the merge base of `HEAD` with `main`, or with
+`origin/main` where the checkout has no `main` branch (as CI's has not),
+or with the ref that `--base` gives. Against it, it finds the lines that
+the working tree adds or changes in the non-test `.mbt` files of the
+[pure packages](#terms): your uncommitted changes count, and so does a
+file that git does not track but does not ignore, since the runner copies
+it. A generated file does not count, and a file that moved counts as
+changed whole. A pure package here is a directory with a `moon.pkg` in a
+module that `moon.work` lists, whose supported targets, if it names
+any, hold wasm-gc. The runner then runs every mutant of the pinned set
+whose original text holds one of those lines (so a function's BODY mutant
+runs when any line of its body changed), with each package's own tests.
+The report starts with the base, the merge base, the count of changed
+lines and of the mutants that ran, and then lists the survivors with
+their diffs. A change with no such line runs nothing and says so.
+Package directories given limit the run to them. With `--sites-only`, it
+counts the mutants on the changed lines and runs none, and with `--shard`
+the shards merge as above. A change of 460 such lines, about the 75th
+percentile of merges into `main`, had 174 mutants, which ran in 3.5
+minutes on wasm-gc on an arm64 laptop with 8 cores.
 
 **The compiler's output.** Before a mutant's tests run, the runner
 compares the compiler's output for the mutated package with the output
@@ -1653,9 +1683,10 @@ python3 scripts/mutation/run.py --mutant 'usage/usage.mbt,resident_bytes,ROR,<=,
 python3 scripts/mutation/run.py usage
 ```
 
-Run only that much on a laptop. Bulk runs, over many packages or the
-weekly and monthly sets, go to GitHub Actions, through the workflows that
-later steps of the review add.
+Run only that much on a laptop, besides the mutants on your changed
+lines (above). Bulk runs, over many packages or the weekly and monthly sets, go
+to GitHub Actions, through the workflows that later steps of the review
+add.
 
 The tests (`python3 -m unittest discover -s scripts/mutation -v`) run the
 finder and the runner on `scripts/mutation/fixture`, a module that is not
@@ -1677,7 +1708,9 @@ failure, then a pass; a time-out, then a run within the limit), so that a
 flaky failure and a time-out that does not repeat happen every time; the
 real moon builds. `scripts/mutation/test_choice.py` runs the options
 above on copies of the fixture, some in a small git history, and merges
-shards. `moon fmt --check`
+shards; `scripts/mutation/test_changed.py` runs `--changed` on a small
+git history of the fixture, with a branch, a later change on `main` and
+a package that builds natively only. `moon fmt --check`
 at the root does not read the fixture: run `moon fmt` inside it after a
 change.
 

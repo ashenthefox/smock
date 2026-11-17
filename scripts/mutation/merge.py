@@ -20,7 +20,8 @@ mutant on its own. When every shard wrote flake records, they merge as
 confirm.py merge merges them into flakes.json, and the summary and the
 report give this run's flaky results over all the shards. The report is
 the one run.py writes from them, which it also prints; for a listed set,
-the keys that no longer apply are those the first shard gives.
+the keys that no longer apply are those the first shard gives; for a run
+on changed lines, the report starts with its base and lines.
 
 It exits with 0 when it merged them, and with 1 when it cannot.
 """
@@ -30,6 +31,7 @@ import json
 import sys
 from pathlib import Path
 
+import changed
 import choice
 import compare
 import confirm
@@ -88,13 +90,13 @@ def ordered(directories):
 
     def of_run(summary):
         selection = dict(summary["selection"], shard=None)
-        return summary.get("operator_set"), summary.get("set"), selection
+        return summary.get("operator_set"), summary.get("set"), selection, summary.get("changed")
 
     first = of_run(shards[0][3])
     for index, _, directory, summary, *_ in shards[1:]:
         if of_run(summary) != first:
             raise MergeError(f"shard {index}/{count} ({directory}) is of another run than shard 1/{count}:"
-                             " its operator set, set or selection differ")
+                             " its operator set, set, selection or changed lines differ")
     return shards
 
 
@@ -181,6 +183,9 @@ def main():
         text += "\n".join(["", *choice.listed_report(summary["selection"]["packages"], records, gone)])
     if "flakes" in summary:
         text = text.rstrip("\n") + "\n\n" + "\n".join(confirm.summary_lines(summary["flakes"]))
+    if "changed" in summary:
+        text = "\n".join(changed.header(summary["changed"], summary["selection"]["set"], len(records))
+                         + ([text] if summary["packages"] else []))
     (out / "report.md").write_text(text, encoding="utf-8")
     print(text)
 

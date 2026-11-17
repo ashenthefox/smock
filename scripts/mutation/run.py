@@ -7,6 +7,7 @@ it, and writes one record per mutant, a summary per package and a report
 usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir>]
            [--set pinned|full] [--mutant <id>]... [--sites-only] [--workers <n>]
            [--list <file> [--totals-only]] [--sample <n> [--seed <s>]] [--shard <k>/<n>]
+           [--changed [--base <ref>]]
            [--flakes <file>] [--moon <moon>] [--finder <command>]
            [<package directory>...]
 
@@ -25,7 +26,8 @@ once; a package given that holds none of the ids is not run.
 skipped sites of each package, in both sets, and the mutants a run would
 make, in chosen.jsonl.
 
-Three more options choose the mutants, for bulk runs (choice.py says how):
+Four more options choose the mutants: three for bulk runs (choice.py
+says how), and one for a contributor's branch (changed.py says how):
 
   --list <file>    runs the mutants a file lists, in its order, in place
                    of a set: by offset on a commit, or by key on any
@@ -47,10 +49,20 @@ Three more options choose the mutants, for bulk runs (choice.py says how):
                    order, whose sizes differ by one at most;
                    scripts/mutation/merge.py merges the outputs of a
                    run's shards into the output of the run without them.
+  --changed        runs the mutants whose original text holds a non-test
+                   line that the working tree adds or changes in a pure
+                   package, against the merge base of HEAD with main
+                   (origin/main where there is no main), or with the ref
+                   --base gives. The packages are those of the changed
+                   files, unless given. The report starts with the base,
+                   the merge base, the count of changed lines and of the
+                   mutants that ran; with no changed line, the run runs
+                   nothing and says so. The summary gives the lines
+                   (changed).
 
-Without --mutant, --list or --sample, every package given runs, one that
-has no mutant at all in the first shard; with one of them, only the
-packages that hold one of the shard's mutants run.
+Without --mutant, --list, --sample or --changed, every package given
+runs, one that has no mutant at all in the first shard; with one of them,
+only the packages that hold one of the shard's mutants run.
 
 For each worker, the runner copies <root> into <work>/tree-<n>, the files
 that git tracks and the untracked ones it does not ignore, and builds
@@ -180,6 +192,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import changed
 import choice
 import compare
 import confirm
@@ -700,6 +713,10 @@ def main():
                         help="count the sites of each package in both sets, and run no mutant")
     parser.add_argument("--list", metavar="FILE",
                         help="run the mutants that FILE lists, by offset on a commit or by key")
+    parser.add_argument("--changed", action="store_true",
+                        help="run the mutants on the non-test lines the branch changes in the pure packages")
+    parser.add_argument("--base", help="with --changed, the ref whose merge base with HEAD the lines are"
+                                       " compared with (main, or origin/main, unless given)")
     parser.add_argument("--totals-only", action="store_true",
                         help="with --list, write only per-package and total counts, naming no mutant")
     parser.add_argument("--sample", type=int, metavar="N",
@@ -721,8 +738,12 @@ def main():
         parser.error("--sample takes a number from 1, and no --mutant or --list")
     if args.list and args.mutant:
         parser.error("--list and --mutant choose the mutants each: give one of them")
-    if not args.packages and not args.list:
+    if not args.packages and not args.list and not args.changed:
         parser.error("give at least one package directory")
+    if args.changed and (args.list or args.mutant):
+        parser.error("--changed chooses the mutants: give no --list or --mutant with it")
+    if args.base and not args.changed:
+        parser.error("--base goes with --changed")
     if args.totals_only and (not args.list or args.sites_only or args.shard):
         parser.error("--totals-only takes --list, and neither --sites-only nor --shard")
     root = Path(args.root).resolve()
@@ -739,6 +760,9 @@ def main():
         entries = choice.read_list(args.list) if args.list else None
         if entries is not None and not args.packages:
             args.packages = choice.list_directories(entries)
+        changes = changed.find(root, args.base, args.packages) if args.changed else None
+        if changes is not None:
+            args.packages = changed.directories(changes["lines"])
         found = {directory: find_sites(finder, root, directory) for directory in args.packages
                  if entries is None or (root / directory).is_dir()}
         found.update({directory: ([], []) for directory in args.packages if directory not in found})
@@ -753,15 +777,18 @@ def main():
             if args.shard and args.shard[0] != 1:
                 # The first shard counts the keys that no longer apply.
                 unapplied = {directory: [] for directory in args.packages}
+        if changes is not None:
+            chosen = changed.on_lines(chosen, args.packages, changes["lines"])
+            changes["mutants"] = sum(len(chosen[directory]) for directory in args.packages)
         if args.sample is not None:
             chosen = choice.sample(chosen, args.packages, args.sample, args.seed)
         # The run's mutants, and the shard's.
         whole, chosen = chosen, choice.shard(chosen, args.packages, *args.shard) if args.shard else chosen
-        selected = bool(args.mutant) or args.sample is not None or entries is not None
+        selected = bool(args.mutant) or args.sample is not None or entries is not None or changes is not None
         run_set = "listed" if entries is not None else args.set
         runs = choice.running(args.packages, whole, chosen, selected, args.shard and args.shard[0])
         records, summaries = [], []
-        if not args.sites_only:
+        if not args.sites_only and runs:
             files = listed_files(root)
             workers = [Worker(n, work, shlex.split(args.moon)) for n in range(args.workers)]
             judge = confirm.Judge.read(args.flakes, failed_tests, RunnerError)
@@ -784,7 +811,7 @@ def main():
                     summary.update(alternative_counts(package_records))
                 records += package_records
             summaries.append(summary)
-    except (RunnerError, choice.ChoiceError) as error:
+    except (RunnerError, choice.ChoiceError, changed.ChangedError) as error:
         print(choice.HIDDEN if args.totals_only else f"run: {error}", file=sys.stderr)
         sys.exit(1)
     except Exception:
@@ -820,13 +847,17 @@ def main():
                     f.write(json.dumps(site, ensure_ascii=False) + "\n")
     (out / "summary.json").write_text(
         json.dumps({"operator_set": operator_set, "set": run_set, "selection": choice.selection(args),
-                    "packages": summaries, **flakes},
+                    **({"changed": changes} if changes is not None else {}), "packages": summaries, **flakes},
                    indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     text = report(operator_set, run_set, summaries, records)
     if entries is not None and not args.sites_only:
         text += "\n".join(["", *choice.listed_report(args.packages, records, unapplied)])
     if judge is not None:
         text = text.rstrip("\n") + "\n\n" + "\n".join(judge.report_lines())
+    if changes is not None:
+        ran = None if args.sites_only else sum(len(chosen[directory]) for directory in runs)
+        text = "\n".join(changed.header(changes, args.set, ran, args.shard is not None)
+                         + ([text] if args.packages else []))
     (out / "report.md").write_text(text, encoding="utf-8")
     print(text)
 
