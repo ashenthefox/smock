@@ -801,13 +801,35 @@ async test "a symlink outside the definitions directory pointed at a file with t
 let large_body_file_bytes : Int32 = 16 * 1024 * 1024
 
 ///|
-/// How long a request may take while a reload hashes the large body file.
-/// A debug build answers within about 10 ms, since it hashes 64 KiB between
-/// pauses. The tests of this package share one event loop, so a test that
-/// computes meanwhile delays the reply as it reaches this test, and this
-/// allows for that. It stays under the 400 ms it takes to hash the file at
-/// once.
-let while_reloading_ms : Int64 = 250
+/// How many milliseconds smock took, by the times of its own log lines,
+/// from listening on the admin port to listening on the plain port. In
+/// between, it reads the Definition files and hashes them ("`smock serve`
+/// listens on the admin port, reads the Definition files in the
+/// definitions directory, then listens on the plain port and on the TLS
+/// port", docs/running.md), serving nothing else: as long as a reload that
+/// hashed them at once would hold a request.
+fn startup_read_ms(logs : Array[String]) -> Int64 raise {
+  let mut admin = None
+  let mut plain = None
+  for line in logs {
+    let entry = @json.parse(line) catch { _ => continue }
+    guard entry is Object(fields) &&
+      fields.get("msg") is Some(String("listening")) &&
+      fields.get("time") is Some(String(time)) &&
+      @log.parse_time(time) is Some(at) else {
+      continue
+    }
+    match fields.get("listener") {
+      Some(String("admin")) => admin = Some(at)
+      Some(String("plain")) => plain = Some(at)
+      _ => ()
+    }
+  }
+  guard admin is Some(admin) && plain is Some(plain) else {
+    fail("no listening lines for the admin and plain ports")
+  }
+  plain - admin
+}
 
 ///|
 async test "while a reload hashes a large body file, requests on an open connection are answered at once, from the old set, then the new" {
@@ -856,21 +878,32 @@ async test "while a reload hashes a large body file, requests on an open connect
           }
         })
         let after = smock.status()
-        let in_time = if slowest <= while_reloading_ms {
+        // "Until the swap, requests are answered from the current set, also
+        // while the digest of the new files is computed, however large they
+        // are" (docs/definition-files.md, Reloading): no request is held
+        // until the reload ends, as hashing the file at once would hold it.
+        // A debug build answers within about 10 ms, since it hashes 64 KiB
+        // between pauses. How long hashing at once takes is the runner's
+        // speed, so it is measured in the same run: by smock's read of the
+        // same files at startup, which no request shares. Each request must
+        // take less than half that, a margin for a startup that ran on a
+        // quieter machine than the reload.
+        let reading_ms = startup_read_ms(smock.logs)
+        let in_time = if 2L * slowest < reading_ms {
           "true"
         } else {
-          "false: one took \{slowest} ms"
+          "false: one took \{slowest} ms, and the read at startup \{reading_ms} ms"
         }
         inspect(
           (
             $|swapped in time: \{swapped is Some(_)}; \{last_reload(after)}, digest changed: \{after.get("digest") != before.get("digest")}
             $|bodies, in order: \{bodies.join(", ")}
-            $|every request answered within \{while_reloading_ms} ms: \{in_time}
+            $|every request answered in less than half the read at startup: \{in_time}
           ),
           content=(
             #|swapped in time: true; "swapped", digest changed: true
             #|bodies, in order: old, new
-            #|every request answered within 250 ms: true
+            #|every request answered in less than half the read at startup: true
           ),
         )
       })
