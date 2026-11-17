@@ -116,7 +116,8 @@ Packages of `smock/smock`:
   template helpers `uppercase`, `lowercase` and `trim`, from the data of
   one pinned Unicode version (18.0.0). `scripts/gen-unicode-data.py`
   generated the data from the Unicode Character Database; it changes only
-  with a new format version.
+  with a new format version. A workflow checks that the data is still what
+  the script writes ([Build and test](#build-and-test)).
 - `defdir`: reads the definitions directory and loads it, for
   `smock serve`, `smock check` and `smock render`, and takes the stamp of
   it that a poll compares (native).
@@ -290,6 +291,8 @@ scripts/test-estimate-costs.sh       # the cost model recomputed from made-up me
 scripts/check-e2e-repeat-workflow.sh       # the e2e repeat workflow runs only by hand, as many times as asked, on the architecture asked for (needs yq and jq)
 scripts/test-check-e2e-repeat-workflow.sh  # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-repeat-e2e.sh           # the script that runs the e2e tests again and again, with a fake moon
+scripts/check-unicode-data-workflow.sh   # the Unicode data workflow runs when its files change and weekly, and runs the generator's check (needs yq and jq)
+scripts/test-check-unicode-data-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/check-ci-artifacts.sh        # when CI's jobs and steps run, and that it keeps the release binaries only from a run whose every job passed (needs yq and jq)
 scripts/test-check-ci-artifacts.sh   # that check, on copies of the workflows changed one thing at a time (needs yq and jq)
 scripts/test-ci-plan.sh              # the plan that skips the tests on main of a tree that already passed (needs git and jq)
@@ -301,6 +304,7 @@ python3 scripts/check-doc-links.py   # the documents' links into the repository 
 scripts/test-check-doc-links.sh      # that check, on small trees (needs python3 and git)
 scripts/check-openapi.sh             # the Admin API document is valid OpenAPI 3.1
 python3 bench/gen_definitions.py --check   # the benchmark's committed definitions are what their generator writes
+python3 scripts/gen-unicode-data.py --check   # unicode/data.mbt is what its generator writes (downloads from unicode.org)
 scripts/install-protoc.sh            # the pinned protoc, into ~/.local/bin, with its well-known types
 PROTOC=~/.local/bin/protoc scripts/gen-protobuf-fixtures.sh --check   # the protobuf fixtures are what their sources build
 PROTOC=~/.local/bin/protoc scripts/test-protobuf-fixtures.sh          # that check, on a copy of the working tree
@@ -482,6 +486,19 @@ Every other run, and a run whose plan fails, runs every job.
 (`bench/test_gke_script.py`), which take about four minutes, only on a push
 or pull request that changes that script, `scripts/install-oha.sh`,
 `scripts/build-release.sh`, `Dockerfile`, `bench/` or the workflow itself.
+
+`.github/workflows/unicode-data.yml` runs
+`python3 scripts/gen-unicode-data.py --check`. It downloads the pinned
+version of the Unicode Character Database from unicode.org, and fails when
+`unicode/data.mbt` is not what the script writes from it. The table records
+the SHA-256 of each file it comes from, so a file that unicode.org now
+serves with other bytes fails it too. It runs on a push or pull request
+that changes the table, the script or the workflow itself, once a week
+(Tuesdays, 04:23 UTC), and when started by hand. It does not run in
+`ci.yml`: a network failure would fail the job `scripts`, and `keep` would
+keep no binaries. The job `scripts` runs
+`scripts/check-unicode-data-workflow.sh` and its test on every push; they
+check when the workflow runs and what it runs.
 
 The native build links OpenSSL 3 (on Debian and Ubuntu, `libssl-dev`).
 `prebuild.py`, which `moon` runs with `python3` before every native build,

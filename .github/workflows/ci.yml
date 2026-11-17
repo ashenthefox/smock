@@ -105,6 +105,18 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-repeat-e2e.sh
 
+      # The check of the Unicode data against its generator downloads the
+      # Unicode Character Database, so it runs in unicode-data.yml, when the
+      # table, the generator or that workflow changes and once a week, and
+      # not here; this checks when that workflow runs and what it runs.
+      - name: Check the Unicode data workflow
+        if: ${{ !cancelled() }}
+        run: scripts/check-unicode-data-workflow.sh
+
+      - name: Test the check of the Unicode data workflow
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-unicode-data-workflow.sh
+
       # The GKE run of the benchmark of another architecture than its
       # machine's takes the release binary that the job keep below keeps.
       # This checks the conditions under which the jobs of build-test.yml
