@@ -326,6 +326,7 @@ scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its
 scripts/test-yaml-test-suite-verdict.sh   # how a run of yaml-test-suite is judged against its lists of cases
 scripts/test-check-schema.sh         # the JSON Schema cross-check, with a fake validator and a fake smock (needs jq)
 scripts/test-coverage-report.sh      # the coverage report, on small bisect reports (needs python3)
+scripts/test-random-seeds.sh         # the script that writes random seeds into the properties, on a copy of re2's property and on small trees (needs python3)
 python3 scripts/check-doc-links.py   # the documents' links into the repository lead to a file, and to a heading when they name one (needs git)
 scripts/test-check-doc-links.sh      # that check, on small trees (needs python3 and git)
 scripts/check-openapi.sh             # the Admin API document is valid OpenAPI 3.1
@@ -1000,6 +1001,29 @@ An equivalence claim reaches the maintainer in three steps:
   runner applies a mutant, and prints it; a failure is rerun by
   committing that seed. No test reads the environment for a seed, so
   `scripts/check-no-io.sh` stays as it is.
+
+  The seed is a constant of the property's test file, with a doc comment
+  that names the property. It is alone on its line, in this form:
+
+  ```
+  const <NAME>_SEED : UInt64 = <digits>
+  ```
+
+  The value is decimal, without a suffix, and the property passes the
+  constant to QuickCheck as `seed=<NAME>_SEED`. The first is
+  `FULL_MATCH_SEED`, in `re2/full_match_wbtest.mbt`.
+  `python3 scripts/random-seeds.py [<path>...]` finds every such constant
+  in the test files under the paths, or under the current directory when
+  none is given. It writes a random seed in place of each value and
+  prints one line for each constant:
+  `<file>:<line>: <NAME>_SEED = <seed>`. It rewrites the files in place,
+  so run it only in a working copy that you throw away. A line that
+  declares a `_SEED` constant in another form fails it, and it then
+  writes nothing. To rerun a printed seed, set the constant to it and run
+  the property's test, such as
+  `moon test --target wasm-gc re2/full_match_wbtest.mbt`. The failure
+  shows the smallest counterexample that QuickCheck found. Commit the
+  seed with the fix, so that every push runs it.
 - **Where the checks run.** smock merges branches locally, ticket
   branches into integration branches and those into `main`, and opens no
   pull requests; only Dependabot does. So the changed-lines job and the

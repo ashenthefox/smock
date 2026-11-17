@@ -195,6 +195,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-coverage-report.sh
 
+      # Each property runs with the seed committed beside it, and the weekly
+      # run writes random seeds into a working copy with
+      # scripts/random-seeds.py. This tests that script on a copy of re2's
+      # property and on small trees.
+      - name: Test the script that writes random seeds into the properties
+        if: ${{ !cancelled() }}
+        run: scripts/test-random-seeds.sh
+
       # --- The documents ----------------------------------------------------
 
       # The documents link to each other by path and by the anchors that
