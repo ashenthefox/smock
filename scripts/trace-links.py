@@ -8,7 +8,9 @@ for the comparison before and after a removal and for the keep reasons of
 rule (C).
 
 usage: python3 scripts/trace-links.py [--repo <dir>] [--rev <rev>]
-                                      [--jobs <n>] [<path>...]
+                                      [--issues <file>] [--jobs <n>]
+                                      [<path>...]
+       python3 scripts/trace-links.py [--repo <dir>] --dump-issues
 
 <dir> is the checkout, this one unless given, and <rev> the commit whose
 tests are read, HEAD unless given. The script reads the tests of the
@@ -39,11 +41,16 @@ The ticket is the issue number in the commit's subject: the one in a
 trailing "(#N)", or else the only #N the subject names. A subject that
 names none, or several and no trailing one, gives no ticket.
 
-The issues come from gh (`gh api` on the checkout's repository). An
-issue's acceptance criteria are the items of the list under its heading
-"Acceptance criteria", or under a line that is only that label in bold,
-as a bug's Agent Brief has: each item without its check box, ticked or
-not, and with the lines indented under it.
+The issues come from gh: `gh api` on the checkout's repository, which
+needs a token in GH_TOKEN on CI. --dump-issues prints them as gh gives
+them, one JSON object a line, and --issues reads them from such a file
+instead of asking gh, so that the links before and after a removal read
+the same issues. An issue's acceptance criteria are the items of the
+list under its heading "Acceptance criteria", or under a line that is
+only that label in bold, as a bug's Agent Brief has: each item without
+its check box, ticked or not, and with the lines indented under it.
+
+<n> is how many files git blame reads at once, 4 unless given.
 
 What it prints is one JSON object:
 
@@ -320,11 +327,15 @@ ISSUE_FIELDS = (
 
 def fetch_issues(repo):
     """Every issue and pull request of the checkout's repository on GitHub,
-    by number."""
-    out = run(["gh", "api", "--paginate", "repos/{owner}/{repo}/issues?state=all&per_page=100",
-               "--jq", ISSUE_FIELDS], cwd=repo)
+    as gh gives them: one JSON object a line."""
+    return run(["gh", "api", "--paginate", "repos/{owner}/{repo}/issues?state=all&per_page=100",
+                "--jq", ISSUE_FIELDS], cwd=repo)
+
+
+def read_issues(text):
+    """The issues of the lines that fetch_issues gives, by number."""
     issues = {}
-    for line in out.splitlines():
+    for line in text.splitlines():
         if line.strip():
             issue = json.loads(line)
             issues[int(issue["number"])] = issue
@@ -448,22 +459,39 @@ def moonbit_files(repo, rev, paths, modules):
     return files
 
 
+def issues_from(path):
+    """The text of a file that --dump-issues wrote."""
+    try:
+        with open(path, encoding="utf-8") as file:
+            return file.read()
+    except OSError as error:
+        raise Failure(f"{path}: {error.strerror}") from error
+
+
 def main():
-    """Prints the trace links."""
+    """Prints the trace links, or the issues with --dump-issues."""
     parser = argparse.ArgumentParser(description="Derive the trace links of the tests.")
     parser.add_argument("--repo", default=".")
     parser.add_argument("--rev", default="HEAD")
+    parser.add_argument("--issues")
+    parser.add_argument("--dump-issues", action="store_true")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("paths", nargs="*")
     args = parser.parse_args()
     try:
+        if args.dump_issues:
+            sys.stdout.write(fetch_issues(args.repo))
+            return 0
         rev = git(args.repo, "rev-parse", "--verify", "--quiet", f"{args.rev}^{{commit}}").strip()
         files = moonbit_files(args.repo, rev, args.paths, modules_of(args.repo, rev))
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
             found = pool.map(lambda file: links_of(args.repo, rev, *file), files)
             tests = [record for records in found for record in records]
         numbers = sorted({t["issue"] for t in tests if t["issue"] is not None})
-        known = fetch_issues(args.repo) if numbers else {}
+        if args.issues:
+            known = read_issues(issues_from(args.issues))
+        else:
+            known = read_issues(fetch_issues(args.repo)) if numbers else {}
     except Failure as error:
         print(f"trace-links: {error}", file=sys.stderr)
         return 2

@@ -25,13 +25,16 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
 export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
 
-# The stand-in for gh: it notes its arguments in $tmp/gh.args and prints
-# $tmp/issues.jsonl, the issues as `gh api` gives them with the script's
-# --jq filter: one JSON object a line. It fails when $tmp/gh.fails exists.
+# The stand-in for gh: it notes its arguments in $tmp/gh.args and the
+# directory it runs in, whose repository gh asks GitHub about, in
+# $tmp/gh.dir, and prints $tmp/issues.jsonl, the issues as `gh api` gives
+# them with the script's --jq filter: one JSON object a line. It fails when
+# $tmp/gh.fails exists.
 mkdir "$tmp/bin"
 cat >"$tmp/bin/gh" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$TRACE_TEST_TMP/gh.args"
+pwd -P >>"$TRACE_TEST_TMP/gh.dir"
 if [ -e "$TRACE_TEST_TMP/gh.fails" ]; then
   echo "gh: HTTP 401: Bad credentials" >&2
   exit 1
@@ -57,7 +60,7 @@ fail() {
 # one MoonBit module, fix/fix, which is the whole workspace. No issue is
 # known yet.
 tree() {
-  rm -rf "$repo" "$tmp/gh.args" "$tmp/gh.fails"
+  rm -rf "$repo" "$tmp/gh.args" "$tmp/gh.dir" "$tmp/gh.fails"
   : >"$tmp/issues.jsonl"
   git init --quiet --initial-branch=main "$repo"
   file moon.mod <<'EOF'
@@ -215,6 +218,42 @@ value moved 'test("b/b_test.mbt", "a total counts every request")["commit"]' "\"
 value moved 'test("b/b_test.mbt", "a total counts every request")["introduced_in"]' '"a/a_test.mbt"'
 value moved 'test("b/b_test.mbt", "a total counts every request")["issue"]' '12'
 value moved 'out["issues"]["12"]["criteria"]' '["A total counts every request.","A new total is zero."]'
+
+# gh is asked once for every issue and pull request, in the checkout, so
+# that it asks about the checkout's repository.
+if [ "$(cat "$tmp/gh.args")" = "api --paginate repos/{owner}/{repo}/issues?state=all&per_page=100 --jq .[] | {number, title, state, labels: [.labels[].name], pull_request: (.pull_request != null), body}" ]; then
+  pass "moved: asks gh once for every issue"
+else
+  fail "moved: asks gh $(cat "$tmp/gh.args")"
+fi
+if [ "$(cat "$tmp/gh.dir")" = "$(cd "$repo" && pwd -P)" ]; then
+  pass "moved: runs gh in the checkout"
+else
+  fail "moved: runs gh in $(cat "$tmp/gh.dir")"
+fi
+
+# --dump-issues prints the issues as gh gives them, and --issues reads them
+# from such a file instead of asking gh, so that the links before and after
+# a removal read the same issues.
+links dump --dump-issues
+exits dump 0
+if cmp -s "$tmp/dump.json" "$tmp/issues.jsonl"; then
+  pass "dump: prints the issues as gh gives them"
+else
+  fail "dump: prints something else"
+  sed 's/^/     /' "$tmp/dump.json"
+fi
+sed 's/"Count requests in totals"/"Count requests in totals, as saved"/' "$tmp/issues.jsonl" >"$tmp/saved.jsonl"
+rm "$tmp/gh.args"
+links saved --issues "$tmp/saved.jsonl"
+exits saved 0
+value saved 'out["issues"]["12"]["title"]' '"Count requests in totals, as saved"'
+value saved 'out["issues"]["12"]["criteria"]' '["A total counts every request.","A new total is zero."]'
+if [ -e "$tmp/gh.args" ]; then
+  fail "saved: asks gh"
+else
+  pass "saved: does not ask gh"
+fi
 
 # A test copied into a file that was there before, and removed from its
 # first file in a later commit: blame must look for copies from any file
