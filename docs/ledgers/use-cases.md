@@ -64,7 +64,8 @@ Rows whose status changed between d953f320 and be2b8e0b, and why:
 - **F95**, the Helm chart's values: the survey counted it covered, but
   its evidence says that two documented values, `definitions.gitSync.depth`
   and `definitions.gitSync.extraArgs`, are rendered by no test. Still true
-  at be2b8e0b, so it is partly tested, with gap G1 (#373).
+  at be2b8e0b, so it was partly tested, with gap G1. Since then, #373's
+  check renders both, so it is tested.
 - **M01 to M06** (YAML), **M09 to M13** (templates), **M14** (XML),
   **M15 to M18** (the Admin API), **M19 and M20** (definitions), **M21 and
   M22** (`smock import-openapi`): asserted since, by #280, #281, #283 and
@@ -83,9 +84,11 @@ Rows whose status changed between d953f320 and be2b8e0b, and why:
 A gap that no ticket of the test review closes is filed as an issue, which
 its row names.
 
-- **G1, #373.** The Helm chart's rendering tests check no rendering of
-  `definitions.gitSync.depth` or `definitions.gitSync.extraArgs`, which the
-  chart's README documents (F95).
+- **G1, closed by #373.** The Helm chart's rendering tests checked no
+  rendering of `definitions.gitSync.depth` or
+  `definitions.gitSync.extraArgs`, which the chart's README documents
+  (F95). The git-sync test now renders both, and checks that both git-sync
+  containers carry them.
 - **G2, #374.** The Helm chart's git-sync and OCI-image modes are rendered
   and admitted on kind, but never served. Serving them on kind is out of
   scope for now (#275, decision 5), so the issue is deferred, filed to be
@@ -226,7 +229,7 @@ its row names.
 | ID | Feature | Source | Status | Checked by |
 |---|---|---|---|---|
 | F94 | The container image | [Container image](../installing.md#container-image) | tested | `scripts/smoke-test-image.sh` runs the image in CI and in the release |
-| F95 | The Helm chart's values, each rendered, and its ConfigMap mode served on kind | [Values](../../charts/smock/README.md#values) | partly | `scripts/test-helm-chart.sh` renders the chart for each delivery mode and option<br>`scripts/test-helm-chart-on-kind.sh` installs and upgrades the chart on kind<br>#373 (gap G1): no test renders `definitions.gitSync.depth` or `definitions.gitSync.extraArgs` |
+| F95 | The Helm chart's values, each rendered, and its ConfigMap mode served on kind | [Values](../../charts/smock/README.md#values) | tested | `scripts/test-helm-chart.sh` renders the chart for each delivery mode and option<br>`scripts/test-helm-chart.sh` renders `definitions.gitSync.depth` and `definitions.gitSync.extraArgs` in both git-sync containers, in its check "git-sync: both git-sync containers fetch the depth set, 0 for the whole history, and take the extra flags" (#373)<br>`scripts/test-helm-chart-on-kind.sh` installs and upgrades the chart on kind |
 | F96 | The Helm chart's git-sync and OCI-image delivery modes, served | [From a Git repository (git-sync)](../../charts/smock/README.md#from-a-git-repository-git-sync), [From an OCI image](../../charts/smock/README.md#from-an-oci-image) | partly | `scripts/test-helm-chart-on-kind.sh` admits their Pods through Pod Security admission on kind<br>`e2e/reload_test.mbt` "a git-sync update, which points the symlink that --dir goes through at a new worktree and removes the old one, reloads the definitions"<br>#374 (gap G2, deferred): serving both modes on kind is out of scope for now (#275, decision 5) |
 | F97 | Verifying the image's and the chart's signatures | [Verify the image](../installing.md#verify-the-image), [Verify the Helm chart](../installing.md#verify-the-helm-chart) | tested | `scripts/verify-image.sh` runs in the release, after it publishes<br>`scripts/verify-chart.sh` runs in the release, after it publishes |
 | F98 | The Mockoon migration guide's worked example | [A worked example](../migrating-from-mockoon.md#a-worked-example) | open | #287 runs the guide's `smock check` and `smock render` commands against what it prints |
