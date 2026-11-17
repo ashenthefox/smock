@@ -90,6 +90,33 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-estimate-costs.sh
 
+      # The e2e tests run again and again only by hand (e2e-repeat.yml).
+      # This checks when that workflow runs and how it runs the tests, and
+      # tests the script that repeats them, with a fake moon.
+      - name: Check the e2e repeat workflow
+        if: ${{ !cancelled() }}
+        run: scripts/check-e2e-repeat-workflow.sh
+
+      - name: Test the check of the e2e repeat workflow
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-e2e-repeat-workflow.sh
+
+      - name: Test the script that repeats the e2e tests
+        if: ${{ !cancelled() }}
+        run: scripts/test-repeat-e2e.sh
+
+      # The check of the Unicode data against its generator downloads the
+      # Unicode Character Database, so it runs in unicode-data.yml, when the
+      # table, the generator or that workflow changes and once a week, and
+      # not here; this checks when that workflow runs and what it runs.
+      - name: Check the Unicode data workflow
+        if: ${{ !cancelled() }}
+        run: scripts/check-unicode-data-workflow.sh
+
+      - name: Test the check of the Unicode data workflow
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-unicode-data-workflow.sh
+
       # The GKE run of the benchmark of another architecture than its
       # machine's takes the release binary that the job keep below keeps.
       # This checks the conditions under which the jobs of build-test.yml
@@ -113,6 +140,22 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-latest-toolchain-plan.sh
 
+      # The branch checks run on a push to a branch other than main, in
+      # branch-checks.yml and not here, so that keep never waits for them.
+      # This checks when that workflow runs and what it runs, and tests the
+      # weakening report it writes, on small git histories.
+      - name: Check the branch checks workflow
+        if: ${{ !cancelled() }}
+        run: scripts/check-branch-checks-workflow.sh
+
+      - name: Test the check of the branch checks workflow
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-branch-checks-workflow.sh
+
+      - name: Test the weakening report
+        if: ${{ !cancelled() }}
+        run: scripts/test-weakening-report.sh
+
       # --- The scripts that build-test.yml runs --------------------------------
 
       # build-test.yml makes and checks the SBOM of the image it builds.
@@ -128,12 +171,29 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-h2spec-verdict.sh
 
+      # The job yaml-test-suite below judges the answers of smock's YAML
+      # parser with scripts/yaml-test-suite-verdict.py. This tests the
+      # verdict on small made-up suites.
+      - name: Test the yaml-test-suite verdict
+        if: ${{ !cancelled() }}
+        run: scripts/test-yaml-test-suite-verdict.sh
+
       # build-test.yml cross-checks the JSON Schema with smock on every
       # fixture (scripts/check-schema.sh). This tests that check with a
       # validator and a smock that answer as the test tells them.
       - name: Test the cross-check of the JSON Schema
         if: ${{ !cancelled() }}
         run: scripts/test-check-schema.sh
+
+      # --- The tools that judge the tests -----------------------------------
+
+      # scripts/coverage.sh runs the in-process tests under coverage and
+      # reports each package's points from the toolchain's bisect report
+      # (scripts/coverage-report.py). This tests the report on small
+      # committed bisect reports, a partly covered line among them.
+      - name: Test the coverage report
+        if: ${{ !cancelled() }}
+        run: scripts/test-coverage-report.sh
 
       # --- The documents ----------------------------------------------------
 
@@ -205,6 +265,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-check-kept-tests.sh
 
+      # --- The removal proof -------------------------------------------------
+
+      # A test may be removed only when, among other sets, its removal keeps
+      # the trace links: from the commit that introduced each test, through
+      # moves and copies, to the ticket that commit names and that issue's
+      # acceptance criteria (scripts/trace-links.py). This tests them on
+      # small git histories, with a stand-in for gh.
+      - name: Test the trace links
+        if: ${{ !cancelled() }}
+        run: scripts/test-trace-links.sh
+
       # --- The Helm chart ---------------------------------------------------
 
       # The chart on a cluster is tested in build-test.yml, with the image
@@ -221,6 +292,29 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-helm-chart.sh
 
+  # yaml-test-suite against smock's YAML parser, smock/yaml, in both of its
+  # modes (yaml-test-suite/README.md): scripts/check-yaml-test-suite.sh
+  # fetches the pinned release of the suite, checked against its SHA-256,
+  # builds the testee with moon, and judges every case in each mode against
+  # the mode's list of the cases that do not pass, yaml-test-suite/safe.txt
+  # and yaml-test-suite/openapi.txt. It runs beside the other jobs, so that
+  # it adds nothing to the run's wall time, and keep waits for it.
+  yaml-test-suite:
+    name: yaml-test-suite against smock/yaml
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install MoonBit (pinned)
+        run: scripts/install-moonbit.sh pinned
+
+      - name: Update the mooncakes registry index
+        run: moon update
+
+      - name: Run yaml-test-suite against smock/yaml in both modes
+        run: scripts/check-yaml-test-suite.sh
+
   # Keeps the release binary of each architecture for a machine that cannot
   # build it: the GKE benchmark of amd64 from an arm64 machine takes it
   # (scripts/gke-bench.sh --arch amd64 --smock). It runs after every other
@@ -231,8 +325,8 @@ jobs:
   # release handed over, and removes the handed-over copy.
   keep:
     name: Keep the release binaries
-    needs: [build-test, scripts]
-    if: ${{ !cancelled() && needs.build-test.result == 'success' && needs.scripts.result == 'success' }}
+    needs: [build-test, scripts, yaml-test-suite]
+    if: ${{ !cancelled() && needs.build-test.result == 'success' && needs.scripts.result == 'success' && needs.yaml-test-suite.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

@@ -362,6 +362,16 @@ types only when every import is in the set and every name is defined
 once. So a missing import gives one problem, not one for each type the
 missing file defines.
 
+The 16 MiB of full names is 16,777,216 UTF-16 code units. A name in a
+`.proto` file is ASCII, so each of its characters is one unit. Each full
+name made by joining a name to a package, a message or a service with a
+dot counts: the message `shop.Order` counts 10, and its field
+`shop.Order.id` 13. A name with nothing before it, such as a message in a
+file with no package, counts nothing. A package counts itself and each
+prefix of it that ends before a dot, once for each file that declares it:
+`shop.v1` counts `shop` and `shop.v1`, 4 and 7. A method also counts its
+path: `shop.Orders.Get` counts 15, and `/shop.Orders/Get` 16 more.
+
 ### What smock keeps
 
 smock keeps what it needs of each file: its name, package, syntax and

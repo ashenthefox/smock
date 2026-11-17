@@ -16,19 +16,6 @@ let delays : String =
   #|      "response": { "status": 200, "body": "fast" } } ] }
 
 ///|
-/// How many of the events `client` has read and kept for later are about
-/// `stream`.
-fn H2Client::kept_for(self : H2Client, stream : Int32) -> Int32 {
-  let mut n = 0
-  for event in self.events {
-    if event_stream(event) == Some(stream) {
-      n += 1
-    }
-  }
-  n
-}
-
-///|
 async test "h2c: a delayed stream does not hold a fast one on the same connection: the fast stream is answered at once, and the delayed one after its delay" {
   with_definitions([("m.json", delays)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {

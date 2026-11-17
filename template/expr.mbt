@@ -307,7 +307,7 @@ fn Parser::value(self : Parser, exact~ : Bool = false) -> Expr raise Syntax {
   let start = self.i
   match self.peek() {
     None => raise Syntax(start, "expected a value, found the end")
-    Some('\'' | '"') => Literal(Json::string(self.string()))
+    Some('\'' | '"' as quote) => Literal(Json::string(self.string(quote)))
     Some(c) if c == '-' || c.is_ascii_digit() => {
       let number = self.number()
       if exact {
@@ -328,12 +328,10 @@ fn Parser::value(self : Parser, exact~ : Bool = false) -> Expr raise Syntax {
 }
 
 ///|
-/// Parses a string literal.
-fn Parser::string(self : Parser) -> String raise Syntax {
+/// Parses a string literal whose opening `quote`, `'` or `"`, the caller
+/// has seen at the current position.
+fn Parser::string(self : Parser, quote : Char) -> String raise Syntax {
   let start = self.i
-  guard self.peek() is Some(quote) else {
-    raise Syntax(start, "expected a string")
-  }
   self.i += 1
   let out = StringBuilder()
   for ;; {
@@ -465,7 +463,7 @@ fn Parser::steps(self : Parser) -> Array[Step] raise Syntax {
       self.skip_space()
       let at = self.i
       match self.peek() {
-        Some('\'' | '"') => steps.push(Step::Name(self.string()))
+        Some('\'' | '"' as quote) => steps.push(Step::Name(self.string(quote)))
         Some(c) if c.is_ascii_digit() => {
           let from = self.i
           while self.peek() is Some(c) && c.is_ascii_digit() {

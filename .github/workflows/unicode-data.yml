@@ -1,0 +1,54 @@
+# Checks that unicode/data.mbt, the Unicode data that the template helpers
+# uppercase, lowercase and trim read, is what scripts/gen-unicode-data.py
+# writes from the pinned version of the Unicode Character Database. A hand
+# edit or a stale table fails it. The table records the SHA-256 of each file
+# it comes from, so a file that unicode.org now serves with other bytes
+# fails it too.
+#
+# The check downloads those files from unicode.org, so it does not run on
+# every push, and not in ci.yml: a network failure there would fail CI's job
+# scripts, and with it the keeping of main's binaries. It runs when a push
+# or a pull request changes the table, the generator or this workflow, and
+# once a week. For a push to a branch, GitHub compares the paths with what
+# the push brought: a later push that changes none of them starts no run,
+# also when the last run here failed. For a pull request, GitHub compares
+# them with all that the pull request changes. Run it by hand from the
+# Actions tab to try it, or again after a network failure.
+#
+# scripts/check-unicode-data-workflow.sh checks when this workflow runs and
+# what it runs.
+name: Unicode data
+
+on:
+  push:
+    branches-ignore: ["dependabot/**"]
+    paths:
+      - unicode/data.mbt
+      - scripts/gen-unicode-data.py
+      - .github/workflows/unicode-data.yml
+  pull_request:
+    paths:
+      - unicode/data.mbt
+      - scripts/gen-unicode-data.py
+      - .github/workflows/unicode-data.yml
+  schedule:
+    - cron: "23 4 * * 2" # Tuesdays, 04:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unicode-data-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check the Unicode data against its generator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the Unicode Character Database and compare the table with what it gives
+        run: python3 scripts/gen-unicode-data.py --check
