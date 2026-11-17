@@ -166,7 +166,7 @@ def directories(lines):
 def header(info, chosen_set, ran, sharded=False):
     """The diff mode's lines at the top of the report: the base, the lines
     and how many mutants ran of those on them, in the run or, sharded, in
-    the shard."""
+    the shard (None for a run that runs none, as --sites-only)."""
     out = ["# Mutants on changed lines", ""]
     where = f"Against `{info['base']}`, merge base `{info['merge_base'][:12]}`"
     count = sum(len(n) for n in info["lines"].values())
@@ -177,6 +177,8 @@ def header(info, chosen_set, ran, sharded=False):
     total = info["mutants"]
     if not total:
         ran_text = f"No mutant of the {chosen_set} set is on them, so none ran."
+    elif ran is None:
+        ran_text = f"{total} mutants of the {chosen_set} set are on them."
     elif ran == total:
         ran_text = f"The run ran the {total} mutants of the {chosen_set} set on them." if total > 1 else \
             f"The run ran the one mutant of the {chosen_set} set on them."

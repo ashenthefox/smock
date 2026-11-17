@@ -165,6 +165,17 @@ class ChangedLinesTest(unittest.TestCase):
         self.assertIn(f"Against `{self.commits['odd']}`, merge base `{self.commits['odd'][:12]}`: 1 changed"
                       " non-test line in the pure packages (calc).", (out / "report.md").read_text())
 
+    def test_sites_only_counts_the_mutants_on_the_changed_lines_and_runs_none(self):
+        # #275: a diff too large for the changed-lines job is "reported as
+        # not covered", so the job needs the count before it runs.
+        out = self.tmp / "count"
+        result = self.run_runner(out, "--changed", "--sites-only")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("2 changed non-test lines in the pure packages (calc). 9 mutants of the pinned set are on"
+                      " them.\n", (out / "report.md").read_text())
+        self.assertEqual(len(read_lines(out / "chosen.jsonl")), 9)
+        self.assertEqual(json.loads((out / "summary.json").read_text())["changed"]["mutants"], 9)
+
     def test_the_shards_of_a_run_on_changed_lines_merge_into_its_report(self):
         # #275: the changed-lines job runs "on at most about 3 shards"; the
         # merge gives the report of the run without them (#305).

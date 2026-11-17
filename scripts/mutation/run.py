@@ -689,7 +689,7 @@ def main():
     if entries is not None and not args.sites_only:
         text += "\n".join(["", *choice.listed_report(args.packages, records, unapplied)])
     if changes is not None:
-        ran = sum(len(chosen[directory]) for directory in runs)
+        ran = None if args.sites_only else sum(len(chosen[directory]) for directory in runs)
         text = "\n".join(changed.header(changes, args.set, ran, args.shard is not None)
                          + ([text] if args.packages else []))
     (out / "report.md").write_text(text, encoding="utf-8")
