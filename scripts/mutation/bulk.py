@@ -372,8 +372,18 @@ def finish_run(args):
         return finish_timing(plan, args, out)
     result = subprocess.run([sys.executable, str(MERGE), "--out", str(out), *args.shards], capture_output=True,
                             text=True)
+    lines = [f"# Mutation run: {MODES[plan['mode']]}", "",
+             f"{link(args.run_url)}: {describe(plan)}, {describe_shards(plan)}.", ""]
+    times = times_line(read_jobs(args.jobs))
+    if times:
+        lines += [times, ""]
     if result.returncode != 0:
-        raise BulkError(result.stderr.strip().removeprefix("merge: "))
+        problem = result.stderr.strip().removeprefix("merge: ")
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "report.md").write_text("\n".join(lines + [f"The shards' outputs do not merge: {problem}. Each"
+                                                          " shard's artifact holds what it wrote."]) + "\n",
+                                       encoding="utf-8")
+        raise BulkError(problem)
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
     merged = (out / "report.md").read_text(encoding="utf-8")
     walls = []
@@ -381,11 +391,6 @@ def finish_run(args):
         done = Path(shard) / "bulk.json"
         if done.is_file():
             walls.append(json.loads(done.read_text(encoding="utf-8")))
-    lines = [f"# Mutation run: {MODES[plan['mode']]}", "",
-             f"{link(args.run_url)}: {describe(plan)}, {describe_shards(plan)}.", ""]
-    times = times_line(read_jobs(args.jobs))
-    if times:
-        lines += [times, ""]
     if walls:
         longest = max(walls, key=lambda w: w["wall_s"])
         lines += [f"The longest shard's run took {duration(longest['wall_s'])} (shard {longest['name']}), on"
