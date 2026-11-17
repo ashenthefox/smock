@@ -43,6 +43,19 @@ names no example, a path outside the directory or the example's own
 file, a source the tree does not hold, or a path the example already
 gets is a problem. Blank lines and lines that start with # are skipped.
 
+The Mockoon migration guide, docs/migrating-from-mockoon.md and the
+documents in docs/mockoon/, shows smock check and smock render commands,
+and what they print. Each block of shell commands (sh, shell or bash) of
+the guide that runs smock check or smock render runs as the guide writes
+it, with sh -e, in a copy of docs/examples/from-mockoon/, where the guide
+says its commands run, with the smock under check first on the PATH. The
+blocks run one after another in the same copy. Each must exit with status
+0 and print what the block shows: each line that is a comment after the
+block's first command, without the # and the space after it. A comment
+before the first command, or at the end of a command's line, says what
+the commands do. A guide that runs these commands in no block is a
+problem.
+
 It prints a line for each whole Definition file, each problem, how many
 whole Definition files it found and how many fenced blocks it set aside,
 and then whether every example passed or how many problems it found. It
@@ -52,6 +65,7 @@ or a file it reads cannot be read, or is run wrongly.
 scripts/test-check-doc-examples.sh tests it, with a fake smock. It needs
 Python 3.9 or later.
 """
+import difflib
 import os
 import posixpath
 import re
@@ -87,7 +101,21 @@ YAML_KEY = re.compile(r"""("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s\-?:,\[\]{}#&*!|
 # The context that examples leave out (read_context).
 CONTEXT = "scripts/doc-examples/context.txt"
 
-# How long smock check may take on one Definition file, in seconds.
+# The Mockoon migration guide, its other documents, and the directory its
+# commands run in: "Unless a step says otherwise, the commands run in
+# docs/examples/from-mockoon/".
+MOCKOON_GUIDE = "docs/migrating-from-mockoon.md"
+MOCKOON_DOCUMENTS = "docs/mockoon"
+MOCKOON_EXAMPLE = "docs/examples/from-mockoon"
+
+# The languages of a block of shell commands.
+SHELL_LANGUAGES = {"sh", "shell", "bash"}
+
+# A command that runs smock check or smock render.
+SMOCK_COMMAND = re.compile(r"(?:^|[\s;&|(])smock\s+(?:check|render)\b")
+
+# How long smock check may take on one Definition file, and a block of
+# commands to run, in seconds.
 TIMEOUT = 60
 
 
@@ -218,16 +246,20 @@ def indented(text):
     return "\n".join("    " + line for line in text.rstrip("\n").split("\n"))
 
 
-def run(command, cwd=None):
-    """Runs a command with a plain environment, and gives its exit status
-    and all it printed, standard output and standard error together."""
+def run(command, cwd=None, path=None):
+    """Runs a command with a plain environment, with <path> first on its
+    PATH when it is given, and gives its exit status and all it printed,
+    standard output and standard error together."""
     environment = {"PATH": os.environ.get("PATH", "")}
+    if path is not None:
+        environment["PATH"] = path + os.pathsep + environment["PATH"]
     if "HOME" in os.environ:
         environment["HOME"] = os.environ["HOME"]
     result = subprocess.run(
         command,
         cwd=cwd,
         env=environment,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         timeout=TIMEOUT,
@@ -344,6 +376,80 @@ def check_example(tree, smock, scratch, example, problem):
         print(indented(output))
 
 
+def commands(block):
+    """The lines of a block of shell commands that are not comments."""
+    return [line for line in block.text.split("\n") if line.strip() and not line.strip().startswith("#")]
+
+
+def shown_output(block):
+    """What a block of shell commands shows that its commands print: each
+    line that is a comment after its first command, without the # and the
+    space after it. A comment before the first command, and one at the end
+    of a command's line, says what the commands do."""
+    shown = []
+    started = False
+    for line in block.text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            if started:
+                shown.append(stripped[2:] if stripped.startswith("# ") else stripped[1:])
+        elif stripped:
+            started = True
+    return shown
+
+
+def run_block(where, block, directory, bin_directory, problem):
+    """Runs a block of shell commands in a directory, with sh -e, so that
+    the block stops at a command that fails, and with the smock under check
+    first on the PATH. It passes when it exits with status 0 and prints
+    what the block shows, standard output and standard error together."""
+    try:
+        status, output = run(["/bin/sh", "-e", "-c", block.text], cwd=directory, path=bin_directory)
+    except subprocess.TimeoutExpired:
+        problem(f"{where}: takes longer than {TIMEOUT} s")
+        return
+    if status != 0:
+        problem(f"{where}: exits with {status}:")
+        if output.strip():
+            print(indented(output))
+        return
+    shown = shown_output(block)
+    printed = output.split("\n")
+    if printed and printed[-1] == "":
+        printed.pop()
+    if printed == shown:
+        print(f"{where}: prints what the guide shows")
+        return
+    problem(f"{where}: prints otherwise than the guide shows:")
+    print(indented("\n".join(difflib.unified_diff(shown, printed, "the guide", "printed", lineterm=""))))
+
+
+def check_mockoon_guide(tree, scratch, bin_directory, problem):
+    """Runs the blocks of the Mockoon guide that run smock check or smock
+    render, one after another, in one copy of the example's directory, and
+    gives how many there are. A guide with none is a problem."""
+    documents = [MOCKOON_GUIDE]
+    if os.path.isdir(os.path.join(tree, MOCKOON_DOCUMENTS)):
+        names = sorted(os.listdir(os.path.join(tree, MOCKOON_DOCUMENTS)))
+        documents += [f"{MOCKOON_DOCUMENTS}/{name}" for name in names if name.endswith(".md")]
+    blocks = []
+    for document in documents:
+        for block in fenced_blocks(read(tree, document)):
+            if block.language in SHELL_LANGUAGES and any(SMOCK_COMMAND.search(line) for line in commands(block)):
+                blocks.append((document, block))
+    if not blocks:
+        problem(
+            f"check-doc-examples: the Mockoon guide, {MOCKOON_GUIDE} and {MOCKOON_DOCUMENTS}/*.md,"
+            " runs smock check or smock render in no block"
+        )
+        return 0
+    directory = os.path.join(scratch, "mockoon")
+    shutil.copytree(os.path.join(tree, MOCKOON_EXAMPLE), directory, symlinks=True)
+    for document, block in blocks:
+        run_block(f"{document}:{block.line}", block, directory, bin_directory, problem)
+    return len(blocks)
+
+
 def plural(count, singular, many):
     return f"{count} {singular if count == 1 else many}"
 
@@ -370,12 +476,19 @@ def main(arguments):
         with tempfile.TemporaryDirectory() as scratch:
             for example in examples:
                 check_example(tree, smock, scratch, example, problem)
+            # The documents' commands run smock by its name.
+            bin_directory = os.path.join(scratch, "bin")
+            os.makedirs(bin_directory)
+            os.symlink(smock, os.path.join(bin_directory, "smock"))
+            guide_blocks = check_mockoon_guide(tree, scratch, bin_directory, problem)
     except Unreadable as error:
         print(f"check-doc-examples: {error}", file=sys.stderr)
         return 2
     files = plural(len(examples), "whole Definition file", "whole Definition files")
     blocks = plural(aside, "other fenced block", "other fenced blocks")
     print(f"check-doc-examples: found {files}, and set aside {blocks} as fragments")
+    guide = plural(guide_blocks, "block", "blocks")
+    print(f"check-doc-examples: found {guide} of the Mockoon guide that run smock check or smock render")
     if problems:
         print(f"check-doc-examples: {plural(len(problems), 'problem', 'problems')}")
         return 1
