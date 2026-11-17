@@ -2,9 +2,9 @@
 # keeps for a reason that the kill matrix cannot see. Under rule (A) alone,
 # such a test may kill no mutant that another test does not kill as well,
 # and so look redundant: it pins a value that a spec fixes, checks that the
-# targets and builds agree, checks what a dependency does, or is one of the
-# deliberate overlaps. A removal batch starts from this list, and never
-# proposes a test on it.
+# targets and builds agree, checks what a dependency does, is one of the
+# deliberate overlaps, or checks what smock's own C decides. A removal
+# batch starts from this list, and never proposes a test on it.
 #
 # Each reason says where it comes from, the searches that found its tests,
 # and how their hits were judged, so that the searches can be reviewed as
@@ -1063,3 +1063,132 @@ source = "the poll's full stamp, every 10 s, sees a symlink pointed at a file wi
 file = 'watch/watch_wbtest.mbt'
 name = "a change made right after a poll's glance is seen by the full stamp after it, and one made right after the full stamp by the next poll's glance, though both point a symlink at a file written long before"
 source = 'the poll sees a symlink pointed at a file written long before, made right after a glance or a full stamp'
+
+# --------------------------------------------------------------------------
+
+[[reason]]
+id = 'own-c'
+rule = "smock's own C"
+title = "A test of what smock's own C decides, which no MoonBit mutant reaches"
+source = """
+#351: the maintainer's decision of 2026-11-17 adds this reason to #275's
+removal rule (C): the tests of smock's own C, the OpenSSL glue in
+openssl/openssl.c and the reset helper in server/reset.c. ADR 0001: these
+are smock's only C sources, and scripts/check-no-c.sh allows no other. The
+mutation runner makes mutants of MoonBit alone: its site finder reads .mbt
+files (scripts/mutation/sites.py), and it skips the sites of FFI (#275, Step
+2; CONTRIBUTING.md, Mutation runner). So no mutant reaches this C, and under
+rule (A) alone a test of it may look redundant. A test of what OpenSSL
+decides is under dependency-openssl instead, and one of what a MoonBit
+mutant reaches is judged by rule (A).
+"""
+search = [
+  '''git ls-files '*.c' '*.h'''',
+  '''git grep -n -E 'extern "C"' -- '*.mbt'''',
+  '''git grep -n -E '^(async )?test "' -- 'openssl/*_test.mbt'''',
+  '''git grep -n -i -E '^(async )?test "([^"\\]|\\.)*(alpn|no_application_protocol|alert|close_notify|self-signed|IP address|an RST|connection resets?|valid from)' -- '*_test.mbt' '*_wbtest.mbt' '*.mbt.md'''',
+  '''the test blocks of e2e/*_test.mbt and server/*_wbtest.mbt whose text matches an RST|is_reset|alpn_offer|alert_received|alpn_protocol|presented_certificate|s_client|SelfSigned''',
+]
+found = """
+The first search finds smock's two C files; the second, the 27 bindings
+that call into them, in openssl/openssl.mbt, openssl/client.mbt and
+server/reset.mbt. With the C's own comments, they show what the C decides
+beyond handing a call to OpenSSL: how a PEM read ends (no block, a block
+that does not parse, with the earliest reason on OpenSSL's error queue, or
+a key of another certificate); the chain sent after the leaf; the protocol
+ALPN picks, h2 left out over a TLS 1.2 suite that RFC 9113 prohibits, and
+the fatal alert when none fits; the last alert a client read; close_notify
+read as the end; the self-signed certificate's names, each an IP address or
+a DNS name, its validity from an hour before, and a new key and serial
+number for each; and the RST that SO_LINGER makes a reset Fault send. The
+third search finds the bindings' 13 tests; the fourth, 21 tests whose names
+speak of ALPN, an alert, close_notify, a self-signed certificate, IP
+addresses, an RST or a connection reset; the fifth, 23 e2e test blocks that
+look at a reset, at what ALPN picked, at an alert, at the certificate smock
+presents or at what s_client saw. 40 tests in all.
+
+Listed: a test whose subject, as its name says, is an outcome that smock's
+C decides, so that a change to that C fails it while no mutant does. Left
+out: the bindings' tests of what OpenSSL decides, a leaf sent without its
+intermediate and a key update, which are under dependency-openssl; their
+tests of what their MoonBit decides, the messages of a refused
+configuration and the names a self-signed certificate refuses; and the
+ECDSA chain's handshake, which runs the RSA chain's C and differs only in
+what OpenSSL does with the key. Also left out: the e2e tests that use a
+reset, ALPN or the self-signed certificate to see what smock's MoonBit
+decides (the 100 Continue before a Fault, the seeded draws of a reset
+Fault, the Journal entry committed before the RST, the Scenario each reset
+moves, the log lines of a Fault, the --tls-http2 setting, the server's
+choice of protocol after ALPN, SNI, the set of names in the certificate,
+its log entry, its reloads and its expiry metric); the test that the
+certificate stays in memory, a documented feature that both the MoonBit
+and the C keep, and whose keep reason a removal batch derives; and the
+tests of Definition files' hosts and of HTTP/2's drain, which reach no C.
+No test checks the C's other settings: TLS 1.2 at least, no renegotiation,
+and no session cache on a server.
+"""
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'a client that trusts only the root CA completes a handshake with a server presenting an RSA leaf and its intermediate'
+source = "smock_openssl_ctx_use_chain adds each certificate after the leaf to the chain the server sends, so a client that trusts only the root CA verifies the leaf through its intermediate (ServerConfig's documentation: the certificates that issued the leaf are sent with it; RFC 5280, section 6)"
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'a configuration that cannot be used is refused with the reason'
+source = "smock_openssl_ctx_use_chain and smock_openssl_ctx_use_key tell a block that does not parse, with the earliest reason on OpenSSL's error queue (smock_openssl_take_error), from a key of another certificate (their -2, or smock_openssl_ctx_check_key); the reasons are OpenSSL's, such as bad base64 decode, and the bindings' TlsError"
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'ALPN: a server accepting http/1.1 picks it from h2 and http/1.1, serves a client without ALPN, and refuses a client offering only h2'
+source = "smock_alpn_select picks the first protocol of the server's list that the client offers, and fails the handshake when it offers none of them (RFC 7301, section 3.2; ServerConfig's documentation); a client without ALPN never reaches it"
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'a client that a server refuses by ALPN learns the alert the server sent by its code, 120 for no_application_protocol, whatever text OpenSSL has for it'
+source = 'smock_keep_alert keeps the last alert a client connection reads, and smock_openssl_ssl_alert gives its description: 120, no_application_protocol (RFC 8446, section 6), once smock_alpn_select has refused'
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'ALPN skips h2 over a TLS 1.2 suite that RFC 9113 prohibits, anything but ECDHE or DHE with an AEAD cipher, and not over TLS 1.3'
+source = 'smock_suite_allows_h2: over TLS 1.2, h2 only with ECDHE or DHE and an AEAD cipher, and over TLS 1.3 with any suite (RFC 9113, section 9.2.2 and Appendix A; docs/http2.md, TLS 1.2)'
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'a close_notify from the peer reads as Closed'
+source = "smock_result reads OpenSSL's SSL_ERROR_ZERO_RETURN as -2, the end of the connection, which the bindings give as Closed, and smock_openssl_ssl_shutdown writes the close_notify (RFC 8446, section 6.1)"
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'a generated self-signed certificate serves TLS, and a client that trusts it verifies it for each of its names, IP addresses included, and for no other name'
+source = "add_name makes a name that OpenSSL reads as an IPv4 or IPv6 address an IP address name and every other name a DNS name, so a client verifies the certificate for each name and no other (SelfSigned::generate's documentation)"
+
+[[reason.test]]
+file = 'openssl/openssl_test.mbt'
+name = 'each generated certificate has a new key and its own SHA-256 fingerprint'
+source = "smock_openssl_self_signed_new makes a new key and a random serial number for each certificate, and smock_openssl_self_signed_sha256 gives its SHA-256 digest, 32 octets (SelfSigned's documentation: no two share a fingerprint)"
+
+[[reason.test]]
+file = 'e2e/faults_test.mbt'
+name = 'a reset Fault reads the whole request, body included, then ends the connection with an RST, without a byte of response'
+source = 'smock_reset_on_close sets SO_LINGER with a zero timeout, so that closing the connection sends an RST, on the plain and the TLS port (docs/definition-files/faults.md: smock resets the connection, an RST, without writing anything; ADR 0001)'
+
+[[reason.test]]
+file = 'e2e/tls_test.mbt'
+name = 'ALPN: a client offering h2 and http/1.1, or h2 alone, gets h2 and is served over HTTP/2; one offering http/1.1 alone, or no ALPN, gets HTTP/1.1; one offering neither fails the handshake'
+source = 'smock_alpn_select on the TLS port, which offers h2, then http/1.1 (docs/http2.md, h2 on the TLS port: a client that offers neither fails the handshake, with the no_application_protocol alert)'
+
+[[reason.test]]
+file = 'e2e/tls_http2_test.mbt'
+name = 'over TLS 1.2, ALPN skips h2 when the suite is one RFC 9113 prohibits: with only a CBC suite, h2 and http/1.1 get http/1.1 and h2 alone fails; the mandatory ECDHE-RSA-AES128-GCM-SHA256 with P-256 gets h2'
+source = 'smock_suite_allows_h2 in the binary, against openssl s_client (docs/http2.md, TLS 1.2; RFC 9113, section 9.2.2 and Appendix A)'
+
+[[reason.test]]
+file = 'e2e/self_signed_test.mbt'
+name = 'with neither certificate setting, smock serves HTTPS on the TLS port with a self-signed certificate it generated, valid from an hour before it was generated until 365 days after'
+source = 'smock_openssl_self_signed_new signs the certificate with its own subject as issuer, and sets its notBefore an hour back (docs/running.md, The self-signed certificate: valid from an hour before smock generates it until 365 days after)'
+
+[[reason.test]]
+file = 'e2e/self_signed_test.mbt'
+name = 'the certificate also covers every Mock Host, IP addresses as IP addresses and the rest as DNS names, so a client that trusts it can call each Mock by its Host'
+source = 'add_name in smock_openssl_self_signed_new (docs/running.md, The self-signed certificate: Hosts that are IP addresses are IP address names, the others DNS names)'

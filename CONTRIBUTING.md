@@ -1070,9 +1070,13 @@ A test may go only under (A) or (B), and never when (C) holds.
   - a test of a constant that a spec fixes;
   - a test that the backends agree, or a test in a release build, such as
     the engine's tests of seeded floating-point results;
-  - a test of behaviour that a dependency provides.
+  - a test of behaviour that a dependency provides;
+  - a test of smock's own C, the OpenSSL glue in `openssl/openssl.c` and
+    the reset helper in `server/reset.c`. No mutant reaches that C, since
+    the mutation runner skips FFI, so under (A) alone such a test could
+    look redundant.
 
-  The tests kept for the last four reasons are named in the keep list,
+  The tests kept for the last five reasons are named in the keep list,
   [`mutation/kept-tests.toml`](mutation/kept-tests.toml).
 
 An e2e test goes only when operator-level mutants of the `server` code on
