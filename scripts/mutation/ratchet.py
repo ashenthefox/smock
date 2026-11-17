@@ -55,6 +55,7 @@ parse, or git cannot answer.
 """
 
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -218,6 +219,49 @@ def write(root, finder, moonc):
     print(f"ratchet: wrote the site counts of {len(files)} packages into {COUNTS.as_posix()}/")
 
 
+def committed_files(root):
+    """The committed counts in root's tree, by path under the counts'
+    directory."""
+    directory = root / COUNTS
+    if not directory.is_dir():
+        return {}
+    return {p.relative_to(directory).as_posix(): p.read_text(encoding="utf-8")
+            for p in sorted(directory.rglob("*.jsonl"))}
+
+
+def differences(committed, files):
+    """What differs between the committed counts and those of the tree, as
+    a message for each package whose file differs, with the diff."""
+    messages = []
+    for name in sorted(set(committed) | set(files)):
+        old, new = committed.get(name, ""), files.get(name, "")
+        if old == new:
+            continue
+        diff = list(difflib.unified_diff(old.splitlines(), new.splitlines(), f"committed/{name}", f"tree/{name}",
+                                         lineterm="", n=0))
+        shown = diff[:40] + ([f"... and {len(diff) - 40} more lines"] if len(diff) > 40 else [])
+        messages.append(f"the committed site counts of {name.removesuffix('.jsonl')} differ from the site"
+                        f" finder's on this tree:\n" + "\n".join(shown))
+    return messages
+
+
+def check(root, finder, moonc, base):
+    """Checks the committed counts against root's tree and against the
+    base: whether it passed."""
+    by_package = tree_counts(root, finder, moonc)
+    files = count_files(by_package)
+    problems = differences(committed_files(root), files)
+    if problems:
+        problems.append(f"Run `python3 scripts/mutation/ratchet.py write` and commit {COUNTS.as_posix()}/ with the"
+                        " change that alters the sites.")
+    for problem in problems:
+        print(f"ratchet: {problem}", file=sys.stderr)
+    if problems:
+        return False
+    print(f"ratchet: the committed site counts of {len(files)} packages are the tree's.")
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description="Write or check the committed site counts of each package.")
     parser.add_argument("--root", default=".", help="the workspace")
@@ -225,14 +269,16 @@ def main():
     parser.add_argument("--moonc", default="moonc", help="the compiler, whose parse tree gives the definitions")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("write", help="write the counts of the tree")
-    check = commands.add_parser("check", help="check the counts against the tree and the base")
-    check.add_argument("--base", default="origin/main", help="compare with the merge base of HEAD and this")
+    checking = commands.add_parser("check", help="check the counts against the tree and the base")
+    checking.add_argument("--base", default="origin/main", help="compare with the merge base of HEAD and this")
     args = parser.parse_args()
     root = Path(args.root).resolve()
     finder = shlex.split(args.finder) if args.finder else [sys.executable, str(HERE / "sites.py")]
     try:
         if args.command == "write":
             write(root, finder, args.moonc)
+        elif not check(root, finder, args.moonc, args.base):
+            sys.exit(1)
     except (RatchetError, sites.FinderError, FileNotFoundError) as error:
         print(f"ratchet: {error}", file=sys.stderr)
         sys.exit(2)

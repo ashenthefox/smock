@@ -92,6 +92,29 @@ class RatchetTest(unittest.TestCase):
         self.assertEqual({c["file"] for c in counts}, {"calc/calc.mbt"})
         self.assertEqual([list(c) for c in counts], [["file", "definition", "text", "pinned", "full"]] * 4)
 
+    def test_the_check_passes_when_the_committed_counts_are_the_trees(self):
+        self.history.ratchet("write")
+        self.history.commit("counts")
+        result = self.history.ratchet("check", "--base", "main")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("the committed site counts of 4 packages are the tree's", result.stdout)
+
+    def test_the_check_fails_when_a_change_alters_sites_and_not_their_counts(self):
+        self.history.ratchet("write")
+        self.history.commit("counts")
+        calc = self.history.root / "calc" / "calc.mbt"
+        calc.write_text(calc.read_text().replace("!(n % 2 == 0)", "!(n % 2 == 0) && n > 0"))
+        result = self.history.ratchet("check", "--base", "main")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("the committed site counts of calc differ from the site finder's on this tree", result.stderr)
+        self.assertIn('-{"file":"calc/calc.mbt","definition":"is_odd"', result.stderr)
+        self.assertIn("python3 scripts/mutation/ratchet.py write", result.stderr)
+        # So does a package whose counts are not committed at all.
+        (self.history.root / "mutation" / "site-counts" / "log.jsonl").unlink()
+        result = self.history.ratchet("check", "--base", "main")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("the committed site counts of log differ from the site finder's on this tree", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
