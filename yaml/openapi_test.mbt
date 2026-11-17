@@ -480,23 +480,29 @@ test "malformed text gives the same error in both modes" {
   )
   // A `#` with no white space before it starts no comment: "Comments must
   // be separated from other tokens by white space characters" (YAML 1.2.2,
-  // section 6.6). yaml-test-suite marks these three, SU5Z, 9JBA and CVW2,
-  // as errors, and both modes refuse them, with the messages yaml_test.mbt's
-  // comment test gives.
+  // section 6.6). yaml-test-suite marks the first three, SU5Z, 9JBA and
+  // CVW2, as errors, and both modes refuse them with the message `parse`
+  // documents for such a `#` "in both modes", as yaml_test.mbt's comment
+  // test does. The last has the `#` right after an indentation indicator,
+  // which only the mode for OpenAPI documents reads.
   inspect(
     both([
       "key: \"value\"# invalid comment", "---\n[ a, b, c, ]#invalid\n", "---\n[ a, b, c,#invalid\n]\n",
+      "a: |2#c\n  x\n",
     ]),
     content=(
       #|"key: \"value\"# invalid comment"
-      #|  safe: error /key: unexpected text after the value
-      #|  openapi: error /key: unexpected text after the value
+      #|  safe: error /key: a comment needs a space before its #
+      #|  openapi: error /key: a comment needs a space before its #
       #|"---\n[ a, b, c, ]#invalid\n"
-      #|  safe: error /2: unexpected text after the value
-      #|  openapi: error /2: unexpected text after the value
+      #|  safe: error /2: a comment needs a space before its #
+      #|  openapi: error /2: a comment needs a space before its #
       #|"---\n[ a, b, c,#invalid\n]\n"
-      #|  safe: error /3: a plain value cannot start with #; quote this value
-      #|  openapi: error /3: a plain value cannot start with #; quote this value
+      #|  safe: error /2: a comment needs a space before its #
+      #|  openapi: error /2: a comment needs a space before its #
+      #|"a: |2#c\n  x\n"
+      #|  safe: error /a: block scalar indentation indicators are not supported
+      #|  openapi: error /a: a comment needs a space before its #
     ),
   )
   // A tab between two `-` indicators on one line is in the indentation of

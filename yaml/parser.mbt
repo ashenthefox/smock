@@ -146,12 +146,20 @@ fn Parser::skip_space(self : Parser) -> Unit {
 }
 
 ///|
+/// What a `#` right after other text is rejected with, where a comment
+/// could start after white space: it starts no comment (YAML 1.2.2,
+/// section 6.6).
+const NO_SPACE_BEFORE_COMMENT : String = "a comment needs a space before its #"
+
+///|
 /// Skips a comment: a `#` at the start of a line or after white space, to
 /// the end of its line. A `#` right after other text starts no comment
-/// (YAML 1.2.2, section 6.6), so it is left for the caller to refuse.
-fn Parser::skip_comment(self : Parser) -> Unit {
-  if self.peek() == '#' &&
-    (self.pos == self.line_start || self.chars[self.pos - 1] is (' ' | '\t')) {
+/// (YAML 1.2.2, section 6.6), so it is rejected.
+fn Parser::skip_comment(self : Parser) -> Unit raise ParseError {
+  if self.peek() == '#' {
+    if self.pos > self.line_start && !(self.chars[self.pos - 1] is (' ' | '\t')) {
+      self.fail(NO_SPACE_BEFORE_COMMENT)
+    }
     while !(self.peek() is ('\n' | EOF)) {
       self.bump()
     }
@@ -696,7 +704,9 @@ fn Parser::block_scalar(self : Parser, parent : Int32) -> Json raise ParseError 
   } else if !self.openapi && self.peek() is ('0'..<='9') {
     self.fail("block scalar indentation indicators are not supported")
   }
-  if !is_blank_or_eof(self.peek()) {
+  if self.peek() == '#' {
+    self.fail(NO_SPACE_BEFORE_COMMENT)
+  } else if !is_blank_or_eof(self.peek()) {
     self.fail("invalid block scalar header")
   }
   self.skip_space()
@@ -903,6 +913,7 @@ fn Parser::block_mapping(
     }
     key = self.scalar(column, flow=false)
     self.skip_space()
+    self.skip_comment()
     if !self.at_key_indicator() {
       self.fail("expected a key followed by ':'")
     }

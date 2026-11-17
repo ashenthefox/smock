@@ -103,6 +103,11 @@ pub impl Show for ParseError with fn output(self, logger) {
 ///   "duplicate key". Keys are compared as the strings they read as, so
 ///   `a:` and `"a":` repeat each other.
 /// - The members of a mapping are read in the order they are written.
+/// - A `#` starts a comment only at the start of a line or after a space
+///   or a tab (YAML 1.2.2, section 6.6). Right after other text of a plain
+///   scalar, it is part of the scalar, as in `path: /a#b`; anywhere else,
+///   such as right after a quoted value or a flow collection, it is
+///   rejected with "a comment needs a space before its #".
 /// - A block scalar whose last line ends the text without a line break
 ///   gets no line break added, as YAML 1.2.2 says (section 8.1.1.2), with
 ///   each chomping indicator: a text that ends with `a: |` and then `  x`,

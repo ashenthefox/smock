@@ -211,13 +211,13 @@ test "comments run from a # after white space to the end of the line" {
   )
   // "Comments must be separated from other tokens by white space
   // characters" (YAML 1.2.2, section 6.6). A `#` right after a quoted
-  // scalar, a flow collection or a flow indicator starts no comment, so the
-  // text is refused: yaml-test-suite marks the first three inputs, SU5Z,
-  // 9JBA and CVW2, as errors. Each refusal comes with the message the
-  // parser gives for what it finds there instead: text after a value, a
-  // plain value that starts with an indicator, as the tests above assert for
-  // `a: [1, 2]]` and `a: @x`, and the two flow messages #280's acceptance
-  // criteria name. The nearest inputs that stay valid follow: a `#` after a
+  // scalar, a flow collection, a flow indicator or a block scalar's header
+  // starts no comment, so the text is refused: yaml-test-suite marks the
+  // first three inputs, SU5Z, 9JBA and CVW2, as errors. `parse` documents
+  // the message: "anywhere else, such as right after a quoted value or a
+  // flow collection, it is rejected with 'a comment needs a space before
+  // its #'". The pointer is the deepest node reached, as `ParseError`
+  // documents. The nearest inputs that stay valid follow: a `#` after a
   // space or a tab, which section 6.6 allows, and a `#` inside a plain
   // scalar, which section 7.3.3 allows after a character that is not white
   // space ("An ns-char preceding").
@@ -225,22 +225,27 @@ test "comments run from a # after white space to the end of the line" {
     each([
       "key: \"value\"# invalid comment", "---\n[ a, b, c, ]#invalid\n", "---\n[ a, b, c,#invalid\n]\n",
       "a: 'x'#c", "a: {b: 1}#c", "[a, \"b\"#c\n]", "{a: \"b\"#c\n}", "[#c\n a]",
-      "key: \"value\" # c", "key: \"value\"\t# c", "a: [x]\t# c", "{a: \"b\" # c\n}",
+      "a: |#c\n  x\n", "a: >-#c\n  x\n", "a: 1\n\"b\"#c: 2", "key: \"value\" # c",
+      "key: \"value\"\t# c", "a: [x]\t# c", "{a: \"b\" # c\n}", "a: | # c\n  x\n",
       "key: value# c", "[a#b, c]",
     ]),
     content=(
-      #|"key: \"value\"# invalid comment" -> error /key: unexpected text after the value
-      #|"---\n[ a, b, c, ]#invalid\n" -> error /2: unexpected text after the value
-      #|"---\n[ a, b, c,#invalid\n]\n" -> error /3: a plain value cannot start with #; quote this value
-      #|"a: 'x'#c" -> error /a: unexpected text after the value
-      #|"a: {b: 1}#c" -> error /a/b: unexpected text after the value
-      #|"[a, \"b\"#c\n]" -> error /1: expected , or ] in a flow sequence
-      #|"{a: \"b\"#c\n}" -> error /a: expected , or } in a flow mapping
-      #|"[#c\n a]" -> error /0: a plain value cannot start with #; quote this value
+      #|"key: \"value\"# invalid comment" -> error /key: a comment needs a space before its #
+      #|"---\n[ a, b, c, ]#invalid\n" -> error /2: a comment needs a space before its #
+      #|"---\n[ a, b, c,#invalid\n]\n" -> error /2: a comment needs a space before its #
+      #|"a: 'x'#c" -> error /a: a comment needs a space before its #
+      #|"a: {b: 1}#c" -> error /a/b: a comment needs a space before its #
+      #|"[a, \"b\"#c\n]" -> error /1: a comment needs a space before its #
+      #|"{a: \"b\"#c\n}" -> error /a: a comment needs a space before its #
+      #|"[#c\n a]" -> error : a comment needs a space before its #
+      #|"a: |#c\n  x\n" -> error /a: a comment needs a space before its #
+      #|"a: >-#c\n  x\n" -> error /a: a comment needs a space before its #
+      #|"a: 1\n\"b\"#c: 2" -> error /a: a comment needs a space before its #
       #|"key: \"value\" # c" -> {"key":"value"}
       #|"key: \"value\"\t# c" -> {"key":"value"}
       #|"a: [x]\t# c" -> {"a":["x"]}
       #|"{a: \"b\" # c\n}" -> {"a":"b"}
+      #|"a: | # c\n  x\n" -> {"a":"x\n"}
       #|"key: value# c" -> {"key":"value# c"}
       #|"[a#b, c]" -> ["a#b","c"]
     ),

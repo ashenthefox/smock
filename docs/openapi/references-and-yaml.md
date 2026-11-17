@@ -243,6 +243,11 @@ The YAML parser also holds to these rules:
   hexadecimal or octal integer above 2^53 - 1, is an error whose message
   ends in "quote this value". Quoted, it is a string.
 - The members of a mapping are read in the order they are written.
+- A `#` starts a comment only at the start of a line or after a space or
+  a tab, as YAML says. Right after other text of a plain value, it is part
+  of the value, as in `url: /pets#top`; anywhere else, such as right after
+  a quoted value or a flow collection, as in `type: "string"# note`, it is
+  an error, "a comment needs a space before its #".
 - A block scalar whose last line ends the file without a line break gets
   no line break added, as YAML 1.2.2 says (section 8.1.1.2), with each
   chomping indicator: a file that ends with `description: |` and then

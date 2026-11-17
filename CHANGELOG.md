@@ -726,8 +726,9 @@ of each GitHub release include its section
 - In YAML, a `#` with no space or tab before it no longer starts a
   comment, as YAML says. After a quoted value or a flow collection, such
   as `key: "value"# note` or `[a, b]#note`, smock dropped the rest of the
-  line as a comment; it now rejects the text. Inside a plain value, as in
-  `path: /a#b`, the `#` is part of the value, as before
+  line as a comment; it now rejects the text, with "a comment needs a
+  space before its #". Inside a plain value, as in `path: /a#b`, the `#`
+  is part of the value, as before
   ([smock#366](https://github.com/hirunefu/smock/issues/366)).
 - In YAML, a tab between two `-` on one line, as in `-<tab>- x`, is now
   rejected as a tab in indentation, as the documents say: the white space

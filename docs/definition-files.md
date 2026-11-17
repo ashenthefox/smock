@@ -646,6 +646,11 @@ The YAML parser also holds to these rules:
 - A key that repeats in a mapping is rejected at the later key, with
   "duplicate key". `id:` and `"id":` are the same key.
 - The members of a mapping are read in the order they are written.
+- A `#` starts a comment only at the start of a line or after a space or
+  a tab, as YAML says. Right after other text of a plain value, it is part
+  of the value, as in `path: /a#b`; anywhere else, such as right after a
+  quoted value or a flow collection, as in `body: "x"# note`, it is
+  rejected with "a comment needs a space before its #".
 - A block scalar whose last line ends the file without a line break gets
   no line break added, as YAML 1.2.2 says (section 8.1.1.2), with each
   chomping indicator: a file that ends with `body: |` and then `  hello`,
