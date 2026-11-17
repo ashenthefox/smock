@@ -82,6 +82,19 @@ pub impl Show for ParseError with fn output(self, logger) {
 /// Parsing is linear in the length of `text`, does no I/O, and ends with a
 /// value or an error for every input.
 ///
+/// `parse` also holds to these rules, in both modes unless a rule names one:
+/// - A key with nothing written, as in `: value`, is rejected as an empty
+///   value is, with "a key must not be empty". This holds in the mode for
+///   OpenAPI documents too, where an empty value is null, since every key
+///   there is a string.
+/// - A key that repeats in a mapping is rejected at the later key, with
+///   "duplicate key". Keys are compared as the strings they read as, so
+///   `a:` and `"a":` repeat each other.
+/// - The members of a mapping are read in the order they are written.
+/// - In the mode for OpenAPI documents, a plain scalar that JSON cannot
+///   hold, such as `.inf`, `.NaN` or a hexadecimal or octal integer above
+///   2^53 - 1, is rejected with a message that ends in "quote this value".
+///
 /// ```mbt check
 /// test {
 ///   let text =

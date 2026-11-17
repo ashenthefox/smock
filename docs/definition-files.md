@@ -630,6 +630,16 @@ only a safe subset of YAML (`yaml/`):
 A JSON file with a key repeated in one object is rejected too, at the later
 key: JSON parsers disagree on which of the two values counts.
 
+The YAML parser also holds to these rules:
+
+- An empty value, as in `body:` with nothing after it, is rejected: write
+  `null`, or `""` for an empty string. A key with nothing written, as in
+  `: value`, is rejected as an empty value is, with "a key must not be
+  empty".
+- A key that repeats in a mapping is rejected at the later key, with
+  "duplicate key". `id:` and `"id":` are the same key.
+- The members of a mapping are read in the order they are written.
+
 Every problem is reported with the file and the JSON Pointer of the value,
 such as `users.yaml: /stubs/0/request/method: "on" may be read as a boolean;
 quote this value`.

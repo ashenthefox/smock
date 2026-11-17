@@ -59,7 +59,9 @@ class ListError(Exception):
 
 class Object(list):
     """A JSON object, as the pairs of its members in order, so that the
-    order of members counts when two objects are compared."""
+    order of members counts when two objects are compared: "The members of
+    a mapping are read in the order they are written" (yaml/yaml.mbt,
+    `parse`)."""
 
 
 def load(text):
@@ -158,6 +160,22 @@ def read_list(path):
 # JSON cannot hold, reads every key as a string, and takes indentation
 # indicators.
 #
+# `parse` also "holds to these rules, in both modes unless a rule names
+# one" (yaml/yaml.mbt; docs/definition-files.md repeats the safe subset's,
+# docs/openapi/references-and-yaml.md the OpenAPI mode's):
+# - the empty key: "A key with nothing written, as in `: value`, is
+#   rejected as an empty value is, with 'a key must not be empty'. This
+#   holds in the mode for OpenAPI documents too";
+# - the duplicate key: "A key that repeats in a mapping is rejected at the
+#   later key, with 'duplicate key'. Keys are compared as the strings they
+#   read as";
+# - the number JSON cannot hold: "In the mode for OpenAPI documents, a
+#   plain scalar that JSON cannot hold, such as `.inf`, `.NaN` or a
+#   hexadecimal or octal integer above 2^53 - 1, is rejected with a message
+#   that ends in 'quote this value'";
+# - and the order of members, which `same` compares: "The members of a
+#   mapping are read in the order they are written."
+#
 # Each construct is (what it is, in words; the pattern its message must
 # match; the words of that rule), by its kind.
 NAMES_IT = "a message that names it"
@@ -225,7 +243,9 @@ YAML_1_2 = re.compile("|".join([
 JSON_TYPED = re.compile(r"true|false|null|-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][-+]?[0-9]+)?")
 
 # The largest integer a JSON number holds exactly, 2^53 - 1, above which
-# the mode for OpenAPI documents refuses a hexadecimal or octal integer.
+# the mode for OpenAPI documents refuses a hexadecimal or octal integer,
+# with a message that ends in "quote this value" (yaml/yaml.mbt, `parse`:
+# a plain scalar that JSON cannot hold).
 MAX_SAFE_INTEGER = 2**53 - 1
 
 
@@ -291,6 +311,8 @@ def from_events(events):
                 position = "key" if mapping["nodes"] % 2 == 0 else "value"
                 mapping["nodes"] += 1
                 if position == "key" and event.kind == "=VAL":
+                    # Keys repeat when their texts do, plain or quoted
+                    # (yaml/yaml.mbt, `parse`: "A key that repeats").
                     if event.text in mapping["keys"]:
                         found.add(("duplicate key", None))
                     mapping["keys"].add(event.text)
@@ -308,6 +330,8 @@ def from_events(events):
 def plain_constructs(text, position):
     """The constructs that a plain scalar with this text is, at a key or a
     value."""
+    # An empty key is refused as an empty value is, in both modes
+    # (yaml/yaml.mbt, `parse`: "A key with nothing written").
     if text == "":
         return {("empty key", None)} if position == "key" else {("empty value", None)}
     found = set()
