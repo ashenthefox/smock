@@ -51,3 +51,15 @@ VJP3/01  differs  A key of a flow mapping spans lines, or its ":" is on the next
 DK95/00  differs  A tab follows the spaces at the start of a line, before content. YAML reads it as separation, since only spaces indent (YAML 1.2.2, 6.1). smock reads it as indentation, which the documents say it refuses ("tabs in indentation"): "tabs are not allowed in indentation".
 Q5MG     differs  A tab follows the spaces at the start of a line, before content. YAML reads it as separation, since only spaces indent (YAML 1.2.2, 6.1). smock reads it as indentation, which the documents say it refuses ("tabs in indentation"): "tabs are not allowed in indentation".
 
+# Bugs.
+6XDY      #323     A bug: two document markers, ---, with nothing between them, are read as one document that holds the plain scalar "---". The documents say multiple documents are refused.
+9JBA      #323     A bug: smock reads a comment that no white space separates from what comes before it, which YAML refuses (YAML 1.2.2, 6.6: "Comments must be separated from other tokens by white space characters").
+CVW2      #323     A bug: smock reads a comment that no white space separates from what comes before it, which YAML refuses (YAML 1.2.2, 6.6: "Comments must be separated from other tokens by white space characters").
+SU5Z      #323     A bug: smock reads a comment that no white space separates from what comes before it, which YAML refuses (YAML 1.2.2, 6.6: "Comments must be separated from other tokens by white space characters").
+Y79Y/004  #323     A bug: a tab separates two block sequence indicators on one line, which YAML refuses: the inner sequence would be indented by a tab (YAML 1.2.2, 6.1). smock reads [[null]].
+Y79Y/005  #323     A bug: a tab separates two block sequence indicators on one line, which YAML refuses: the inner sequence would be indented by a tab (YAML 1.2.2, 6.1). smock reads [[null]].
+JEF9/02   #323     A bug: the last line of a block scalar ends the input, with no line break. The suite reads a line break there, and smock reads none.
+L24T/01   #323     A bug: the last line of a block scalar ends the input, with no line break. The suite reads a line break there, and smock reads none.
+Y79Y/000  #323     A bug: a line of a block scalar holds a tab where its content would be indented, which YAML refuses: only spaces indent (YAML 1.2.2, 6.1 and 8.1.1.1). smock reads an empty line.
+Y79Y/001  #323     A bug: a line of a block scalar holds a tab after its indentation, and nothing else. YAML reads the tab as content, since only spaces indent (YAML 1.2.2, 8.1.1.1, Example 8.2). smock reads an empty line.
+R4YG      #323     A bug: a line of a block scalar holds a tab after its indentation, and nothing else. YAML reads the tab as content, since only spaces indent (YAML 1.2.2, 8.1.1.1, Example 8.2). smock reads an empty line.
