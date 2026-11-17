@@ -690,8 +690,9 @@ the rules for writing and removing tests apply already.
   `engine`, `grpc`, `http1`, `importopenapi`, `llm`, `log`, `metrics`,
   `prng`, `protobuf`, `re2`, `settings`, `template`, `unicode`, `usage`,
   `xml` and `yaml`. `serverparsers`, made since from the parsers of
-  `server`, is pure too, but it is not in the two stages that take the 19
-  to L4 (below): how far it climbs is the maintainer's decision.
+  `server`, is pure too. It goes to L4 as well, outside the two stages
+  that take the 19 there (below), and the maintainer reads every
+  exclusion in it, as in the protocol packages.
   `testcerts` builds there too, but it is data only, so it is not one.
   The native-only packages are `server`, `cmd/smock`, `defdir`, `watch`,
   `openssl`, `protobuf-conformance`, `yaml-test-suite`, `schema` and
@@ -814,7 +815,10 @@ A package climbs four levels:
 
 All 19 pure packages go to L4, in two stages: first `yaml`, `http1`,
 `xml`, `re2`, `grpc`, `cookies`, `settings`, `metrics`, `usage` and
-`prng`, then the other nine. `server` and `cmd/smock` get coverage through
+`prng`, then the other nine. `serverparsers` goes to L4 too, by a climb of
+its own ([#339](https://github.com/hirunefu/smock/issues/339)) that waits
+for the ladder's tooling and for the parsers still to move out of
+`server`, not for either stage. `server` and `cmd/smock` get coverage through
 e2e, a BODY audit and, if the measurements on CI's runners bear out the
 estimate, mutants at operator level through e2e, monthly and before each
 release.
@@ -1015,8 +1019,8 @@ An equivalence claim reaches the maintainer in three steps:
 2. **Adversarial.** For each claim that remains, a separate agent context
    tries to write a test that kills the mutant, from the spec.
 3. **The maintainer.** What survives both goes to the maintainer: every
-   entry in the protocol packages, and one in five of the others, as a
-   sample. The maintainer draws the sample after the batch is frozen, so
+   entry in the protocol packages and in `serverparsers`, and one in five
+   of the others, as a sample. The maintainer draws the sample after the batch is frozen, so
    that its author cannot know which entries will be read. If a sampled
    entry is rejected, its author triages the whole batch again, and the
    maintainer draws a new sample.
