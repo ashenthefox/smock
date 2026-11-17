@@ -276,10 +276,13 @@ links bad_rev --rev no-such-commit
 exits bad_rev 2
 links no_file --issues "$tmp/no-such-file.jsonl"
 exits no_file 2
+printf '{"number": 12, "title": "Count requests in totals"}\nnot JSON\n' >"$tmp/not-json.jsonl"
+links not_json --issues "$tmp/not-json.jsonl"
+exits not_json 2
 touch "$tmp/gh.fails"
 links gh_fails
 exits gh_fails 2
-for name in bad_rev no_file gh_fails; do
+for name in bad_rev no_file not_json gh_fails; do
   if [ -s "$tmp/$name.json" ]; then
     fail "$name: prints links"
   else
@@ -295,6 +298,11 @@ if grep -q "no-such-file.jsonl" "$tmp/no_file.err"; then
   pass "no_file: names the file"
 else
   fail "no_file: says $(cat "$tmp/no_file.err")"
+fi
+if grep -q "line 2" "$tmp/not_json.err"; then
+  pass "not_json: names the line"
+else
+  fail "not_json: says $(cat "$tmp/not_json.err")"
 fi
 
 # A history without tests has no links, and gh is not asked.

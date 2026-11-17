@@ -76,8 +76,9 @@ What it prints is one JSON object:
             texts, or null when its body has no such heading or label.
             A number that GitHub does not know has only "found": false.
 
-It exits with 2 when git or gh cannot answer, such as when <rev> is not a
-commit.
+It exits with 2, and prints no links, when git or gh cannot answer, such
+as when <rev> is not a commit, or when the file --issues names cannot be
+read as --dump-issues writes it.
 """
 
 import argparse
@@ -105,7 +106,7 @@ def run(command, cwd=None):
     except OSError as error:
         raise Failure(f"{command[0]}: {error}") from error
     if result.returncode != 0:
-        raise Failure(f"{' '.join(command[:3])}: {result.stderr.strip()}")
+        raise Failure(f"{' '.join(command[:4])}: {result.stderr.strip()}")
     return result.stdout
 
 
@@ -301,7 +302,7 @@ def links_of(repo, rev, path, package):
     records = []
     for block in blocks:
         line = introduction(block, blamed, lines)
-        subject = line.get("summary", "")
+        subject = line["summary"]
         records.append({
             "package": package,
             "file": path,
@@ -310,7 +311,7 @@ def links_of(repo, rev, path, package):
             "kind": block.kind,
             "name": block.name,
             "commit": line["commit"],
-            "introduced_in": line.get("filename", path),
+            "introduced_in": line["filename"],
             "subject": subject,
             "issue": issue_of(subject),
         })
@@ -335,10 +336,13 @@ def fetch_issues(repo):
 def read_issues(text):
     """The issues of the lines that fetch_issues gives, by number."""
     issues = {}
-    for line in text.splitlines():
+    for n, line in enumerate(text.splitlines(), start=1):
         if line.strip():
-            issue = json.loads(line)
-            issues[int(issue["number"])] = issue
+            try:
+                issue = json.loads(line)
+                issues[int(issue["number"])] = issue
+            except (ValueError, TypeError, KeyError) as error:
+                raise Failure(f"issues, line {n}: not an issue as gh gives it ({error})") from error
     return issues
 
 
