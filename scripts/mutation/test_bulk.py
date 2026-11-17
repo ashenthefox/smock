@@ -337,9 +337,17 @@ class RunTest(unittest.TestCase):
         self.assertEqual(self.result.stdout, report + "\n")
 
     def test_a_missing_shard_fails_the_finish(self):
-        result = bulk("finish", "--plan", self.plan, "--out", self.tmp / "half", self.shards[0])
+        result = bulk("finish", "--plan", self.plan, "--out", self.tmp / "half", "--run-url",
+                      "https://github.com/o/r/actions/runs/1", self.shards[0])
         self.assertEqual(result.returncode, 1)
         self.assertIn("shard 2/2 is missing", result.stderr)
+        # The report the run keeps says so, with the run's link: a shard
+        # whose run stopped, as on a failed self-test, wrote no output.
+        report = (self.tmp / "half" / "report.md").read_text()
+        self.assertTrue(report.startswith("# Mutation run: chosen packages\n\n"
+                                          "[The run on GitHub Actions](https://github.com/o/r/actions/runs/1):"), report)
+        self.assertIn("The shards' outputs do not merge: shard 2/2 is missing. Each shard's artifact holds what it"
+                      " wrote.", report)
 
 
 class TimingTest(unittest.TestCase):

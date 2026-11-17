@@ -514,15 +514,6 @@ def finish_run(args):
         return finish_timing(plan, args, out)
     result = subprocess.run([sys.executable, str(MERGE), "--out", str(out), *args.shards], capture_output=True,
                             text=True)
-    if result.returncode != 0:
-        raise BulkError(result.stderr.strip().removeprefix("merge: "))
-    summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
-    merged = (out / "report.md").read_text(encoding="utf-8")
-    walls = []
-    for shard in args.shards:
-        done = Path(shard) / "bulk.json"
-        if done.is_file():
-            walls.append(json.loads(done.read_text(encoding="utf-8")))
     jobs = read_jobs(args.jobs)
     lines = [f"# Mutation run: {MODES[plan['mode']]}", "",
              f"{link(args.run_url)}: {describe(plan)}, {describe_shards(plan)}.", ""]
@@ -535,6 +526,20 @@ def finish_run(args):
     times = times_line(jobs)
     if times:
         lines += [times, ""]
+    if result.returncode != 0:
+        problem = result.stderr.strip().removeprefix("merge: ")
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "report.md").write_text("\n".join(lines + [f"The shards' outputs do not merge: {problem}. Each"
+                                                          " shard's artifact holds what it wrote."]) + "\n",
+                                       encoding="utf-8")
+        raise BulkError(problem)
+    summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+    merged = (out / "report.md").read_text(encoding="utf-8")
+    walls = []
+    for shard in args.shards:
+        done = Path(shard) / "bulk.json"
+        if done.is_file():
+            walls.append(json.loads(done.read_text(encoding="utf-8")))
     if walls:
         longest = max(walls, key=lambda w: w["wall_s"])
         lines += [f"The longest shard's run took {duration(longest['wall_s'])} (shard {longest['name']}), on"

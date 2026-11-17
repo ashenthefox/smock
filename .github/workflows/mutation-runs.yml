@@ -285,20 +285,25 @@ jobs:
           "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs"
           --jq '.jobs[] | {name, started_at, completed_at, conclusion}' >"$RUNNER_TEMP/jobs.jsonl"
 
-      # A job summary holds at most 1 MiB; a larger report is only in the
-      # artifact.
+      # The report says so when the shards do not merge, and the step
+      # fails then. A job summary holds at most 1 MiB; a larger report is
+      # only in the artifact.
       - name: Merge the shards' outputs into one report
         run: |
+          status=0
           python3 scripts/mutation/bulk.py finish --plan "$RUNNER_TEMP/plan/plan.json" \
             --out "$RUNNER_TEMP/report" --jobs "$RUNNER_TEMP/jobs.jsonl" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            "$RUNNER_TEMP"/shards/* >/dev/null
+            "$RUNNER_TEMP"/shards/* >/dev/null || status=$?
           report=$RUNNER_TEMP/report/report.md
-          if [ "$(wc -c <"$report")" -le 1000000 ]; then
+          if [ ! -f "$report" ]; then
+            echo "The finish wrote no report." >>"$GITHUB_STEP_SUMMARY"
+          elif [ "$(wc -c <"$report")" -le 1000000 ]; then
             cat "$report" >>"$GITHUB_STEP_SUMMARY"
           else
             echo "The report is larger than a job summary holds: it is in the artifact mutation-report." >>"$GITHUB_STEP_SUMMARY"
           fi
+          exit "$status"
 
       - name: Keep the report
         if: ${{ !cancelled() }}
