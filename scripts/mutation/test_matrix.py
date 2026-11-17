@@ -252,6 +252,104 @@ class KillMatrixTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((out / "matrix").exists())
 
+    def test_with_one_test_left_out_of_the_run_the_mutants_only_it_killed_survive(self):
+        # meter's only test left out: `low < n`, which only it killed,
+        # survives, and within's BODY loses only that one of its killers;
+        # the tool, reading the whole matrix, says the same.
+        root = self.tmp / "without-meter"
+        shutil.copytree(FIXTURE, root, ignore=shutil.ignore_patterns("_build", "target", ".mooncakes"))
+        (root / "meter" / "meter_test.mbt").unlink()
+        mutants = [MATRIX[0][0], MATRIX[1][0]]
+        out = self.tmp / "without-meter-out"
+        result = run_runner(root, self.tmp / "work-without-meter", out, self.moon, "--matrix",
+                            *[a for m in mutants for a in ("--mutant", m)], "units")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run = {r["id"]: (r["outcome"], [test_id(tuple(t[k] for k in ("package", "file", "index", "name")))
+                                        for t in r["killing_tests"]]) for r in read_lines(out / "mutants.jsonl")}
+        self.assertEqual(run, {MATRIX[0][0]: ("killed", [test_id(t) for t in (DIAL_HIGH, INSIDE, FIVE, FOUR)]),
+                               MATRIX[1][0]: ("survived", [])})
+        told = {m["id"]: (m["outcome"], m["killing_tests"])
+                for m in self.tool("kills", "--without", "--test", test_id(METER_LOW), self.out)}
+        self.assertEqual({i: told[i] for i in mutants}, run)
+
+    def test_a_kill_matrix_runs_alone(self):
+        for other in (["--totals-only", "--list", "x.jsonl"], ["--self-test-only"]):
+            result = run_runner(FIXTURE, self.tmp / "work", self.tmp / "refused", self.moon, "--matrix", *other,
+                                "units")
+            self.assertEqual(result.returncode, 2, other)
+            self.assertIn("--matrix takes no --totals-only or --self-test-only", result.stderr)
+
+
+class MatrixToolTest(unittest.TestCase):
+    """The tool on a matrix written by hand, with an e2e test, a duplicate
+    and a time-out, which the fixture's matrix has not."""
+
+    TESTS = [
+        {"test": "p/q/a_test.mbt:a", "package": "p/q", "file": "a_test.mbt", "line": 1, "index": 0, "name": "a",
+         "layer": "in-process"},
+        {"test": "p/q/b_test.mbt#0", "package": "p/q", "file": "b_test.mbt", "line": 1, "index": 0, "name": "",
+         "layer": "in-process"},
+        {"test": "p/e2e/c_test.mbt:c", "package": "p/e2e", "file": "c_test.mbt", "line": 1, "index": 0, "name": "c",
+         "layer": "e2e"},
+    ]
+    MUTANTS = [
+        {"id": "q.mbt,f,ROR,<,<=,0", "outcome": "killed", "killing_tests": ["p/q/a_test.mbt:a", "p/e2e/c_test.mbt:c"]},
+        {"id": "q.mbt,f,INT,1,2,0", "outcome": "killed", "killing_tests": ["p/e2e/c_test.mbt:c"]},
+        {"id": "q.mbt,g,INT,1,2,0", "outcome": "duplicate", "duplicate_of": "q.mbt,f,INT,1,2,0", "killing_tests": []},
+        {"id": "q.mbt,h,BODY,{…},{ 0 },0", "outcome": "timed out", "killing_tests": []},
+        {"id": "q.mbt,h,NOT,!,,0", "outcome": "killed", "killing_tests": ["p/q/b_test.mbt#0"]},
+    ]
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="test-matrix-tool-"))
+        self.file = self.tmp / "q.json"
+        self.file.write_text(json.dumps({"version": 1, "package": "p/q", "directory": "q", "operator_set": "v1",
+                                         "set": "full", "backend": "wasm-gc", "packages": ["p/q"], "native_only": [],
+                                         "tests": self.TESTS, "mutants": self.MUTANTS}))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def tool(self, *args):
+        result = subprocess.run([sys.executable, str(MATRIX_TOOL), *map(str, args)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return [json.loads(line) for line in result.stdout.splitlines()]
+
+    def test_an_e2e_kill_does_not_count_for_the_in_process_layer(self):
+        # Removal rule (A): only tests in the same layer or a lower one
+        # count, so an e2e kill never justifies removing an in-process test.
+        self.assertEqual([(m["id"], m["outcome"], m["killing_tests"])
+                          for m in self.tool("kills", "--layer", "in-process", self.file)], [
+            ("q.mbt,f,ROR,<,<=,0", "killed", ["p/q/a_test.mbt:a"]),
+            ("q.mbt,f,INT,1,2,0", "survived", []),
+            ("q.mbt,g,INT,1,2,0", "survived", []),
+            ("q.mbt,h,BODY,{…},{ 0 },0", "timed out", []),
+            ("q.mbt,h,NOT,!,,0", "killed", ["p/q/b_test.mbt#0"]),
+        ])
+
+    def test_a_duplicate_counts_as_the_mutant_it_compiles_as_and_a_time_out_names_no_test(self):
+        self.assertEqual([(t["test"], t["alone"]) for t in self.tool("alone", self.tmp)], [
+            ("p/q/b_test.mbt#0", ["q.mbt,h,NOT,!,,0"]),
+            ("p/e2e/c_test.mbt:c", ["q.mbt,f,INT,1,2,0", "q.mbt,g,INT,1,2,0"]),
+        ])
+        [duplicate] = [m for m in self.tool("kills", "--without", "--test", "p/q/a_test.mbt:a", self.file)
+                       if m["id"] == "q.mbt,g,INT,1,2,0"]
+        self.assertEqual(duplicate, {"package": "p/q", "id": "q.mbt,g,INT,1,2,0", "outcome": "killed",
+                                     "matrix": "killed", "killing_tests": ["p/e2e/c_test.mbt:c"],
+                                     "duplicate_of": "q.mbt,f,INT,1,2,0"})
+
+    def test_a_file_that_is_no_kill_matrix_is_refused(self):
+        (self.tmp / "summary.json").write_text(json.dumps({"operator_set": "v1", "packages": []}))
+        result = subprocess.run([sys.executable, str(MATRIX_TOOL), "alone", self.tmp], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("summary.json is no kill matrix of version 1", result.stderr)
+
+    def test_the_tests_of_smocks_e2e_package_are_e2e_tests(self):
+        sys.path.insert(0, str(HERE))
+        import matrix
+        self.assertEqual([matrix.layer(p) for p in ("smock/smock/e2e", "smock/smock/engine", "smock/yaml")],
+                         ["e2e", "in-process", "in-process"])
+
 
 # A moon that answers the runs of tests, but not their builds, dry runs or
 # outlines, from a script: a JSON list of answers, taken in turn. "real"

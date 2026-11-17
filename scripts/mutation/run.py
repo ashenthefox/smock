@@ -804,6 +804,8 @@ def main():
                                 or args.sites_only):
         parser.error("--self-test-only runs no mutant, so it takes no --mutant, --list, --sample, --changed"
                      " or --sites-only")
+    if args.matrix and (args.totals_only or args.self_test_only):
+        parser.error("--matrix takes no --totals-only or --self-test-only")
     root = Path(args.root).resolve()
     work = Path(args.work).resolve() if args.work else root / "_build" / "mutation"
     out = Path(args.out).resolve() if args.out else work / "out"
