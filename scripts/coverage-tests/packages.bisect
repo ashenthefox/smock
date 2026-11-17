@@ -1,0 +1,1 @@
+BISECT-COVERAGE-4 3 18 cmd/smock/main.mbt 4 17 32 28 47 4 0 0 0 0 13 prng/prng.mbt 4 206 327 343 372 4 5 3 0 3 16 server/serve.mbt 6 90 193 207 222 305 331 6 1 0 0 0 2 0

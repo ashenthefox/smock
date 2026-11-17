@@ -162,6 +162,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-check-schema.sh
 
+      # --- The tools that judge the tests -----------------------------------
+
+      # scripts/coverage.sh runs the in-process tests under coverage and
+      # reports each package's points from the toolchain's bisect report
+      # (scripts/coverage-report.py). This tests the report on small
+      # committed bisect reports, a partly covered line among them.
+      - name: Test the coverage report
+        if: ${{ !cancelled() }}
+        run: scripts/test-coverage-report.sh
+
       # --- The documents ----------------------------------------------------
 
       # The documents link to each other by path and by the anchors that
