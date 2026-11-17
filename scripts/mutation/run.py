@@ -5,7 +5,8 @@ report (CONTRIBUTING.md, "Mutation runner").
 
 usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir>]
            [--set pinned|full] [--mutant <id>]... [--sites-only] [--workers <n>]
-           [--moon <moon>] [--finder <command>] <package directory>...
+           [--moon <moon>] [--finder <command>] [--self-test-only]
+           <package directory>...
 
 <package directory> is relative to <root>, the workspace or module to
 mutate: the current directory unless it is given. The site finder
@@ -19,7 +20,8 @@ alternative of every operator at every position. --mutant runs only the
 mutant with that id, which must be in the set, and may be given more than
 once; a package given that holds none of the ids is not run.
 --sites-only runs no mutant: it writes the counts of sites, positions and
-skipped sites of each package, in both sets.
+skipped sites of each package, in both sets. --self-test-only runs each
+package's self-test, and no mutant.
 
 For each worker, the runner copies <root> into <work>/tree-<n>, the files
 that git tracks and the untracked ones it does not ignore, and builds
@@ -28,7 +30,11 @@ target directory of the runner's own, so that a plain build and a mutant
 build never rebuild each other, and each mutant is built where the last
 one was. <work> is <root>/_build/mutation unless it is given. For each
 package, the runner first builds and runs the tests without a mutant, and
-stops if they fail. Then, for each mutant, it writes the mutated file into
+stops if they fail. Then it runs the package's forced-fail self-test
+(selftest.py): it switches on a mutant that puts an abort at the start of
+every function of the package, builds and runs the tests, switches it off,
+and stops unless a test failed, so that a runner that could see no mutant
+never reports one. Then, for each mutant, it writes the mutated file into
 the tree, builds the package's tests (moon test --build-only), and runs
 them. It checks the build's exit status, so that a failed build never
 runs the binary of an earlier one, and it never passes -u. The outcome is
@@ -56,7 +62,8 @@ It writes into <out> (<work>/out unless it is given):
                  score: killed / (killed + survived), which leaves
                  time-outs out until they are confirmed; for the full set,
                  the same counts at the pinned alternatives and at the
-                 other alternatives apart;
+                 other alternatives apart; and the self-test's record: the
+                 functions it changed, its outcome and its failed tests;
   report.md      the operator set's version and the set, the summaries,
                  the sites each rule skipped, the time-outs, and each
                  survivor's diff with its whole enclosing definition (for
@@ -68,7 +75,7 @@ A position is the place of one or more sites: their file, operator, line
 and column.
 
 It exits with 0 when every mutant has an outcome, survivors or not, and
-with 1 when it cannot run them.
+with 1 when it cannot run them, a self-test that no test killed included.
 """
 
 import argparse
@@ -473,6 +480,8 @@ def report(operator_set, chosen, summaries, records):
         if "backend" in summary:
             out += [f"Backend {summary['backend']}, {summary['baseline']['tests']} tests, baseline run"
                     f" {summary['baseline']['run_s']:.2f} s, time limit {summary['limit_s']:.2f} s.", ""]
+        if "self_test" in summary:
+            out += [selftest.report_line(summary["self_test"]), ""]
         out += site_table(summary)
         if "backend" not in summary:
             continue
@@ -534,6 +543,8 @@ def main():
     parser.add_argument("--mutant", action="append", help="run only the mutant with this id")
     parser.add_argument("--sites-only", action="store_true",
                         help="count the sites of each package in both sets, and run no mutant")
+    parser.add_argument("--self-test-only", action="store_true",
+                        help="run each package's self-test, and no mutant")
     parser.add_argument("--workers", type=int, default=1, help="how many mutants build and run at once")
     parser.add_argument("--moon", default="moon", help="the moon command")
     parser.add_argument("--finder", help="the site finder's command (default: sites.py beside this script)")
@@ -541,6 +552,8 @@ def main():
     args = parser.parse_args()
     if args.workers < 1:
         parser.error("--workers must be at least 1")
+    if args.self_test_only and (args.mutant or args.sites_only):
+        parser.error("--self-test-only runs no mutant, so it takes neither --mutant nor --sites-only")
     root = Path(args.root).resolve()
     work = Path(args.work).resolve() if args.work else root / "_build" / "mutation"
     out = Path(args.out).resolve() if args.out else work / "out"
@@ -556,6 +569,8 @@ def main():
             raise RunnerError(f"the packages' sites name several operator sets: {sorted(versions)}")
         operator_set = versions.pop() if versions else None
         sites, chosen = choose(found, args.set, args.mutant, args.packages)
+        if args.self_test_only:
+            chosen = {directory: [] for directory in args.packages}
         records, summaries = [], []
         if not args.sites_only:
             files = listed_files(root)

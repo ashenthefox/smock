@@ -128,3 +128,9 @@ def failure(package, record):
     elif outcome == "timed out":
         what += f": its tests ran past {record['timings']['limit_s']:.2f} s"
     return what
+
+
+def report_line(record):
+    """The report's line on a self-test that passed."""
+    return (f"Self-test: `{STATEMENT}` at the start of {len(record['definitions'])} functions,"
+            f" killed by {record['failed_tests']} tests.")
