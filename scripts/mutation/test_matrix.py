@@ -98,7 +98,7 @@ def read_lines(path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def test_id(test):
+def matrix_name(test):
     """A test's name in a matrix (CONTRIBUTING.md, "The kill matrix"): its
     package, `/` and file, then `:` and its name, or `#` and its index when
     it has no name."""
@@ -212,15 +212,15 @@ class KillMatrixTest(unittest.TestCase):
     def test_the_tool_lists_the_tests_that_alone_kill_some_mutant(self):
         # From MATRIX: four tests are each the only one that kills a mutant.
         self.assertEqual([(t["test"], t["layer"], t["alone"]) for t in self.tool("alone", self.out)], [
-            (test_id(DIAL_HIGH), "in-process", ["units/units.mbt,within,ROR,<=,<,1"]),
-            (test_id(METER_LOW), "in-process", ["units/units.mbt,within,ROR,<=,<,0"]),
-            (test_id(BELOW), "in-process", ["units/units.mbt,within,LCR,&&,||,0"]),
-            (test_id(PAST), "in-process", ["units/units.mbt,past,BODY,{…},{ false },0"]),
+            (matrix_name(DIAL_HIGH), "in-process", ["units/units.mbt,within,ROR,<=,<,1"]),
+            (matrix_name(METER_LOW), "in-process", ["units/units.mbt,within,ROR,<=,<,0"]),
+            (matrix_name(BELOW), "in-process", ["units/units.mbt,within,LCR,&&,||,0"]),
+            (matrix_name(PAST), "in-process", ["units/units.mbt,past,BODY,{…},{ false },0"]),
         ])
         # The others kill only what other tests kill too: candidates for
         # removal, under removal rule (A).
         self.assertEqual([(t["test"], t["kills"]) for t in self.tool("alone", "--none", self.out / "matrix" / "units.json")],
-                         [(test_id(t), ["units/units.mbt,within,BODY,{…},{ false },0"]) for t in (INSIDE, FIVE, FOUR)])
+                         [(matrix_name(t), ["units/units.mbt,within,BODY,{…},{ false },0"]) for t in (INSIDE, FIVE, FOUR)])
 
     def test_the_tool_gives_the_mutants_that_a_set_of_tests_kills(self):
         def outcomes(*args):
@@ -229,8 +229,8 @@ class KillMatrixTest(unittest.TestCase):
         # With every test but meter's, the mutant that only meter's killed
         # survives; the rest are as in the matrix.
         without = [(i, "survived" if tests == [METER_LOW] else outcome, outcome,
-                    [test_id(t) for t in tests if t != METER_LOW]) for i, outcome, tests in MATRIX]
-        self.assertEqual(outcomes("--without", "--test", test_id(METER_LOW), self.out), without)
+                    [matrix_name(t) for t in tests if t != METER_LOW]) for i, outcome, tests in MATRIX]
+        self.assertEqual(outcomes("--without", "--test", matrix_name(METER_LOW), self.out), without)
         # units' own tests alone kill what ImportersTest finds they kill
         # without the importers' tests: within's BODY, `||` and past's BODY.
         own = {"units/units.mbt,within,BODY,{…},{ false },0", "units/units.mbt,within,LCR,&&,||,0",
@@ -238,9 +238,9 @@ class KillMatrixTest(unittest.TestCase):
         self.assertEqual([(i, o) for i, o, _, _ in outcomes("--package", "mutation/fixture/units", self.out)],
                          [(i, "killed" if i in own else "survived") for i, _, _ in MATRIX])
         # One test alone kills only within's BODY.
-        self.assertEqual([(i, o, tests) for i, o, _, tests in outcomes("--test", test_id(INSIDE), self.out)],
+        self.assertEqual([(i, o, tests) for i, o, _, tests in outcomes("--test", matrix_name(INSIDE), self.out)],
                          [(i, "killed" if tests == MATRIX[0][2] else "survived",
-                           [test_id(INSIDE)] if tests == MATRIX[0][2] else []) for i, _, tests in MATRIX])
+                           [matrix_name(INSIDE)] if tests == MATRIX[0][2] else []) for i, _, tests in MATRIX])
 
     def test_the_tool_refuses_a_test_the_matrix_does_not_hold(self):
         result = subprocess.run([sys.executable, str(MATRIX_TOOL), "kills", "--test", "mutation/fixture/units/x.mbt:y",
@@ -278,12 +278,12 @@ class KillMatrixTest(unittest.TestCase):
         result = run_runner(root, self.tmp / "work-without-meter", out, self.moon, "--matrix",
                             *[a for m in mutants for a in ("--mutant", m)], "units")
         self.assertEqual(result.returncode, 0, result.stderr)
-        run = {r["id"]: (r["outcome"], [test_id(tuple(t[k] for k in ("package", "file", "index", "name")))
+        run = {r["id"]: (r["outcome"], [matrix_name(tuple(t[k] for k in ("package", "file", "index", "name")))
                                         for t in r["killing_tests"]]) for r in read_lines(out / "mutants.jsonl")}
-        self.assertEqual(run, {MATRIX[0][0]: ("killed", [test_id(t) for t in (DIAL_HIGH, INSIDE, FIVE, FOUR)]),
+        self.assertEqual(run, {MATRIX[0][0]: ("killed", [matrix_name(t) for t in (DIAL_HIGH, INSIDE, FIVE, FOUR)]),
                                MATRIX[1][0]: ("survived", [])})
         told = {m["id"]: (m["outcome"], m["killing_tests"])
-                for m in self.tool("kills", "--without", "--test", test_id(METER_LOW), self.out)}
+                for m in self.tool("kills", "--without", "--test", matrix_name(METER_LOW), self.out)}
         self.assertEqual({i: told[i] for i in mutants}, run)
 
     def test_the_shards_of_a_kill_matrix_merge_into_the_matrix_of_the_run_without_shards(self):
@@ -327,7 +327,7 @@ class KillMatrixTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         matrix = json.loads((merged / "matrix" / "units.json").read_text())
         self.assertEqual(matrix["mutants"], [{"id": MATRIX[1][0], "outcome": "killed",
-                                              "killing_tests": [test_id(METER_LOW)]}])
+                                              "killing_tests": [matrix_name(METER_LOW)]}])
 
     def test_a_kill_matrix_runs_over_the_full_set_too(self):
         # For removal proofs (#306, first criterion). units' full set has
