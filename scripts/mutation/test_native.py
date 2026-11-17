@@ -44,7 +44,7 @@ MACHINE = platform.machine()
 DECIDES = MACHINE in AMD64
 # bounds' tests, as moon names them.
 DOT = ("mutation/fixture/bounds", "bounds_test.mbt", "a dot after the first characters")
-NO_DOT = ("mutation/fixture/bounds", "bounds_test.mbt", "no dot after the first characters")
+NO_DOT = ("mutation/fixture/dots", "dots_test.mbt", "no dot after the first characters")
 ENDS = ("mutation/fixture/bounds", "bounds_test.mbt", "a name that ends after its first characters")
 
 # The mutants of bounds' pinned set: each one's id, whether the finder
@@ -226,10 +226,12 @@ class NativeTest(unittest.TestCase):
 
     def test_a_record_names_the_tests_that_killed_it_on_each_backend(self):
         verdicts = {r["id"]: r.get("verdicts") for r in self.records}
-        # `||` reads past the end of "a" too: wasm-gc traps there, while the
-        # native read finds no dot.
+        # `||` reads past the end of "a": wasm-gc traps there, while the
+        # native read finds no dot, and only dots' test, which imports
+        # bounds, kills it natively.
         lcr = verdicts["bounds/bounds.mbt,dot_after,LCR,&&,||,0"]
-        self.assertEqual(sorted(names(lcr["wasm-gc"]["killing_tests"])), sorted([NO_DOT, ENDS]))
+        self.assertEqual(names(lcr["wasm-gc"]["killing_tests"]), [ENDS])
+        self.assertEqual((lcr["wasm-gc"]["importers"], lcr["native"]["importers"]), ([], ["mutation/fixture/dots"]))
         self.assertEqual(names(lcr["native"]["killing_tests"]), [NO_DOT])
         ror = verdicts["bounds/bounds.mbt,dot_after,ROR,>,>=,0"]
         self.assertEqual(names(ror["wasm-gc"]["killing_tests"]), [ENDS])
@@ -271,17 +273,26 @@ class NativeTest(unittest.TestCase):
         # mutants, with their own time limit.
         self.assertEqual(len(native["baseline"]["runs_s"]), 2)
         self.assertAlmostEqual(native["limit_s"], 1.25 * native["baseline"]["run_s"] + 4, places=2)
-        self.assertEqual(native["baseline"]["tests"], 4)
-        # Of bounds' tests, natively: none passes -u.
-        native_runs = [line.split() for line in self.log.read_text().splitlines()
-                       if "--target native" in line and "mutation/fixture/bounds" in line.split()]
-        self.assertTrue(native_runs)
-        for words in native_runs:
-            self.assertNotIn("-u", words)
-            self.assertNotIn("--update", words)
-        # A build of the baseline, of each mutant, and of each kill's two
-        # confirming runs: 1 + 3 + 2 x 2.
-        self.assertEqual(sum(1 for words in native_runs if "--build-only" in words), 8)
+        self.assertEqual(native["baseline"]["tests"], 3)
+        # The two that survive bounds' own tests natively run again
+        # natively with the tests of dots, which kill one.
+        importers = native["importers"]
+        self.assertEqual((importers["packages"], importers["reran"], importers["killed"], importers["killed_by"]),
+                         (["mutation/fixture/dots"], 2, 1, {"mutation/fixture/dots": 1}))
+        self.assertEqual(importers["baseline"]["tests"], 1)
+        # On wasm-gc, nothing survived bounds' own tests, so dots' tests
+        # never ran there.
+        self.assertEqual(self.summary["importers"]["reran"], 0)
+        # Natively, none passes -u. A build of the runs without a mutant, of
+        # each mutant and of each kill's two confirming runs: with bounds'
+        # tests, 1 + 3 + 2 x 1; with dots', 1 + 2 + 2 x 1.
+        for package, builds in (("mutation/fixture/bounds", 6), ("mutation/fixture/dots", 5)):
+            native_runs = [line.split() for line in self.log.read_text().splitlines()
+                           if "--target native" in line and package in line.split()]
+            for words in native_runs:
+                self.assertNotIn("-u", words)
+                self.assertNotIn("--update", words)
+            self.assertEqual(sum(1 for words in native_runs if "--build-only" in words), builds, package)
 
     def test_native_builds_take_no_c_compiler_or_flags_from_the_environment(self):
         # The run had MOON_CC, MOON_AR and MOON_CC_WRAPPER set to files that
@@ -311,6 +322,8 @@ class NativeTest(unittest.TestCase):
         for record in self.host:
             self.assertEqual(record["backend"], "native")
             self.assertNotIn("verdicts", record)
+            # The output compared is wasm-gc's, which host has none of.
+            self.assertNotIn("compiler_output", record)
         summary = self.host_summary
         self.assertEqual(summary["backend"], "native")
         self.assertEqual({k: summary[k] for k in ("mutants", "killed", "survived", "unviable")},
@@ -321,7 +334,7 @@ class NativeTest(unittest.TestCase):
         # the abort stops the test program, so moon names no failed test.
         self.assertEqual((summary["self_test"]["outcome"], summary["self_test"]["failed_tests"]), ("killed", 0))
         self.assertIn("Self-test: `abort(\"mutation self-test\")` at the start of 1 functions, killed: the test"
-                      " program stopped before it named a failed test, as an abort stops it natively.", self.report)
+                      " program stopped before it named a failed test.", self.report)
         # Every build and run of host's tests is native; moon is asked only
         # whether they build on wasm-gc.
         for line in self.log.read_text().splitlines():
@@ -377,6 +390,9 @@ class NativeShardsTest(unittest.TestCase):
         self.assertEqual((native["machine"], native["decides"]), (MACHINE, DECIDES))
         # The runs without a mutant and the limit of the first shard.
         self.assertEqual(native["baseline"], summaries[0]["native"]["baseline"])
+        # dots' tests ran a survivor natively in each of the first two
+        # shards, and killed the second's.
+        self.assertEqual((native["importers"]["reran"], native["importers"]["killed"]), (2, 1))
         report = (self.merged / "report.md").read_text()
         self.assertIn("- Unchecked array access: 3 mutants at sites whose definition uses one, all of which ran"
                       f" natively on {MACHINE} as well; 1 has another verdict there.", report)

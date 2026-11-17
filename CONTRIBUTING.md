@@ -1802,7 +1802,9 @@ at the root does not read the fixture: run `moon fmt` inside it after a
 change. In the fixture's package `bounds`, `dot_after` reads a character
 with `unsafe_get`, and each mutant of the pinned set has a known outcome
 on each backend, given beside the site: one is killed on wasm-gc by the
-trap alone and survives natively. The package `host` builds only
+trap alone and survives natively, and another survives `bounds`' own
+tests natively and is killed by those of `dots`, which imports `bounds`
+for its tests. The package `host` builds only
 natively. `scripts/mutation/test_native.py` runs both, with moon's
 variables for another C compiler set to ones that do not exist, and the
 shards of `bounds`, whose native verdicts merge.
