@@ -348,7 +348,8 @@ class TimingTest(unittest.TestCase):
         timing = json.loads((self.finished / "timing.json").read_text())
         self.assertEqual([t["workers"] for t in timing["runs"]], [1, 2, 4])
         for run in timing["runs"]:
-            self.assertAlmostEqual(run["per_mutant_s"], run["wall_s"] / 4, places=3)
+            # The shard's run over its mutants, to the millisecond.
+            self.assertEqual(run["per_mutant_s"], round(run["wall_s"] / 4, 3))
 
 
 if __name__ == "__main__":
