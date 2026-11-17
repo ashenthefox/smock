@@ -182,13 +182,25 @@ test "scheduling delay: the run_delay of /proc/<pid>/schedstat, from nanoseconds
       // A thread that never waited.
       @usage.scheduling_delay_seconds("65958 0 2\n"),
       @usage.scheduling_delay_seconds("2034567890123 987654321 41234\n"),
+      // The waiting time is the second of the three fields that the kernel's
+      // sched-stats document gives the file, and the only one read: a line
+      // of exactly two fields holds it.
+      @usage.scheduling_delay_seconds("65958000 1500000\n"),
       // Too few fields, a field that is not a number, and no line.
       @usage.scheduling_delay_seconds("65958\n"),
       @usage.scheduling_delay_seconds("65958 -1 2\n"),
       @usage.scheduling_delay_seconds(""),
     ],
     content=(
-      #|[Some(0.0015), Some(0), Some(0.987654321), None, None, None]
+      #|[
+      #|  Some(0.0015),
+      #|  Some(0),
+      #|  Some(0.987654321),
+      #|  Some(0.0015),
+      #|  None,
+      #|  None,
+      #|  None,
+      #|]
     ),
   )
 }
