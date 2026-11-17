@@ -837,10 +837,12 @@ Where an operator needs more detail, v1 has this:
   `not(...)` calls.
 - **Skipped sites.** A rule skips a site that cannot be a mutant, and the
   reports count it: a BODY site without a default value, or whose
-  function is foreign (FFI); a STR site outside STR's scope; an IFC site,
-  or an LCR site at an `&&`, whose condition binds a name with `is`, since
-  the name would then be unbound where it is used; and an AOR site at a
-  `+` with a string literal as an operand, since strings have no `-`.
+  function is foreign (FFI); a STR site outside STR's scope; IFC's `true`
+  for a condition that binds a name with `is`, and LCR at an `&&` whose
+  operand does, since the name would then be unbound where it is used;
+  and an AOR site at a `+` with a string literal as an operand, since
+  strings have no `-`. Such a condition is forced to false as
+  `false && (condition)`, which keeps the name bound.
 - **The same mutant.** Where two sites make the same mutant, as BODY's
   `{ false }` and BOOL's `false` do in a body that is only `true`, one is
   kept: the one in the pinned set, then the first of BODY, ROR, LCR, NOT,

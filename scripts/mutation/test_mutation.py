@@ -250,12 +250,26 @@ class OperatorsTest(unittest.TestCase):
             # A guard statement: its else never runs when it is true.
             (f + "p.x != 7,true,0", 104, True), (f + "p.x != 7,false,0", 104, False),
             (f + "o is Some(_),true,0", 105, True), (f + "o is Some(_),false,0", 105, False),
-            # Forced, `v` would not be bound where the body uses it.
-            (("skipped", "binds a name", "o is Some(v)", "false"), 106, True),
+            # A condition that binds a name is forced to false with `false
+            # && (...)`, which keeps the name bound where the body uses it;
+            # forced to true, the name would be unbound, so that is skipped.
+            (f + "o is Some(v),false && (o is Some(v)),0", 106, True),
             (("skipped", "binds a name", "o is Some(v)", "true"), 106, False),
             # `while true` (109): BOOL's mutant is IFC's false, and true is
             # the condition itself, so IFC has no site there.
             (f + "n > 9,false,0", 113, True), (f + "n > 9,true,0", 113, False),
+        ])
+
+    def test_ifc_forces_a_guard_that_binds_a_name_only_to_false(self):
+        # The pinned set's true would leave `v` unbound after the guard.
+        self.assertEqual(table(self.lines, ["logic"], "IFC"), [
+            ("forms/operators.mbt,logic,IFC,o is Some(v) && v > 0,false && (o is Some(v) && v > 0),0", 121, True),
+            (("skipped", "binds a name", "o is Some(v) && v > 0", "true"), 121, False),
+        ])
+        guards = find_sites(FIXTURE, "forms/operators.mbt", chosen="full")
+        self.assertEqual(table(guards, ["conditions"], "IFC")[10:12], [
+            ("forms/operators.mbt,conditions,IFC,o is Some(_),true,0", 105, True),
+            ("forms/operators.mbt,conditions,IFC,o is Some(_),false,0", 105, False),
         ])
 
     def test_lcr_swaps_and_and_or(self):
@@ -654,15 +668,15 @@ class FullSetTest(unittest.TestCase):
         self.assertEqual((out / "mutants.jsonl").read_text(), "")
         package = json.loads((out / "summary.json").read_text())["packages"][0]
         self.assertEqual(package["sets"]["full"]["skipped"], {
-            "AOR string operand": 2, "BODY FFI": 1, "BODY no default": 3, "IFC binds a name": 4,
+            "AOR string operand": 2, "BODY FFI": 1, "BODY no default": 3, "IFC binds a name": 2,
             "LCR binds a name": 1, "STR outside scope": 28})
         self.assertEqual(package["sets"]["pinned"]["skipped"], {
-            "AOR string operand": 2, "BODY FFI": 1, "BODY no default": 3, "IFC binds a name": 2,
+            "AOR string operand": 2, "BODY FFI": 1, "BODY no default": 3,
             "LCR binds a name": 1, "STR outside scope": 15})
         report = (out / "report.md").read_text()
         self.assertIn("## mutation/fixture/forms", report)
         self.assertIn("Sites skipped in this set: AOR string operand 2, BODY FFI 1, BODY no default 3,"
-                      " IFC binds a name 2, LCR binds a name 1, STR outside scope 15.", report)
+                      " LCR binds a name 1, STR outside scope 15.", report)
 
 
 if __name__ == "__main__":

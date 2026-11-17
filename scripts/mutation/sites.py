@@ -75,7 +75,7 @@ Each line is a JSON object. A site has:
 A site that a rule skips is printed as well, so that a report can count
 it: it has the same fields but id and ordinal, and "skipped", the rule's
 reason (operators.SKIPS): "no default" and "FFI" (BODY), "outside scope"
-(STR), "binds a name" (IFC and LCR) or "string operand" (AOR).
+(STR), "binds a name" (IFC's true, and LCR) or "string operand" (AOR).
 
 The lines are sorted by file, then by position. The ids stay the same as
 long as a definition's sites of the same kind keep their order.

@@ -26,7 +26,7 @@ DEDUPLICATION = ("BODY", "ROR", "LCR", "NOT", "BOOL", "AOR", "INT", "STR", "IFC"
 NO_DEFAULT = "no default"          # BODY: the return type has no default value
 FFI = "FFI"                        # BODY: the function is foreign (extern)
 OUTSIDE_SCOPE = "outside scope"    # STR: the literal is outside STR's scope
-BINDS = "binds a name"             # IFC, LCR: forcing it unbinds a name `is` binds
+BINDS = "binds a name"             # IFC to true, LCR: it would unbind a name `is` binds
 STRING_OPERAND = "string operand"  # AOR: `+` joins strings, which have no `-`
 SKIPS = (NO_DEFAULT, FFI, OUTSIDE_SCOPE, BINDS, STRING_OPERAND)
 
@@ -93,12 +93,21 @@ IFC_PINNED = {"if": "false", "loop": "false", "match guard": "false", "guard": "
 def condition(kind, text, binds):
     """A condition's alternatives: forced to the pinned value, then to the
     other. An alternative equal to the condition's own text is no site. A
-    condition that binds a name with `is` is skipped: forced, the name is
-    no longer bound where the guarded code uses it."""
+    condition that binds a name with `is` is forced to false as
+    `false && (condition)`, which never evaluates the condition and keeps
+    the name bound where the code it guards uses it; forced to true, the
+    name would be unbound, so that alternative is skipped."""
     pinned = IFC_PINNED[kind]
     other = "true" if pinned == "false" else "false"
-    skipped = BINDS if binds else None
-    return [Alternative(value, value == pinned, skipped) for value in (pinned, other) if value != text]
+    alternatives = []
+    for value in (pinned, other):
+        if value == text:
+            continue
+        if binds and value == "false":
+            alternatives.append(Alternative(f"false && ({text})", value == pinned))
+        else:
+            alternatives.append(Alternative(value, value == pinned, BINDS if binds else None))
+    return alternatives
 
 
 # INT: an integer literal as the source writes it: a sign, digits in a base,
