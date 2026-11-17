@@ -176,12 +176,14 @@ class PlanTest(unittest.TestCase):
     def test_each_shard_is_planned_to_end_within_the_jobs_six_hours(self):
         # #313: "shards the run within 6 hours per job". CONTRIBUTING: each
         # shard's mutants at the planned time a mutant take at most 5 of
-        # the job's 6 hours; with an hour a mutant, 5 mutants a shard, so
-        # more shards than the width, which run as jobs come free.
+        # the job's 6 hours; with an hour a mutant, 5 mutants a shard: 7
+        # shards for 31 mutants, more than the width, so they run in waves
+        # as jobs come free, and 8, which fill both waves of 2, end the
+        # run sooner than 7, whose last would run alone.
         plan, out = self.plan("budget", "--mode", "packages", "--packages", "calc log", "--width", "2",
                               "--seconds-per-mutant", "3600")
         shards = json.loads(out["shards"])
-        self.assertEqual(len(shards), 7)
+        self.assertEqual(len(shards), 8)
         self.assertEqual(out["width"], "2")
         self.assertEqual((plan["budget_s"], plan["seconds_per_mutant"]), (5 * 3600, 3600))
 
