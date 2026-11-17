@@ -280,6 +280,11 @@ test "text, comments, CDATA sections and processing instructions must be well-fo
 }
 
 ///|
+/// The last case is a value of the declaration without quotes, which
+/// XML 1.0 §2.8 [24] forbids: `VersionInfo ::= S 'version' Eq ("'"
+/// VersionNum "'" | '"' VersionNum '"')`, as [80] and [32] quote the
+/// encoding and standalone values. Its error is at the byte where the
+/// quote is missing, as `ParseError`'s position is documented.
 test "an XML declaration must come first, and be well-formed" {
   inspect(
     errors([
@@ -287,7 +292,7 @@ test "an XML declaration must come first, and be well-formed" {
       "<a/><?Xml?>", "<?xml?><a/>", "<?xml encoding='UTF-8'?><a/>", "<?xml version='2.0'?><a/>",
       "<?xml version='1.'?><a/>", "<?xml version=\"1.0'?><a/>", "<?xml version='1.0' standalone='maybe'?><a/>",
       "<?xml version='1.0' encoding='UTF-8' version='1.0'?><a/>", "<?xml version='1.0'encoding='UTF-8'?><a/>",
-      "<?xml version='1.0' standalone='yes' encoding='UTF-8'?><a/>",
+      "<?xml version='1.0' standalone='yes' encoding='UTF-8'?><a/>", "<?xml version=1.0?><a/>",
     ]),
     content=(
       #| <?xml version='1.0'?><a/> => position 1: the XML declaration must come first
@@ -303,6 +308,7 @@ test "an XML declaration must come first, and be well-formed" {
       #|<?xml version='1.0' encoding='UTF-8' version='1.0'?><a/> => position 37: expected ?> to end the XML declaration
       #|<?xml version='1.0'encoding='UTF-8'?><a/> => position 19: expected ?> to end the XML declaration
       #|<?xml version='1.0' standalone='yes' encoding='UTF-8'?><a/> => position 37: expected ?> to end the XML declaration
+      #|<?xml version=1.0?><a/> => position 14: expected a quoted value
     ),
   )
 }
