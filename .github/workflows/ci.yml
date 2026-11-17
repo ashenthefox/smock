@@ -265,6 +265,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-check-kept-tests.sh
 
+      # --- The removal proof -------------------------------------------------
+
+      # A test may be removed only when, among other sets, its removal keeps
+      # the trace links: from the commit that introduced each test, through
+      # moves and copies, to the ticket that commit names and that issue's
+      # acceptance criteria (scripts/trace-links.py). This tests them on
+      # small git histories, with a stand-in for gh.
+      - name: Test the trace links
+        if: ${{ !cancelled() }}
+        run: scripts/test-trace-links.sh
+
       # --- The Helm chart ---------------------------------------------------
 
       # The chart on a cluster is tested in build-test.yml, with the image

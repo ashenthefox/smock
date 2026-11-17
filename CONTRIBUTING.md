@@ -335,6 +335,7 @@ PROTOC=~/.local/bin/protoc scripts/test-protobuf-fixtures.sh          # that che
 python3 -m unittest discover -s bench -p test_compare.py -v   # the benchmark's comparison of two runs, which the merge checklist reads
 python3 scripts/check-kept-tests.py   # every test that the keep list, mutation/kept-tests.toml, names is still there (needs Python 3.11 or later)
 scripts/test-check-kept-tests.sh     # that check, on small trees
+scripts/test-trace-links.sh          # the trace links of the removal proof (scripts/trace-links.py), on small git histories with a stand-in for gh (needs python3 and git)
 helm lint --strict charts/smock --set adminAuth.tokenSecret.name=smock-admin-token   # the Helm chart passes helm's lint (needs helm)
 scripts/test-helm-chart.sh           # rendering tests of the Helm chart (needs helm, yq and jq)
 python3 -m unittest discover -s bench -p test_gke_script.py -v   # scripts/gke-bench.sh against fake gcloud, kubectl and docker commands, about 5 minutes
