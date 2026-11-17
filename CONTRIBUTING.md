@@ -1263,11 +1263,11 @@ verdict: the mutation runner and its data, the exclusion list, the
 coverage wrapper with its floors and scope, the canary's verdicts, the
 lists of packages at L4 and of tests kept, the merge and release checks,
 the mutation and coverage workflows, and the lists of cases that
-protobuf's conformance suite and h2spec may fail. Most of these files do
-not exist yet: the list fixes the paths they will have, and each line
-names the issue that creates them. A change that adds a file that decides
-a verdict puts it at a path the list names, or adds its path to the list
-in the same change. The report reads the base's list and the head's, so
+protobuf's conformance suite, h2spec and the YAML test suite may fail.
+Most of these files do not exist yet: the list fixes the paths they will
+have, and each line names the issue that creates them. A change that adds
+a file that decides a verdict puts it at a path the list names, or adds
+its path to the list in the same change. The report reads the base's list and the head's, so
 a file still shows when the same change takes its path off the list.
 
 The report reads MoonBit by its lines and by `moon fmt`'s layout, not as
