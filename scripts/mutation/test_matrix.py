@@ -122,5 +122,88 @@ class KillMatrixTest(unittest.TestCase):
         self.assertEqual({r["package"] for r in self.records}, {"mutation/fixture/units"})
 
 
+# A moon that answers the runs of tests, but not their builds, dry runs or
+# outlines, from a script: a JSON list of answers, taken in turn. "real"
+# runs the real moon; {"fail": [test, ...]} prints what moon prints when
+# those tests fail, and exits as it does. Once the script is used up, the
+# real moon answers. Its arguments: the script, the real moon, then moon's
+# own.
+SCRIPTED_MOON = '''\
+import json, os, sys
+script, real, args = sys.argv[1], sys.argv[2], sys.argv[3:]
+if args[:1] == ["test"] and not {"--build-only", "--dry-run", "--outline"} & set(args):
+    with open(script) as f:
+        answers = json.load(f)
+    if answers:
+        answer = answers.pop(0)
+        with open(script, "w") as f:
+            json.dump(answers, f)
+        if isinstance(answer, dict) and "fail" in answer:
+            for package, filename, index, name in answer["fail"]:
+                print(json.dumps({"package": package, "filename": filename, "index": str(index),
+                                  "test_name": name, "message": "a scripted failure"}))
+            print(f"Total tests: 5, passed: {5 - len(answer['fail'])}, failed: {len(answer['fail'])}.")
+            sys.exit(2)
+os.execv(real, [real, *args])
+'''
+
+
+class MatrixConfirmationTest(unittest.TestCase):
+    """Kill-matrix runs of within's BODY `{ false }`, which three tests of
+    three packages kill, with a moon that answers from a script, so that
+    one of them fails only once, or fails without the mutant too."""
+
+    MUTANT = MATRIX[0][0]
+
+    @classmethod
+    def setUpClass(cls):
+        moon = shutil.which("moon")
+        if moon is None:
+            raise unittest.SkipTest("moon is not on PATH")
+        cls.real = moon
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-matrix-confirm-"))
+        cls.fake = cls.tmp / "scripted_moon.py"
+        cls.fake.write_text(SCRIPTED_MOON)
+        cls.runs = 0
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def run_scripted(self, answers):
+        """Runs the runner in kill-matrix mode on the mutant, with the moon
+        that answers from the script: its record and its flake records."""
+        type(self).runs += 1
+        script = self.tmp / f"run-{self.runs}.json"
+        script.write_text(json.dumps(answers))
+        moon = f"{sys.executable} {self.fake} {script} {self.real}"
+        out = self.tmp / f"run-{self.runs}"
+        result = run_runner(FIXTURE, self.tmp / "work", out, moon, "--matrix", "--mutant", self.MUTANT, "units")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [record] = read_lines(out / "mutants.jsonl")
+        return record, json.loads((out / "flakes.json").read_text())["runs"][-1]
+
+    # The runs of tests, in turn: the two runs without a mutant, the
+    # self-test's run, the mutant's run, its run again with the mutant on,
+    # and the run without it.
+
+    def test_a_test_that_passes_when_the_kill_runs_again_is_not_credited(self):
+        killed = [list(DIAL_HIGH), list(METER_LOW), list(INSIDE)]
+        record, flakes = self.run_scripted(["real", "real", "real", {"fail": killed},
+                                            {"fail": [list(DIAL_HIGH), list(INSIDE)]}])
+        self.assertEqual((record["outcome"], record["confirmation"]), ("killed", "confirmed"))
+        self.assertEqual(record["killing_tests"], [dict(fields(t), layer="in-process") for t in (DIAL_HIGH, INSIDE)])
+        # meter's test passed the one time it ran again with the mutant on.
+        self.assertIn({"package": METER_LOW[0], "file": METER_LOW[1], "name": METER_LOW[3], "flaked": 1,
+                       "reruns": 1}, flakes["tests"])
+
+    def test_a_test_that_fails_without_the_mutant_too_is_not_credited(self):
+        record, flakes = self.run_scripted(["real", "real", "real", "real", "real", {"fail": [list(METER_LOW)]}])
+        self.assertEqual((record["outcome"], record["confirmation"]), ("killed", "confirmed"))
+        self.assertEqual(record["killing_tests"], [dict(fields(t), layer="in-process") for t in (DIAL_HIGH, INSIDE)])
+        self.assertIn({"package": METER_LOW[0], "file": METER_LOW[1], "name": METER_LOW[3], "flaked": 1,
+                       "reruns": 1}, flakes["tests"])
+
+
 if __name__ == "__main__":
     unittest.main()
