@@ -265,7 +265,10 @@ async test "h2c: streams waiting on the connection window get it in the order th
       // Then the 149,505 octets left of the bodies of streams 1 and 5. The
       // document does not say whether stream 5 began to wait when its
       // HEADERS went out without its body, before stream 1 sent, or when its
-      // task looked at the windows, after: their order is not checked.
+      // task looked at the windows, after: their order is not checked. The
+      // maintainer decided on 2026-11-18 that a stream begins to wait when
+      // its response is queued without all of its body, so stream 5 comes
+      // first; today stream 1 does, and #381 fixes the code.
       out.push("--- the connection window widened by 149505")
       raw.send([WindowUpdate(stream_id=0, increment=149_505)])
       let rest = raw.runs_until(data_total(149_505)).split("\n").collect()
