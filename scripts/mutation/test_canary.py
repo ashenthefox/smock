@@ -19,6 +19,7 @@ usage: python3 -m unittest discover -s scripts/mutation -v
 
 import collections
 import json
+import os
 import posixpath
 import shutil
 import subprocess
@@ -213,6 +214,181 @@ class SitesTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn(f"within: calc/calc.mbt does not hold \"<=\" at offset {self.within['offset'] + 1}"
                       f" on {self.commit}", result.stdout)
+
+
+def moon_log(directory):
+    """A moon command that logs each of its command lines, and the log."""
+    moon = shutil.which("moon")
+    if moon is None:
+        raise unittest.SkipTest("moon is not on PATH")
+    log = directory / "moon.log"
+    script = directory / "moon"
+    script.write_text(f'#!/bin/sh\necho "$*" >>"{log}"\nexec "{moon}" "$@"\n')
+    script.chmod(0o755)
+    return script, log
+
+
+class RunTest(unittest.TestCase):
+    """canary.py run and install, on a canary of the fixture module's
+    mutants, whose outcomes the fixture's comments give, in a git history
+    of its own."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-canary-run-"))
+        cls.repo = cls.tmp / "repo"
+        cls.marker = cls.tmp / "installed"
+        # The commit's own install script, which says how it was run.
+        install = f'#!/bin/sh\necho "$* $(pwd)" >"{cls.marker}"\n'
+        cls.commit = fixture_history(cls.repo, {"scripts/install-moonbit.sh": install})
+        calc = (FIXTURE / "calc" / "calc.mbt").read_text(encoding="utf-8")
+        same = (FIXTURE / "same" / "same.mbt").read_text(encoding="utf-8")
+        body = same.index("{", same.index("pub fn count_a_if"))
+        body_text = same[body : same.index("\n}\n", body) + 2]
+        on = {"commit": cls.commit}
+        # Each verdict as the fixture's comments give it.
+        cls.entries = [
+            entry("low", "killed", offset=at(calc, "\n  low ", "<="), v1="calc/calc.mbt,in_range,ROR,<=,<,0", **on),
+            entry("high", "survived", offset=at(calc, "&& n ", "<="), v1="calc/calc.mbt,in_range,ROR,<=,<,1", **on),
+            entry("halve", "unviable", offset=at(calc, "\n    ", "x = x / 2"), original="x = x / 2", replacement="",
+                  operator="DEL", v1="calc/calc.mbt,halve_until,DEL,x = x / 2,,0", **on),
+            # Outside v1, as the canary's ROR mutants that are not the
+            # boundary alternative are: 1 is then outside the range from 1
+            # to 3.
+            entry("low-above", "killed", offset=at(calc, "\n  low ", "<="), replacement=">",
+                  outside="ROR: only the boundary alternative, < with <= and > with >=", **on),
+            # same.mbt: an equivalent mutant, and a duplicate of a killed one.
+            entry("tracing", "survived", file="same/same.mbt", offset=at(same, "    if ", "TRACING"),
+                  original="TRACING", replacement="false", operator="IFC",
+                  v1="same/same.mbt,total,IFC,TRACING,false,0", tests=["mutation/fixture/same"], **on),
+            entry("body", "killed", file="same/same.mbt", offset=body, original=body_text, replacement="{ 0 }",
+                  operator="BODY", v1="same/same.mbt,count_a_if,BODY,{…},{ 0 },0",
+                  tests=["mutation/fixture/same"], **on),
+            entry("wanted", "killed", file="same/same.mbt", offset=at(same, "  if ", "wanted"), original="wanted",
+                  replacement="false", operator="IFC", v1="same/same.mbt,count_a_if,IFC,wanted,false,0",
+                  tests=["mutation/fixture/same"], **on),
+        ]
+        cls.data = cls.tmp / "mutants.jsonl"
+        write_lines(cls.data, cls.entries)
+        cls.explained = cls.tmp / "explained.toml"
+        cls.explained.write_text("")
+        cls.moon, cls.log = moon_log(cls.tmp)
+        cls.work = cls.tmp / "work"
+        cls.result = cls.run_canary_on(cls.data, "--work", cls.work)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    @classmethod
+    def run_canary_on(cls, data, *args, env=None):
+        return subprocess.run([sys.executable, str(CANARY), "run", "--repo", str(cls.repo), "--data", str(data),
+                               "--explained", str(cls.explained), "--moon", str(cls.moon), *map(str, args)],
+                              capture_output=True, text=True, env=env)
+
+    def test_the_replay_gives_the_recorded_verdicts_and_passes(self):
+        # #308: "The runner replays them as a listed set on d953f320's
+        # source, ... and compares each verdict with the recorded one. A
+        # mutant that the compiler-output comparison marks equivalent
+        # matches a recorded survivor."
+        self.assertEqual(self.result.returncode, 0, self.result.stdout + self.result.stderr)
+        summary = json.loads((self.work / "out" / "canary.json").read_text())
+        self.assertEqual((summary["mutants"], summary["matched"], summary["unexplained"]), (7, 7, []))
+        records = {r["listed"]["name"]: r for r in read_lines(self.work / "out" / "mutants.jsonl")}
+        self.assertEqual({n: r["outcome"] for n, r in records.items()},
+                         {"low": "killed", "high": "survived", "halve": "unviable", "low-above": "killed",
+                          "tracing": "equivalent", "body": "killed", "wanted": "duplicate"})
+        # As a listed set, with kill confirmation: the mutant outside v1
+        # is named so, and each kill was run again.
+        self.assertFalse(records["low-above"]["in_operator_set"])
+        self.assertEqual(records["low"]["confirmation"], "confirmed")
+        self.assertIn("sites: 7 mutants on", self.result.stdout)
+        self.assertIn("Every verdict is the recorded one, or an explained difference.", self.result.stdout)
+
+    def test_the_replay_runs_on_the_commits_source_in_a_checkout_of_its_own(self):
+        source = self.work / "source"
+        self.assertEqual(git(source, "rev-parse", "HEAD").strip(), self.commit)
+        self.assertEqual(git(source, "status", "--porcelain"), "")
+        # The runner's trees were copied from that checkout.
+        self.assertTrue((self.work / "runner" / "tree-0" / "calc" / "calc.mbt").is_file())
+
+    def test_a_replay_that_gives_another_verdict_fails(self):
+        wrong = self.tmp / "wrong.jsonl"
+        write_lines(wrong, [dict(e, verdict="survived") if e["name"] == "low" else e for e in self.entries])
+        result = self.run_canary_on(wrong, "--work", self.tmp / "work-wrong", "--mutant", "low")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("| `low` | calc/calc.mbt:17 | survived | killed | killed |", result.stdout)
+
+    def test_a_shard_runs_its_part_and_compares_nothing(self):
+        out = self.tmp / "shard"
+        result = self.run_canary_on(self.data, "--work", self.tmp / "work-shard", "--out", out,
+                                    "--mutant", "low", "--mutant", "low-above", "--shard", "2/2")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([r["listed"]["name"] for r in read_lines(out / "mutants.jsonl")], ["low-above"])
+        self.assertFalse((out / "canary.json").exists())
+
+    def test_the_replay_stops_unless_the_toolchain_the_commit_pins_is_on_path(self):
+        # #308: "The replay installs the toolchain pinned at d953f320."
+        fake = self.tmp / "fake-bin"
+        fake.mkdir(exist_ok=True)
+        (fake / "moonc").write_text('#!/bin/sh\necho "v0.0.1+fake (2020-01-01)"\n')
+        (fake / "moonc").chmod(0o755)
+        log_before = self.log.read_text() if self.log.exists() else ""
+        env = dict(os.environ, PATH=f"{fake}{os.pathsep}{os.environ['PATH']}")
+        result = self.run_canary_on(self.data, "--work", self.work, env=env)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        pinned = (REPO / ".moonbit-version").read_text().strip()
+        self.assertIn(f"{self.commit} pins MoonBit {pinned}, but moonc on PATH is 0.0.1+fake", result.stderr)
+        self.assertIn("canary.py install", result.stderr)
+        # It ran no moon.
+        self.assertEqual(self.log.read_text() if self.log.exists() else "", log_before)
+
+    def test_a_commit_that_no_longer_builds_stops_the_replay_and_says_what_moves_the_canary(self):
+        # #308: "When that toolchain can no longer build that commit, the
+        # canary moves to a new commit and new recorded verdicts, with the
+        # maintainer's approval."
+        broken = self.tmp / "broken-moon"
+        broken.write_text('#!/bin/sh\necho "error: no build" >&2\nexit 1\n')
+        broken.chmod(0o755)
+        result = subprocess.run([sys.executable, str(CANARY), "run", "--repo", str(self.repo), "--data",
+                                 str(self.data), "--explained", str(self.explained), "--moon", str(broken),
+                                 "--work", str(self.tmp / "work-broken"), "--mutant", "low"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("the canary moves to a new commit with new recorded verdicts, with the maintainer's"
+                      " approval", result.stderr)
+
+    def test_install_runs_the_install_script_of_the_commit_in_its_checkout(self):
+        work = self.tmp / "work-install"
+        result = subprocess.run([sys.executable, str(CANARY), "install", "--repo", str(self.repo), "--data",
+                                 str(self.data), "--explained", str(self.explained), "--work", str(work)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.marker.read_text().strip(), f"pinned {work / 'source'}")
+
+    def test_a_checkout_that_was_changed_or_is_of_another_commit_is_made_again(self):
+        # CONTRIBUTING, "The canary": the replay runs on the commit's own
+        # source, so a checkout left changed is not reused.
+        work = self.tmp / "work-again"
+        install = [sys.executable, str(CANARY), "install", "--repo", str(self.repo), "--data", str(self.data),
+                   "--explained", str(self.explained), "--work", str(work)]
+        self.assertEqual(subprocess.run(install, capture_output=True).returncode, 0)
+        calc = work / "source" / "calc" / "calc.mbt"
+        calc.write_text("changed\n")
+        result = subprocess.run(install, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calc.read_text(), (FIXTURE / "calc" / "calc.mbt").read_text())
+        git(work / "source", "checkout", "-q", "--detach", "HEAD")
+        git(work / "source", "commit", "-q", "--allow-empty", "-m", "another commit")
+        result = subprocess.run(install, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(git(work / "source", "rev-parse", "HEAD").strip(), self.commit)
+        # A directory that is no checkout is in the way.
+        other = self.tmp / "work-in-the-way"
+        (other / "source").mkdir(parents=True)
+        result = subprocess.run(install[:-1] + [str(other)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("is in the way of the canary's checkout: remove it", result.stderr)
 
 
 def entry(name, verdict, file="calc/calc.mbt", offset=0, original="<=", replacement="<", **more):

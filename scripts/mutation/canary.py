@@ -413,6 +413,88 @@ def chosen_names(entries, names):
     return set(names)
 
 
+def checkout(repo, commit, path):
+    """Checks the commit out at path, as a worktree of repo without a
+    branch, unless a clean checkout of it is there already: the path."""
+    path = Path(path).resolve()
+    if path.exists():
+        top = subprocess.run(["git", "-C", str(path), "rev-parse", "--show-toplevel", "HEAD"], capture_output=True,
+                             text=True)
+        lines = top.stdout.split()
+        if top.returncode != 0 or len(lines) != 2 or Path(lines[0]).resolve() != path:
+            raise CanaryError(f"{path} is in the way of the canary's checkout: remove it")
+        if lines[1] == commit and not git(path, "status", "--porcelain").strip():
+            return path
+        git(repo, "worktree", "remove", "--force", str(path))
+    git(repo, "worktree", "prune")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    git(repo, "worktree", "add", "--detach", str(path), commit)
+    return path
+
+
+def toolchain_problem(repo, commit):
+    """Why the toolchain on PATH is not the one the commit pins in
+    .moonbit-version, or None when it is."""
+    pinned = git(repo, "show", f"{commit}:./.moonbit-version").decode("utf-8").strip()
+    try:
+        result = subprocess.run(["moonc", "-v"], capture_output=True, text=True)
+        words = result.stdout.split()
+        installed = words[0].removeprefix("v") if result.returncode == 0 and words else None
+    except OSError:
+        installed = None
+    if installed == pinned:
+        return None
+    return (f"{commit} pins MoonBit {pinned}, but moonc on PATH is {installed or 'missing'}: install it with"
+            " `python3 scripts/mutation/canary.py install`, which replaces the toolchain in $MOON_HOME"
+            " (on a laptop, use a machine of its own or wait until the pin is the same)")
+
+
+def install(repo, commit, work):
+    """Checks the commit out into <work>/source and runs its own
+    scripts/install-moonbit.sh there, to install the toolchain it pins:
+    the script's exit status."""
+    source = checkout(repo, commit, work / "source")
+    script = source / "scripts" / "install-moonbit.sh"
+    if not script.is_file():
+        raise CanaryError(f"{commit} has no scripts/install-moonbit.sh to install its toolchain with")
+    return subprocess.run(["sh", str(script), "pinned"], cwd=source).returncode
+
+
+def replay(args, entries, explained, names, command):
+    """The run command: checks the commit out, checks the toolchain and the
+    sites, runs the chosen mutants as a listed set with run.py, and
+    compares their verdicts unless it ran one shard. Whether all went
+    well."""
+    work = Path(args.work).resolve() if args.work else Path(args.repo).resolve() / "_build" / "canary"
+    out = Path(args.out).resolve() if args.out else work / "out"
+    commit = entries[0]["commit"]
+    source = checkout(args.repo, commit, work / "source")
+    problem = toolchain_problem(args.repo, commit)
+    if problem is not None:
+        print(f"canary: {problem}", file=sys.stderr)
+        return False
+    problems = check_sites(entries, source, command)
+    print(sites_line(entries, problems), flush=True)
+    listing = work / "list.jsonl"
+    with open(listing, "w", encoding="utf-8") as f:
+        for entry in entries:
+            if names is None or entry["name"] in names:
+                f.write(json.dumps({k: entry[k] for k in LISTED}, ensure_ascii=False) + "\n")
+    runner = [sys.executable, str(RUN), "--root", str(source), "--work", str(work / "runner"), "--out", str(out),
+              "--list", str(listing), "--moon", args.moon]
+    runner += ["--finder", args.finder] if args.finder else []
+    runner += ["--shard", args.shard] if args.shard else []
+    if subprocess.run(runner).returncode != 0:
+        print(MOVING, file=sys.stderr)
+        return False
+    if args.shard:
+        return not problems
+    ok = compare_output(entries, explained, out, names)
+    if problems:
+        print(sites_line(entries, problems))
+    return ok and not problems
+
+
 def main():
     parser = argparse.ArgumentParser(description="Replay the mutation runner's canary and compare its verdicts.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -446,6 +528,11 @@ def main():
                 problems = check_sites(entries, Path(tmp), command)
             print(sites_line(entries, problems))
             sys.exit(1 if problems else 0)
+        if args.command == "install":
+            work = Path(args.work).resolve() if args.work else Path(args.repo).resolve() / "_build" / "canary"
+            sys.exit(1 if install(args.repo, entries[0]["commit"], work) else 0)
+        if args.command == "run":
+            sys.exit(0 if replay(args, entries, explained, names, command) else 1)
         if args.command == "compare":
             ok = compare_output(entries, explained, Path(args.out), names)
             sys.exit(0 if ok else 1)
