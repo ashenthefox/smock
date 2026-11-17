@@ -587,9 +587,10 @@ never gated. Each baseline below was measured at d953f320.
    89.1% were killed when the importers' tests ran too.
 3. **Boundaries**: every limit that a spec or smock's documents state is
    tested at the limit and just past it, with the smallest input that
-   crosses it. A limit in the code that no document states is a finding.
-   Baseline: about 33 of the 40 most important limits tested on both
-   sides.
+   crosses it. A limit in the code that no document states is a finding:
+   once the maintainer confirms it, the documents state it, and it is
+   tested like the others. Baseline: about 33 of the 40 most important
+   limits tested on both sides.
 4. **Use cases**: every documented feature has an automated test, or a
    recorded manual check with its reason. Every Definition-file example
    in the documents passes `smock check` in CI. Every message a user can
@@ -758,7 +759,7 @@ ledger accepts are in the same list, under the same categories:
   pin it there.
 - **DEFERRED**: carries an issue number, and still counts as unresolved.
 
-Dead code is deleted, not excluded.
+Dead code is deleted, not excluded, with the maintainer's approval.
 
 An equivalence claim reaches the maintainer in three steps:
 
@@ -869,6 +870,14 @@ context, one that wrote none of that package's tests under these rules,
 checks each against its source. The maintainer reads only the snapshots
 that this context finds in disagreement with their source, and each of
 those becomes an issue (a bug) or a corrected test.
+
+Step 1's tests close the gaps that the review found before it had any
+tooling. Every expected value they add is checked the same way: before
+the merge into `main`, a separate agent context that wrote none of them
+checks each value against the source it cites. The maintainer reads only
+the values that this context finds in disagreement with their source,
+and those whose source it finds unclear. Each disagreement becomes an
+issue (a bug) or a corrected test, as in an audit.
 
 ### What makes a good test
 
