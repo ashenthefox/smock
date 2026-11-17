@@ -46,15 +46,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # A job summary holds at most 1 MiB; a larger report is only in the
-      # artifact.
+      # The report compares commits, so the file it is written to in the
+      # checkout is not in it. A job summary holds at most 1 MiB; a larger
+      # report is only in the artifact.
       - name: Write the weakening report against the merge base with main
         run: |
-          mkdir -p "$RUNNER_TEMP/weakening-report"
-          report=$RUNNER_TEMP/weakening-report/weakening-report.md
-          python3 scripts/weakening-report.py --base origin/main >"$report"
-          if [ "$(wc -c <"$report")" -le 1000000 ]; then
-            cat "$report" >>"$GITHUB_STEP_SUMMARY"
+          python3 scripts/weakening-report.py --base origin/main >weakening-report.md
+          if [ "$(wc -c <weakening-report.md)" -le 1000000 ]; then
+            cat weakening-report.md >>"$GITHUB_STEP_SUMMARY"
           else
             echo "The weakening report is larger than a job summary holds: it is in the artifact weakening-report." >>"$GITHUB_STEP_SUMMARY"
           fi
@@ -63,5 +62,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: weakening-report
-          path: ${{ runner.temp }}/weakening-report/weakening-report.md
+          path: weakening-report.md
           retention-days: 90
