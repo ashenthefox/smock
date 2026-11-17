@@ -86,6 +86,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import selftest
+
 HERE = Path(__file__).resolve().parent
 BACKEND = "wasm-gc"
 # The build of the package without a mutant, and its tests, may take this
@@ -379,6 +381,7 @@ def run_package(root, directory, sites, mutants, workers, log):
     limit = 1.25 * baseline_s + 4
     log(f"{package}: {len(sites)} sites, {len(mutants)} mutants, {tests} tests,"
         f" baseline run {baseline_s:.2f} s, limit {limit:.2f} s")
+    self_test = run_self_test(first, package, directory, limit, log)
     for worker in workers[1:]:
         status, output, _ = worker.build(package)
         if status != 0:
@@ -408,8 +411,20 @@ def run_package(root, directory, sites, mutants, workers, log):
         "baseline": {"run_s": round(baseline_s, 3), "tests": tests},
         "limit_s": round(limit, 3),
         **outcome_counts(records),
+        "self_test": self_test,
     }
     return records, summary
+
+
+def run_self_test(worker, package, directory, limit, log):
+    """The forced-fail self-test of a package (selftest.py), before any
+    of its mutants: its record, or a RunnerError when no test saw it."""
+    record = selftest.run(worker, package, directory, limit, failed_tests)
+    problem = selftest.failure(package, record)
+    if problem:
+        raise RunnerError(problem)
+    log(f"  self-test killed, by {record['failed_tests']} tests ({len(record['definitions'])} functions changed)")
+    return record
 
 
 def run_mutant(worker, package, site, limit):
