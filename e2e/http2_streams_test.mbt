@@ -161,9 +161,11 @@ let seeded_delays : String =
 ///|
 /// `ms`, how long a request took, as a test shows it against `drawn`, the
 /// delay it should have had: `as drawn` when it took at least that long,
-/// and not much longer.
+/// and less than twice that, or 300 ms more where that is longer. The
+/// delay is the time due, so the upper side is relative to it.
 fn against_drawn(ms : Int64, drawn : Int64) -> String {
-  if ms >= drawn && ms < drawn + 300L {
+  let upper = if 2L * drawn > drawn + 300L { 2L * drawn } else { drawn + 300L }
+  if ms >= drawn && ms < upper {
     "as drawn"
   } else {
     "\{ms} ms"
