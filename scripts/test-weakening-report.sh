@@ -620,6 +620,33 @@ mentions verdict-off '### `scripts/verdict-files.txt` (changed)'
 mentions verdict-off 'The list of the files that decide a verdict (listed as `scripts/verdict-files.txt`).'
 mentions verdict-off '-floors.txt          the coverage floors'
 
+# A watched Markdown file whose diff holds a fence of its own: the report
+# fences the diff with more backticks, so that the fence does not end it.
+tree
+package
+file scripts/verdict-files.txt <<'TXT'
+docs/rules.md    the rules
+TXT
+file docs/rules.md <<'MD'
+# Rules
+MD
+branch
+cat >>"$repo/docs/rules.md" <<'MD'
+
+```sh
+run it
+```
+MD
+report fence
+mentions fence '````diff'
+mentions fence '+```sh'
+if [ "$(grep -c '^````$' "$tmp/fence.out")" = 1 ]; then
+  pass "fence: the diff's fence ends once"
+else
+  fail "fence: the diff's fence does not end once"
+  sed 's/^/     /' "$tmp/fence.out"
+fi
+
 # Each path that the committed list names shows, with what the list says
 # it is. A path with * or ending in / stands for a file it matches.
 list=scripts/verdict-files.txt

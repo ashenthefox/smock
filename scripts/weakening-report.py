@@ -4,16 +4,43 @@ maintainer to read before merging it (CONTRIBUTING.md, "The weakening
 report"). It only reports: it exits with 0 whatever it finds.
 
 usage: python3 scripts/weakening-report.py [--repo <dir>] [--base <ref>]
-                                           [--head <ref>] [--json <file>]
+                                           [--head <ref>]
 
 <dir> is the checkout, this one unless given. The report compares <head>
 (HEAD unless given) with its merge base with <base> (origin/main unless
-given), and prints itself as Markdown.
+given), and prints itself as Markdown. It reads the MoonBit packages
+that the branch changes, test code only: the test files (_test.mbt,
+_wbtest.mbt and the mbt blocks of .mbt.md), and the test blocks of other
+files. moon fmt starts each top-level item with a line of ///|, and the
+report reads the items so, and their statements by moon fmt's layout.
 
-What it lists:
+What it lists, each under a heading, or "Nothing to report.":
 
   Tests deleted
-      a test block of the base that the head no longer has in its package.
+      each test block of the base that its package no longer has. A test
+      whose name is gone is matched with the new test of its package
+      that holds most of its body, or whose name is much like its own,
+      and is then a test that stays.
+  Assertions removed or changed in tests that stay
+      in each test, and each other item of a test file, that the head
+      still has, the lines it removes or changes that assert something:
+      a call of inspect, debug_inspect, json_inspect, an assert_
+      function, fail, abort or panic; a guard; an if whose block fails;
+      and a line that compares two values (==, !=, <, <=, > or >=).
+      Lines are compared without their indentation. Lines added inside
+      an assertion are not listed, as extending a test adds them.
+  Snapshot lines changed
+      the lines a test removes from, changes in or adds to a snapshot:
+      the content= of a call of inspect, debug_inspect or json_inspect,
+      or a constant or a variable that a content= names; and each file
+      in a __snapshot__ directory that the head changes or deletes.
+  Skip attributes and target settings added
+      each #skip or #cfg attribute that a test gains, a package whose
+      supported targets no longer let its tests run on wasm-gc, and a
+      test file that its package's targets no longer build for wasm-gc.
+  Files that decide a verdict changed
+      each changed file that scripts/verdict-files.txt names, in the base
+      or in the head, with its diff, and each change to that list.
 
 It exits with 2 when git cannot answer, such as when <base> or <head> is
 not a commit.
@@ -46,6 +73,21 @@ def git(repo, *args):
 def show(repo, rev, path):
     """The text of path at rev."""
     return git(repo, "show", f"{rev}:{path}")
+
+
+def diff_of(repo, base, head, path):
+    """The hunks of git's diff of path from base to head."""
+    diff = git(repo, "diff", base, head, "--", path).splitlines()
+    start = next((i for i, line in enumerate(diff) if line.startswith("@@")), len(diff))
+    return diff[start:]
+
+
+def fenced(lines, info=""):
+    """Lines in a fenced code block of Markdown, whose fence is longer than
+    any run of backticks in them."""
+    longest = max((len(run) for line in lines for run in re.findall("`+", line)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return [fence + info, *lines, fence]
 
 
 def exists(repo, rev, path):
@@ -161,7 +203,9 @@ def items_of(path, text):
                 kind, name = match.group(1), match.group(2)
             else:
                 kind, name = "item", " ".join(text_of_header.split())
-            attributes = [line.strip() for line in segment[:first] if line.strip().startswith("#")]
+            attributes = [
+                line.strip() for line in segment[:first] if line.strip().startswith("#")
+            ]
             items.append(
                 Item(path, kind, name, segment[first:], start + first + 1, attributes)
             )
@@ -443,7 +487,7 @@ TARGET = re.compile(r"([+-]?)\s*(all|wasm-gc|wasm|js|native|llvm)\b")
 SUPPORTED = re.compile(
     r'(?:^[ \t]*supported_targets[ \t]*=|"supported-targets"[ \t]*:)[ \t]*'
     r'("(?:[^"\\]|\\.)*"|\[[^\]]*\])',
-    re.M,
+    re.MULTILINE,
 )
 FILE_TARGETS = re.compile(r'"?\btargets"?\s*:\s*\{')
 
@@ -654,8 +698,7 @@ def verdict_files(repo, base, head, changed):
         if entry is None:
             continue
         pattern, description = entry
-        diff = git(repo, "diff", base, head, "--", path).splitlines()
-        hunks = diff[next((i for i, line in enumerate(diff) if line.startswith("@@")), len(diff)) :]
+        hunks = diff_of(repo, base, head, path)
         added = sum(1 for line in hunks if line.startswith("+"))
         removed = sum(1 for line in hunks if line.startswith("-"))
         shown = hunks[:DIFF_LINES]
@@ -668,9 +711,7 @@ def verdict_files(repo, base, head, changed):
             "",
             f"<details><summary>{added} lines added, {removed} removed</summary>",
             "",
-            "```diff",
-            *shown,
-            "```",
+            *fenced(shown, "diff"),
             "",
             "</details>",
             "",
@@ -717,12 +758,16 @@ def report(repo, base_ref, head_ref):
         if posixpath.basename(path) in ("moon.pkg", "moon.pkg.json"):
             skips.extend(kept_off_wasm_gc(repo, base, head, path))
 
-    short = lambda rev: git(repo, "rev-parse", "--short", rev).strip()
+    def short(rev):
+        return git(repo, "rev-parse", "--short", rev).strip()
+
     out = [
         "# Weakening report",
         "",
-        f"Branch head `{short(head)}`, against `{short(base)}`, "
-        f"its merge base with `{base_ref}`.",
+        (
+            f"Branch head `{short(head)}`, against `{short(base)}`, "
+            f"its merge base with `{base_ref}`."
+        ),
         "",
     ]
     if deleted:
@@ -749,9 +794,7 @@ def report(repo, base_ref, head_ref):
 
 def changed_file(repo, base, head, path):
     """A file and its diff, as Markdown lines."""
-    diff = git(repo, "diff", base, head, "--", path).splitlines()
-    hunks = diff[next((i for i, line in enumerate(diff) if line.startswith("@@")), len(diff)) :]
-    return [f"### `{path}`", "", "```diff", *hunks, "```", ""]
+    return [f"### `{path}`", "", *fenced(diff_of(repo, base, head, path), "diff"), ""]
 
 
 def changed_item(before, after, hunks):
@@ -759,10 +802,8 @@ def changed_item(before, after, hunks):
     out = [f"### `{before.path}:{before.line}`: {before.title()}", ""]
     if (after.path, after.title()) != (before.path, before.title()):
         out += [f"Now `{after.path}:{after.line}`: {after.title()}.", ""]
-    out.append("```diff")
-    for hunk in hunks:
-        out += hunk.render()
-    out += ["```", ""]
+    out += fenced([line for hunk in hunks for line in hunk.render()], "diff")
+    out.append("")
     return out
 
 
