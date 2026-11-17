@@ -121,6 +121,15 @@ INDEX_METHODS = {"op_get", "op_set", "op_as_view"}
 DELETABLE = {"Pexpr_apply", "Pexpr_dot_apply", "Pexpr_pipe", "Pexpr_assign", "Pexpr_mutate"}
 # What a string escape stands for, after its backslash.
 ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "\\": "\\", '"': '"', "'": "'"}
+# The unchecked array accesses: core's methods that read or write the
+# elements of an array, a string or bytes, or make a view of them, without
+# a bounds check, by name (the tree has no types), and the prefixes of
+# their families. unsafe_to_char, unsafe_reinterpret_as_bytes and
+# unsafe_make, which read no element, are not among them.
+UNCHECKED_ACCESS = {"unsafe_get", "unsafe_set", "unsafe_view", "unsafe_mut_view", "unsafe_char_at",
+                    "unsafe_charcode_at", "unsafe_substring", "unsafe_range_equal", "unsafe_pop",
+                    "unsafe_pop_back"}
+UNCHECKED_ACCESS_PREFIXES = ("unsafe_blit", "unsafe_read_", "unsafe_write_", "unsafe_extract_")
 
 
 class FinderError(Exception):
@@ -241,6 +250,17 @@ def binds(node):
     for current in walk(node):
         if head_of(current) == "Pexpr_is" and len(current) >= 3 and first_binder([current[2]]):
             return True
+    return False
+
+
+def uses_unchecked_access(node):
+    """Whether a definition calls an unchecked array access, as a method
+    (`a.unsafe_get(i)`, `String::unsafe_get(s, i)`) or by its name."""
+    for current in walk(node):
+        if len(current) == 2 and current[0] in ("label_name", "var_name") and isinstance(current[1], str):
+            name = re.split(r"::|\.", current[1])[-1]
+            if name in UNCHECKED_ACCESS or name.startswith(UNCHECKED_ACCESS_PREFIXES):
+                return True
     return False
 
 
@@ -813,6 +833,8 @@ def file_sites(source, tree_text):
     """The sites of one file, sorted by position, with their ordinals, and
     the sites that a rule skipped."""
     found = []
+    # The definitions, by name and lines, that use an unchecked array access.
+    unchecked = set()
     for entry in parse_tree(tree_text):
         if not (isinstance(entry, list) and len(entry) == 3 and entry[0] == "base_pos"):
             raise FinderError(f"{source.path}: unexpected entry in the parse tree: {str(entry)[:80]}")
@@ -820,6 +842,8 @@ def file_sites(source, tree_text):
         if item.is_test():
             continue
         name, lines = item.name(), item.lines()
+        if uses_unchecked_access(item.node):
+            unchecked.add((name, tuple(lines)))
         found += [(name, lines, change) for change in item.sites()]
     # One entry per position and alternative: the tree can hold a node
     # twice, as it does in a compound assignment to an element.
@@ -848,6 +872,8 @@ def file_sites(source, tree_text):
                      "pinned": alternative.pinned, "operator_set": ops.VERSION})
         if alternative.skipped is not None:
             site["skipped"] = alternative.skipped
+        if (name, tuple(lines)) in unchecked:
+            site["unchecked_access"] = True
         sites.append(site)
     return sites
 
