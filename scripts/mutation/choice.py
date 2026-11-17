@@ -76,3 +76,16 @@ def running(directories, chosen, mine, selected, shard_index):
     packages that hold one of the shard's mutants run."""
     first = shard_index is None or shard_index == 1
     return {d for d in directories if mine[d] or (not selected and first and not chosen[d])}
+
+
+def selection(args):
+    """What chose a run's mutants, as its summary gives it: the set, the
+    packages given, the ids, the sample and the shard. Shards whose
+    selections differ only in their shard are of one run."""
+    return {
+        "set": args.set,
+        "packages": list(args.packages),
+        "mutants": list(args.mutant or []),
+        "sample": None if args.sample is None else {"size": args.sample, "seed": args.seed},
+        "shard": None if args.shard is None else {"index": args.shard[0], "count": args.shard[1]},
+    }

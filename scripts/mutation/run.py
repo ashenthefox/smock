@@ -589,7 +589,8 @@ def main():
                 for site in chosen[directory] if directory in runs else []:
                     f.write(json.dumps(site, ensure_ascii=False) + "\n")
     (out / "summary.json").write_text(
-        json.dumps({"operator_set": operator_set, "set": args.set, "packages": summaries},
+        json.dumps({"operator_set": operator_set, "set": args.set, "selection": choice.selection(args),
+                    "packages": summaries},
                    indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     text = report(operator_set, args.set, summaries, records)
     (out / "report.md").write_text(text, encoding="utf-8")

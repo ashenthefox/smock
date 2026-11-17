@@ -20,6 +20,7 @@ usage: python3 -m unittest discover -s scripts/mutation -v
 """
 
 import json
+import re
 import shutil
 import stat
 import subprocess
@@ -102,6 +103,94 @@ class ShardTest(unittest.TestCase):
             result = run_runner(FIXTURE, self.tmp / "bad", "--sites-only", "--shard", shard, "calc")
             self.assertEqual(result.returncode, 2, shard)
             self.assertIn("argument --shard: ", result.stderr)
+
+
+def without_timings(text):
+    """A report with each time in seconds written as N."""
+    return re.sub(r"\d+\.\d+ s\b", "N s", text)
+
+
+class MergeTest(unittest.TestCase):
+    """One run of log's full set and of a package without a site, and the
+    same run in three shards, whose reports merge."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-choice-merge-"))
+        cls.root = cls.tmp / "root"
+        shutil.copytree(FIXTURE, cls.root, ignore=shutil.ignore_patterns("_build", "target", ".mooncakes"))
+        (cls.root / "empty").mkdir()
+        (cls.root / "empty" / "moon.pkg").write_text("")
+        (cls.root / "empty" / "empty.mbt").write_text(
+            '///|\n/// A text, which is no site: STR\'s scope does not hold this package.\npub let text : String = "a"\n')
+        cls.packages = ("--set", "full", "log", "empty")
+        cls.whole = cls.run_once(cls.tmp / "whole")
+        cls.shards = [cls.run_once(cls.tmp / f"shard-{k}", "--shard", f"{k}/3") for k in (1, 2, 3)]
+        cls.merged = cls.tmp / "merged"
+        cls.result = subprocess.run([sys.executable, str(MERGE), "--out", str(cls.merged), *map(str, cls.shards)],
+                                    capture_output=True, text=True)
+
+    @classmethod
+    def run_once(cls, out, *args):
+        result = run_runner(cls.root, out, *args, *cls.packages, work=cls.tmp / "work")
+        if result.returncode != 0:
+            raise AssertionError(f"run.py failed ({result.returncode}):\n{result.stderr}")
+        return out
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_the_shards_reports_merge_into_the_report_of_the_run_without_shards(self):
+        # #305: "Shard reports merge into one report equal to a run without
+        # shards in every mutant's outcome and killing tests, timings
+        # aside."
+        self.assertEqual(self.result.returncode, 0, self.result.stderr)
+
+        def records(out):
+            return [{k: v for k, v in r.items() if k != "timings"} for r in read_lines(out / "mutants.jsonl")]
+
+        self.assertEqual(records(self.merged), records(self.whole))
+        self.assertEqual(len(records(self.merged)), 8)
+        # Each shard ran a part of them.
+        self.assertEqual([len(read_lines(s / "mutants.jsonl")) for s in self.shards], [2, 3, 3])
+
+        def counts(out):
+            summary = json.loads((out / "summary.json").read_text())
+            packages = summary.pop("packages")
+            timings = ("baseline", "limit_s", "shards")
+            return (summary,
+                    [({k: v for k, v in p.items() if k not in timings}, p.get("baseline", {}).get("tests"))
+                     for p in packages])
+
+        self.assertEqual(counts(self.merged), counts(self.whole))
+        self.assertEqual(without_timings((self.merged / "report.md").read_text()),
+                         without_timings((self.whole / "report.md").read_text()))
+        # The merge prints the report, as a run does.
+        self.assertEqual(without_timings(self.result.stdout), without_timings((self.whole / "report.md").read_text()) + "\n")
+
+    def test_the_package_without_a_mutant_runs_in_the_first_shard(self):
+        packages = [[p["directory"] for p in json.loads((s / "summary.json").read_text())["packages"]]
+                    for s in self.shards]
+        self.assertEqual(packages, [["log", "empty"], ["log"], ["log"]])
+        merged = json.loads((self.merged / "summary.json").read_text())["packages"]
+        self.assertEqual([(p["directory"], p["mutants"], p["baseline"]["tests"]) for p in merged],
+                         [("log", 8, 3), ("empty", 0, 0)])
+        self.assertEqual([s["shard"] for s in merged[0]["shards"]], ["1/3", "2/3", "3/3"])
+
+    def test_a_merge_needs_every_shard_of_one_run(self):
+        missing = subprocess.run([sys.executable, str(MERGE), "--out", str(self.tmp / "missing"),
+                                  str(self.shards[0]), str(self.shards[2])], capture_output=True, text=True)
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn("shard 2/3 is missing", missing.stderr)
+        twice = subprocess.run([sys.executable, str(MERGE), "--out", str(self.tmp / "twice"),
+                                *map(str, self.shards), str(self.shards[1])], capture_output=True, text=True)
+        self.assertEqual(twice.returncode, 1)
+        self.assertIn("shard 2/3 is given twice", twice.stderr)
+        other = subprocess.run([sys.executable, str(MERGE), "--out", str(self.tmp / "other"),
+                                str(self.whole), *map(str, self.shards[1:])], capture_output=True, text=True)
+        self.assertEqual(other.returncode, 1)
+        self.assertIn(f"{self.whole} is not a shard", other.stderr)
 
 
 class SampleTest(unittest.TestCase):
