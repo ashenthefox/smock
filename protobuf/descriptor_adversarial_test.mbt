@@ -230,7 +230,90 @@ test "messages nested deeper than 100 are refused, as protobuf's parsers refuse 
 }
 
 ///|
+/// The name of the message of `names_set`, 65,529 letters, built once and
+/// with `String::make`, as CONTRIBUTING says of a large input.
+let long_message_name : String = String::make(65529, 'M')
+
+///|
+/// A set of one file in the package `pkg`, holding one message named
+/// `long_message_name` with 255 fields of type int32, numbered 1 to 255 and
+/// named `aa` to `po`, the first with `extra` more letters `a`. The package
+/// takes 3 characters and the message's full name 65,533, which make
+/// 65,536; the full name of each field, such as `pkg.MMM….aa`, takes 65,536
+/// as well. So its full names take 256 times 65,536 characters, 16 MiB, and
+/// `extra` more. Every full name in it but the package's has a prefix, and
+/// it has one file, no method and no enum value, so smock's count, which
+/// leaves out a name without a prefix but counts a package's, comes to the
+/// same total as counting every full name of the set once.
+fn names_set(extra : Int32) -> Bytes {
+  let letter = (n : Int32) => ('a'.to_int() + n).unsafe_to_char()
+  nested(w => {
+    message_field(
+      w,
+      1,
+      nested(w => {
+        string_field(w, 1, "a.proto")
+        string_field(w, 2, "pkg")
+        message_field(
+          w,
+          4,
+          nested(w => {
+            string_field(w, 1, long_message_name)
+            for i in 0..<255 {
+              let name = String::from_array([letter(i / 16), letter(i % 16)])
+              message_field(
+                w,
+                2,
+                nested(w => {
+                  string_field(
+                    w,
+                    1,
+                    if i == 0 {
+                      name + String::make(extra, 'a')
+                    } else {
+                      name
+                    },
+                  )
+                  varint_field(w, 3, (i + 1).to_uint64())
+                  varint_field(w, 5, 5)
+                }),
+              )
+            }
+          }),
+        )
+      }),
+    )
+  })
+}
+
+///|
+/// A set whose full names take 16 MiB exactly.
+let names_of_16_mib : Bytes = names_set(0)
+
+///|
+/// A set whose full names take one character more than 16 MiB.
+let names_past_16_mib : Bytes = names_set(1)
+
+///|
 test "a set whose full names would take more than 16 MiB is refused as soon as they do" {
+  // docs/grpc.md, "What smock checks": smock refuses a set when "the full
+  // names of the set take more than 16 MiB". Every full name in these two
+  // sets but the package's has a prefix, so the set of 16 MiB exactly is
+  // read, and the one of a character more is refused with that problem.
+  // Only the problem is shown, so that a set read by mistake is not
+  // rendered whole.
+  inspect(set_outcome(names_of_16_mib[:]), content="read")
+  let problem = try @protobuf.read_descriptor_set(names_past_16_mib[:]) catch {
+    err => "error: \{err}"
+  } noraise {
+    _ => "read"
+  }
+  inspect(
+    problem,
+    content=(
+      #|error: the full names of the set take more than 16 MiB
+    ),
+  )
   // A message with a name of 65535 letters and fields without a name: each
   // field's full name takes 65536 characters, so the 257th field passes
   // 16 MiB.
