@@ -497,7 +497,7 @@ def part_summary(out, args):
         row("The e2e package, built with nothing to do", seconds(e2e["noop"]))
         times = [run["seconds"] for run in e2e["runs"] if not run["timed_out"]]
         if times:
-            row(f"Every e2e test in one process, median of {len(times)} runs",
+            row("Every e2e test in one process, " + ("one run" if len(times) == 1 else f"median of {len(times)} runs"),
                 f"{median(times):.1f} ({min(times):.1f} to {max(times):.1f})")
         for number, run in enumerate(e2e["runs"], 1):
             row(f"Every e2e test in one process, run {number}", seconds(run))

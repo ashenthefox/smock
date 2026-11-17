@@ -169,7 +169,8 @@ def measured_table(names, all_found):
         lines.append(f"| {label} | " + " | ".join(values) + f" | {local} |")
 
     counts = {len(found["runs"]) for found in all_found}
-    runs = f"median of {counts.pop()} runs" if len(counts) == 1 else "median of the runs"
+    count = counts.pop() if len(counts) == 1 else None
+    runs = "one run" if count == 1 else f"median of {count} runs" if count else "median of the runs"
     row(f"Every e2e test in one process, {runs}",
         [f"{found['E']:.1f} s ({min(found['runs']):.1f} to {max(found['runs']):.1f})" for found in all_found], "34.7 s")
     row("Each e2e test alone: median, 90th percentile, slowest",
