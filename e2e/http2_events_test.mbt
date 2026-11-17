@@ -207,8 +207,10 @@ async test "h2c: an event stream that the client resets, or that moonhttp resets
         RstStream(stream_id=1, error_code=@http2.error_cancel),
         WindowUpdate(stream_id=3, increment=0),
       ])
-      let entries = smock.journal_durations(2, below=1000, within=600)
-      let committed_ms = @async.now() - start
+      // A reset "ends the event stream at once" (docs/http2.md, Server-Sent
+      // Events), so each entry's duration, by smock's own clock, ends before
+      // the next event was due, 1000 ms after the first.
+      let entries = smock.journal_durations(2, below=1000, within=patience_ms)
       // Past the next event's time, a fast stream is answered, and nothing
       // more came on the reset streams.
       @async.sleep((1300L - (@async.now() - start)).to_int())
@@ -216,11 +218,9 @@ async test "h2c: an event stream that the client resets, or that moonhttp resets
       out.push("--- the resets sent")
       out.push(raw.runs_until(frame => ends_stream(frame, 5)))
       inspect(
-        [
-          ..out,
-          "--- both committed before the next event was due: \{entries.length() == 2 && committed_ms < 1000}",
-          ..entries,
-        ].join("\n"),
+        [..out, "--- both committed: \{entries.length() == 2}", ..entries].join(
+          "\n",
+        ),
         content=(
           #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
           #|SETTINGS ACK
@@ -232,7 +232,7 @@ async test "h2c: an event stream that the client resets, or that moonhttp resets
           #|RST_STREAM 3 PROTOCOL_ERROR
           #|HEADERS 5 END_HEADERS [:status: 200, date: <now>, content-length: 5]
           #|DATA 5 END_STREAM: 1 frames, 5 octets
-          #|--- both committed before the next event was due: true
+          #|--- both committed: true
           #|/ticks: stub "ticks", status 200, durationMs below 1000: true
           #|/ticks: stub "ticks", status 200, durationMs below 1000: true
         ),

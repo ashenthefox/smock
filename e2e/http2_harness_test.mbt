@@ -1058,16 +1058,20 @@ async fn H2Client::timeline(
 ///|
 /// The Journal's entries, each shown as its target, its Stub, its status
 /// and whether its `durationMs` is below `below`, once there are `count`
-/// of them, or as they are after `within` milliseconds.
+/// of them, or as they are after `within` milliseconds: the first 100, or
+/// the first `limit`. `durationMs` runs "from the request being read to
+/// the last byte being written" (openapi/admin.json), by smock's own clock,
+/// so the test's own pace does not enter it.
 async fn Smock::journal_durations(
   self : Smock,
   count : Int32,
   below~ : Int32,
   within~ : Int32,
+  limit~ : Int32 = 100,
 ) -> Array[String] {
   let start = @async.now()
   for ;; {
-    let (_, journal) = self.journal()
+    let (_, journal) = self.journal(query="{\"limit\":\{limit}}")
     guard journal is Object({ "entries": Array(entries), .. }) else {
       fail("no entries: \{journal.stringify()}")
     }
