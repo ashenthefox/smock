@@ -1,0 +1,67 @@
+# The branch checks: what the maintainer reads before merging a branch
+# into main (CONTRIBUTING.md, "The weakening report"). They run on each
+# push to a branch other than main, against the branch's merge base with
+# main.
+#
+# - Not on main, whose commits are what the branches are compared with.
+# - Not on a push to a dependabot/** branch, nor on a pull request: this
+#   project merges branches locally and opens no pull requests, and
+#   Dependabot's pull requests keep their own path. The maintainer pushes
+#   an outside contributor's pull request to a branch here before merging
+#   it, so that these checks run on it.
+# - Not in ci.yml, so that CI's job keep, which keeps main's binaries,
+#   never waits for them and is never skipped on main.
+# - A newer push to a branch cancels the run of the older one.
+#
+# The job weakening lists what the branch weakens: tests deleted,
+# assertions removed or changed in tests that stay, snapshot lines changed,
+# skip attributes and target settings added, and changes to the files that
+# decide a verdict (scripts/verdict-files.txt). It only reports: it passes
+# whatever it finds, writes the report to the job summary, and keeps it as
+# the artifact weakening-report.
+#
+# scripts/check-branch-checks-workflow.sh checks when this workflow runs
+# and what it runs.
+name: Branch checks
+
+on:
+  push:
+    branches-ignore: ["main", "dependabot/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: branch-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  weakening:
+    name: Report what the branch weakens
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # The whole history, so that the report finds the merge base with main.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # A job summary holds at most 1 MiB; a larger report is only in the
+      # artifact.
+      - name: Write the weakening report against the merge base with main
+        run: |
+          mkdir -p "$RUNNER_TEMP/weakening-report"
+          report=$RUNNER_TEMP/weakening-report/weakening-report.md
+          python3 scripts/weakening-report.py --base origin/main >"$report"
+          if [ "$(wc -c <"$report")" -le 1000000 ]; then
+            cat "$report" >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "The weakening report is larger than a job summary holds: it is in the artifact weakening-report." >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Keep the report
+        uses: actions/upload-artifact@v7
+        with:
+          name: weakening-report
+          path: ${{ runner.temp }}/weakening-report/weakening-report.md
+          retention-days: 90

@@ -9,6 +9,8 @@
 # It needs what the report needs: python3 and git.
 #
 # usage: scripts/test-weakening-report.sh
+#
+# shellcheck disable=SC2016 # the backticks are the report's Markdown, not commands
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -627,6 +629,7 @@ branch
 mkdir -p "$repo/scripts"
 cp "$list" "$repo/$list"
 entries=0
+# shellcheck disable=SC2094 # file writes into the repository, not the list
 while read -r pattern description; do
   case $pattern in '' | '#'*) continue ;; esac
   entries=$((entries + 1))
