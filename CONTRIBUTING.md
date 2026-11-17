@@ -1138,7 +1138,7 @@ An equivalence claim reaches the maintainer in three steps:
   ([The self-test](#the-self-test)). A weekly canary replays the 250 mutants sampled at
   d953f320, whose verdicts are known, on that commit with the toolchain
   pinned there, and the maintainer accepts each difference once it is
-  explained.
+  explained ([The canary](#the-canary)).
 - **The held-out measure.** A set of mutants that no check gates on and
   that no agent writing tests ever sees: operators outside v1, such as
   swapped arguments and replaced match arms, and realistic mutants written
@@ -1824,6 +1824,100 @@ their changes, and the maintainer's acknowledgment of the report at the
 merge is the approval. A merge base with no committed counts, from before
 this check, is compared with nothing; on `main`, the merge base is the
 commit itself.
+
+### The canary
+
+The canary checks that the runner still sees what it saw, with known
+answers. The throw-away prototype of the test review sampled 250 mutants
+at d953f320 and recorded each one's verdict: with the package's own tests,
+and, for 42 of the 55 that survived them, with the tests of the packages
+that import it. `mutation/canary/mutants.jsonl` holds them, one per line,
+as mutants by offset that `run.py --list` reads, each with its name in the
+prototype's notes (such as `template-compare-arith-032`), its recorded
+verdict (`killed`, `timed out`, `survived` or `unviable`) and the packages
+whose tests gave it. 196 were killed, 8 timed out, 39 survived and 7 did
+not build.
+
+`python3 scripts/mutation/canary.py run` replays them on d953f320's
+source. It checks that commit out into `_build/canary/source`, as a
+worktree without a branch, and runs `scripts/mutation/run.py --list`
+there, as any run: each package's own tests, then its importers' tests
+for the survivors, kill confirmation and the comparison of the compiler's
+output. It then compares each verdict with the recorded one, and writes
+`canary.md` and `canary.json` beside the runner's output in
+`_build/canary/out`. A verdict is compared as killed, survived, unviable
+or unconfirmed:
+
+- a confirmed time-out counts as killed, as it does in the score;
+- a mutant that the comparison of the compiler's output marks equivalent
+  matches a recorded survivor;
+- a duplicate takes the verdict of the mutant it compiles as;
+- an unconfirmed mutant matches nothing.
+
+**The toolchain.** The replay runs with the toolchain that d953f320 pins in
+`.moonbit-version`. It stops before it builds anything when `moonc` on
+`PATH` is another. `python3 scripts/mutation/canary.py install` checks
+the commit out and runs that commit's own
+`scripts/install-moonbit.sh pinned`, which replaces the toolchain in
+`$MOON_HOME`, or `~/.moon`. So it runs in a job of its own, not on a
+laptop whose toolchain other work shares. When that toolchain can no
+longer build that commit, or can no longer be installed, the replay stops
+and says so. The canary then moves to a new commit with new recorded
+verdicts, with the maintainer's approval.
+
+**The site finder.** Each mutant within operator set v1 names the v1 site
+that makes it (`"v1"`, the site's id). Each other mutant names the rule of
+v1 that leaves it out (`"outside"`). `python3 scripts/mutation/canary.py
+sites`, which every replay runs first, checks each mutant's original text
+at its offset on the commit. It then runs the site finder's full set on
+the commit's files. The finder must still give each named site, where the
+mutant is, and no site may make a mutant recorded outside v1. So a
+narrowed finder fails the replay, and so does a widened one. 214 of the
+250 are within v1. 15 of those are made by a site that writes the same
+mutant another way: an integer literal in the base the source writes it
+in (`0x0UL` where the prototype wrote `0UL`), or BODY's `{ () }` where
+the prototype deleted the only statement of a function. The 36 outside v1
+are ROR's other alternatives (31: `<` to `>=` and the like, and `==` with
+`!=`), two `&&` that join conditions binding a name with `is`, an integer
+that its type cannot hold, a literal in a pattern, and the last statement
+of an `if` body that has an `else`. The runner still runs them, as
+mutants outside v1 (`"in_operator_set": false`) with the prototype's
+operator names.
+
+**Explained differences.** `mutation/canary/explained.toml` lists the
+differences that were explained on #275 and that the maintainer accepted.
+Each names the mutant, its recorded verdict, the verdict the replay gives,
+a category, the reason and a link to the acceptance. The categories are a
+flaky test, a time limit, a mutant that the parse-based site finder places
+differently, and importers' tests that the recorded verdict did not run:
+the prototype ran the tests of the packages that import a package
+directly, and none for the survivors of `metrics` and `engine/range.mbt`,
+while the runner runs those of every importer. A bug in the runner is
+fixed instead. A
+difference that is not on the list fails the replay. The report lists the
+explained differences too, and those on the list that the replay did not
+give. Both files are under `mutation/`, which `scripts/verdict-files.txt`
+names, so the weakening report shows every change to the list and to the
+recorded verdicts.
+
+The whole replay is a bulk run, so it runs on GitHub Actions, in
+`.github/workflows/mutation-canary.yml`, started by hand
+(`gh workflow run mutation-canary.yml`); the weekly mutation run repeats
+it. The workflow keeps the output as the artifact `mutation-canary`. On a
+laptop, check the sites, or replay a few mutants by name:
+
+```sh
+python3 scripts/mutation/canary.py sites
+python3 scripts/mutation/canary.py run --mutant cookies-000 --mutant template-compare-arith-007
+python3 scripts/mutation/canary.py compare --mutant cookies-000 _build/canary/out
+```
+
+With `--shard k/n`, `run` runs one shard and compares nothing;
+`scripts/mutation/merge.py` merges the shards' outputs, and `compare`
+compares the merged one. The tests (`scripts/mutation/test_canary.py`)
+check the committed data against d953f320, so they need the history down
+to that commit, and run the replay, its toolchain check and the install
+on a canary of the fixture's mutants in a git history of its own.
 
 ## The weakening report
 
