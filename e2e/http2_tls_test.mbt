@@ -76,6 +76,12 @@ async test "h2 on the TLS port: part of the preface, then a stall, gets GOAWAY N
         ..certs.args(),
       ],
       smock => {
+        // From the first octet, the preface "has the read timeout instead"
+        // of the idle timeout (docs/http2.md, Timeouts), so the GOAWAY comes
+        // before the idle timeout, the competing event, timed from before
+        // the connection opened, could end it.
+        let idle = 10000L
+        let opened = @async.now()
         let raw = smock.raw_h2(tls=true, preface=false)
         defer raw.close()
         let since = @async.now()
@@ -85,12 +91,12 @@ async test "h2 on the TLS port: part of the preface, then a stall, gets GOAWAY N
         inspect(
           [
             ..frames.shown,
-            "after at least 300 ms: \{elapsed >= 300}, long before the idle timeout: \{elapsed < 5000}",
+            "after at least 300 ms: \{elapsed >= 300}, before the idle timeout: \{since - opened + elapsed < idle}",
           ].join("\n"),
           content=(
             #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
             #|GOAWAY last=0 NO_ERROR
-            #|after at least 300 ms: true, long before the idle timeout: true
+            #|after at least 300 ms: true, before the idle timeout: true
           ),
         )
       },

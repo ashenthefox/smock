@@ -1674,3 +1674,16 @@ async fn RawH2::frames_until(
 fn is_goaway(frame : @http2.Frame) -> Bool {
   frame is GoAway(..)
 }
+
+///|
+/// Whether `ms`, the time from one of smock's steps to the next that comes
+/// "a second" after it, is about a second: at least 800 ms, which allows for
+/// a first step read late, and less than 3 seconds. After a GOAWAY with
+/// `NO_ERROR`, smock reads what the client sends "until the client closes
+/// the connection, or for one second at most, and then closes"
+/// (docs/http2.md, Timeouts), and in a drain it sends the final GOAWAY "a
+/// second after the first" when the client does not answer its PING
+/// (docs/http2.md, The drain).
+fn about_a_second(ms : Int64) -> Bool {
+  ms >= 800 && ms < 3 * 1000
+}

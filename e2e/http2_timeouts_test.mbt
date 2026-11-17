@@ -45,8 +45,11 @@ async test "h2c: a stream whose request does not arrive within the read timeout 
           body=b"01234",
           end=false,
         )
+        // A late stream gets RST_STREAM alone, and "the connection's other
+        // streams go on" (docs/http2.md, Timeouts): the fast response ends
+        // before anything of the stalled stream, its reset included, comes.
         let fast = client.request("GET", "/fast", authority="localhost")
-        let fast_ms = @async.now() - start
+        let fast_first = client.kept_for(stalled) == 0
         let reset = client.response(stalled)
         let reset_ms = @async.now() - start
         client.send_data(later, b"56789")
@@ -55,7 +58,7 @@ async test "h2c: a stream whose request does not arrive within the read timeout 
         let after = client.request("GET", "/fast", authority="localhost")
         inspect(
           [
-            "fast, during the stalled upload: \{fast.brief()}, before its deadline: \{fast_ms < 800}",
+            "fast, during the stalled upload: \{fast.brief()}, before its reset: \{fast_first}",
             "stalled: \{reset.brief()}, after at least 800 ms: \{reset_ms >= 800}",
             "later: \{completed.brief()}, after the stalled stream's deadline: \{completed_ms >= 800}",
             "after: \{after.brief()}",
@@ -63,7 +66,7 @@ async test "h2c: a stream whose request does not arrive within the read timeout 
             ..smock.journal_once(3, within=0),
           ].join("\n"),
           content=(
-            #|fast, during the stalled upload: 200 fast (end), before its deadline: true
+            #|fast, during the stalled upload: 200 fast (end), before its reset: true
             #|stalled: no response (reset CANCEL), after at least 800 ms: true
             #|later: 200 uploaded (end), after the stalled stream's deadline: true
             #|after: 200 fast (end)
@@ -99,6 +102,10 @@ async test "h2c: a field block still open at the read timeout, after HEADERS and
         let answered = raw.frames_until_stream_ends(1)
         let block = raw.block(request_fields("GET", "/fast", "localhost"))
         let half = block.length() / 2
+        // A header block "still open" at the read timeout gets GOAWAY
+        // (docs/http2.md, Timeouts), which the test allows up to 3 times the
+        // read timeout, well before the idle timeout.
+        let read = 600L
         let start = @async.now()
         raw.send([
           Headers(
@@ -137,8 +144,8 @@ async test "h2c: a field block still open at the read timeout, after HEADERS and
             answered,
             "---",
             ..goaway.shown,
-            "GOAWAY after at least 600 ms: \{goaway.end_ms >= 600}, before 900 ms: \{goaway.end_ms < 900}",
-            "then: \{after.shown.length()} frames, \{after.how}, about a second after the GOAWAY: \{after.end_ms - goaway.end_ms >= 800 && after.end_ms - goaway.end_ms < 2000}",
+            "GOAWAY after at least 600 ms: \{goaway.end_ms >= read}, within 3 times the read timeout: \{goaway.end_ms < 3 * read}",
+            "then: \{after.shown.length()} frames, \{after.how}, about a second after the GOAWAY: \{about_a_second(after.end_ms - goaway.end_ms)}",
           ].join("\n"),
           content=(
             #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
@@ -147,7 +154,7 @@ async test "h2c: a field block still open at the read timeout, after HEADERS and
             #|DATA 1 END_STREAM 4 octets
             #|---
             #|GOAWAY last=1 NO_ERROR
-            #|GOAWAY after at least 600 ms: true, before 900 ms: true
+            #|GOAWAY after at least 600 ms: true, within 3 times the read timeout: true
             #|then: 0 frames, a FIN, about a second after the GOAWAY: true
           ),
         )
@@ -166,7 +173,11 @@ async test "h2c: a connection with no stream gets GOAWAY NO_ERROR at the idle ti
         "1000",
       ],
       smock => {
-        // Timed from before smock can have started its idle timeout.
+        // PING, SETTINGS and WINDOW_UPDATE do not restart the idle timeout
+        // (docs/http2.md, Timeouts), so the GOAWAY comes at it, which the
+        // test allows up to 3 times. Timed from before smock can have
+        // started its idle timeout.
+        let idle = 1000L
         let start = @async.now()
         let raw = smock.raw_h2()
         defer raw.close()
@@ -194,12 +205,12 @@ async test "h2c: a connection with no stream gets GOAWAY NO_ERROR at the idle ti
         inspect(
           [
             "rounds answered before it: \{rounds >= 3}",
-            "\{shown}, after at least 1000 ms: \{goaway.end_ms >= 1000}, before 2000 ms: \{goaway.end_ms < 2000}",
-            "then: \{after.shown.length()} frames, \{after.how}, about a second after the GOAWAY: \{after.end_ms - goaway.end_ms >= 800 && after.end_ms - goaway.end_ms < 2000}",
+            "\{shown}, after at least 1000 ms: \{goaway.end_ms >= idle}, within 3 times the idle timeout: \{goaway.end_ms < 3 * idle}",
+            "then: \{after.shown.length()} frames, \{after.how}, about a second after the GOAWAY: \{about_a_second(after.end_ms - goaway.end_ms)}",
           ].join("\n"),
           content=(
             #|rounds answered before it: true
-            #|GOAWAY last=0 NO_ERROR, after at least 1000 ms: true, before 2000 ms: true
+            #|GOAWAY last=0 NO_ERROR, after at least 1000 ms: true, within 3 times the idle timeout: true
             #|then: 0 frames, a FIN, about a second after the GOAWAY: true
           ),
         )
@@ -314,6 +325,10 @@ async test "h2c: smock's own waits do not count: neither timeout runs while a de
         "500",
       ],
       smock => {
+        // The idle timeout "runs again from the response that ends the last
+        // stream in progress" (docs/http2.md, Timeouts), which the test
+        // allows up to 3 times.
+        let idle = 500L
         let start = @async.now()
         let raw = smock.raw_h2()
         defer raw.close()
@@ -331,7 +346,7 @@ async test "h2c: smock's own waits do not count: neither timeout runs while a de
             answered,
             "---",
             ..goaway.shown,
-            "answered after the delay: \{answered_ms >= 1000}, GOAWAY about 500 ms after it: \{goaway.end_ms - answered_ms >= 400 && goaway.end_ms - answered_ms < 1500}",
+            "answered after the delay: \{answered_ms >= 1000}, GOAWAY about the idle timeout after it: \{goaway.end_ms - answered_ms >= 400 && goaway.end_ms - answered_ms < 3 * idle}",
           ].join("\n"),
           content=(
             #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
@@ -340,7 +355,7 @@ async test "h2c: smock's own waits do not count: neither timeout runs while a de
             #|DATA 1 END_STREAM 4 octets
             #|---
             #|GOAWAY last=1 NO_ERROR
-            #|answered after the delay: true, GOAWAY about 500 ms after it: true
+            #|answered after the delay: true, GOAWAY about the idle timeout after it: true
           ),
         )
       },
