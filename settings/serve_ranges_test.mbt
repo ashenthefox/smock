@@ -261,3 +261,115 @@ test "ranges: --journal-max-entries, by its flag or SMOCK_JOURNAL_MAX_ENTRIES, t
     ),
   )
 }
+
+///|
+test "ranges: --http2-max-concurrent-streams, by its flag or SMOCK_HTTP2_MAX_CONCURRENT_STREAMS, takes 1 and 1000, and refuses 0, 1001 and a value that is not a decimal integer" {
+  // docs/running.md, Settings: --http2-max-concurrent-streams takes 1 to
+  // 1000.
+  inspect(
+    each_by_flag_and_variable(
+      "--http2-max-concurrent-streams",
+      "SMOCK_HTTP2_MAX_CONCURRENT_STREAMS",
+      ["1", "1000", "0", "1001", "ten"],
+      settings => settings.http2_max_concurrent_streams.to_string(),
+    ),
+    content=(
+      #|1: 1
+      #|1000: 1000
+      #|0: invalid value "0" for --http2-max-concurrent-streams (SMOCK_HTTP2_MAX_CONCURRENT_STREAMS): must be an integer from 1 to 1000
+      #|1001: invalid value "1001" for --http2-max-concurrent-streams (SMOCK_HTTP2_MAX_CONCURRENT_STREAMS): must be an integer from 1 to 1000
+      #|ten: invalid value "ten" for --http2-max-concurrent-streams (SMOCK_HTTP2_MAX_CONCURRENT_STREAMS): must be an integer from 1 to 1000
+    ),
+  )
+}
+
+///|
+/// The seed of the process generator that settings hold, or `none`.
+fn seed(settings : @settings.ServeSettings) -> String {
+  match settings.seed {
+    Some(seed) => seed.to_string()
+    None => "none"
+  }
+}
+
+///|
+test "ranges: --seed, by its flag or SMOCK_SEED, takes 0 and 2^53 - 1, and refuses -1, 2^53 and a value that is not a decimal integer" {
+  // docs/running.md, Settings: --seed and SMOCK_SEED set the seed of the
+  // process generator, which smock otherwise picks "from 0 to
+  // 9007199254740991" (2^53 - 1), as a Stub's seed takes
+  // (docs/definition-files/faults.md, Seeds).
+  inspect(
+    each_by_flag_and_variable(
+      "--seed",
+      "SMOCK_SEED",
+      ["0", "9007199254740991", "-1", "9007199254740992", "0x2a"],
+      seed,
+    ),
+    content=(
+      #|0: 0
+      #|9007199254740991: 9007199254740991
+      #|-1: invalid value "-1" for --seed (SMOCK_SEED): must be an integer from 0 to 9007199254740991
+      #|9007199254740992: invalid value "9007199254740992" for --seed (SMOCK_SEED): must be an integer from 0 to 9007199254740991
+      #|0x2a: invalid value "0x2a" for --seed (SMOCK_SEED): must be an integer from 0 to 9007199254740991
+    ),
+  )
+}
+
+///|
+test "ranges: without --seed, smock picks a seed from 0 to 2^53 - 1, one that --seed takes" {
+  // docs/running.md, Settings: without --seed, "smock picks the seed of its
+  // random generator, from 0 to 9007199254740991".
+  let picked = @settings.random_seed()
+  inspect(
+    [
+      (picked <= 9007199254740991UL).to_string(),
+      (@settings.parse_seed(picked.to_string()) == Some(picked)).to_string(),
+    ].join(" "),
+    content="true true",
+  )
+}
+
+///|
+/// The byte bound that `bound` gives settings, in bytes, or `none` when
+/// it leaves it to the memory limit.
+fn max_bytes(bound : @settings.ByteBound?) -> String {
+  match bound {
+    Some(bound) => bound.max_bytes.to_string()
+    None => "none"
+  }
+}
+
+///|
+test "ranges: --journal-max-bytes and --state-max-bytes, by their flags or variables, take 1 and 1073741824, and refuse 0, 1073741825 and a value that is not a decimal integer" {
+  // docs/definition-files/variables.md, The state bound: --state-max-bytes
+  // or SMOCK_STATE_MAX_BYTES "sets it, in bytes, from 1 to 1073741824 (1
+  // GiB), as --journal-max-bytes takes".
+  inspect(
+    [
+      each_by_flag_and_variable(
+        "--journal-max-bytes",
+        "SMOCK_JOURNAL_MAX_BYTES",
+        ["1", "1073741824", "0", "1073741825", "64MiB"],
+        settings => max_bytes(settings.journal_max_bytes),
+      ),
+      each_by_flag_and_variable(
+        "--state-max-bytes",
+        "SMOCK_STATE_MAX_BYTES",
+        ["1", "1073741824", "0", "1073741825", "1e6"],
+        settings => max_bytes(settings.state_max_bytes),
+      ),
+    ].join("\n"),
+    content=(
+      #|1: 1
+      #|1073741824: 1073741824
+      #|0: invalid value "0" for --journal-max-bytes (SMOCK_JOURNAL_MAX_BYTES): must be an integer from 1 to 1073741824
+      #|1073741825: invalid value "1073741825" for --journal-max-bytes (SMOCK_JOURNAL_MAX_BYTES): must be an integer from 1 to 1073741824
+      #|64MiB: invalid value "64MiB" for --journal-max-bytes (SMOCK_JOURNAL_MAX_BYTES): must be an integer from 1 to 1073741824
+      #|1: 1
+      #|1073741824: 1073741824
+      #|0: invalid value "0" for --state-max-bytes (SMOCK_STATE_MAX_BYTES): must be an integer from 1 to 1073741824
+      #|1073741825: invalid value "1073741825" for --state-max-bytes (SMOCK_STATE_MAX_BYTES): must be an integer from 1 to 1073741824
+      #|1e6: invalid value "1e6" for --state-max-bytes (SMOCK_STATE_MAX_BYTES): must be an integer from 1 to 1073741824
+    ),
+  )
+}
