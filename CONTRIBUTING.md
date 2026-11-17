@@ -387,7 +387,8 @@ python3 scripts/mutation/ratchet.py check --base origin/main   # the site counts
 `scripts/test-helm-chart.sh` renders `charts/smock` for each delivery mode
 of the Definition files and each Admin API authentication and TLS option,
 and checks the manifests, the Restricted Pod Security Standard included,
-and that the chart's README lists every value with its default.
+the notes an install shows, and that the chart's README lists every value
+with its default.
 `scripts/test-helm-chart-on-kind.sh` creates a kind cluster, checks every
 delivery mode against Kubernetes' own Pod Security admission, installs the
 chart with the image into a namespace that enforces the Restricted

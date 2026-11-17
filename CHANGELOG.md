@@ -690,6 +690,14 @@ of each GitHub release include its section
   gRPC in its description of smock, as the README's opening line does: "A
   mock server for HTTP/1.1, HTTP/2, HTTPS, Server-Sent Events and gRPC
   unary calls." It left gRPC out.
+- The Helm chart writes every number from a values file in full. Helm
+  reads such a number as a floating-point number, and the chart wrote some
+  of a million or more in exponent form: `definitions.gitSync.depth:
+  1000000` gave git-sync `--depth=1e+06`, and `definitions.gitSync.uid:
+  1000680000` gave `runAsUser: 1.00068e+09`, where git-sync and
+  Kubernetes take an integer. The Services' ports, the replica count in
+  the notes after an install, and Definition files or body files given as
+  numbers were written the same way.
 
 ## [0.4.0] - 2026-11-01
 
