@@ -122,6 +122,13 @@ OVERLOADED_BODY = {
 }
 OVERLOADED_REQUEST_ID = "req_5J4ymbACTcA49ramAi1T8pGa"
 
+# Gemini's OpenAI-compatible base URL, as smock stands in for it: the path
+# of `http://localhost:8080/v1beta/openai/`, which
+# docs/definition-files/llm-responses.md#paths-and-compatible-endpoints
+# gives for Gemini. Its table gives the Stub the path
+# /v1beta/openai/chat/completions, which the Stub gemini-text has.
+GEMINI_BASE_PATH = "/v1beta/openai/"
+
 # The stop sequences an application gives the Messages API, and the stop
 # details of a refusal: its type, category and explanation.
 STOP_SEQUENCES = ["Step 2:", "END"]
@@ -305,6 +312,13 @@ class Smock:
         the options say otherwise."""
         options = {"max_retries": 0, "timeout": CALL_TIMEOUT_S, **options}
         return openai.OpenAI(base_url=f"{self.url}/v1", api_key="test", **options)
+
+    def gemini(self, **options):
+        """An openai-python client of this smock through Gemini's
+        OpenAI-compatible base URL, GEMINI_BASE_PATH under smock's, with
+        max_retries=0 unless the options say otherwise."""
+        options = {"max_retries": 0, "timeout": CALL_TIMEOUT_S, **options}
+        return openai.OpenAI(base_url=f"{self.url}{GEMINI_BASE_PATH}", api_key="test", **options)
 
     def anthropic(self, **options):
         """An anthropic-sdk-python client of this smock, with max_retries=0
@@ -512,42 +526,44 @@ def streamed_tool_calls(checks, name, chunks):
 
 def chat_text(checks, smock):
     """Chat Completions, text only, with generated ids: create() with and
-    without stream, with and without include_usage."""
-    client = smock.openai()
-    name = "chat-text: create"
-    reply = chat_create(client, "chat-text")
-    message = reply.choices[0].message
-    checks.equal(f"{name}: the text", message.content, CHAT_TEXT)
-    checks.equal(f"{name}: no tool calls", message.tool_calls, None)
-    checks.equal(f"{name}: the stop reason", reply.choices[0].finish_reason, "stop")
-    check_usage(checks, name, reply.usage, 19, 10)
-    checks.id(f"{name}: the id", reply.id, CHAT_ID)
-    checks.equal(f"{name}: the model", reply.model, "chat-text")
-    checks.id(f"{name}: the request id", reply._request_id, REQUEST_ID)
+    without stream, with and without include_usage. First through OpenAI's
+    base URL, then through Gemini's OpenAI-compatible base URL, whose Stub
+    gives the same reply at Gemini's path."""
+    for stub, client in (("chat-text", smock.openai()), ("gemini-text", smock.gemini())):
+        name = f"{stub}: create"
+        reply = chat_create(client, stub)
+        message = reply.choices[0].message
+        checks.equal(f"{name}: the text", message.content, CHAT_TEXT)
+        checks.equal(f"{name}: no tool calls", message.tool_calls, None)
+        checks.equal(f"{name}: the stop reason", reply.choices[0].finish_reason, "stop")
+        check_usage(checks, name, reply.usage, 19, 10)
+        checks.id(f"{name}: the id", reply.id, CHAT_ID)
+        checks.equal(f"{name}: the model", reply.model, stub)
+        checks.id(f"{name}: the request id", reply._request_id, REQUEST_ID)
 
-    name = "chat-text: create(stream=True)"
-    request_id, chunks = chat_stream(client, "chat-text")
-    check_chunks(checks, name, chunks, CHAT_ID, "chat-text")
-    checks.equal(f"{name}: the opening chunk's content", chunks[0].choices[0].delta.content, "")
-    checks.equal(f"{name}: the text", streamed_content(chunks), CHAT_TEXT)
-    checks.check(f"{name}: a piece ends between the code points of the emoji",
-                 any((chunk.choices[0].delta.content or "").endswith("👋") for chunk in chunks),
-                 repr([chunk.choices[0].delta.content for chunk in chunks]))
-    checks.equal(f"{name}: the stop reason, on the closing chunk only",
-                 streamed_finish_reasons(chunks), [None] * (len(chunks) - 1) + ["stop"])
-    checks.equal(f"{name}: no usage", [chunk.usage for chunk in chunks], [None] * len(chunks))
-    checks.id(f"{name}: the request id", request_id, REQUEST_ID)
+        name = f"{stub}: create(stream=True)"
+        request_id, chunks = chat_stream(client, stub)
+        check_chunks(checks, name, chunks, CHAT_ID, stub)
+        checks.equal(f"{name}: the opening chunk's content", chunks[0].choices[0].delta.content, "")
+        checks.equal(f"{name}: the text", streamed_content(chunks), CHAT_TEXT)
+        checks.check(f"{name}: a piece ends between the code points of the emoji",
+                     any((chunk.choices[0].delta.content or "").endswith("👋") for chunk in chunks),
+                     repr([chunk.choices[0].delta.content for chunk in chunks]))
+        checks.equal(f"{name}: the stop reason, on the closing chunk only",
+                     streamed_finish_reasons(chunks), [None] * (len(chunks) - 1) + ["stop"])
+        checks.equal(f"{name}: no usage", [chunk.usage for chunk in chunks], [None] * len(chunks))
+        checks.id(f"{name}: the request id", request_id, REQUEST_ID)
 
-    name = "chat-text: create(stream=True) with include_usage"
-    request_id, chunks = chat_stream(client, "chat-text", stream_options={"include_usage": True})
-    check_chunks(checks, name, chunks, CHAT_ID, "chat-text")
-    checks.equal(f"{name}: the text", streamed_content(chunks), CHAT_TEXT)
-    checks.equal(f"{name}: the last chunk has no choice", chunks[-1].choices, [])
-    check_usage(checks, f"{name}: the last chunk", chunks[-1].usage, 19, 10)
-    checks.equal(f"{name}: no usage before the last chunk",
-                 [chunk.usage for chunk in chunks[:-1]], [None] * (len(chunks) - 1))
-    checks.equal(f"{name}: the stop reason", streamed_finish_reasons(chunks)[-1], "stop")
-    checks.id(f"{name}: the request id", request_id, REQUEST_ID)
+        name = f"{stub}: create(stream=True) with include_usage"
+        request_id, chunks = chat_stream(client, stub, stream_options={"include_usage": True})
+        check_chunks(checks, name, chunks, CHAT_ID, stub)
+        checks.equal(f"{name}: the text", streamed_content(chunks), CHAT_TEXT)
+        checks.equal(f"{name}: the last chunk has no choice", chunks[-1].choices, [])
+        check_usage(checks, f"{name}: the last chunk", chunks[-1].usage, 19, 10)
+        checks.equal(f"{name}: no usage before the last chunk",
+                     [chunk.usage for chunk in chunks[:-1]], [None] * (len(chunks) - 1))
+        checks.equal(f"{name}: the stop reason", streamed_finish_reasons(chunks)[-1], "stop")
+        checks.id(f"{name}: the request id", request_id, REQUEST_ID)
 
 
 def chat_tools(checks, smock):

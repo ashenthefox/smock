@@ -47,6 +47,14 @@ retry checks, below, keep the default retries.
   parses them, usage, stop reasons, ids and the request id that the SDK
   reads from the `x-request-id` header, and what every chunk of a stream
   shares.
+- Gemini's OpenAI-compatible base URL, as [LLM
+  responses](../docs/definition-files/llm-responses.md#paths-and-compatible-endpoints)
+  shows it: an openai-python client whose base URL is smock's with
+  Gemini's path, `/v1beta/openai/`, calls the Stub `gemini-text` at the
+  path the reference gives Gemini's Stub, `/v1beta/openai/chat/completions`.
+  It makes the calls and the checks of the text-only Chat Stub: `create`
+  with and without `stream`, and a stream with
+  `stream_options.include_usage`.
 - Responses: `create` with and without `stream`, and the `stream()` helper
   with text and with two tool calls, given function tools. It checks the
   text, the function call items and their arguments as the SDK parses
