@@ -11,11 +11,17 @@ tests of the same importers whose tests ran it on wasm-gc. Kills and
 time-outs are confirmed natively too. The record gives both verdicts
 ("verdicts").
 
-The native verdict decides on amd64: a mutant killed on wasm-gc and
-surviving natively is then a survivor, until a test kills it natively or
-an exclusion covers it (UB-NATIVE). arm64's builds may behave otherwise on
-undefined behaviour, so there the native verdict is recorded and not
-used, and the wasm-gc verdict counts.
+Native verdicts are taken on CI's amd64 runner: there a mutant killed on
+wasm-gc and surviving natively is a survivor, until a test kills it
+natively or an exclusion covers it (UB-NATIVE). One machine is the
+reference so that a verdict can be reproduced: natively, an access out
+of bounds is undefined behaviour, and what it does can change with the
+machine and with the C compiler that built the test program. amd64 is
+that machine because its native builds are about six times faster than
+arm64's (#276). The native verdict decides on any amd64 machine
+(DECIDING), so that a laptop's records read as CI's would, but a verdict
+taken off CI is for information. On arm64 the native verdict is recorded
+and not used, and the wasm-gc verdict counts.
 
 A package that builds only natively, which moon refuses to test on
 wasm-gc, runs wholly natively: every mutant, the runs without a mutant
@@ -47,7 +53,8 @@ MARK = "unchecked_access"
 # moon's variables that give its native builds another C compiler, archiver
 # or compiler wrapper (moon 0.1.20261104 reads these three).
 C_VARIABLES = ("MOON_AR", "MOON_CC", "MOON_CC_WRAPPER")
-# The machines whose native verdict decides, as Python names amd64.
+# The machines whose native verdict decides, as Python names amd64, the
+# architecture of CI's runner that takes native verdicts.
 DECIDING = ("x86_64", "amd64")
 # The wasm-gc outcomes of a mutant whose tests ran: those that also run
 # natively. A mutant that does not build, or that the compiler's output

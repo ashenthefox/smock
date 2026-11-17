@@ -1170,9 +1170,10 @@ covering test for every mutant.
 credit.
 
 **Backend.** The verdicts for pure packages are taken on wasm-gc. A site
-that uses an unchecked array access is also judged natively on amd64,
-because wasm-gc traps where the native binary does not, and for such a
-site the native verdict decides.
+that uses an unchecked array access is also judged natively, because
+wasm-gc traps where the native binary does not, and for such a site the
+native verdict taken on CI's amd64 runner decides (the runner's "Native
+verdicts", in [Mutation runner](#mutation-runner)).
 
 The runner never passes `-u` to `moon test`.
 
@@ -1911,15 +1912,24 @@ of the importers whose tests ran it on wasm-gc, with kill confirmation.
 Its record gives both verdicts under `verdicts`: `wasm-gc` and `native`,
 each with its outcome, the tests that killed it, its timings and its
 confirmation, and the machine that took the native one. `backend` names
-the verdict that counts. **The native verdict decides on amd64**: a
-mutant killed on wasm-gc that survives natively is then a survivor, with
-its diff, until a test kills it natively or an exclusion covers it
-(UB-NATIVE). On arm64, whose builds may behave otherwise on undefined
-behaviour, the native verdict is recorded and the wasm-gc verdict
-counts. Each package's summary (`native`) gives the machine, whether its
-verdict decides, the marked mutants, how many ran natively, their native
-outcomes and how many verdicts differ, and the report lists the mutants
-whose verdicts differ between the backends.
+the verdict that counts. **Native verdicts are taken on CI's amd64
+runner** (`ubuntu-24.04`): a mutant killed on wasm-gc that survives
+natively there is a survivor, with its diff, until a test kills it
+natively or an exclusion covers it (UB-NATIVE). One machine is the
+reference so that anyone can reproduce a verdict: natively, an access
+out of bounds is undefined behaviour, and what it does can change with
+the machine and with the C compiler that built the test program. That
+machine is CI's amd64 runner because native builds there are about six
+times faster than on arm64
+([Test costs on CI's runners](#test-costs-on-cis-runners)). A native
+verdict taken anywhere else, as on a laptop, is for information. The
+runner lets the native verdict decide on any amd64 machine, so that a
+laptop's records read as CI's would; on arm64 it records the native
+verdict and counts the wasm-gc one. Each package's summary (`native`)
+gives the machine, whether its verdict decides, the marked mutants, how
+many ran natively, their native outcomes and how many verdicts differ,
+and the report lists the mutants whose verdicts differ between the
+backends.
 
 A package that builds only natively, which moon refuses to test on
 wasm-gc, runs wholly natively: the two runs without a mutant, the
@@ -1947,8 +1957,8 @@ and runs, the 693 marked mutants of the pinned set take at most about
 would save at most the rebuilds, about half of that, and would need a
 read of an environment variable inside the pure packages, which do no
 I/O, and a type check of each mutant before it enters. On arm64 the same
-rebuild took 41.1 s, so the native verdicts are taken on amd64 runners in
-CI. A laptop can still run one marked mutant natively, with `--mutant`.
+rebuild took 41.1 s. A laptop can still run one marked mutant natively,
+with `--mutant`, and its verdict is for information.
 
 To see the sites of a package, and to run one mutant, or the few mutants
 of a small package (they need python3, git, moon and moonc):
