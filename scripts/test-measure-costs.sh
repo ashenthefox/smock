@@ -249,6 +249,76 @@ exits alone-none 0
 called alone-none ""
 holds alone-none alone.json '.ok == true and .runs == 0 and .tests == []' "no test, and ok"
 
+# --- rebuild: native rebuilds after one mutant in engine -----------------------------------
+
+# The calls of the rebuild part, with <dir> for the one target directory it
+# uses: clean builds, then the same with the mutant applied.
+rebuild_calls="build --target native cmd/smock --target-dir <dir>
+test --target native -p smock/smock/engine --build-only --target-dir <dir>
+test --target wasm-gc -p smock/smock/engine --build-only --target-dir <dir>
+[mutant] test --target native -p smock/smock/engine --build-only --target-dir <dir>
+[mutant] test --target native -p smock/smock/engine --target-dir <dir>
+[mutant] build --target native cmd/smock --target-dir <dir>
+[mutant] test --target wasm-gc -p smock/smock/engine --target-dir <dir>"
+
+# rebuilt <name>: the fake moon got the rebuild part's calls, each with the
+# same target directory, outside the tree, which is gone afterwards; and
+# engine/range.mbt is as it was.
+rebuilt() {
+  dir=$(sed -n 's/.*--target-dir \([^ ]*\).*/\1/p' "$FAKE_LOG" | sort -u)
+  if [ "$(echo "$dir" | wc -l)" = 1 ] && [ "${dir#"$tree"}" = "$dir" ] && [ ! -e "$dir" ]; then
+    pass "$1: uses one target directory of its own, and removes it"
+  else
+    fail "$1: uses the target directories $dir"
+  fi
+  called "$1" "$(echo "$rebuild_calls" | sed "s|<dir>|$dir|")"
+  if cmp -s engine/range.mbt "$tree/engine/range.mbt"; then
+    pass "$1: leaves engine/range.mbt as it was"
+  else
+    fail "$1: changed engine/range.mbt"
+  fi
+}
+
+measure rebuild rebuild
+exits rebuild 0
+rebuilt rebuild
+holds rebuild rebuild.json '.ok == true and .observed == true' "ok, and the mutant observed"
+holds rebuild rebuild.json '.mutant == {"file": "engine/range.mbt", "original": "      status = 416\n", "replacement": "      status = 415\n"}' \
+  "the mutant"
+holds rebuild rebuild.json '[.clean.cmd, .clean.engine_native, .clean.engine_wasm_gc,
+    .mutated.engine_native_build, .mutated.cmd][] | .exit_status == 0 and .seconds >= 0' \
+  "each build, timed"
+holds rebuild rebuild.json '[.mutated.engine_native_run, .mutated.engine_wasm_gc][]
+  | .exit_status == 2 and .tests.failed == 3 and .seconds >= 0' "each run of engine's tests with the mutant, with its failures"
+
+# The mutant's build fails: the tree is restored all the same.
+FAKE_FAIL_WITH_MUTANT=1 measure rebuild-fails rebuild
+exits rebuild-fails 1
+rebuilt rebuild-fails
+holds rebuild-fails rebuild.json '.ok == false and .observed == false' "not ok, and nothing observed"
+
+# A mutant that no test would see is not a measurement of a mutant.
+mv "$tmp/bin/moon" "$tmp/moon"
+cat >"$tmp/bin/moon" <<'EOF'
+#!/bin/sh
+case " $* " in *" -p smock/smock/engine "*) case " $* " in *" --build-only "*) ;; *) echo "Total tests: 10, passed: 10, failed: 0."; exit 0 ;; esac ;; esac
+exec "$(dirname "$0")/../moon" "$@"
+EOF
+chmod +x "$tmp/bin/moon"
+measure rebuild-unseen rebuild
+exits rebuild-unseen 1
+holds rebuild-unseen rebuild.json '.ok == false and .observed == false' "not ok when no test of engine fails"
+says rebuild-unseen "no test of engine failed with the mutant"
+mv "$tmp/moon" "$tmp/bin/moon"
+
+# The text the mutant changes is gone: nothing is built.
+sed -i 's/status = 416/status = 0 + 416/' "$tree/engine/range.mbt"
+measure rebuild-no-text rebuild
+exits rebuild-no-text 1
+says rebuild-no-text "engine/range.mbt holds the mutant's original text 0 times, not once"
+called rebuild-no-text ""
+cp engine/range.mbt "$tree/engine/"
+
 echo
 echo "test-measure-costs: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

@@ -22,6 +22,14 @@ its start to its exit, measured here.
         alone.json each test's times and their totals, median, 90th
         percentile (nearest rank) and slowest. `--file` keeps the tests of one
         file, and `--timeout` is the time limit of one test (300 s).
+  rebuild
+        In a target directory of its own, builds cmd/smock and engine's
+        tests, native and wasm-gc, from clean; then applies one mutant to
+        engine (MUTANT below) and times the native rebuild of engine's
+        tests, their run, the rebuild of cmd/smock, which holds engine, and
+        the wasm-gc rebuild and run of engine's tests. The mutant is undone
+        afterwards, also when a build fails or the job is cancelled, and
+        both runs must fail, or the mutant was not built.
 
 It refuses to run when a variable that gives moon another C compiler, a
 wrapper of it or flags is set (MOON_CC, MOON_AR, MOON_CC_WRAPPER): on amd64,
@@ -38,9 +46,11 @@ import json
 import os
 import platform
 import re
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -257,7 +267,64 @@ def part_alone(out, args):
     return 0 if result["ok"] else 1
 
 
-PARTS = {"e2e": part_e2e, "alone": part_alone}
+# The mutant the rebuild part applies: engine-range-001 of the mutation
+# prototype's sample (#275), an INT mutant that engine's tests kill. engine
+# is in cmd/smock, so the binary rebuilds too.
+MUTANT = {"file": "engine/range.mbt", "original": "      status = 416\n", "replacement": "      status = 415\n"}
+
+
+def part_rebuild(out, args):
+    logs = out / "logs" / "rebuild"
+    result = {"part": "rebuild", "machine": machine(), "mutant": MUTANT}
+    source = ROOT / MUTANT["file"]
+    text = source.read_text()
+    count = text.count(MUTANT["original"])
+    if count != 1:
+        result["ok"] = False
+        write(out, "rebuild", result)
+        print(
+            f"measure-costs: {MUTANT['file']} holds the mutant's original text {count} times, not once",
+            file=sys.stderr,
+        )
+        return 1
+    target = Path(tempfile.mkdtemp(prefix="measure-rebuild-"))
+    in_target = ["--target-dir", str(target)]
+    build_cmd = ["moon", "build", "--target", "native", "cmd/smock", *in_target, *jobs(args)]
+    engine = ["moon", "test", "--target", "native", "-p", "smock/smock/engine"]
+    engine_wasm_gc = ["moon", "test", "--target", "wasm-gc", "-p", "smock/smock/engine"]
+    build_only = ["--build-only", *in_target, *jobs(args)]
+    try:
+        result["clean"] = {
+            "cmd": timed(build_cmd, logs / "clean-cmd.log"),
+            "engine_native": timed([*engine, *build_only], logs / "clean-engine-native.log"),
+            "engine_wasm_gc": timed([*engine_wasm_gc, *build_only], logs / "clean-engine-wasm-gc.log"),
+        }
+        mutated = {}
+        if all(passed(step) for step in result["clean"].values()):
+            source.write_text(text.replace(MUTANT["original"], MUTANT["replacement"]))
+            try:
+                mutated["engine_native_build"] = timed([*engine, *build_only], logs / "engine-native-build.log")
+                mutated["engine_native_run"] = timed([*engine, *in_target], logs / "engine-native-run.log")
+                mutated["cmd"] = timed(build_cmd, logs / "cmd.log")
+                mutated["engine_wasm_gc"] = timed([*engine_wasm_gc, *in_target], logs / "engine-wasm-gc.log")
+            finally:
+                source.write_text(text)
+        result["mutated"] = mutated
+    finally:
+        shutil.rmtree(target, ignore_errors=True)
+    # Both runs of engine's tests must fail with the mutant: one that no test
+    # sees is not the build of a mutant this measures.
+    runs = [mutated.get("engine_native_run"), mutated.get("engine_wasm_gc")]
+    result["observed"] = all(run and run.get("tests", {}).get("failed", 0) > 0 for run in runs)
+    builds = [*result["clean"].values(), mutated.get("engine_native_build"), mutated.get("cmd")]
+    result["ok"] = all(step and passed(step) for step in builds) and result["observed"]
+    write(out, "rebuild", result)
+    if all(step and passed(step) for step in builds) and not result["observed"]:
+        print("measure-costs: no test of engine failed with the mutant", file=sys.stderr)
+    return 0 if result["ok"] else 1
+
+
+PARTS = {"e2e": part_e2e, "alone": part_alone, "rebuild": part_rebuild}
 
 
 def main():
@@ -271,6 +338,9 @@ def main():
     args = parser.parse_args()
     if args.runs is None:
         args.runs = {"e2e": 3}.get(args.part, 1)
+    # A cancelled job's SIGTERM ends the part through its finally blocks,
+    # which undo the rebuild part's mutant.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
     set_variables = [name for name in COMPILER_VARIABLES if name in os.environ]
     if set_variables:
         print(
