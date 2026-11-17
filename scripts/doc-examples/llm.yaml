@@ -1,0 +1,4 @@
+# The Mock llm, which an example of docs/definition-files/matching.md uses
+# and the document does not declare.
+mocks:
+  - name: llm

@@ -1,0 +1,5 @@
+# The Mock that `smock import-openapi --mock petstore` declares, as the
+# generated file of docs/importing-openapi.md shows it, for the examples
+# that add to it.
+mocks:
+  - name: petstore
