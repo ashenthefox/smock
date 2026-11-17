@@ -18,8 +18,13 @@ usage: python3 -m unittest discover -s scripts/mutation -v
 """
 
 import json
+import os
+import platform
+import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -27,6 +32,19 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 FIXTURE = HERE / "fixture"
 SITES = HERE / "sites.py"
+RUN = HERE / "run.py"
+# The machine whose native verdict decides: amd64 (#307: arm64's builds may
+# behave otherwise on undefined behaviour, so their verdict is not used),
+# as Python names it there.
+AMD64 = ("x86_64", "AMD64")
+# The machine the tests run on, as Python names it, and whether its native
+# verdict decides.
+MACHINE = platform.machine()
+DECIDES = MACHINE in AMD64
+# bounds' tests, as moon names them.
+DOT = ("mutation/fixture/bounds", "bounds_test.mbt", "a dot after the first characters")
+NO_DOT = ("mutation/fixture/bounds", "bounds_test.mbt", "no dot after the first characters")
+ENDS = ("mutation/fixture/bounds", "bounds_test.mbt", "a name that ends after its first characters")
 
 # The mutants of bounds' pinned set: each one's id, whether the finder
 # marks its site as one whose definition uses an unchecked array access,
@@ -80,3 +98,195 @@ class UncheckedSitesTest(unittest.TestCase):
         # neither reads an array without one.
         for name in ("is_member", "write_percent_encoded", "ascii"):
             self.assertEqual(definitions[name], {False}, name)
+
+
+class DecidingVerdictTest(unittest.TestCase):
+    """Which verdict counts, on amd64 and on arm64 (#307: the native verdict
+    on amd64 decides; arm64's is not used), for records built by hand,
+    since a run shows only the machine it runs on."""
+
+    @staticmethod
+    def records():
+        # Killed on wasm-gc by the trap alone, and surviving natively; and
+        # surviving on wasm-gc, and killed natively.
+        trap = {"id": "a", "outcome": "killed", "killing_tests": [{"name": "t"}], "timings": {"run_s": 1.0},
+                "importers": [], "confirmation": "confirmed", "backend": "wasm-gc"}
+        trap_natively = {"outcome": "survived", "killing_tests": [], "timings": {"run_s": 2.0}, "importers": [],
+                         "diff": "the diff", "backend": "native"}
+        missed = {"id": "b", "outcome": "survived", "killing_tests": [], "timings": {"run_s": 1.0}, "importers": [],
+                  "diff": "the diff", "backend": "wasm-gc"}
+        missed_natively = {"outcome": "killed", "killing_tests": [{"name": "u"}], "timings": {"run_s": 2.0},
+                           "importers": [], "confirmation": "confirmed", "backend": "native"}
+        return (trap, trap_natively), (missed, missed_natively)
+
+    def test_on_amd64_the_native_verdict_decides(self):
+        import native
+
+        for machine in AMD64:
+            (trap, natively), (missed, missed_natively) = self.records()
+            native.combine(trap, natively, machine)
+            native.combine(missed, missed_natively, machine)
+            # A mutant killed on wasm-gc and surviving natively is a
+            # survivor, with its diff; one killed natively alone is killed.
+            self.assertEqual((trap["outcome"], trap["backend"], trap["killing_tests"], trap["diff"]),
+                             ("survived", "native", [], "the diff"))
+            self.assertNotIn("confirmation", trap)
+            self.assertEqual((missed["outcome"], missed["backend"], missed["killing_tests"]),
+                             ("killed", "native", [{"name": "u"}]))
+            self.assertNotIn("diff", missed)
+            self.assertEqual(trap["timings"], {"run_s": 2.0})
+            # Both verdicts stay in the record.
+            self.assertEqual(trap["verdicts"], {
+                "wasm-gc": {"outcome": "killed", "killing_tests": [{"name": "t"}], "timings": {"run_s": 1.0},
+                            "importers": [], "confirmation": "confirmed"},
+                "native": {"outcome": "survived", "killing_tests": [], "timings": {"run_s": 2.0}, "importers": [],
+                           "machine": machine}})
+
+    def test_on_arm64_the_native_verdict_is_recorded_and_the_wasm_gc_verdict_counts(self):
+        import native
+
+        for machine in ("aarch64", "arm64"):
+            (trap, natively), (missed, missed_natively) = self.records()
+            native.combine(trap, natively, machine)
+            native.combine(missed, missed_natively, machine)
+            self.assertEqual((trap["outcome"], trap["backend"], trap["killing_tests"]),
+                             ("killed", "wasm-gc", [{"name": "t"}]))
+            self.assertNotIn("diff", trap)
+            self.assertEqual((missed["outcome"], missed["backend"], missed["diff"]), ("survived", "wasm-gc", "the diff"))
+            self.assertEqual((trap["verdicts"]["native"]["outcome"], trap["verdicts"]["native"]["machine"]),
+                             ("survived", machine))
+
+
+def logging_moon(directory):
+    """A moon that logs each of its command lines and runs the real one."""
+    moon = shutil.which("moon")
+    if moon is None:
+        raise unittest.SkipTest("moon is not on PATH")
+    script = directory / "moon"
+    log = directory / "moon.log"
+    script.write_text(f'#!/bin/sh\necho "$*" >>"{log}"\nexec "{moon}" "$@"\n')
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    return script, log
+
+
+def names(tests):
+    """The tests of a record, as (package, file, name)."""
+    return [(t["package"], t["file"], t["name"]) for t in tests]
+
+
+class NativeTest(unittest.TestCase):
+    """One run of bounds' pinned set, whose mutants at sites that use an
+    unchecked array access run natively as well, with moon's variables for
+    another C compiler set to ones that do not exist."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-native-"))
+        cls.moon, cls.log = logging_moon(cls.tmp)
+        cls.out = cls.tmp / "out"
+        # moon reads these three; a native build that took them would fail.
+        environment = dict(os.environ, MOON_CC=str(cls.tmp / "no-cc"), MOON_AR=str(cls.tmp / "no-ar"),
+                           MOON_CC_WRAPPER=str(cls.tmp / "no-wrapper"))
+        cls.result = subprocess.run(
+            [sys.executable, str(RUN), "--root", str(FIXTURE), "--work", str(cls.tmp / "work"), "--out", str(cls.out),
+             "--moon", str(cls.moon), "bounds"],
+            capture_output=True, text=True, env=environment)
+        if cls.result.returncode != 0:
+            raise AssertionError(f"run.py failed ({cls.result.returncode}):\n{cls.result.stderr}")
+        cls.records = [json.loads(line) for line in (cls.out / "mutants.jsonl").read_text().splitlines()]
+        cls.summary = json.loads((cls.out / "summary.json").read_text())["packages"][0]
+        cls.report = (cls.out / "report.md").read_text()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_each_mutant_has_its_known_outcome_on_each_backend(self):
+        # A mutant at a site that uses an unchecked array access gives both
+        # verdicts; any other runs on wasm-gc alone.
+        found = []
+        for record in self.records:
+            verdicts = record.get("verdicts", {})
+            found.append((record["id"], record.get("unchecked_access", False),
+                          verdicts.get("wasm-gc", record)["outcome"], verdicts.get("native", {}).get("outcome")))
+        self.assertEqual(found, BOUNDS)
+
+    def test_a_record_names_the_tests_that_killed_it_on_each_backend(self):
+        verdicts = {r["id"]: r.get("verdicts") for r in self.records}
+        # `||` reads past the end of "a" too: wasm-gc traps there, while the
+        # native read finds no dot.
+        lcr = verdicts["bounds/bounds.mbt,dot_after,LCR,&&,||,0"]
+        self.assertEqual(sorted(names(lcr["wasm-gc"]["killing_tests"])), sorted([NO_DOT, ENDS]))
+        self.assertEqual(names(lcr["native"]["killing_tests"]), [NO_DOT])
+        ror = verdicts["bounds/bounds.mbt,dot_after,ROR,>,>=,0"]
+        self.assertEqual(names(ror["wasm-gc"]["killing_tests"]), [ENDS])
+        self.assertEqual(ror["native"]["killing_tests"], [])
+        # Each kill is confirmed on its own backend, as #301 asks.
+        for record in self.records:
+            for verdict in record.get("verdicts", {}).values():
+                if verdict["outcome"] == "killed":
+                    self.assertEqual(verdict["confirmation"], "confirmed", record["id"])
+        self.assertEqual(names(verdicts["bounds/bounds.mbt,dot_after,BODY,{…},{ false },0"]["native"]["killing_tests"]),
+                         [DOT])
+
+    def test_the_native_verdict_decides_on_amd64_alone(self):
+        # #307: the native verdict on amd64 decides, so a mutant killed on
+        # wasm-gc and surviving natively is a survivor there, with its
+        # diff; elsewhere the native verdict is recorded and not used.
+        for record in self.records:
+            if "verdicts" not in record:
+                self.assertEqual(record["backend"], "wasm-gc")
+                continue
+            native = record["verdicts"]["native"]
+            self.assertEqual(native["machine"], MACHINE)
+            deciding = native if DECIDES else record["verdicts"]["wasm-gc"]
+            self.assertEqual((record["backend"], record["outcome"], record["killing_tests"]),
+                             ("native" if DECIDES else "wasm-gc", deciding["outcome"], deciding["killing_tests"]))
+        ror = next(r for r in self.records if r["id"] == "bounds/bounds.mbt,dot_after,ROR,>,>=,0")
+        if DECIDES:
+            self.assertIn("-  name.length() > n && name.unsafe_get(n) == '.'\n"
+                          "+  name.length() >= n && name.unsafe_get(n) == '.'\n", ror["diff"])
+        else:
+            self.assertNotIn("diff", ror)
+
+    def test_only_the_mutants_at_marked_sites_run_natively(self):
+        native = self.summary["native"]
+        self.assertEqual((native["marked"], native["ran"], native["differ"]), (3, 3, 1))
+        self.assertEqual(native["outcomes"], {"killed": 2, "timed out": 0, "survived": 1, "unconfirmed": 0})
+        self.assertEqual((native["machine"], native["decides"]), (MACHINE, DECIDES))
+        # Natively: two runs without a mutant, as on wasm-gc, before the
+        # mutants, with their own time limit.
+        self.assertEqual(len(native["baseline"]["runs_s"]), 2)
+        self.assertAlmostEqual(native["limit_s"], 1.25 * native["baseline"]["run_s"] + 4, places=2)
+        self.assertEqual(native["baseline"]["tests"], 4)
+        # Each native build and run is of bounds' tests, and none passes -u.
+        native_runs = [line.split() for line in self.log.read_text().splitlines()
+                       if "--target native" in line and "--dry-run" not in line]
+        self.assertTrue(native_runs)
+        for words in native_runs:
+            self.assertEqual(words[words.index("-p") + 1], "mutation/fixture/bounds")
+            self.assertNotIn("-u", words)
+            self.assertNotIn("--update", words)
+        # A build of the baseline, of each mutant, and of each kill's two
+        # confirming runs: 1 + 3 + 2 x 2.
+        self.assertEqual(sum(1 for words in native_runs if "--build-only" in words), 8)
+
+    def test_native_builds_take_no_c_compiler_or_flags_from_the_environment(self):
+        # The run had MOON_CC, MOON_AR and MOON_CC_WRAPPER set to files that
+        # do not exist, and its native builds still built: the runner unset
+        # them, and says so.
+        self.assertEqual(self.summary["native"]["unset"], ["MOON_AR", "MOON_CC", "MOON_CC_WRAPPER"])
+        self.assertIn("The runner unset MOON_AR, MOON_CC and MOON_CC_WRAPPER", self.report)
+
+    def test_the_report_lists_the_mutants_whose_verdicts_differ(self):
+        self.assertIn("- Unchecked array access: 3 mutants at sites whose definition uses one, all of which ran"
+                      f" natively on {MACHINE} as well; 1 has another verdict there.", self.report)
+        self.assertIn("### Verdicts that differ between wasm-gc and native (1)", self.report)
+        self.assertIn("- `bounds/bounds.mbt,dot_after,ROR,>,>=,0`: wasm-gc killed, native survived", self.report)
+        if DECIDES:
+            self.assertIn("The native verdict decides here.", self.report)
+            self.assertIn("### Survivors (1)", self.report)
+        else:
+            self.assertIn(f"On {MACHINE}, the native verdict is recorded, and the wasm-gc verdict counts:"
+                          " only amd64's native verdict decides.", self.report)
+            self.assertIn("### Survivors (0)", self.report)
