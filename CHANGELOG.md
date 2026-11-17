@@ -690,6 +690,11 @@ of each GitHub release include its section
   gRPC in its description of smock, as the README's opening line does: "A
   mock server for HTTP/1.1, HTTP/2, HTTPS, Server-Sent Events and gRPC
   unary calls." It left gRPC out.
+- gRPC reflection now merges a request's `file_containing_extension`
+  records, as protobuf's parsers merge the records of a message field. It
+  kept only the last, so a request that gave the containing type in one
+  record and the extension number in the next got NOT_FOUND. No known
+  client sends a request that way.
 
 ## [0.4.0] - 2026-11-01
 
