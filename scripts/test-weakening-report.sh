@@ -737,6 +737,34 @@ else
   fail "committed-list: names $entries paths, fewer than the kinds of file it must name"
 fi
 
+# The committed list names every file of the tools that decide a verdict,
+# where the checkout has them, so that a change to any of them is listed:
+# #310 lists "the runner and its data" and "the coverage wrapper with its
+# floors and scope" among the files that decide a verdict. The mutation
+# runner is scripts/mutation/ (#298, #299), and the coverage wrapper, its
+# bisect parser and the parser's test data are scripts/coverage.sh,
+# scripts/coverage-report.py and scripts/coverage-tests/ (#296).
+tree
+package
+branch
+mkdir -p "$repo/scripts"
+cp "$list" "$repo/$list"
+git ls-files -- scripts/mutation scripts/coverage.sh scripts/coverage-report.py scripts/coverage-tests >"$tmp/tool-files"
+tools=0
+while read -r path; do
+  tools=$((tools + 1))
+  file "$path" </dev/null
+done <"$tmp/tool-files"
+report tool-files
+while read -r path; do
+  mentions tool-files "### \`$path\` (added)"
+done <"$tmp/tool-files"
+if [ "$tools" -ge 4 ]; then
+  pass "tool-files: the checkout has $tools files of the tools"
+else
+  fail "tool-files: the checkout has $tools files of the tools, fewer than the four it names"
+fi
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]
