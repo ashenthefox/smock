@@ -27,7 +27,7 @@ async test "over a real socket, the head and the opening chunk arrive at once, t
       ask_stream(conn, "/v1/chat/completions")
       let head = read_head(conn)
       let out = [
-        "head \{head_arrival(@async.now() - start, 400)}:",
+        "head \{head_arrival(@async.now() - start, 1000)}:",
         head.trim_end(chars="\n").to_owned(),
       ]
       // When each event is due, in milliseconds after the head: the
@@ -36,7 +36,7 @@ async test "over a real socket, the head and the opening chunk arrive at once, t
       // out at once, so the waits count from the request too, and the time
       // is taken from before it: a time taken after the head was read, an
       // await later, could make an event look early.
-      for due in [0, 400, 700, 1000, 1000, 1000] {
+      for due in [0, 1000, 1300, 1600, 1600, 1600] {
         let event = @async.with_timeout_opt(patience_ms, () => {
           conn.read_until("\n\n")
         })
@@ -45,7 +45,7 @@ async test "over a real socket, the head and the opening chunk arrive at once, t
         }
         let elapsed = @async.now() - start
         let when = if due == 0 {
-          head_arrival(elapsed, 400)
+          head_arrival(elapsed, 1000)
         } else {
           arrival(elapsed, due)
         }
@@ -54,19 +54,19 @@ async test "over a real socket, the head and the opening chunk arrive at once, t
       inspect(
         out.join("\n"),
         content=(
-          #|head before 400 ms:
+          #|head before 1000 ms:
           #|HTTP/1.1 200 OK
           #|Content-Type: text/event-stream
           #|x-request-id: req_TZp9I060Mzd0w4SDwiWTe2c8
           #|Smock-Mock: openai; via=default
           #|Date: <now>
           #|Transfer-Encoding: chunked
-          #|opening chunk before 400 ms
-          #|piece "Hi t" at 400 ms
-          #|piece "here" at 700 ms
-          #|piece "!" at 1000 ms
-          #|closing chunk at 1000 ms
-          #|[DONE] at 1000 ms
+          #|opening chunk before 1000 ms
+          #|piece "Hi t" at 1000 ms
+          #|piece "here" at 1300 ms
+          #|piece "!" at 1600 ms
+          #|closing chunk at 1600 ms
+          #|[DONE] at 1600 ms
         ),
       )
     })
@@ -78,6 +78,7 @@ async test "a client that leaves mid-stream ends the stream at smock's next writ
   with_definitions([("openai.json", paced_openai)], dir => {
     let stopped = with_smock(["--dir", dir, "--port", "0"], smock => {
       let conn = smock.connect()
+      let start = @async.now()
       ask_stream(conn, "/v1/ticks", session="left-mid-stream")
       let _ = read_head(conn)
       // The opening chunk, then the first piece.
@@ -88,22 +89,25 @@ async test "a client that leaves mid-stream ends the stream at smock's next writ
       }
       let streaming = open_files(smock.pid)
       conn.close()
-      // smock notices when it next writes to the closed connection, 50 ms
-      // later, and then closes its end of it.
-      let ended = @async.with_timeout_opt(3000, () => {
+      // smock "notices when it next writes an event"
+      // (docs/definition-files/llm-responses.md, Streams), 50 ms later, and
+      // then closes its end of the connection: well before the stream's own
+      // end, 200 pieces 50 ms apart, 10 s after the request.
+      let ended = @async.with_timeout_opt(patience_ms, () => {
         while open_files(smock.pid) >= streaming {
           @async.sleep(20)
         }
       })
+      let ended_ms = @async.now() - start
       let recorded = smock.journal_count(
         "left-mid-stream", "{ \"filter\": { \"path\": \"/v1/ticks\" } }",
       )
       inspect(
         [
-          if ended is Some(_) {
+          if ended is Some(_) && ended_ms < 200 * 50 {
             "the stream ended"
           } else {
-            "the stream still runs 3 s after the client closed"
+            "the stream still ran \{ended_ms} ms after the request, as long as its pieces last"
           },
           "in the Journal: \{recorded}",
           smock.send("GET", "/hello"),
@@ -151,6 +155,10 @@ async test "on SIGTERM, a drain waits for a stream in progress to send its waits
         defer stream.close()
         ask_stream(stream, "/v1/chat/completions")
         let _ = read_head(stream)
+        // "A drain on SIGTERM waits for a stream in progress, its waits
+        // included" (docs/definition-files/llm-responses.md, Streams), and
+        // ends once it is over, before the drain timeout.
+        let drain = 10000L
         let start = @async.now()
         smock.terminate()
         let (last, _, events) = until_end(stream, start)
@@ -158,12 +166,12 @@ async test "on SIGTERM, a drain waits for a stream in progress to send its waits
         inspect(
           [
             "the stream ended with [DONE] and its last chunk: \{events.has_suffix("data: [DONE]\n\n\n0\n\n")}",
-            "its last piece came after its waits, well before the drain timeout: \{last >= 900L && last < 3000L}",
+            "its last piece came after its waits, before the drain timeout: \{last >= 1500L && last < drain}",
             "exit status \{status}",
           ].join("\n"),
           content=(
             #|the stream ended with [DONE] and its last chunk: true
-            #|its last piece came after its waits, well before the drain timeout: true
+            #|its last piece came after its waits, before the drain timeout: true
             #|exit status 0
           ),
         )

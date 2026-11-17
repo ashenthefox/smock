@@ -375,12 +375,16 @@ async test "read timeout: a request that has begun but has not all arrived withi
         "body cut short: \{rest.escape()}, ended after at least 300 ms: \{elapsed >= 300}",
       )
       // A request sent one byte every 50 ms would take over 2 s to arrive:
-      // bytes keep coming, but the timeout runs from the first one.
+      // bytes keep coming, but the timeout runs "from its first byte to its
+      // last" (`smock serve --help`, --read-timeout-ms). So the connection
+      // ends before the test has sent the last byte, however slowly the
+      // test runs.
       let slow = smock.connect(over~)
       defer slow.close()
       let request = @utf8.encode(
         "GET /users/1 HTTP/1.1\r\nHost: localhost\r\n\r\n",
       )
+      let sent = Ref(0)
       let since = @async.now()
       @async.with_task_group(group => {
         group.spawn_bg(no_wait=true, () => {
@@ -388,12 +392,13 @@ async test "read timeout: a request that has begun but has not all arrived withi
             slow.write(request[i:i + 1]) catch {
               _ => return
             }
+            sent.val = i + 1
             @async.sleep(50)
           }
         })
         let (elapsed, rest) = ended(slow, since)
         out.push(
-          "trickled: \{rest.escape()}, ended after at least 300 ms: \{elapsed >= 300}, before the request could arrive: \{elapsed < 2000}",
+          "trickled: \{rest.escape()}, ended after at least 300 ms: \{elapsed >= 300}, before the request's last byte was sent: \{sent.val < request.length()}",
         )
       })
       // A request that arrives in time is answered.
@@ -408,7 +413,7 @@ async test "read timeout: a request that has begun but has not all arrived withi
         content=(
           #|head cut short: "", ended after at least 300 ms: true
           #|body cut short: "", ended after at least 300 ms: true
-          #|trickled: "", ended after at least 300 ms: true, before the request could arrive: true
+          #|trickled: "", ended after at least 300 ms: true, before the request's last byte was sent: true
           #|in time: HTTP/1.1 200 OK
         ),
       )
@@ -447,24 +452,30 @@ async test "read timeout: a request pipelined behind a slow response has the rea
       rest_later.write("host\r\n\r\n")
       out.push("pipelined: \{status_line(read_response(rest_later))}")
       // A rest that never comes still ends the connection, the read timeout
-      // after the slow response (give or take the time it takes to read).
+      // after the slow response: a request must arrive whole within the read
+      // timeout "of its first byte, or, when it was pipelined behind a
+      // response, of that response" (docs/running.md, Settings,
+      // --read-timeout-ms). The delay puts that response at least 600 ms
+      // after the request was sent, so the connection ends no sooner than
+      // 600 + 300 ms after it, and before the idle timeout, 10 s after that
+      // response, could end it. Both are timed from before the request.
       let no_rest = smock.connect(over~)
       defer no_rest.close()
+      let sent = @async.now()
       no_rest.write(
         "GET /slow HTTP/1.1\r\nHost: localhost\r\n\r\nGET /users/1 HTTP/1.1\r\nHost: local",
       )
       let _ = read_response(no_rest)
-      let since = @async.now()
-      let (elapsed, rest) = ended(no_rest, since)
+      let (end, rest) = ended(no_rest, sent)
       out.push(
-        "no rest: \{rest.escape()}, ended about 300 ms after the slow response: \{elapsed >= 200 && elapsed < 1000}",
+        "no rest: \{rest.escape()}, ended no sooner than the read timeout after the slow response: \{end >= 600 + 300}, before the idle timeout could: \{end < 600 + 10000}",
       )
       inspect(
         out.join("\n"),
         content=(
           #|slow: HTTP/1.1 200 OK
           #|pipelined: HTTP/1.1 200 OK
-          #|no rest: "", ended about 300 ms after the slow response: true
+          #|no rest: "", ended no sooner than the read timeout after the slow response: true, before the idle timeout could: true
         ),
       )
     },
@@ -536,15 +547,23 @@ async test "timeouts: neither timeout runs while smock writes a response, howeve
     (smock, over) => {
       let out = []
       // A response delayed past both timeouts, on a connection that then
-      // stays open for the idle timeout.
+      // stays open for the idle timeout: HTTP/1.1's idle timeout runs from
+      // the end of the response (the maintainer, 2026-11-17, which the
+      // running guide's Limits and timeouts states), and no other timeout
+      // runs on an idle connection. So the connection ends no sooner than
+      // the delay of 1000 ms and the idle timeout after the request, timed
+      // from before it, and within the 4 times the idle timeout after the
+      // response that the test has always allowed.
+      let idle = 500L
       let delayed = smock.connect(over~)
       defer delayed.close()
+      let sent = @async.now()
       delayed.write("GET /slow HTTP/1.1\r\nHost: localhost\r\n\r\n")
       let response = read_response(delayed)
-      let since = @async.now()
-      let (elapsed, rest) = ended(delayed, since)
+      let answered = @async.now() - sent
+      let (end, rest) = ended(delayed, sent)
       out.push(
-        "delayed: \{response.escape()}, then \{rest.escape()}, ended about 500 ms after it: \{elapsed >= 300 && elapsed < 2000}",
+        "delayed: \{response.escape()}, then \{rest.escape()}, ended about the idle timeout after it, within 4 times it: \{end >= 1000 + idle && end - answered < 4 * idle}",
       )
       // A stream longer than both timeouts.
       let stream = smock.connect(over~)
@@ -557,7 +576,7 @@ async test "timeouts: neither timeout runs while smock writes a response, howeve
       inspect(
         out.join("\n"),
         content=(
-          #|delayed: "HTTP/1.1 200 OK\nSmock-Mock: users; via=default\nDate: <now>\nContent-Length: 4\n\nslow", then "", ended about 500 ms after it: true
+          #|delayed: "HTTP/1.1 200 OK\nSmock-Mock: users; via=default\nDate: <now>\nContent-Length: 4\n\nslow", then "", ended about the idle timeout after it, within 4 times it: true
           #|streamed: "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nSmock-Mock: users; via=default\r\nDate: <now>\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n\r\nd\r\ndata: first\n\n\r\ne\r\ndata: second\n\n\r\nc\r\ndata: last\n\n\r\n0\r\n\r\n"
         ),
       )
@@ -584,17 +603,24 @@ async test "timeouts: a read timeout longer than the idle timeout gives a reques
       @async.sleep(800)
       conn.write("Host: localhost\r\n\r\n")
       out.push("the rest 800 ms later: \{status_line(read_response(conn))}")
+      // A request that has begun holds off a shorter idle timeout (the
+      // maintainer, 2026-11-17, which the running guide's Limits and
+      // timeouts states), and must arrive whole within the read timeout of
+      // its first byte (docs/running.md, Settings, --read-timeout-ms). So a
+      // rest that never comes ends the connection at the read timeout,
+      // which the test allows up to 3 times.
+      let read = 1500L
       let since = @async.now()
       conn.write("GET /users/1 HTTP/1.1\r\nHost: local")
       let (elapsed, rest) = ended(conn, since)
       out.push(
-        "a rest that never comes: \{rest.escape()}, ended after at least 1500 ms: \{elapsed >= 1500}, before 3000 ms: \{elapsed < 3000}",
+        "a rest that never comes: \{rest.escape()}, ended after at least 1500 ms: \{elapsed >= read}, within 3 times the read timeout: \{elapsed < 3 * read}",
       )
       inspect(
         out.join("\n"),
         content=(
           #|the rest 800 ms later: HTTP/1.1 200 OK
-          #|a rest that never comes: "", ended after at least 1500 ms: true, before 3000 ms: true
+          #|a rest that never comes: "", ended after at least 1500 ms: true, within 3 times the read timeout: true
         ),
       )
     },

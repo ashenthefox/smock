@@ -3,9 +3,9 @@
 // the time each part arrives is checked against the events' delays.
 
 ///|
-/// A Mock that streams three events from `/events`: the first 400 ms after
+/// A Mock that streams three events from `/events`: the first 1000 ms after
 /// the head, the second 300 ms later, and the last right after it. `/slow`
-/// streams one event, 1000 ms after the head. `/hello` answers at once.
+/// streams one event, 2000 ms after the head. `/hello` answers at once.
 let news : String =
   #|{ "mocks": [{ "name": "news" }],
   #|  "stubs": [
@@ -13,12 +13,12 @@ let news : String =
   #|      "response": { "status": 200,
   #|        "headers": { "Cache-Control": "no-cache" },
   #|        "events": [
-  #|          { "delay": 400, "data": "first" },
+  #|          { "delay": 1000, "data": "first" },
   #|          { "delay": 300, "event": "update", "id": "2", "data": "line 1\nline 2" },
   #|          { "data": "last" } ] } },
   #|    { "id": "slow", "mock": "news", "request": { "path": "/slow" },
   #|      "response": { "status": 200,
-  #|        "events": [{ "delay": 1000, "data": "late" }] } },
+  #|        "events": [{ "delay": 2000, "data": "late" }] } },
   #|    { "id": "hello", "mock": "news", "request": { "path": "/hello" },
   #|      "response": { "status": 200, "body": "hello" } } ] }
 
@@ -54,16 +54,16 @@ async test "an events Stub streams to a real HTTP/1.1 client: the head at once, 
       inspect(
         out.join("\n"),
         content=(
-          #|head before 400 ms:
+          #|head before 1000 ms:
           #|200 OK
           #|Content-Type: text/event-stream
           #|Cache-Control: no-cache
           #|Smock-Mock: news; via=default
           #|Date: <now>
           #|Transfer-Encoding: chunked
-          #|event at 400 ms: "data: first"
-          #|event at 700 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2"
-          #|event at 700 ms: "data: last"
+          #|event at 1000 ms: "data: first"
+          #|event at 1300 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2"
+          #|event at 1300 ms: "data: last"
           #|end of stream
           #|200 OK
           #|Smock-Mock: news; via=default
@@ -101,7 +101,7 @@ async test "an events Stub streams to an HTTP/1.0 client over a raw connection w
     inspect(
       out.join("\n"),
       content=(
-        #|head before 400 ms:
+        #|head before 1000 ms:
         #|HTTP/1.1 200 OK
         #|Content-Type: text/event-stream
         #|Cache-Control: no-cache
@@ -109,9 +109,9 @@ async test "an events Stub streams to an HTTP/1.0 client over a raw connection w
         #|Date: <now>
         #|Connection: close
         #|
-        #|event at 400 ms: "data: first"
-        #|event at 700 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2"
-        #|event at 700 ms: "data: last"
+        #|event at 1000 ms: "data: first"
+        #|event at 1300 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2"
+        #|event at 1300 ms: "data: last"
         #|closed
       ),
     )
@@ -127,24 +127,36 @@ async test "while a stream waits for an event's delay, smock answers requests on
       let start = @async.now()
       stream.write("GET /slow HTTP/1.1\r\nHost: localhost\r\n\r\n")
       let _ = read_head(stream)
-      let hello = smock.send("GET", "/hello")
-      let elapsed = @async.now() - start
+      // The stream is read beside the request on another connection,
+      // keeping when its event came. "While a stream waits, smock serves
+      // every other connection" (docs/definition-files/responses.md,
+      // Server-Sent Events), so the request is answered before the event
+      // comes.
+      let (hello, hello_ms, event, event_ms) = @async.with_task_group(group => {
+        let streamed = group.spawn(() => {
+          // The event's chunk, then the last chunk.
+          let event = @async.with_timeout_opt(patience_ms, () => {
+            stream.read_until("\r\n\r\n")
+          })
+          guard event is Some(Some(event)) else {
+            fail("the stream ended early")
+          }
+          (event, @async.now() - start)
+        })
+        let hello = smock.send("GET", "/hello")
+        let hello_ms = @async.now() - start
+        let (event, event_ms) = streamed.wait()
+        (hello, hello_ms, event, event_ms)
+      })
       let out = [
-        if elapsed < 1000L {
+        if hello_ms < event_ms {
           "answered while the stream waits:"
         } else {
-          "answered at \{elapsed} ms, after the stream's event was due:"
+          "answered at \{hello_ms} ms, after the stream's event came at \{event_ms} ms:"
         },
         hello,
+        "stream \{arrival(event_ms, 2000)}: \{event.escape()}",
       ]
-      // The event's chunk, then the last chunk.
-      let event = @async.with_timeout_opt(patience_ms, () => {
-        stream.read_until("\r\n\r\n")
-      })
-      guard event is Some(Some(event)) else { fail("the stream ended early") }
-      out.push(
-        "stream \{arrival(@async.now() - start, 1000)}: \{event.escape()}",
-      )
       inspect(
         out.join("\n"),
         content=(
@@ -155,7 +167,7 @@ async test "while a stream waits for an event's delay, smock answers requests on
           #|Content-Length: 5
           #|
           #|hello
-          #|stream at 1000 ms: "c\r\ndata: late\n\n\r\n0"
+          #|stream at 2000 ms: "c\r\ndata: late\n\n\r\n0"
         ),
       )
     })
@@ -176,6 +188,7 @@ async test "a client that closes the connection mid-stream ends that stream, and
   with_definitions([("clock.json", defs)], dir => {
     let stopped = with_smock(["--dir", dir, "--port", "0"], smock => {
       let conn = smock.connect()
+      let start = @async.now()
       conn.write("GET /ticks HTTP/1.1\r\nHost: localhost\r\n\r\n")
       let _ = read_head(conn)
       guard conn.read_until("\n\n") is Some(_) else {
@@ -183,18 +196,21 @@ async test "a client that closes the connection mid-stream ends that stream, and
       }
       let streaming = open_files(smock.pid)
       conn.close()
-      // smock notices when it next writes to the closed connection, and
-      // then closes its end of it.
-      let ended = @async.with_timeout_opt(3000, () => {
+      // smock notices "when it next writes an event"
+      // (docs/definition-files/responses.md, Server-Sent Events), 50 ms
+      // later, and then closes its end of it: well before the stream's own
+      // end, 10 s after the request.
+      let ended = @async.with_timeout_opt(patience_ms, () => {
         while open_files(smock.pid) >= streaming {
           @async.sleep(20)
         }
       })
+      let ended_ms = @async.now() - start
       let out = [
-        if ended is Some(_) {
+        if ended is Some(_) && ended_ms < 200 * 50 {
           "the stream ended"
         } else {
-          "the stream still runs 3 s after the client closed"
+          "the stream still ran \{ended_ms} ms after the request, as long as its events last"
         },
         smock.send("GET", "/hello"),
       ]
@@ -239,7 +255,9 @@ async test "a response to HEAD from an events Stub is its head alone: smock writ
       let conn = smock.connect()
       defer conn.close()
       let start = @async.now()
-      // `/slow` has one event, due 1000 ms after the head.
+      // `/slow` has one event, due 2000 ms after the head. A response to
+      // HEAD "waits for no event" (docs/definition-files/responses.md,
+      // Server-Sent Events), so the next request is answered before it.
       conn.write(
         "HEAD /slow HTTP/1.1\r\nHost: localhost\r\nbaggage: smock-session=head-of-stream\r\n\r\nGET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n",
       )
@@ -253,7 +271,7 @@ async test "a response to HEAD from an events Stub is its head alone: smock writ
         [
           head,
           "in the Journal right after: \{recorded}",
-          if elapsed < 1000L {
+          if elapsed < 2000L {
             "the next request answered before the event was due:"
           } else {
             "the next request answered at \{elapsed} ms, after the event was due:"

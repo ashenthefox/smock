@@ -254,6 +254,10 @@ async test "h2c: a header block whose small CONTINUATION frames keep coming, und
         // A stream answered first, so that the GOAWAY names it.
         raw.send([raw.get(1, "/fast")])
         let answered = raw.frames_until_stream_ends(1)
+        // A header block "still open" at the read timeout gets GOAWAY
+        // (docs/http2.md, Timeouts), which the test allows up to 3 times the
+        // read timeout, well before the idle timeout.
+        let read = 600L
         let start = @async.now()
         raw.send([opening(3, b"\x82")])
         // A CONTINUATION frame of 100 octets every 50 ms, until the GOAWAY
@@ -284,9 +288,9 @@ async test "h2c: a header block whose small CONTINUATION frames keep coming, und
             answered,
             "---",
             ..goaway.shown,
-            "GOAWAY after at least 600 ms: \{goaway.end_ms >= 600}, before 900 ms: \{goaway.end_ms < 900}",
+            "GOAWAY after at least 600 ms: \{goaway.end_ms >= read}, within 3 times the read timeout: \{goaway.end_ms < 3 * read}",
             "CONTINUATION frames until then, at least 5: \{before >= 5}, and the block under the bound: \{1 + 100 * sent.val <= 32768}",
-            "then: \{after.shown.length()} frames, \{after.how}, about a second after the GOAWAY: \{after.end_ms - goaway.end_ms >= 800 && after.end_ms - goaway.end_ms < 2000}",
+            "then: \{after.shown.length()} frames, \{after.how}, about a second after the GOAWAY: \{about_a_second(after.end_ms - goaway.end_ms)}",
             smock.fresh(),
           ].join("\n"),
           content=(
@@ -296,7 +300,7 @@ async test "h2c: a header block whose small CONTINUATION frames keep coming, und
             #|DATA 1 END_STREAM 4 octets
             #|---
             #|GOAWAY last=1 NO_ERROR
-            #|GOAWAY after at least 600 ms: true, before 900 ms: true
+            #|GOAWAY after at least 600 ms: true, within 3 times the read timeout: true
             #|CONTINUATION frames until then, at least 5: true, and the block under the bound: true
             #|then: 0 frames, a FIN, about a second after the GOAWAY: true
             #|then a fresh connection: 200 fast

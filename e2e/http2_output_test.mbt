@@ -117,6 +117,9 @@ async test "h2c: a client that opens wide windows, sends many HEAD and GET reque
     let stopped = with_smock(
       ["--dir", dir, "--port", "0", "--write-timeout-ms", "1000"],
       smock => {
+        // The write timeout closes the connection (docs/running.md, The
+        // write timeout), which the test allows up to 5 times.
+        let write = 1000L
         let raw = smock.raw_h2(settings=false)
         defer raw.close()
         raw.send(wide_open)
@@ -149,13 +152,13 @@ async test "h2c: a client that opens wide windows, sends many HEAD and GET reque
           [
             "fewer requests reached the Mocks than the client sent: \{unread.reached < unread.sent}",
             "peak RSS within 32 MiB: \{unread.peak <= peak_target}",
-            "closed after at least 1000 ms: \{unread.closed_ms >= 1000}, within 5000 ms: \{unread.closed_ms < 5000}",
+            "closed after at least 1000 ms: \{unread.closed_ms >= write}, within 5 times the write timeout: \{unread.closed_ms < 5 * write}",
             "a new connection: \{after.brief()}",
           ].join("\n"),
           content=(
             #|fewer requests reached the Mocks than the client sent: true
             #|peak RSS within 32 MiB: true
-            #|closed after at least 1000 ms: true, within 5000 ms: true
+            #|closed after at least 1000 ms: true, within 5 times the write timeout: true
             #|a new connection: 200 hello (end)
           ),
         )
@@ -172,6 +175,9 @@ async test "h2c: delayed responses to a client that opens wide windows and never
     let stopped = with_smock(
       ["--dir", dir, "--port", "0", "--write-timeout-ms", "1000"],
       smock => {
+        // The write timeout closes the connection (docs/running.md, The
+        // write timeout), which the test allows up to 5 times.
+        let write = 1000L
         let raw = smock.raw_h2(settings=false)
         defer raw.close()
         raw.send(wide_open)
@@ -199,13 +205,13 @@ async test "h2c: delayed responses to a client that opens wide windows and never
           [
             "requests that reached the Mocks: \{unread.reached} of \{unread.sent}",
             "peak RSS within 32 MiB: \{unread.peak <= peak_target}",
-            "closed after at least 1000 ms: \{unread.closed_ms >= 1000}, within 5000 ms: \{unread.closed_ms < 5000}",
+            "closed after at least 1000 ms: \{unread.closed_ms >= write}, within 5 times the write timeout: \{unread.closed_ms < 5 * write}",
             "a new connection: \{after.brief()}",
           ].join("\n"),
           content=(
             #|requests that reached the Mocks: 100 of 100
             #|peak RSS within 32 MiB: true
-            #|closed after at least 1000 ms: true, within 5000 ms: true
+            #|closed after at least 1000 ms: true, within 5 times the write timeout: true
             #|a new connection: 200 hello (end)
           ),
         )

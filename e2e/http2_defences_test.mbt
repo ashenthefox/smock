@@ -511,21 +511,20 @@ async test "h2c: floods of empty DATA frames, padded or not, of WINDOW_UPDATE, R
 async test "h2c: when a defence closes the connection, its streams in progress end with it: a delayed stream's task is cancelled at once, and its entry is committed then" {
   with_definitions([("faults.json", faults)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
-      let start = @async.now()
       // `GET /slow` waits 1,500 ms before its response.
       let flooded = smock.flood(
         "a PING flood while a delayed stream waits",
         setup=raw => [raw.get(1, "/slow")],
         _ => times(ping, 100),
       )
-      let entries = smock.journal_once(2, within=1000)
-      let committed_ms = @async.now() - start
+      // "Every stream of a connection that closes" stops waiting at once
+      // (docs/http2.md, Streams that wait), so the delayed entry's
+      // duration, by smock's own clock, ends before the delay of 1,500 ms.
+      let entries = smock.journal_durations(2, below=1500, within=patience_ms)
       inspect(
-        [
-          flooded,
-          "both committed before the delay was over: \{entries.length() == 2 && committed_ms < 1500}",
-          ..entries,
-        ].join("\n"),
+        [flooded, "both committed: \{entries.length() == 2}", ..entries].join(
+          "\n",
+        ),
         content=(
           #|a PING flood while a delayed stream waits:
           #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
@@ -535,9 +534,9 @@ async test "h2c: when a defence closes the connection, its streams in progress e
           #|GOAWAY last=1 ENHANCE_YOUR_CALM
           #|then a FIN
           #|then a fresh connection: 200 fast
-          #|both committed before the delay was over: true
-          #|/slow: stub "slow", status 200
-          #|/fast: stub "fast", status 200
+          #|both committed: true
+          #|/slow: stub "slow", status 200, durationMs below 1500: true
+          #|/fast: stub "fast", status 200, durationMs below 1500: true
         ),
       )
     })
