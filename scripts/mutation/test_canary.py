@@ -115,12 +115,23 @@ def git(repo, *args):
     return result.stdout
 
 
+def installed_toolchain():
+    """The version of the moonc on PATH, as .moonbit-version writes it, or
+    None without one."""
+    moonc = shutil.which("moonc")
+    if moonc is None:
+        return None
+    words = subprocess.run([moonc, "-v"], capture_output=True, text=True).stdout.split()
+    return words[0].removeprefix("v") if words else None
+
+
 def fixture_history(directory, files=None):
     """A git repository at directory whose one commit holds a copy of the
-    fixture module, the toolchain pin of this repository and the files
-    given by path: the commit's id."""
+    fixture module, a .moonbit-version that pins the toolchain on PATH (so
+    that the weekly run with the latest MoonBit runs these tests too), and
+    the files given by path: the commit's id."""
     shutil.copytree(FIXTURE, directory, ignore=shutil.ignore_patterns("_build", "target", ".mooncakes"))
-    shutil.copyfile(REPO / ".moonbit-version", directory / ".moonbit-version")
+    (directory / ".moonbit-version").write_text(f"{installed_toolchain()}\n")
     for path, text in (files or {}).items():
         (directory / path).parent.mkdir(parents=True, exist_ok=True)
         (directory / path).write_text(text, encoding="utf-8")
@@ -337,7 +348,7 @@ class RunTest(unittest.TestCase):
         env = dict(os.environ, PATH=f"{fake}{os.pathsep}{os.environ['PATH']}")
         result = self.run_canary_on(self.data, "--work", self.work, env=env)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        pinned = (REPO / ".moonbit-version").read_text().strip()
+        pinned = installed_toolchain()
         self.assertIn(f"{self.commit} pins MoonBit {pinned}, but moonc on PATH is 0.0.1+fake", result.stderr)
         self.assertIn("canary.py install", result.stderr)
         # It ran no moon.
