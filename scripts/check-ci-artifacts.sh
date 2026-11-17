@@ -61,7 +61,9 @@
 #   the job does, also after a failed step (!cancelled()). No job or step
 #   continues on error or hides a failed command, and no other job uploads
 #   smock-linux-<arch>.
-# - One of those jobs runs this check and its test.
+# - Those jobs run, each once: this check and its test, yaml-test-suite
+#   against smock's YAML parser (scripts/check-yaml-test-suite.sh), and the
+#   test of its verdict (scripts/test-yaml-test-suite-verdict.sh).
 #
 # scripts/test-check-ci-artifacts.sh tests this check. It needs yq
 # (mikefarah/yq v4, on GitHub's Ubuntu runners) and jq.
@@ -366,7 +368,8 @@ problems=$(yq --output-format=json "$caller" | jq -r --arg workflow "$(basename 
     ($all[] | .key as $job | .value.steps[]? | (.if | expression) as $if
      | select($if != null and $if != "!cancelled()")
      | "the step \"\(step_name)\" of job \($job) should run whenever its job does (no condition, or !cancelled() to run after a failed step), not if: \($if)"),
-    (("scripts/check-ci-artifacts.sh", "scripts/test-check-ci-artifacts.sh") as $command
+    (("scripts/check-ci-artifacts.sh", "scripts/test-check-ci-artifacts.sh",
+      "scripts/check-yaml-test-suite.sh", "scripts/test-yaml-test-suite-verdict.sh") as $command
      | ([$all[] | select(.key as $key | any($keep[]; .key == $key) | not) | .value.steps[]? | select(command == $command)] | length) as $times
      | if $times != 1 then "a job that the binaries wait for should run \($command) once, not \($times) times" else empty end),
 

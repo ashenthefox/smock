@@ -34,7 +34,7 @@ fail() {
 export HANDED='release-linux-${{ matrix.arch }}'
 export PINNED="inputs.toolchain == 'pinned'"
 export GATED='${{ !cancelled() && needs.plan.outputs.full != '"'false'"' }}'
-export KEEP='${{ !cancelled() && needs.build-test.result == '"'success'"' && needs.scripts.result == '"'success'"' }}'
+export KEEP='${{ !cancelled() && needs.build-test.result == '"'success'"' && needs.scripts.result == '"'success'"' && needs.yaml-test-suite.result == '"'success'"' }}'
 
 # check <name>: runs the check on the copies, its output into
 # $tmp/<name>.out and its exit status into $tmp/<name>.status.
@@ -478,6 +478,33 @@ refuses this-check-may-fail caller \
   '(.jobs.scripts.steps[] | select(.run == "scripts/check-ci-artifacts.sh") | .run) = "scripts/check-ci-artifacts.sh || true"' \
   "a job that the binaries wait for should run scripts/check-ci-artifacts.sh once, not 0 times"
 
+# yaml-test-suite runs against smock's YAML parser in every run, and its
+# verdict's test too: a run without them would keep binaries whose parser
+# no suite checked.
+refuses yaml-test-suite-not-run caller \
+  'del(.jobs.yaml-test-suite.steps[] | select(.run == "scripts/check-yaml-test-suite.sh"))' \
+  "a job that the binaries wait for should run scripts/check-yaml-test-suite.sh once, not 0 times"
+
+refuses yaml-test-suite-run-twice caller \
+  '.jobs.scripts.steps += [{"run": "scripts/check-yaml-test-suite.sh"}]' \
+  "a job that the binaries wait for should run scripts/check-yaml-test-suite.sh once, not 2 times"
+
+refuses yaml-test-suite-may-fail caller \
+  '(.jobs.yaml-test-suite.steps[] | select(.run == "scripts/check-yaml-test-suite.sh") | .run) = "scripts/check-yaml-test-suite.sh || true"' \
+  "a job that the binaries wait for should run scripts/check-yaml-test-suite.sh once, not 0 times"
+
+refuses yaml-test-suite-verdict-not-tested caller \
+  'del(.jobs.scripts.steps[] | select(.run == "scripts/test-yaml-test-suite-verdict.sh"))' \
+  "a job that the binaries wait for should run scripts/test-yaml-test-suite-verdict.sh once, not 0 times"
+
+refuses yaml-test-suite-on-pull-requests-only caller \
+  '.jobs.yaml-test-suite.if = "github.event_name == '"'"'pull_request'"'"'"' \
+  "job yaml-test-suite should run in every run, once: no condition, no needs and no matrix"
+
+refuses yaml-test-suite-after-the-build caller \
+  '.jobs.yaml-test-suite.needs = "build-test"' \
+  "job yaml-test-suite should run in every run, once: no condition, no needs and no matrix"
+
 refuses called-with-the-latest-toolchain caller \
   '.jobs.build-test.with.toolchain = "latest"' \
   "it should call build-test.yml with toolchain: pinned, with which the release binaries are handed over"
@@ -541,7 +568,7 @@ refuses kept-whatever-happened caller \
   '(.jobs.keep.steps[] | select(.with.name == "smock-linux-arm64") | .if) = "always()"' \
   "job keep should make smock-linux-arm64 whenever it runs, not if: always()"
 
-for job in build-test scripts; do
+for job in build-test scripts yaml-test-suite; do
   refuses "keep-without-$job" caller \
     ".jobs.keep.needs -= [\"$job\"]" \
     "job keep should need job $job, so that it keeps nothing when that job fails"
