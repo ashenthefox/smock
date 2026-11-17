@@ -6,8 +6,9 @@ it, and writes one record per mutant, a summary per package and a report
 
 usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir>]
            [--set pinned|full] [--mutant <id>]... [--sites-only] [--workers <n>]
+           [--list <file> [--totals-only]] [--sample <n> [--seed <s>]] [--shard <k>/<n>]
            [--flakes <file>] [--moon <moon>] [--finder <command>]
-           <package directory>...
+           [<package directory>...]
 
 <package directory> is relative to <root>, the workspace or module to
 mutate: the current directory unless it is given. The site finder
@@ -21,7 +22,35 @@ alternative of every operator at every position. --mutant runs only the
 mutant with that id, which must be in the set, and may be given more than
 once; a package given that holds none of the ids is not run.
 --sites-only runs no mutant: it writes the counts of sites, positions and
-skipped sites of each package, in both sets.
+skipped sites of each package, in both sets, and the mutants a run would
+make, in chosen.jsonl.
+
+Three more options choose the mutants, for bulk runs (choice.py says how):
+
+  --list <file>    runs the mutants a file lists, in its order, in place
+                   of a set: by offset on a commit, or by key on any
+                   later commit. A mutant that no site of operator set v1
+                   makes is outside v1, and its record says so
+                   (in_operator_set). The packages are those of the
+                   listed files, unless given. A key that no longer
+                   finds its text is written, with why, to
+                   unapplied.jsonl, and the report counts it. With
+                   --totals-only, the run writes only per-package and
+                   total counts into summary.json and report.md; it
+                   removes from <out> the files of an earlier run that
+                   name mutants and from <work> the workers' builds, and
+                   prints no mutant's id, no output of a build or a test,
+                   and not the reason it stops, which may name a mutant.
+  --sample <n>     runs a sample of n of the set's mutants, stratified by
+                   package, which --seed (0 unless given) fixes.
+  --shard <k>/<n>  runs the k-th of n parts of the mutants, in the run's
+                   order, whose sizes differ by one at most;
+                   scripts/mutation/merge.py merges the outputs of a
+                   run's shards into the output of the run without them.
+
+Without --mutant, --list or --sample, every package given runs, one that
+has no mutant at all in the first shard; with one of them, only the
+packages that hold one of the shard's mutants run.
 
 For each worker, the runner copies <root> into <work>/tree-<n>, the files
 that git tracks and the untracked ones it does not ignore, and builds
@@ -95,8 +124,9 @@ It writes into <out> (<work>/out unless it is given):
                  that failed then), the tests that failed but give no kill
                  credit, the compiler's message for an unviable one, and
                  the diff of a survivor or of an unconfirmed one;
-  summary.json   the operator set's version and the set that ran, the
-                 flake threshold with the tests above it and those with a
+  summary.json   the operator set's version, the set that ran (listed for
+                 --list), what chose the mutants (selection), the flake
+                 threshold with the tests above it and those with a
                  flaky result in this run ("flakes"), and per package: the
                  baseline (both runs, and the tests that failed in them),
                  the counts of sites and positions in the set that ran
@@ -119,8 +149,11 @@ It writes into <out> (<work>/out unless it is given):
                  the time-outs, the unconfirmed mutants, each survivor's
                  diff with its whole enclosing definition (for the full
                  set, the survivors at the pinned alternatives and those
-                 at the other alternatives apart), and the flaky tests,
-                 which it also prints;
+                 at the other alternatives apart); for a listed set,
+                 then, per package, the mutants listed, run, no longer
+                 applying and outside v1, each listed mutant with its
+                 outcome, and each key that no longer applies, with why;
+                 and last the flaky tests. It also prints the report;
   flakes.json    the flake records: the latest runs' records, this one
                  included, and each test's flake rate over them, for the
                  next run's --flakes.
@@ -147,6 +180,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import choice
 import compare
 import confirm
 import importers
@@ -581,7 +615,7 @@ def report(operator_set, chosen, summaries, records):
     package, the sites each rule skipped, its time-outs, and its survivors
     with their diffs, those at the other alternatives of the full set
     apart."""
-    which = "the pinned set" if chosen == "pinned" else "the full set"
+    which = {"pinned": "the pinned set", "full": "the full set"}.get(chosen, f"a {chosen} set")
     out = ["# Mutation report", "", f"Operator set {operator_set}, {which}.", ""]
     for summary in summaries:
         package = summary["package"]
@@ -664,30 +698,68 @@ def main():
     parser.add_argument("--mutant", action="append", help="run only the mutant with this id")
     parser.add_argument("--sites-only", action="store_true",
                         help="count the sites of each package in both sets, and run no mutant")
+    parser.add_argument("--list", metavar="FILE",
+                        help="run the mutants that FILE lists, by offset on a commit or by key")
+    parser.add_argument("--totals-only", action="store_true",
+                        help="with --list, write only per-package and total counts, naming no mutant")
+    parser.add_argument("--sample", type=int, metavar="N",
+                        help="run a sample of N of the mutants, stratified by package")
+    parser.add_argument("--seed", default="0", help="the seed of --sample (0 unless given)")
+    parser.add_argument("--shard", type=choice.shard_spec, metavar="K/N",
+                        help="run only shard K of N of the mutants (K from 1)")
     parser.add_argument("--workers", type=int, default=1, help="how many mutants build and run at once")
     parser.add_argument("--flakes", help="the flake records of an earlier run (its flakes.json)")
     parser.add_argument("--moon", default="moon", help="the moon command")
     parser.add_argument("--finder", help="the site finder's command (default: sites.py beside this script)")
-    parser.add_argument("packages", nargs="+", help="package directories, relative to <root>")
+    parser.add_argument("packages", nargs="*",
+                        help="package directories, relative to <root> (with --list, those of its files"
+                             " unless given)")
     args = parser.parse_args()
     if args.workers < 1:
         parser.error("--workers must be at least 1")
+    if args.sample is not None and (args.sample < 1 or args.mutant or args.list):
+        parser.error("--sample takes a number from 1, and no --mutant or --list")
+    if args.list and args.mutant:
+        parser.error("--list and --mutant choose the mutants each: give one of them")
+    if not args.packages and not args.list:
+        parser.error("give at least one package directory")
+    if args.totals_only and (not args.list or args.sites_only or args.shard):
+        parser.error("--totals-only takes --list, and neither --sites-only nor --shard")
     root = Path(args.root).resolve()
     work = Path(args.work).resolve() if args.work else root / "_build" / "mutation"
     out = Path(args.out).resolve() if args.out else work / "out"
     finder = shlex.split(args.finder) if args.finder else [sys.executable, str(HERE / "sites.py")]
 
     def log(message):
-        print(message, file=sys.stderr, flush=True)
+        if not args.totals_only:
+            print(message, file=sys.stderr, flush=True)
 
     judge = None
     try:
-        found = {directory: find_sites(finder, root, directory) for directory in args.packages}
+        entries = choice.read_list(args.list) if args.list else None
+        if entries is not None and not args.packages:
+            args.packages = choice.list_directories(entries)
+        found = {directory: find_sites(finder, root, directory) for directory in args.packages
+                 if entries is None or (root / directory).is_dir()}
+        found.update({directory: ([], []) for directory in args.packages if directory not in found})
         versions = {s["operator_set"] for sites, skipped in found.values() for s in sites + skipped}
         if len(versions) > 1:
             raise RunnerError(f"the packages' sites name several operator sets: {sorted(versions)}")
         operator_set = versions.pop() if versions else None
         sites, chosen = choose(found, args.set, args.mutant, args.packages)
+        unapplied = {directory: [] for directory in args.packages}
+        if entries is not None:
+            chosen, unapplied = choice.resolve(root, args.list, entries, found, args.packages)
+            if args.shard and args.shard[0] != 1:
+                # The first shard counts the keys that no longer apply.
+                unapplied = {directory: [] for directory in args.packages}
+        if args.sample is not None:
+            chosen = choice.sample(chosen, args.packages, args.sample, args.seed)
+        # The run's mutants, and the shard's.
+        whole, chosen = chosen, choice.shard(chosen, args.packages, *args.shard) if args.shard else chosen
+        selected = bool(args.mutant) or args.sample is not None or entries is not None
+        run_set = "listed" if entries is not None else args.set
+        runs = choice.running(args.packages, whole, chosen, selected, args.shard and args.shard[0])
         records, summaries = [], []
         if not args.sites_only:
             files = listed_files(root)
@@ -697,23 +769,36 @@ def main():
                 worker.judge = judge
                 sync(root, worker.tree, files)
         for directory in args.packages:
-            if args.mutant and not chosen[directory]:
+            if directory not in runs:
                 continue
             summary = package_summary(root, directory, found[directory][0], found[directory][1], args.set,
                                       operator_set)
+            summary["set"] = run_set
             if not args.sites_only:
                 package_records, counts = run_package(root, directory, sites[directory], chosen[directory],
                                                       workers, log)
                 for record in package_records:
-                    record.update(set=args.set)
+                    record.update(set=run_set)
                 summary.update(counts)
-                if args.set == "full":
+                if run_set == "full":
                     summary.update(alternative_counts(package_records))
                 records += package_records
             summaries.append(summary)
-    except RunnerError as error:
-        print(f"run: {error}", file=sys.stderr)
+    except (RunnerError, choice.ChoiceError) as error:
+        print(choice.HIDDEN if args.totals_only else f"run: {error}", file=sys.stderr)
         sys.exit(1)
+    except Exception:
+        if not args.totals_only:
+            raise
+        print(choice.HIDDEN, file=sys.stderr)
+        sys.exit(1)
+    finally:
+        if args.totals_only:
+            choice.drop_builds(work)
+    if args.totals_only:
+        print(choice.write_totals(out, operator_set, choice.selection(args), args.packages, summaries, records,
+                                  unapplied, outcome_counts))
+        return
     out.mkdir(parents=True, exist_ok=True)
     with open(out / "mutants.jsonl", "w", encoding="utf-8") as f:
         for record in records:
@@ -722,10 +807,24 @@ def main():
     if judge is not None:
         (out / "flakes.json").write_text(json.dumps(judge.records(), indent=2, ensure_ascii=False) + "\n",
                                          encoding="utf-8")
+    if entries is not None:
+        with open(out / "unapplied.jsonl", "w", encoding="utf-8") as f:
+            for directory in args.packages:
+                for entry, why in unapplied[directory]:
+                    line = {"directory": directory, "listed": entry, "why": why}
+                    f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    if args.sites_only:
+        with open(out / "chosen.jsonl", "w", encoding="utf-8") as f:
+            for directory in args.packages:
+                for site in chosen[directory] if directory in runs else []:
+                    f.write(json.dumps(site, ensure_ascii=False) + "\n")
     (out / "summary.json").write_text(
-        json.dumps({"operator_set": operator_set, "set": args.set, "packages": summaries, **flakes},
+        json.dumps({"operator_set": operator_set, "set": run_set, "selection": choice.selection(args),
+                    "packages": summaries, **flakes},
                    indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    text = report(operator_set, args.set, summaries, records)
+    text = report(operator_set, run_set, summaries, records)
+    if entries is not None and not args.sites_only:
+        text += "\n".join(["", *choice.listed_report(args.packages, records, unapplied)])
     if judge is not None:
         text = text.rstrip("\n") + "\n\n" + "\n".join(judge.report_lines())
     (out / "report.md").write_text(text, encoding="utf-8")

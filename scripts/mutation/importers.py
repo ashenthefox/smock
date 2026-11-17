@@ -148,6 +148,30 @@ def merge(record, again, packages, summary):
         summary["killed_by"] = dict(sorted(summary["killed_by"].items()))
 
 
+def own_records(records):
+    """A package's records as its own tests left them: a mutant that its
+    importers' tests ran again had survived its own tests."""
+    return [dict(r, outcome="survived") if r.get("importers") else r for r in records]
+
+
+def merge_credits(credits):
+    """What a package's summary says of its importers in a run in shards
+    (scripts/mutation/merge.py), from what each shard's summary says: the
+    same importers, the survivors they ran again and killed summed over
+    the shards, and the run without a mutant and the time limit of the
+    first shard whose importers' tests ran."""
+    merged = credit(credits[0]["packages"], credits[0]["native_only"])
+    for found in credits:
+        merged["reran"] += found["reran"]
+        merged["killed"] += found["killed"]
+        for name, n in found["killed_by"].items():
+            merged["killed_by"][name] = merged["killed_by"].get(name, 0) + n
+        if "baseline" in found and "baseline" not in merged:
+            merged.update(baseline=found["baseline"], limit_s=found["limit_s"])
+    merged["killed_by"] = dict(sorted(merged["killed_by"].items()))
+    return merged
+
+
 def report_lines(summary):
     """The lines of the report that give a package's counts with its own
     tests alone, its importers, and what their tests killed."""

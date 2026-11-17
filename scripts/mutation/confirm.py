@@ -260,18 +260,23 @@ class Judge:
 
     def report_lines(self):
         """The report's section on flaky tests."""
-        summary = self.summary()
-        out = ["## Flaky tests", "",
-               f"Flake threshold {summary['threshold']:.2%} of a test's runs, over the latest {summary['recent_runs']}"
-               f" runs; this run read the records of {summary['runs_read']}.", ""]
-        for title, tests in (("Above the threshold, so they give no kill credit in this run", summary["above"]),
-                             ("A flaky result in this run", summary["flaked"])):
-            out += [f"{title}: {'none' if not tests else len(tests)}.", ""]
-            out += [f"- `{t['name']}` ({t['package']}, {t['file']}): {t['flaked']} of {t['observed']} runs,"
-                    f" {t['rate']:.2%}" for t in tests]
-            if tests:
-                out += [""]
-        return out
+        return summary_lines(self.summary())
+
+
+def summary_lines(summary):
+    """The report's section on flaky tests, from what the summary says of
+    them."""
+    out = ["## Flaky tests", "",
+           f"Flake threshold {summary['threshold']:.2%} of a test's runs, over the latest {summary['recent_runs']}"
+           f" runs; this run read the records of {summary['runs_read']}.", ""]
+    for title, tests in (("Above the threshold, so they give no kill credit in this run", summary["above"]),
+                         ("A flaky result in this run", summary["flaked"])):
+        out += [f"{title}: {'none' if not tests else len(tests)}.", ""]
+        out += [f"- `{t['name']}` ({t['package']}, {t['file']}): {t['flaked']} of {t['observed']} runs,"
+                f" {t['rate']:.2%}" for t in tests]
+        if tests:
+            out += [""]
+    return out
 
 
 def records_of(runs, threshold, recent):
@@ -309,6 +314,15 @@ def merge(shards):
     this = {"suites": dict(sorted(suites.items())),
             "tests": [dict(named(k), flaked=c[0], reruns=c[1]) for k, c in sorted(tests.items(), key=str)]}
     return records_of(first["runs"][:-1] + [this], first["threshold"], first["recent_runs"])
+
+
+def merged_summary(summaries, records):
+    """What the summary of a run in shards says of flaky tests, from its
+    shards' summaries and its merged flake records (merge): the threshold,
+    the runs read and the tests above it, which every shard read alike,
+    and the flaky results of this run over all its shards."""
+    mine = Judge.rates([records["runs"][-1]])
+    return dict(summaries[0], flaked=[dict(named(k), **r) for k, r in sorted(mine.items(), key=str)])
 
 
 def main():

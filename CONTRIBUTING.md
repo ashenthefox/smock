@@ -1455,7 +1455,8 @@ and passes to the runner; the weekly workflow
 made of shards, as the weekly run is, keeps one file: its shards each
 read the same records, and
 `python3 scripts/mutation/confirm.py merge <flakes.json>...` sums their
-counts of this run into one record. A run
+counts of this run into one record, as `scripts/mutation/merge.py` does
+when it merges the shards' outputs. A run
 without `--flakes`, as on a laptop, starts with no records, so only its
 own two runs without a mutant take credit away.
 
@@ -1511,8 +1512,79 @@ its whole enclosing definition, and the flaky tests, which the runner
 also prints; and `flakes.json`, the flake records. A run of the full set counts
 the mutants at the pinned alternatives and at the other alternatives
 apart, and lists their survivors apart: L4 reads only the former.
-`--sites-only` runs no mutant, and writes only the counts. `--work` and
-`--out` choose other directories.
+`--sites-only` runs no mutant, and writes only the counts and the
+mutants a run would make (`chosen.jsonl`). `--work` and `--out` choose
+other directories.
+
+**Shards, samples and listed sets.** Bulk runs choose among the mutants
+with three more options, which `scripts/mutation/choice.py` implements.
+Each summary says what chose its mutants (`selection`): the set, the
+packages, the ids, the list's SHA-256, the sample and the shard.
+
+- `--shard k/n` runs the k-th of n parts of the mutants, in the run's
+  order (the packages as given, then each package's sites), and the
+  parts' sizes differ by one at most. Every mutant is in exactly one
+  shard, and the same input gives the same shards. Each shard runs the
+  tests of its packages without a mutant on its own, and a package with
+  no mutant at all runs in the first shard.
+  `python3 scripts/mutation/merge.py --out <dir> <shard>...` merges the
+  outputs of every shard of one run into the output of the run without
+  shards: the same records, counts and report, timings aside, the
+  counts with the package's own tests alone, its importers' counts and
+  the flake records included. One thing differs: each shard compares
+  the compiler's output only among its own mutants, so a mutant that
+  compiles as one in another shard runs its tests instead of being
+  marked a duplicate, and both records hold the same digest. Each
+  package's summary keeps each shard's run without
+  a mutant, and its importers' run, under `shards`.
+- `--sample N --seed S` takes N of the set's mutants, stratified by
+  package. Each package gets its share of N, rounded down, and the
+  mutants left over go to the packages whose shares lost the most in
+  rounding (the first package given wins a tie). Within a package, the
+  mutants taken are those whose ids, hashed with the seed by SHA-256,
+  come first. So the same seed and tree give the same sample, whatever
+  the version of Python. The seed is 0 unless given.
+- `--list FILE` runs the mutants a file lists, in its order, in place of
+  a set. Each line is a JSON object, a mutant by offset or by key:
+  - **By offset**: `file`, `offset` (in characters, from 0), `original`
+    (the text at the offset, which the mutant replaces), `replacement`,
+    and `commit`, on which the offset holds; and `operator`, if the entry
+    names one. The run stops unless the file holds its text on that
+    commit and the original text at the offset.
+  - **By key**: `file`, `definition`, `operator`, `original`,
+    `replacement` and `ordinal`, the fields of an id, by which an
+    exclusion names a mutant, with the texts whole. A key applies to any
+    later commit where it still finds its text.
+
+  A listed mutant that a site of operator set v1 makes is that site, with
+  its id: by offset, one whose change is the site's, but for white space
+  at its edges, as the finder tells two sites that make the same mutant.
+  Any other is outside v1: its record says
+  `"in_operator_set": false`. It is named as a site is, with the operator
+  its entry gives (`OTHER` when an entry by offset gives none), and an
+  ordinal that counts the places in its definition where the same
+  original text starts before it, outside comments. So a key whose
+  operator is one of v1's names a site of v1 by its id, and a mutant
+  outside v1 takes an operator name of its own, such as `SWAP`. A key no
+  longer applies when its file, its definition or its text is gone, or,
+  for an operator of v1, its site. The run writes such a key, with why,
+  to `unapplied.jsonl`, and the report counts it beside the outcomes of
+  the others; with shards, the first shard counts them. The packages are
+  those of the listed files, unless given: given packages leave the
+  list's other mutants out.
+
+  With `--totals-only`, which the held-out set needs, a listed run writes
+  only `summary.json` and `report.md`, with counts per package and in
+  total: listed, killed, timed out, survived, unviable, no longer
+  applying, and the score. It prints no mutant's id, no output of a
+  build or a test, and not the reason it stops, which may name a mutant.
+  It removes from its output directory the files of an earlier run that
+  name mutants, and from its work directory the workers' builds, which
+  hold the last mutants. It takes no shard.
+
+Without `--mutant`, `--list` or `--sample`, every package given runs, as
+before; with one of them, only the packages that hold one of the
+mutants.
 
 **The compiler's output.** Before a mutant's tests run, the runner
 compares the compiler's output for the mutated package with the output
@@ -1603,7 +1675,9 @@ would kill stays a survivor. The tests of confirmation run calc's
 mutants with a moon that answers the runs of tests from a script (a
 failure, then a pass; a time-out, then a run within the limit), so that a
 flaky failure and a time-out that does not repeat happen every time; the
-real moon builds. `moon fmt --check`
+real moon builds. `scripts/mutation/test_choice.py` runs the options
+above on copies of the fixture, some in a small git history, and merges
+shards. `moon fmt --check`
 at the root does not read the fixture: run `moon fmt` inside it after a
 change.
 
