@@ -240,8 +240,10 @@ def markdown(found, records):
             f"**The whole diff is covered**: {lines} changed non-test {'line' if lines == 1 else 'lines'} in the pure"
             f" packages ({', '.join(found['packages'])}), with no mutant of the pinned set on"
             f" {'it' if lines == 1 else 'them'}, so none ran.", ""])
+    mutants = found["mutants"]
     on_lines = (f"{lines} changed non-test {'line' if lines == 1 else 'lines'} in the pure packages"
-                f" ({', '.join(found['packages'])}), with {found['mutants']} mutants of the pinned set on them")
+                f" ({', '.join(found['packages'])}), with {mutants} {'mutant' if mutants == 1 else 'mutants'} of the"
+                f" pinned set on {'it' if lines == 1 else 'them'}")
     if not found["covered"]:
         return "\n".join(out + [
             f"**The diff is not covered**: {on_lines}, more than the {BUDGET} that the {MOST_SHARDS} shards of a"

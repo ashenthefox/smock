@@ -470,6 +470,7 @@ step one beyond shard --root "$repo" --runner "$runner" --plan "$tmp/one/plan" -
   --out "$tmp/one/beyond/out" || true
 status one beyond 1
 says_err one beyond "changed-lines: the plan has 1 shards, and no shard 2"
+says one "**The whole diff is covered**: 1 changed non-test line in the pure packages (calc), with 1 mutant of the pinned set on it, all run on 1 shard."
 
 # The report refuses shards that are not the plan's: one missing, one
 # given twice, or one that ran on other lines, as when main moved between
