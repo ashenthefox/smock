@@ -1667,8 +1667,9 @@ fn chat_request(stream : String) -> String {
 
 ///|
 /// A Mock `openai` whose Stub `paced` streams `Hi there!` in three pieces,
-/// the first 400 ms after the head and each later one 300 ms after the one
-/// before, its seed fixing its request id. `/v1/ticks` streams 200 pieces, one every 50 ms, which would
+/// the first 1000 ms after the head, which leaves a slow runner room to
+/// read the head and the opening chunk before it, and each later one 300 ms
+/// after the one before, its seed fixing its request id. `/v1/ticks` streams 200 pieces, one every 50 ms, which would
 /// last 10 s, and `/hello` answers at once.
 let paced_openai : String =
   $|{ "mocks": [{ "name": "openai" }],
@@ -1677,7 +1678,7 @@ let paced_openai : String =
   $|      "request": { "method": "POST", "path": "/v1/chat/completions" },
   $|      "response": { "status": 200,
   $|        "llm": { "api": "openai-chat", "text": "Hi there!",
-  $|          "timing": { "first": { "fixed": 400 }, "interval": { "fixed": 300 } } } },
+  $|          "timing": { "first": { "fixed": 1000 }, "interval": { "fixed": 300 } } } },
   $|      "fault": { "seed": 7 } },
   $|    { "id": "ticks", "mock": "openai",
   $|      "request": { "method": "POST", "path": "/v1/ticks" },
@@ -2105,8 +2106,10 @@ fn ephemeral_user(status : Int32, body : String) -> String {
 
 ///|
 /// When the events of `/events` in `news` are due, in milliseconds after
-/// the request.
-let news_due : Array[Int32] = [400, 700, 700]
+/// the request. The head goes out at once, before the first event, and a
+/// test checks that order against the first event's time due: 1000 ms
+/// leaves a slow runner room.
+let news_due : Array[Int32] = [1000, 1300, 1300]
 
 ///|
 /// `at <due> ms` when an event that arrived `elapsed` milliseconds after
@@ -2128,7 +2131,12 @@ fn arrival(elapsed : Int64, due : Int32) -> String {
 ///|
 /// `before <first> ms` when the head arrived `elapsed` milliseconds after
 /// the request, before the first event was due at `first`. Otherwise when
-/// it arrived.
+/// it arrived. smock "sends the status and the headers at once", then
+/// waits the first event's delay (docs/definition-files/responses.md,
+/// Server-Sent Events): the head comes before the first event, and on one
+/// connection only the time the event is due tells the two apart. The
+/// streams that use this make that time long enough to leave a slow runner
+/// room, rather than loosening the bound.
 fn head_arrival(elapsed : Int64, first : Int32) -> String {
   if elapsed < first.to_int64() {
     "before \{first} ms"

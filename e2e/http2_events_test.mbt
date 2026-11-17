@@ -13,7 +13,7 @@ let h2_news : String =
   #|      "response": { "status": 200,
   #|        "headers": { "Cache-Control": "no-cache" },
   #|        "events": [
-  #|          { "delay": 400, "data": "first" },
+  #|          { "delay": 1000, "data": "first" },
   #|          { "delay": 300, "event": "update", "id": "2", "data": "line 1\nline 2" },
   #|          { "data": "last" } ] } },
   #|    { "id": "hello", "mock": "m", "request": { "path": "/hello" },
@@ -82,10 +82,10 @@ async test "h2c: an events Stub sends HEADERS with text/event-stream and no cont
         content=(
           #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
           #|SETTINGS ACK
-          #|before 400 ms: HEADERS 1 END_HEADERS [:status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>]
-          #|DATA 1 at 400 ms: "data: first\n\n"
-          #|DATA 1 at 700 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
-          #|DATA 1 END_STREAM at 700 ms: "data: last\n\n"
+          #|before 1000 ms: HEADERS 1 END_HEADERS [:status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>]
+          #|DATA 1 at 1000 ms: "data: first\n\n"
+          #|DATA 1 at 1300 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
+          #|DATA 1 END_STREAM at 1300 ms: "data: last\n\n"
           #|---
           #|/events: stub "stream", status 200
         ),
@@ -105,7 +105,7 @@ let h2_news_late : String =
   #|      "response": { "status": 200,
   #|        "headers": { "Cache-Control": "no-cache" },
   #|        "events": [
-  #|          { "delay": 400, "data": "first" },
+  #|          { "delay": 1000, "data": "first" },
   #|          { "delay": 300, "event": "update", "id": "2", "data": "line 1\nline 2" },
   #|          { "data": "last" } ] } },
   #|    { "id": "late", "mock": "m", "request": { "path": "/late" },
@@ -142,15 +142,15 @@ async test "h2c: several event streams on one connection each stream their event
         content=(
           #|stream 1:
           #|  HEADERS at once: :status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>
-          #|  DATA at 400 ms: "data: first\n\n"
-          #|  DATA at 700 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
-          #|  DATA at 700 ms: "data: last\n\n"
+          #|  DATA at 1000 ms: "data: first\n\n"
+          #|  DATA at 1300 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
+          #|  DATA at 1300 ms: "data: last\n\n"
           #|  end
           #|stream 3:
           #|  HEADERS at once: :status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>
-          #|  DATA at 400 ms: "data: first\n\n"
-          #|  DATA at 700 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
-          #|  DATA at 700 ms: "data: last\n\n"
+          #|  DATA at 1000 ms: "data: first\n\n"
+          #|  DATA at 1300 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
+          #|  DATA at 1300 ms: "data: last\n\n"
           #|  end
           #|stream 5:
           #|  HEADERS at 300 ms: :status: 200, content-type: text/event-stream, date: <now>

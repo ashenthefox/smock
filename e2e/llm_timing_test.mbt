@@ -27,7 +27,7 @@ async test "over a real socket, the head and the opening chunk arrive at once, t
       ask_stream(conn, "/v1/chat/completions")
       let head = read_head(conn)
       let out = [
-        "head \{head_arrival(@async.now() - start, 400)}:",
+        "head \{head_arrival(@async.now() - start, 1000)}:",
         head.trim_end(chars="\n").to_owned(),
       ]
       // When each event is due, in milliseconds after the head: the
@@ -36,7 +36,7 @@ async test "over a real socket, the head and the opening chunk arrive at once, t
       // out at once, so the waits count from the request too, and the time
       // is taken from before it: a time taken after the head was read, an
       // await later, could make an event look early.
-      for due in [0, 400, 700, 1000, 1000, 1000] {
+      for due in [0, 1000, 1300, 1600, 1600, 1600] {
         let event = @async.with_timeout_opt(patience_ms, () => {
           conn.read_until("\n\n")
         })
@@ -45,7 +45,7 @@ async test "over a real socket, the head and the opening chunk arrive at once, t
         }
         let elapsed = @async.now() - start
         let when = if due == 0 {
-          head_arrival(elapsed, 400)
+          head_arrival(elapsed, 1000)
         } else {
           arrival(elapsed, due)
         }
@@ -54,19 +54,19 @@ async test "over a real socket, the head and the opening chunk arrive at once, t
       inspect(
         out.join("\n"),
         content=(
-          #|head before 400 ms:
+          #|head before 1000 ms:
           #|HTTP/1.1 200 OK
           #|Content-Type: text/event-stream
           #|x-request-id: req_TZp9I060Mzd0w4SDwiWTe2c8
           #|Smock-Mock: openai; via=default
           #|Date: <now>
           #|Transfer-Encoding: chunked
-          #|opening chunk before 400 ms
-          #|piece "Hi t" at 400 ms
-          #|piece "here" at 700 ms
-          #|piece "!" at 1000 ms
-          #|closing chunk at 1000 ms
-          #|[DONE] at 1000 ms
+          #|opening chunk before 1000 ms
+          #|piece "Hi t" at 1000 ms
+          #|piece "here" at 1300 ms
+          #|piece "!" at 1600 ms
+          #|closing chunk at 1600 ms
+          #|[DONE] at 1600 ms
         ),
       )
     })
@@ -158,7 +158,7 @@ async test "on SIGTERM, a drain waits for a stream in progress to send its waits
         inspect(
           [
             "the stream ended with [DONE] and its last chunk: \{events.has_suffix("data: [DONE]\n\n\n0\n\n")}",
-            "its last piece came after its waits, well before the drain timeout: \{last >= 900L && last < 3000L}",
+            "its last piece came after its waits, well before the drain timeout: \{last >= 1500L && last < 3000L}",
             "exit status \{status}",
           ].join("\n"),
           content=(

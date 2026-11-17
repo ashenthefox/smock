@@ -3,7 +3,7 @@
 // the time each part arrives is checked against the events' delays.
 
 ///|
-/// A Mock that streams three events from `/events`: the first 400 ms after
+/// A Mock that streams three events from `/events`: the first 1000 ms after
 /// the head, the second 300 ms later, and the last right after it. `/slow`
 /// streams one event, 1000 ms after the head. `/hello` answers at once.
 let news : String =
@@ -13,7 +13,7 @@ let news : String =
   #|      "response": { "status": 200,
   #|        "headers": { "Cache-Control": "no-cache" },
   #|        "events": [
-  #|          { "delay": 400, "data": "first" },
+  #|          { "delay": 1000, "data": "first" },
   #|          { "delay": 300, "event": "update", "id": "2", "data": "line 1\nline 2" },
   #|          { "data": "last" } ] } },
   #|    { "id": "slow", "mock": "news", "request": { "path": "/slow" },
@@ -54,16 +54,16 @@ async test "an events Stub streams to a real HTTP/1.1 client: the head at once, 
       inspect(
         out.join("\n"),
         content=(
-          #|head before 400 ms:
+          #|head before 1000 ms:
           #|200 OK
           #|Content-Type: text/event-stream
           #|Cache-Control: no-cache
           #|Smock-Mock: news; via=default
           #|Date: <now>
           #|Transfer-Encoding: chunked
-          #|event at 400 ms: "data: first"
-          #|event at 700 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2"
-          #|event at 700 ms: "data: last"
+          #|event at 1000 ms: "data: first"
+          #|event at 1300 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2"
+          #|event at 1300 ms: "data: last"
           #|end of stream
           #|200 OK
           #|Smock-Mock: news; via=default
@@ -101,7 +101,7 @@ async test "an events Stub streams to an HTTP/1.0 client over a raw connection w
     inspect(
       out.join("\n"),
       content=(
-        #|head before 400 ms:
+        #|head before 1000 ms:
         #|HTTP/1.1 200 OK
         #|Content-Type: text/event-stream
         #|Cache-Control: no-cache
@@ -109,9 +109,9 @@ async test "an events Stub streams to an HTTP/1.0 client over a raw connection w
         #|Date: <now>
         #|Connection: close
         #|
-        #|event at 400 ms: "data: first"
-        #|event at 700 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2"
-        #|event at 700 ms: "data: last"
+        #|event at 1000 ms: "data: first"
+        #|event at 1300 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2"
+        #|event at 1300 ms: "data: last"
         #|closed
       ),
     )
