@@ -227,7 +227,7 @@ class OperatorsTest(unittest.TestCase):
             (("skipped", "no default", "{\n  { x, }\n}", ""), 58, True),
             (("skipped", "no default", "{\n  (x, { x, })\n}", ""), 63, True),
             # body_already and body_empty already are the default: no site.
-            (("skipped", "FFI", 'pub extern "C" fn body_foreign(fd : Int32) -> Int32 = "foreign"', ""), 80, True),
+            (("skipped", "FFI", 'pub extern "js" fn body_foreign(fd : Int32) -> Int32 = "(fd) => fd"', ""), 80, True),
             (f + "impl Eq for Point with equal,BODY,{…},{ false },0", 84, True),
             (f + "conditions,BODY,{…},{ 0 },0", 92, True),
             (f + "logic,BODY,{…},{ false },0", 120, True),

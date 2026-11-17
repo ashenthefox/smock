@@ -76,8 +76,8 @@ pub fn body_empty() -> Unit {
 }
 
 ///|
-/// FFI: the body is foreign.
-pub extern "C" fn body_foreign(fd : Int32) -> Int32 = "foreign"
+/// FFI: the body is foreign, JavaScript, since ADR 0001 forbids C here.
+pub extern "js" fn body_foreign(fd : Int32) -> Int32 = "(fd) => fd"
 
 ///|
 /// The methods of core's traits, whose return types are not written.
