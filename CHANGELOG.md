@@ -785,6 +785,18 @@ of each GitHub release include its section
   once and copies the ClientHello at most once, when it is whole: such a
   client costs about 0.2 s, and a ClientHello in one record costs less
   than before ([smock#388](https://github.com/hirunefu/smock/issues/388)).
+- The certificate expiry metric, and the `expiry` of a reload's log entry,
+  now give the notAfter of the leaf that the TLS port presents when the
+  certificate file starts with a UTF-8 byte order mark, as Windows
+  PowerShell 5.1's `Out-File -Encoding utf8` writes it. OpenSSL drops the
+  mark and presents the leaf. smock kept it, skipped the leaf and read the
+  next certificate, so a chain got the notAfter of the certificate after
+  the leaf, usually years later, and a certificate alone got 0. smock now
+  drops the mark where OpenSSL does: on the first line of the file, and on
+  the line right after the END line of a block that OpenSSL skips, such as
+  a private key. A BEGIN line with white space before it is now no BEGIN
+  line, as for OpenSSL, which then presents the certificate after it
+  ([smock#389](https://github.com/hirunefu/smock/issues/389)).
 
 ## [0.4.0] - 2026-11-01
 

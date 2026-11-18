@@ -2,7 +2,7 @@
 {"file":"serverparsers/bearer_token.mbt","definition":"bearer_token","text":"1490180b7fbad494","pinned":{"BODY":1,"ROR":4,"IFC":5,"LCR":3,"DEL":1,"AOR":2,"INT":2,"STR":2},"full":{"BODY":1,"ROR":4,"IFC":11,"LCR":3,"DEL":1,"AOR":2,"INT":5,"STR":4}}
 {"file":"serverparsers/bearer_token.mbt","definition":"same_token","text":"f57bd4d7e6f8575a","pinned":{"BODY":1,"IFC":1,"DEL":1,"INT":5},"full":{"BODY":1,"IFC":2,"DEL":1,"INT":6}}
 {"file":"serverparsers/certificate_expiry.mbt","definition":"certificate_expiry","text":"7a45470a2dbdf197","pinned":{"BODY":1,"IFC":1,"DEL":2,"INT":6},"full":{"BODY":1,"IFC":5,"DEL":2,"INT":13}}
-{"file":"serverparsers/certificate_expiry.mbt","definition":"first_certificate_der","text":"fd6d58f1168b3aa2","pinned":{"BODY":1,"IFC":3,"DEL":1,"BOOL":3,"STR":3},"full":{"BODY":1,"IFC":6,"DEL":1,"BOOL":3,"STR":6}}
+{"file":"serverparsers/certificate_expiry.mbt","definition":"first_certificate_der","text":"77a8ecc225e3381f","pinned":{"BODY":1,"IFC":4,"LCR":1,"DEL":1,"BOOL":1,"STR":8},"full":{"BODY":1,"IFC":8,"LCR":1,"DEL":1,"BOOL":1,"STR":16}}
 {"file":"serverparsers/certificate_expiry.mbt","definition":"der_element","text":"087e2b5b991b9c02","pinned":{"BODY":1,"ROR":6,"IFC":4,"LCR":2,"DEL":3,"AOR":10,"INT":15},"full":{"BODY":1,"ROR":6,"IFC":8,"LCR":2,"DEL":3,"AOR":10,"INT":26}}
 {"file":"serverparsers/certificate_expiry.mbt","definition":"der_time","text":"2bb993386c284f91","pinned":{"BODY":1,"ROR":3,"IFC":3,"LCR":2,"NOT":1,"AOR":3,"INT":32,"STR":4},"full":{"BODY":1,"ROR":3,"IFC":6,"LCR":2,"NOT":1,"AOR":3,"INT":44,"STR":7}}
 {"file":"serverparsers/client_hello.mbt","definition":"MAX_CLIENT_HELLO","text":"67ed7fa14d01afdf","pinned":{"INT":1},"full":{"INT":3}}
