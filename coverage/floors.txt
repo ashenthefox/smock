@@ -33,7 +33,7 @@ prng 0
 protobuf 113
 protobuf-conformance 52
 re2 5
-server 2705
+server 2671
 serverparsers 0
 settings 0
 template 62
