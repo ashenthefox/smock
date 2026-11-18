@@ -573,7 +573,7 @@ async test "h2c: floods of empty DATA frames, padded or not, of WINDOW_UPDATE, R
 }
 
 ///|
-async test "h2c: when a defence closes the connection, its streams in progress end with it: a delayed stream's task is cancelled at once, and its entry is committed then" {
+async test "h2c: when a defence closes the connection, its streams in progress end with it: a delayed stream's task is cancelled at once, and its entry's duration, by smock's own clock, ends before its delay was over" {
   with_definitions([("faults.json", faults)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       // `GET /slow` waits 1,500 ms before its response.

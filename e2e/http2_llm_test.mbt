@@ -199,7 +199,7 @@ async test "h2c: an llm stream with fixed waits sends its HEADERS and opening ch
 }
 
 ///|
-async test "h2c: an llm stream that the client resets mid-stream ends at once: its entry is committed then, its duration up to the reset, and no more of its chunks is sent" {
+async test "h2c: an llm stream that the client resets mid-stream ends at once: its entry's duration, by smock's own clock, ends before the first piece was due, and no more of its chunks is sent" {
   with_definitions([("openai.json", paced_openai)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let raw = smock.raw_h2()

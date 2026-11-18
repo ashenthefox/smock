@@ -192,7 +192,7 @@ fn h2_ticks() -> String {
 }
 
 ///|
-async test "h2c: an event stream that the client resets, or that moonhttp resets for the client's frames, ends at once: its entry is committed then, its duration up to the reset, and no more of its events is sent" {
+async test "h2c: an event stream that the client resets, or that moonhttp resets for the client's frames, ends at once: its entry's duration, by smock's own clock, ends before the next event was due, and no more of its events is sent" {
   with_definitions([("m.json", h2_ticks())], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let raw = smock.raw_h2()

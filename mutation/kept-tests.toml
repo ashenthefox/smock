@@ -267,9 +267,10 @@ streams, and how it decodes moonhttp's fields
 smock does after moonhttp's answer, when a listed test asserts that answer:
 - e2e/http2_streams_test.mbt's delayed stream and
   e2e/http2_events_test.mbt's event stream, reset for a WINDOW_UPDATE of 0:
-  their subject is that the task ends and the entry is committed at once;
-  RST_STREAM PROTOCOL_ERROR for that frame, on a delayed and on an event
-  stream, is asserted by the listed MadeYouReset test of the five kinds;
+  their subject is that the task ends at once, as the entry's duration
+  shows; RST_STREAM PROTOCOL_ERROR for that frame, on a delayed and on an
+  event stream, is asserted by the listed MadeYouReset test of the five
+  kinds;
 - e2e/http2_bodies_test.mbt's content-length over --body-limit: its
   subject is smock's 413; RST_STREAM PROTOCOL_ERROR for HEADERS that end
   the stream with a content-length is asserted by the listed tests of
