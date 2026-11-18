@@ -258,6 +258,10 @@ it (see [Test costs on CI's runners](#test-costs-on-cis-runners)).
 many times on one runner, to show that a timing test holds on CI's
 runners (see [Build and test](#build-and-test)).
 
+`.github/workflows/mutation-runs.yml`, started by hand, runs the mutation
+runner's bulk runs in shards on GitHub's runners and merges them into one
+report (see [Bulk runs on Actions](#bulk-runs-on-actions)).
+
 `scripts/h2spec/` holds the Definition file that CI serves to h2spec, the
 HTTP/2 conformance tool, and the lists of h2spec's cases that do not pass on
 the plain port and on the TLS port, each with its reason (see
@@ -364,6 +368,8 @@ python3 scripts/check-merge.py <branch>   # whether the branch checks on the bra
 scripts/test-check-merge.sh          # the merge check, with a fake gh and canned runs on a small git history (needs python3, git and jq)
 scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs only by hand, and installs its commit's toolchain before the replay (needs yq and jq)
 scripts/test-check-mutation-canary-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
+scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only by hand, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
+scripts/test-check-mutation-runs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
 scripts/test-yaml-test-suite-verdict.sh   # how a run of yaml-test-suite is judged against its lists of cases
@@ -394,7 +400,7 @@ scripts/check-conformance.sh         # protobuf's conformance suite against smoc
 scripts/fetch-yaml-test-suite.sh     # the pinned release of the YAML test suite, into _build/yaml-test-suite
 scripts/check-yaml-test-suite.sh     # the YAML test suite against smock/yaml in both modes, judged by yaml-test-suite/safe.txt and openapi.txt (fetches the suite first)
 scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, read smock's LLM responses (needs python3 and PyPI)
-python3 -m unittest discover -s scripts/mutation -v   # the mutation runner and its site finder, on a module whose mutants are known, and the exclusion list (needs git, moon and moonc)
+python3 -m unittest discover -s scripts/mutation -v   # the mutation runner and its site finder, on a module whose mutants are known, the exclusion list and the bulk runs' steps (needs git, moon and moonc)
 python3 scripts/mutation/exclusions.py check   # each entry of the exclusion list has a category and what it needs, and the stale ones are listed (needs moonc)
 python3 scripts/mutation/exclusions.py review --base origin/main   # the entries this branch adds or changes, and those the maintainer reads (--seed draws one in five)
 python3 scripts/check-e2e-helpers.py   # no e2e test file uses what another test file defines (needs moon and moonc)
@@ -1730,8 +1736,11 @@ of each outcome and the runs without a mutant with the tests that failed
 in them,
 the same counts with the package's own tests alone, and its importers:
 those on wasm-gc and those left out, the survivors their tests ran again
-and how many the tests of each importer killed; `report.md`, the same
-counts, the time-outs, the unconfirmed mutants, each survivor's diff with
+and how many the tests of each importer killed, and, when BODY mutants
+ran, the **pseudo-tested functions**: those whose BODY mutant survived,
+each with its status after the exclusion list; `report.md`, the same
+counts, the time-outs, the unconfirmed mutants, the pseudo-tested
+functions, each survivor's diff with
 its whole enclosing definition, and the flaky tests, which the runner
 also prints; and `flakes.json`, the flake records. A run of the full set counts
 the mutants at the pinned alternatives and at the other alternatives
@@ -1741,9 +1750,15 @@ mutants a run would make (`chosen.jsonl`). `--work` and `--out` choose
 other directories.
 
 **Shards, samples and listed sets.** Bulk runs choose among the mutants
-with three more options, which `scripts/mutation/choice.py` implements.
+with four more options, which `scripts/mutation/choice.py` implements.
 Each summary says what chose its mutants (`selection`): the set, the
-packages, the ids, the list's SHA-256, the sample and the shard.
+packages, the ids, the operators, the list's SHA-256, the sample and the
+shard.
+
+- `--operator OP`, once or more, runs only the set's mutants that those
+  operators of v1 make, in the run's order. `--operator BODY` is a
+  **BODY pass**: the BODY mutant of every function, which L2 reads. It
+  takes no `--list`, which chooses its own mutants.
 
 - `--shard k/n` runs the k-th of n parts of the mutants, in the run's
   order (the packages as given, then each package's sites), and the
@@ -1806,9 +1821,9 @@ packages, the ids, the list's SHA-256, the sample and the shard.
   name mutants, and from its work directory the workers' builds, which
   hold the last mutants. It takes no shard.
 
-Without `--mutant`, `--list`, `--sample` or `--changed`, every package
-given runs, as before; with one of them, only the packages that hold one
-of the mutants.
+Without `--mutant`, `--operator`, `--list`, `--sample` or `--changed`,
+every package given runs, as before; with one of them, only the packages
+that hold one of the mutants.
 
 **Mutants on the changed lines.** Before you push a branch, run the
 mutants on the lines it changes. It is the one run larger than a single
@@ -1985,9 +2000,9 @@ python3 scripts/mutation/run.py usage
 ```
 
 Run only that much on a laptop, besides the mutants on your changed
-lines (above). Bulk runs, over many packages or the weekly and monthly sets, go
-to GitHub Actions, through the workflows that later steps of the review
-add.
+lines (above). Bulk runs, over many packages or the weekly and monthly
+sets, go to GitHub Actions
+([Bulk runs on Actions](#bulk-runs-on-actions)).
 
 The tests (`python3 -m unittest discover -s scripts/mutation -v`) run the
 finder and the runner on `scripts/mutation/fixture`, a module that is not
@@ -2298,6 +2313,122 @@ compares the merged one. The tests (`scripts/mutation/test_canary.py`)
 check the committed data against d953f320, so they need the history down
 to that commit, and run the replay, its toolchain check and the install
 on a canary of the fixture's mutants in a git history of its own.
+
+### Bulk runs on Actions
+
+Bulk runs go to GitHub Actions, never to a laptop, but for the two named
+exceptions: step 1's replay of the 250 sampled mutants and the held-out
+runs on the maintainer's machine. `.github/workflows/mutation-runs.yml`
+runs them, only when started by hand, from the Actions tab or with `gh`.
+GitHub starts a workflow by hand only once it is on the default branch;
+`--ref` picks the commit it runs on:
+
+```sh
+gh workflow run mutation-runs.yml -f mode=sample -f size=1000 -f seed=<seed>
+gh workflow run mutation-runs.yml -f mode=body
+gh workflow run mutation-runs.yml -f mode=packages -f set=full -f packages='yaml http1'
+gh workflow run mutation-runs.yml -f mode=matrix -f packages=usage
+gh workflow run mutation-runs.yml -f mode=list -f list=<a file in the repository>
+gh workflow run mutation-runs.yml -f mode=timing -f size=50 -f seed=<seed>
+```
+
+Its inputs:
+
+- `mode`, what the run runs, with the runner's options above:
+  - `sample`: a seeded sample of `size` mutants of the set, stratified by
+    package (`--sample`);
+  - `body`: a BODY pass (`--operator BODY`);
+  - `packages`: every mutant of the set;
+  - `list`: the mutants that `list`, a file in the repository, lists
+    (`--list`), in place of a set;
+  - `matrix`: a kill matrix (`--matrix`), for a snapshot audit or a
+    removal batch;
+  - `timing`: one shard, a seeded sample of `size` mutants, run three
+    times, each on a runner of its own, with 1, 2 and 4 mutants built and
+    tested at once (`--workers`).
+- `packages`: package directories, separated by spaces. Without them, a
+  run takes the pure packages that have sites: the 19 and `serverparsers`
+  ([Terms](#terms)); `testcerts` is data and has none. With a list, the
+  packages of its files.
+- `set`: `pinned`, the default, or `full`.
+- `seed` and `size`: a sample's, 0 and 1,000 unless given.
+- `width`: how many shards run at once, from 1 to 20, the default.
+- `workers`: how many mutants each shard builds and tests at once, 1
+  unless given.
+
+A run runs the runner as any run does: each package's own tests, then
+its importers' tests for the survivors, kill confirmation, the comparison
+of the compiler's output, the self-test and the exclusion list. It has
+three jobs, and `scripts/mutation/bulk.py` holds the steps they take:
+
+- **plan** runs `run.py --sites-only` on the mode's selection, which runs
+  no mutant, and cuts the mutants into shards: as many as the width, or
+  more when a shard would not end within a job's time. A job on GitHub's
+  runners stops after 6 hours; a shard's mutants may take 5 of them, at
+  20 s a mutant (`bulk.py plan --seconds-per-mutant`). That is the
+  costliest package's mutant on a runner with its kill confirmed:
+  `engine`'s tests took about 3 s a mutant on wasm-gc on a laptop, a
+  runner is about 1.7 times slower, and a kill is built and run three
+  times. More shards than the width run in waves, as jobs come free, so
+  their count is then a multiple of the width, which fills each wave. A
+  run never has more shards than mutants, and one that would need more
+  than the 256 jobs a matrix makes is refused. The job's summary
+  gives the run's mutants per package, and how many of them are at an
+  unchecked access, and the plan is kept as the artifact `mutation-plan`.
+- **shard** runs each shard (`bulk.py shard`), at most the width at once,
+  on an amd64 runner (`ubuntu-24.04`) with the native setup. Verdicts of
+  a pure package are taken on wasm-gc, which any runner gives alike, but a
+  mutant at an unchecked access also runs natively, and its native
+  verdict decides only on amd64 ([Native verdicts](#mutation-runner)). A
+  shard stops after 6 hours. Its output, with `bulk.json`, which says how
+  long its run took, is kept as the artifact `mutation-shard-<shard>` for
+  7 days, also when it fails.
+- **finish** merges the shards with `merge.py` (`bulk.py finish`) and
+  starts the report with the run: its link, what it ran, its shards, its
+  wall time, from the first job's start to the last job's end, and its
+  runner time, the jobs' times added up, both read from GitHub's API, and
+  how long the longest shard took. Then a line per package: mutants,
+  killed, timed out, survived, unexplained and stale-covered survivors,
+  unviable, unconfirmed, the kill rate, the pseudo-tested functions among
+  the BODY mutants that ran, and the sites skipped. Then the merged report,
+  with each package's sites skipped by rule, its survivors and its
+  pseudo-tested functions. The kill rate is reported, never gated. The
+  report is kept as the artifact `mutation-report` for 90 days, and shown
+  in the job's summary when it fits. A shard that failed makes the merge
+  fail; its own artifact holds what it wrote.
+
+To read a run's report:
+
+```sh
+gh run download <run id> --name mutation-report --dir mutation-report
+```
+
+**The account's jobs.** GitHub runs at most 20 of the repository's jobs at
+once. A run at the full width holds them all while its shards run, and a
+push meanwhile waits for free jobs: CI's jobs on that push start as
+shards end. A run started by hand while others are pushing takes a
+smaller width, such as 10. It then has fewer shards, each longer, and
+leaves the other jobs to CI.
+
+**The baseline** of step 2 is a sample of 1,000 mutants of the pinned set
+over the pure packages, whose survivor rate applies to positions as step
+3's triage budget does, and a BODY pass over every pure function:
+`-f mode=sample -f size=1000 -f seed=<seed>` and `-f mode=body`. The
+mode `timing` times one shard of it, 50 mutants, with 1, 2 and 4 mutants
+at once, and its report gives the time per mutant for each; the default
+of `workers` is set from it. The runs' reports, with their links and their
+wall and runner times, are posted on
+[#275](https://github.com/hirunefu/smock/issues/275).
+
+The tests (`scripts/mutation/test_bulk.py`) plan a run of each mode on
+the fixture module and on smock's packages, run a plan's two shards and
+its finish on the fixture's package `log`, whose report ends with the
+report of the run without shards, and time a sample of `log`'s mutants
+with 1, 2 and 4 at once. `scripts/check-mutation-runs-workflow.sh`, in
+CI's job `scripts` with its test, checks when the workflow runs, that it
+passes each input to the plan, that its shards take their matrix and
+their width from the plan and run on amd64 within a job's time, and that
+it keeps the merged report.
 
 ## The weakening report
 

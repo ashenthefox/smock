@@ -111,11 +111,17 @@ def sample(chosen, directories, size, seed):
     return taken
 
 
+def of_operators(chosen, directories, names):
+    """The chosen mutants of each package that the operators named make,
+    in the run's order: a BODY pass is the BODY mutants alone."""
+    return {d: [s for s in chosen[d] if s["operator"] in names] for d in directories}
+
+
 def running(directories, chosen, mine, selected, shard_index):
     """The packages a run builds and tests, given the chosen mutants of
     each package and the shard's own (the same without shards). Without a
-    selection that can leave a package with no mutant (ids, a list, a
-    sample, changed lines), every package runs, as it always has: one that
+    selection that can leave a package with no mutant (ids, operators, a
+    list, a sample, changed lines), every package runs, as it always has: one that
     has no mutant at all runs in the first shard. Otherwise only the
     packages that hold one of the shard's mutants run."""
     first = shard_index is None or shard_index == 1
@@ -124,13 +130,14 @@ def running(directories, chosen, mine, selected, shard_index):
 
 def selection(args):
     """What chose a run's mutants, as its summary gives it: the set, the
-    packages given, the ids, the list (by its digest), the sample and the
-    shard. Shards whose
+    packages given, the ids, the operators, the list (by its digest), the
+    sample and the shard. Shards whose
     selections differ only in their shard are of one run."""
     return {
         "set": args.set,
         "packages": list(args.packages),
         "mutants": list(args.mutant or []),
+        "operators": list(args.operator or []),
         "list": list_digest(args.list) if args.list else None,
         "sample": None if args.sample is None else {"size": args.sample, "seed": args.seed},
         "shard": None if args.shard is None else {"index": args.shard[0], "count": args.shard[1]},

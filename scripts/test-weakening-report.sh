@@ -833,13 +833,16 @@ mentions floors '+prng 1 the abort arm waits for the exclusion list (#302)'
 # #308: "Changes to the list and to the recorded verdicts show in the
 # weakening report": the canary's mutants with their recorded verdicts,
 # its list of explained differences (mutation/canary/) and its workflow.
+# #275, "Weakening report": "the mutation and coverage workflows", among
+# them the bulk runs' (#313).
 tree
 package
 branch
 mkdir -p "$repo/scripts"
 cp "$list" "$repo/$list"
 git ls-files -- scripts/mutation scripts/coverage.sh scripts/coverage-report.py scripts/coverage-tests \
-  scripts/coverage-ratchet.py mutation/canary .github/workflows/mutation-canary.yml >"$tmp/tool-files"
+  scripts/coverage-ratchet.py mutation/canary .github/workflows/mutation-canary.yml \
+  .github/workflows/mutation-runs.yml >"$tmp/tool-files"
 tools=0
 while read -r path; do
   tools=$((tools + 1))

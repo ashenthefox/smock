@@ -288,6 +288,58 @@ class SampleTest(unittest.TestCase):
         self.assertEqual(self.chosen("all", "--set", "full", "--sample", str(len(whole) + 5)), whole)
 
 
+class OperatorTest(unittest.TestCase):
+    """The mutants of some operators alone (--operator), chosen without a
+    run (--sites-only): a BODY pass over every function (#313, "a BODY
+    pass over every pure function"; #275, "L2 no pseudo-tested function:
+    every BODY mutant is killed or excluded")."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-choice-operators-"))
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def run_sites(self, name, *args):
+        out = self.tmp / name
+        result = run_runner(FIXTURE, out, "--sites-only", *args, *PACKAGES)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return read_lines(out / "chosen.jsonl"), json.loads((out / "summary.json").read_text())
+
+    def test_a_body_pass_runs_the_body_mutant_of_every_function_and_nothing_else(self):
+        whole, _ = self.run_sites("whole")
+        body, summary = self.run_sites("body", "--operator", "BODY")
+        # Every BODY mutant of the set, in the run's order, and only those:
+        # calc's four functions among them (test_mutation.py's CALC).
+        self.assertEqual([s["id"] for s in body], [s["id"] for s in whole if s["operator"] == "BODY"])
+        self.assertIn("calc/calc.mbt,halve_until,BODY,{…},{ 0 },0", [s["id"] for s in body])
+        self.assertEqual(sum(1 for s in body if s["file"] == "calc/calc.mbt"), 4)
+        # The summary says which operators chose the mutants, so that the
+        # shards of a BODY pass merge only with each other.
+        self.assertEqual(summary["selection"]["operators"], ["BODY"])
+
+    def test_several_operators_may_be_given_and_combine_with_a_sample(self):
+        both, _ = self.run_sites("both", "--operator", "BODY", "--operator", "NOT")
+        self.assertEqual({s["operator"] for s in both}, {"BODY", "NOT"})
+        sample, summary = self.run_sites("sample", "--operator", "BODY", "--sample", "3", "--seed", "one")
+        self.assertEqual(len(sample), 3)
+        self.assertEqual({s["operator"] for s in sample}, {"BODY"})
+        self.assertEqual(summary["selection"]["sample"], {"size": 3, "seed": "one"})
+
+    def test_an_operator_that_operator_set_v1_does_not_have_and_a_list_are_refused(self):
+        result = run_runner(FIXTURE, self.tmp / "unknown", "--sites-only", "--operator", "SWAP", "calc")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("argument --operator: invalid choice: 'SWAP'", result.stderr)
+        listed = self.tmp / "listed.jsonl"
+        listed.write_text("")
+        result = run_runner(FIXTURE, self.tmp / "listed", "--sites-only", "--operator", "BODY", "--list",
+                            str(listed))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--list chooses the mutants: give no --operator with it", result.stderr)
+
+
 def offset_of(text, line, column):
     """The offset, in characters, of a line and a column, both from 1."""
     return sum(len(t) + 1 for t in text.split("\n")[: line - 1]) + column - 1
