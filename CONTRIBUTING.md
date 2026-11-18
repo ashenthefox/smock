@@ -367,9 +367,9 @@ scripts/test-weakening-report.sh     # the weakening report, on small git histor
 scripts/test-changed-lines.sh        # the changed-lines job of the branch checks, with a fake mutation runner on small git histories (needs python3, git and jq)
 python3 scripts/check-merge.py <branch>   # whether the branch checks on the branch's head let it be merged into main, and its weakening report (needs git and gh)
 scripts/test-check-merge.sh          # the merge check, with a fake gh and canned runs on a small git history (needs python3, git and jq)
-scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs only by hand, and installs its commit's toolchain before the replay (needs yq and jq)
+scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs only by hand or when the weekly mutation run calls it, and installs its commit's toolchain before the replay (needs yq and jq)
 scripts/test-check-mutation-canary-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
-scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only by hand, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
+scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only on their weekly and monthly schedules and by hand, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
 scripts/test-check-mutation-runs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
@@ -2322,9 +2322,9 @@ on a canary of the fixture's mutants in a git history of its own.
 Bulk runs go to GitHub Actions, never to a laptop, but for the two named
 exceptions: step 1's replay of the 250 sampled mutants and the held-out
 runs on the maintainer's machine. `.github/workflows/mutation-runs.yml`
-runs them, only when started by hand, from the Actions tab or with `gh`.
-It also runs on two schedules, the weekly run and the monthly run
-(below). GitHub runs a workflow on a schedule, or starts it by hand, only
+runs them when started by hand, from the Actions tab or with `gh`, and
+on two schedules, the weekly run and the monthly run (below), never on
+pushes or pull requests. GitHub runs a workflow on a schedule, or starts it by hand, only
 once it is on the default branch; `--ref` picks the commit a run by hand
 runs on:
 

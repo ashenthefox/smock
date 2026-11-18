@@ -168,9 +168,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-check-merge.sh
 
-      # The mutation canary is replayed only by hand (mutation-canary.yml),
-      # with the toolchain its commit pins. This checks when that workflow
-      # runs and how it installs that toolchain before the replay.
+      # The mutation canary is replayed only by hand or when the weekly
+      # mutation run calls it (mutation-canary.yml), with the toolchain its
+      # commit pins. This checks when that workflow runs and how it installs
+      # that toolchain before the replay.
       - name: Check the mutation canary workflow
         if: ${{ !cancelled() }}
         run: scripts/check-mutation-canary-workflow.sh
@@ -179,11 +180,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-check-mutation-canary-workflow.sh
 
-      # The bulk mutation runs run only by hand (mutation-runs.yml), in
-      # shards. This checks when that workflow runs, that its shards fit
-      # the width and a job's time on amd64 runners, and that it keeps the
-      # merged report. bulk.py's own tests need moonc, so they run in
-      # build-test.yml with the runner's.
+      # The bulk mutation runs run only on their weekly and monthly schedules
+      # and by hand (mutation-runs.yml), in shards. This checks when that
+      # workflow runs, that its shards fit the width and a job's time on
+      # amd64 runners, and that it keeps the merged report. bulk.py's own
+      # tests need moonc, so they run in build-test.yml with the runner's.
       - name: Check the mutation runs workflow
         if: ${{ !cancelled() }}
         run: scripts/check-mutation-runs-workflow.sh
