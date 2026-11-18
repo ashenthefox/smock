@@ -166,16 +166,19 @@ MAX_WIDTH = 20
 # The most jobs a matrix of GitHub Actions makes.
 MAX_JOBS = 256
 # How long a job may run on GitHub's runners is six hours; a shard's
-# mutants take at most five of them, which leaves the rest for the
-# checkout, the setup and the runs without a mutant.
+# mutants take at most five of them, at the planned time a mutant, which
+# leaves the rest for the checkout and the setup, under a minute in the
+# baseline, and as room to spare.
 BUDGET_S = 5 * 3600
-# The planned time of a mutant on an amd64 runner, kill confirmation
-# included: the costliest package's tests, engine's, took about 3 s a
-# mutant on wasm-gc on a laptop (#275's cost model), a runner is about
-# 1.7 times slower, and a kill is built and run three times; a mutant at
-# an unchecked access also runs natively. Bulk runs set it from their
-# times.
-SECONDS_PER_MUTANT = 20
+# The planned time of a mutant on an amd64 runner, everything a shard's
+# run does included: what pace() gives for the record SHARD_TIMES, the
+# slowest shard's time a mutant rounded up to a whole second, so that a
+# plan keeps every shard within BUDGET_S at the pace of the slowest shard
+# seen, not at the average's. In step 2's baseline (#275), engine's shard
+# 5-of-20 of the BODY pass, 68 mutants in 970 s, 14.27 s each, gives 15 s;
+# a mutant took 7.0 s of runner time on average. A run added to the
+# record that gives more raises it.
+SECONDS_PER_MUTANT = 15
 # The mutants at once that the mode timing compares.
 TIMING_WORKERS = (1, 2, 4)
 # The sample's default size: the baseline's.

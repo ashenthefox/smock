@@ -20,6 +20,7 @@ usage: python3 -m unittest discover -s scripts/mutation -v
 """
 
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -186,6 +187,21 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(len(shards), 8)
         self.assertEqual(out["width"], "2")
         self.assertEqual((plan["budget_s"], plan["seconds_per_mutant"]), (5 * 3600, 3600))
+
+    def test_every_shard_of_the_weekly_and_the_monthly_run_ends_in_time_at_the_slowest_pace_seen(self):
+        # CONTRIBUTING.md, "Bulk runs on Actions": the planned time of a
+        # mutant keeps every shard of smock's weekly and monthly runs
+        # within a job's time with room to spare, its mutants within 5 of
+        # the job's 6 hours, at the pace of the slowest shard recorded, not
+        # at the average's. The average's 7 s would not: the monthly run's
+        # 26,619 mutants at 7eac627b would go in 20 shards of 1,331, 5.3
+        # hours at the baseline's slowest 14.27 s a mutant.
+        slowest = float(outputs(bulk("pace").stdout)["slowest_s"])
+        for mode in ("weekly", "monthly"):
+            plan, _ = self.plan(f"smock-{mode}", "--mode", mode, root=REPO)
+            # A run's shards differ by one mutant at most.
+            largest = math.ceil(plan["mutants"] / len(plan["shards"]))
+            self.assertLessEqual(largest * slowest, 5 * 3600, f"{mode}: {largest} mutants a shard")
 
     def test_more_shards_than_a_matrix_holds_and_a_mutant_longer_than_a_shard_are_refused(self):
         # GitHub's matrix makes at most 256 jobs; engine has more mutants
@@ -481,6 +497,19 @@ class PaceTest(unittest.TestCase):
         result = bulk("pace", "--record", self.record, shard)
         self.assertEqual(result.returncode, 2)
         self.assertIn("--run-url", result.stderr)
+
+    def test_bulk_runs_are_planned_at_what_the_committed_record_gives(self):
+        # CONTRIBUTING.md, "Bulk runs on Actions": the record holds the
+        # shards of step 2's baseline, run on main (#275, "Step 2's
+        # baseline"): the sample, the BODY pass and the timing.
+        import bulk as steps
+
+        result = bulk("pace")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(outputs(result.stdout)["seconds_per_mutant"], str(steps.SECONDS_PER_MUTANT))
+        baseline = {f"https://github.com/hirunefu/smock/actions/runs/{run}"
+                    for run in (44417735318, 44419874781, 44422395058)}
+        self.assertLessEqual(baseline, {line["run"] for line in read_lines(steps.SHARD_TIMES)})
 
 
 class PackageRowsTest(unittest.TestCase):
