@@ -21,6 +21,7 @@
 
 scripts/verdict-files.txt              the list of the files that decide a verdict
 scripts/weakening-report.py            the weakening report, which reads this list
+scripts/test-weakening-report.sh       the tests of the weakening report, which hold the check that this list names every script of the workflows' verdict steps (#395)
 .github/workflows/branch-checks.yml    the branch checks workflow: the weakening report, and the mutants on the changed lines (#311)
 scripts/changed-lines.py               the changed-lines job: the shards' budget on a push, what counts as covering the whole diff, and the report of the survivors on the changed lines that the merge check reads (#311)
 exclusions.*                           the exclusion list of surviving mutants and uncovered points, with each entry's category, reason and reviewer (#302)
