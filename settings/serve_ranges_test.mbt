@@ -376,9 +376,8 @@ test "ranges: --journal-max-bytes and --state-max-bytes, by their flags or varia
 
 ///|
 test "ranges: --header-size-limit, by its flag or SMOCK_HEADER_SIZE_LIMIT, takes 1 and 1073741824, and refuses 0, 1073741825 and a value that is not a decimal integer" {
-  // No document gives this range: docs/running.md's Settings table and the
-  // help give the default alone, and only the refusal names the range. It
-  // is the code's, a finding that #320 takes to the maintainer.
+  // docs/running.md, Settings: --header-size-limit takes 1 to 1073741824
+  // (2^30), as the maintainer confirmed on 2026-11-18 (#320).
   inspect(
     each_by_flag_and_variable(
       "--header-size-limit",
@@ -398,9 +397,8 @@ test "ranges: --header-size-limit, by its flag or SMOCK_HEADER_SIZE_LIMIT, takes
 
 ///|
 test "ranges: --body-limit, by its flag or SMOCK_BODY_LIMIT, takes 0 and 1073741824, and refuses -1, 1073741825 and a value that is not a decimal integer" {
-  // No document gives this range: docs/running.md's Settings table and the
-  // help give the default alone, and only the refusal names the range. It
-  // is the code's, a finding that #320 takes to the maintainer.
+  // docs/running.md, Settings: --body-limit takes 0 to 1073741824 (2^30),
+  // as the maintainer confirmed on 2026-11-18 (#320).
   inspect(
     each_by_flag_and_variable(
       "--body-limit",
@@ -420,10 +418,10 @@ test "ranges: --body-limit, by its flag or SMOCK_BODY_LIMIT, takes 0 and 1073741
 
 ///|
 test "ranges: the read, idle and write timeouts, by their flags or variables, take 1 and 2147483647, the drain timeout 0 and 2147483647, and each refuses the value past each end and a value that is not a decimal integer" {
-  // No document gives these ranges: docs/running.md's Settings table and
-  // the help give the defaults alone, and only the refusal names the
-  // ranges. They are the code's, a finding that #320 takes to the
-  // maintainer.
+  // docs/running.md, Settings: --read-timeout-ms, --idle-timeout-ms and
+  // --write-timeout-ms take 1 to 2147483647 (2^31 - 1), and
+  // --drain-timeout-ms 0 to 2147483647, as the maintainer confirmed on
+  // 2026-11-18 (#320).
   inspect(
     [
       each_by_flag_and_variable(
@@ -478,9 +476,8 @@ test "ranges: the read, idle and write timeouts, by their flags or variables, ta
 
 ///|
 test "ranges: --journal-body-limit, by its flag or SMOCK_JOURNAL_BODY_LIMIT, takes 0 and 1073741824, and refuses -1, 1073741825 and a value that is not a decimal integer" {
-  // No document gives this range: docs/running.md's Settings table and the
-  // help give the default alone, and only the refusal names the range. It
-  // is the code's, a finding that #320 takes to the maintainer.
+  // docs/running.md, Settings: --journal-body-limit takes 0 to 1073741824
+  // (2^30), as the maintainer confirmed on 2026-11-18 (#320).
   inspect(
     each_by_flag_and_variable(
       "--journal-body-limit",
