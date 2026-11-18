@@ -258,9 +258,10 @@ it (see [Test costs on CI's runners](#test-costs-on-cis-runners)).
 many times on one runner, to show that a timing test holds on CI's
 runners (see [Build and test](#build-and-test)).
 
-`.github/workflows/mutation-runs.yml`, started by hand, runs the mutation
-runner's bulk runs in shards on GitHub's runners and merges them into one
-report (see [Bulk runs on Actions](#bulk-runs-on-actions)).
+`.github/workflows/mutation-runs.yml` runs the mutation runner's bulk
+runs in shards on GitHub's runners and merges them into one report: the
+weekly and the monthly runs on a schedule, the others when started by
+hand (see [Bulk runs on Actions](#bulk-runs-on-actions)).
 
 `scripts/h2spec/` holds the Definition file that CI serves to h2spec, the
 HTTP/2 conformance tool, and the lists of h2spec's cases that do not pass on
@@ -1358,7 +1359,9 @@ report lists every entry whose reviewer changed.
   review.
 - **Seeds.** Each property runs with a fixed seed committed beside it: on
   every push, in mutation runs and in kill confirmations. Each week a
-  separate job writes a random seed into a working copy, the way the
+  separate job of the weekly mutation run
+  ([Bulk runs on Actions](#bulk-runs-on-actions)) writes a random seed
+  into a working copy, the way the
   runner applies a mutant, and prints it; a failure is rerun by
   committing that seed. No test reads the environment for a seed, so
   `scripts/check-no-io.sh` stays as it is.
@@ -1678,10 +1681,10 @@ gives no kill credit, until enough later runs without a flaky result have
 pushed its flaky ones out of the latest. Each run writes `flakes.json`
 beside its report: the latest runs' records, this one included, and the
 rate of each test that had a flaky result among them. The next run reads
-it with `--flakes <file>`. The records live in the report artifact of the
-latest weekly run on GitHub Actions, which the next weekly run downloads
-and passes to the runner; the weekly workflow
-([#314](https://github.com/hirunefu/smock/issues/314)) does both. A run
+it with `--flakes <file>`. The records live in the artifact
+`mutation-flakes` of the latest weekly run on GitHub Actions, which the
+next weekly run downloads and passes to the runner
+([Bulk runs on Actions](#bulk-runs-on-actions)). A run
 made of shards, as the weekly run is, keeps one file: its shards each
 read the same records, and
 `python3 scripts/mutation/confirm.py merge <flakes.json>...` sums their
@@ -2297,7 +2300,7 @@ recorded verdicts.
 
 The whole replay is a bulk run, so it runs on GitHub Actions, in
 `.github/workflows/mutation-canary.yml`, started by hand
-(`gh workflow run mutation-canary.yml`); the weekly mutation run repeats
+(`gh workflow run mutation-canary.yml`), and the weekly mutation run calls
 it. The workflow keeps the output as the artifact `mutation-canary`. On a
 laptop, check the sites, or replay a few mutants by name:
 
@@ -2320,8 +2323,10 @@ Bulk runs go to GitHub Actions, never to a laptop, but for the two named
 exceptions: step 1's replay of the 250 sampled mutants and the held-out
 runs on the maintainer's machine. `.github/workflows/mutation-runs.yml`
 runs them, only when started by hand, from the Actions tab or with `gh`.
-GitHub starts a workflow by hand only once it is on the default branch;
-`--ref` picks the commit it runs on:
+It also runs on two schedules, the weekly run and the monthly run
+(below). GitHub runs a workflow on a schedule, or starts it by hand, only
+once it is on the default branch; `--ref` picks the commit a run by hand
+runs on:
 
 ```sh
 gh workflow run mutation-runs.yml -f mode=sample -f size=1000 -f seed=<seed>
@@ -2330,6 +2335,7 @@ gh workflow run mutation-runs.yml -f mode=packages -f set=full -f packages='yaml
 gh workflow run mutation-runs.yml -f mode=matrix -f packages=usage
 gh workflow run mutation-runs.yml -f mode=list -f list=<a file in the repository>
 gh workflow run mutation-runs.yml -f mode=timing -f size=50 -f seed=<seed>
+gh workflow run mutation-runs.yml --ref main -f mode=monthly
 ```
 
 Its inputs:
@@ -2345,7 +2351,9 @@ Its inputs:
     removal batch;
   - `timing`: one shard, a seeded sample of `size` mutants, run three
     times, each on a runner of its own, with 1, 2 and 4 mutants built and
-    tested at once (`--workers`).
+    tested at once (`--workers`);
+  - `weekly` and `monthly`: the weekly run and the monthly run, below, by
+    hand.
 - `packages`: package directories, separated by spaces. Without them, a
   run takes the pure packages that have sites: the 19 and `serverparsers`
   ([Terms](#terms)); `testcerts` is data and has none. With a list, the
@@ -2403,6 +2411,87 @@ To read a run's report:
 gh run download <run id> --name mutation-report --dir mutation-report
 ```
 
+**The weekly run**, every Friday at 20:23 UTC, runs the pinned set over
+the pure packages, the set over which L4 is defined, so it verifies L4.
+Its shards run as any run does: each package's runs without a mutant
+and its self-test first, then its own tests and its importers' tests, kill confirmation, the comparison of
+the compiler's output, the exclusion list, and the native verdicts of the
+mutants at an unchecked access. They run the properties with their
+committed seeds, and read the flake records of the latest weekly run,
+which the plan downloads. Beside them:
+
+- the plan checks the site counts (`ratchet.py check`) and lists the
+  stale entries of the exclusion list (`bulk.py stale`);
+- the job `canary` calls `.github/workflows/mutation-canary.yml`, which
+  replays [the canary](#the-canary) with the toolchain its commit pins;
+- the job `seeds` runs the properties with random seeds
+  (`bulk.py seeds`), in a working copy of its own that no shard reads: it
+  writes a random seed into each seed constant
+  (`scripts/random-seeds.py`), runs each test file that holds one, and
+  reports each seed, and each failure with its seed and the command that
+  runs it again ([Rules for the work](#rules-for-the-work), "Seeds"); its
+  report is in its job's summary and in the artifact `mutation-seeds`;
+- the job `stale-entries`, when the plan lists stale entries, opens an
+  issue for their re-triage in a batch, "Stale entries of the exclusion
+  list to triage again", or comments on the one already open. It is the
+  workflow's one job that writes, and only issues, as the weekly run with
+  the latest MoonBit reports its failures, and it runs nothing of the
+  repository's.
+
+Its report counts, per package, the unexplained survivors, those that a
+DEFERRED entry covers included, and the stale-covered ones, which count
+as unexplained, as L4 counts them; each stale-covered survivor's section
+names its stale entry. A failed canary, self-test or property seed fails
+the run, and the report starts with the jobs that did not succeed. The
+report keeps this run's flake records as the artifact `mutation-flakes`
+for 90 days, which the next weekly run reads.
+
+**The monthly run**, on the 1st of each month at 22:43 UTC, and by hand
+before a release, runs the full set over the pure packages. It reports
+only: its report gives, per package, the unexplained survivors at the
+pinned alternatives and at the other alternatives apart, and its
+survivors at the other alternatives stop no merge and no release and do
+not count towards L4 (decision 7). Step 5 adds `server` and `cmd/smock`
+through e2e to it, in a job of its own
+([#346](https://github.com/hirunefu/smock/issues/346)), and the small
+native-only packages, which the runner runs wholly natively (`bulk.py`'s
+`MONTHLY_NATIVE_ONLY`).
+
+**When they run.** Both run at the full width, at a quiet hour: in the
+evening UTC, when the repository has seen the fewest commits, and days
+away from the weekly run with the latest MoonBit, on Mondays at 03:17
+UTC. When the 1st is a Friday, the monthly run starts two hours and
+twenty minutes after the weekly one, which takes about one to one and a
+half hours (*estimate*). A push during either waits for free jobs.
+`bulk.py`'s `SCHEDULES` maps each schedule to its run, and the workflow's
+check pins both.
+
+**Stage 1's triage tickets.** A package with more than about 40
+survivors in the weekly run gets triage tickets of at most about 40
+survivors each, never splitting a source file that holds fewer. From the
+first weekly run's report:
+
+```sh
+gh run download <run id> --name mutation-report --dir mutation-report
+mkdir -p bodies
+for n in 323 324 325 326 327 328 329; do
+  gh issue view "$n" -R hirunefu/smock --json body --jq .body >"bodies/$n.md"
+done
+python3 scripts/mutation/bulk.py triage --report mutation-report --bodies bodies --out tickets \
+  --run-url <run link>
+```
+
+For each of stage 1's closing tickets whose packages have more than 40
+unexplained survivors together, stale-covered ones included, it writes a
+body per ticket into `tickets/`: its survivors' ids, the closing ticket's
+criteria Triage, Kills, Exclusions, Code and No weakening for those
+survivors only, the time the agent spent, and its blockers, #314 and
+#315, and #320 for settings. `tickets.json` gives each ticket's title,
+label, blockers and the closing ticket it blocks; `tickets.md` the count
+per closing ticket. The tickets become sub-issues of the closing ticket
+they block, which gains each as a native blocker; the spec's issue holds
+as many sub-issues as GitHub allows.
+
 **The account's jobs.** GitHub runs at most 20 of the repository's jobs at
 once. A run at the full width holds them all while its shards run, and a
 push meanwhile waits for free jobs: CI's jobs on that push start as
@@ -2424,11 +2513,16 @@ The tests (`scripts/mutation/test_bulk.py`) plan a run of each mode on
 the fixture module and on smock's packages, run a plan's two shards and
 its finish on the fixture's package `log`, whose report ends with the
 report of the run without shards, and time a sample of `log`'s mutants
-with 1, 2 and 4 at once. `scripts/check-mutation-runs-workflow.sh`, in
-CI's job `scripts` with its test, checks when the workflow runs, that it
-passes each input to the plan, that its shards take their matrix and
-their width from the plan and run on amd64 within a job's time, and that
-it keeps the merged report.
+with 1, 2 and 4 at once. They run a weekly run of `log` that reads an
+earlier run's flake records and a monthly run of it, list the fixture's
+stale entry, run the properties with random seeds on a small module with
+a moon that fails one, and cut made-up survivors into triage tickets.
+`scripts/check-mutation-runs-workflow.sh`, in CI's job `scripts` with its
+test, checks when the workflow runs, that it passes each input to the
+plan, that its shards take their matrix and their width from the plan and
+run on amd64 within a job's time, the weekly run's other jobs, that only
+the job of the stale entries writes, and only issues, and that it keeps
+the merged report.
 
 ## The weakening report
 

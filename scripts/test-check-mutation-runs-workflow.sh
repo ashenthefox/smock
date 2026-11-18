@@ -78,21 +78,37 @@ else
   fail "missing: exits with $status: $(cat "$tmp/missing.out")"
 fi
 
-# --- Only by hand ---------------------------------------------------------------
+# --- On its schedules and by hand ------------------------------------------------
 
 refuses on-push \
   '.on.push = {}' \
-  "it should run only when started by hand (workflow_dispatch), not on: push workflow_dispatch"
+  "it should run only on its schedules and when started by hand (schedule, workflow_dispatch), not on: push schedule workflow_dispatch"
 
 refuses on-pull-requests-only \
   '.on = "pull_request"' \
-  "it should run only when started by hand (workflow_dispatch), not on: pull_request"
+  "it should run only on its schedules and when started by hand (schedule, workflow_dispatch), not on: pull_request"
+
+refuses no-schedule \
+  'del(.on.schedule)' \
+  "it should run only on its schedules and when started by hand (schedule, workflow_dispatch), not on: workflow_dispatch"
+
+refuses another-schedule \
+  '.on.schedule[0].cron = "17 3 * * 1"' \
+  "its schedules should be the weekly run's, 23 20 * * 5, and the monthly run's, 43 22 1 * *, as scripts/mutation/bulk.py's SCHEDULES gives them, not: 17 3 * * 1, 43 22 1 * *"
+
+refuses a-third-schedule \
+  '.on.schedule += [{"cron": "0 12 * * 3"}]' \
+  "its schedules should be the weekly run's, 23 20 * * 5, and the monthly run's, 43 22 1 * *, as scripts/mutation/bulk.py's SCHEDULES gives them, not: 23 20 * * 5, 43 22 1 * *, 0 12 * * 3"
 
 # --- What a run takes ------------------------------------------------------------
 
 refuses a-mode-missing \
   '.on.workflow_dispatch.inputs.mode.options |= map(select(. != "body"))' \
-  "its input mode should offer the modes body, list, matrix, packages, sample, timing, not: list, matrix, packages, sample, timing"
+  "its input mode should offer the modes body, list, matrix, monthly, packages, sample, timing, weekly, not: list, matrix, monthly, packages, sample, timing, weekly"
+
+refuses no-monthly-run-by-hand \
+  '.on.workflow_dispatch.inputs.mode.options |= map(select(. != "monthly"))' \
+  "its input mode should offer the modes body, list, matrix, monthly, packages, sample, timing, weekly, not: body, list, matrix, packages, sample, timing, weekly"
 
 refuses no-width \
   'del(.on.workflow_dispatch.inputs.width)' \
@@ -106,19 +122,47 @@ refuses an-input-left-out \
   '(.jobs.plan.steps[] | select(.id == "plan") | .run) |= sub("--seed [^ ]+ "; "")' \
   "the plan should pass the input seed to scripts/mutation/bulk.py plan as --seed"
 
-# --- Read-only, and no secrets ---------------------------------------------------
+refuses the-schedule-left-out \
+  'del(.jobs.plan.steps[] | select(.id == "plan") | .env.SCHEDULE)' \
+  "the plan should pass the schedule that started the run to scripts/mutation/bulk.py plan as --schedule"
+
+refuses no-flake-records \
+  'del(.jobs.plan.steps[] | select((.run // "") | test("gh run download")))' \
+  "job plan should download the flake records of the latest weekly run (the artifact mutation-flakes) before the plan, and pass them as --flakes"
+
+# --- Read-only but for one job's issues, and no secrets ----------------------------
 
 refuses write-permission \
   '.permissions.contents = "write"' \
-  "its permissions should be read-only"
+  "its permissions should be read-only, but for issues: write in the one job that opens the issue of the stale entries"
 
 refuses no-permissions \
   'del(.permissions)' \
-  "its permissions should be read-only"
+  "its permissions should be read-only, but for issues: write in the one job that opens the issue of the stale entries"
 
-refuses a-job-that-writes \
+refuses a-second-job-that-writes \
   '.jobs.finish.permissions.issues = "write"' \
-  "its permissions should be read-only"
+  "its permissions should be read-only, but for issues: write in the one job that opens the issue of the stale entries"
+
+refuses the-issue-job-writes-more \
+  '.jobs."stale-entries".permissions.contents = "write"' \
+  "its permissions should be read-only, but for issues: write in the one job that opens the issue of the stale entries"
+
+refuses the-issue-job-checks-out-the-repository \
+  '.jobs."stale-entries".steps = [{"uses": "actions/checkout@v7"}] + .jobs."stale-entries".steps' \
+  "job stale-entries writes issues, so it should run nothing of the repository's: no checkout, no script"
+
+refuses the-issue-job-runs-a-script \
+  '.jobs."stale-entries".steps += [{"run": "python3 scripts/mutation/bulk.py stale --out x"}]' \
+  "job stale-entries writes issues, so it should run nothing of the repository's: no checkout, no script"
+
+refuses the-issue-job-in-every-run \
+  'del(.jobs."stale-entries".if)' \
+  "job stale-entries should run only in a weekly run that lists stale entries: if: needs.plan.outputs.mode == 'weekly' && needs.plan.outputs.stale != '0' ..."
+
+refuses no-issue-job \
+  'del(.jobs."stale-entries")' \
+  "it should open the issue of the stale entries (gh issue create) in one job, not in: nothing"
 
 refuses a-secret \
   '.jobs.shard.steps[1].env = {"TOKEN": "${{ secrets.GITHUB_TOKEN }}"}' \
@@ -140,7 +184,7 @@ refuses a-plan-not-kept \
 
 refuses no-shards-out-of-the-plan \
   'del(.jobs.plan.outputs.shards)' \
-  "job plan should give the plan step's outputs shards and width"
+  "job plan should give the plan step's outputs shards, width and mode"
 
 # --- The shards ------------------------------------------------------------------
 
@@ -188,7 +232,49 @@ refuses a-shard-without-the-plan \
   'del(.jobs.shard.needs)' \
   "job shard should need the plan"
 
+# --- The weekly run's other jobs and steps ----------------------------------------
+
+refuses no-canary \
+  'del(.jobs.canary)' \
+  "it should replay the canary in the weekly run, in a job that calls ./.github/workflows/mutation-canary.yml with if: needs.plan.outputs.mode == 'weekly'"
+
+refuses a-canary-in-every-run \
+  'del(.jobs.canary.if)' \
+  "it should replay the canary in the weekly run, in a job that calls ./.github/workflows/mutation-canary.yml with if: needs.plan.outputs.mode == 'weekly'"
+
+refuses no-random-seeds \
+  'del(.jobs.seeds)' \
+  "it should run the properties with random seeds (scripts/mutation/bulk.py seeds) in one job, not in: nothing"
+
+refuses random-seeds-in-every-run \
+  'del(.jobs.seeds.if)' \
+  "job seeds should run only in the weekly run: if: needs.plan.outputs.mode == 'weekly'"
+
+refuses random-seeds-in-a-shard \
+  '.jobs.shard.steps += [{"run": "python3 scripts/random-seeds.py"}]' \
+  "job shard writes random seeds, but the shards and their kill confirmations run the properties with their committed seeds"
+
+refuses random-seeds-not-kept \
+  'del(.jobs.seeds.steps[] | select(.uses == "actions/upload-artifact@v7"))' \
+  "job seeds should keep the seeds and their results as an artifact with if: always()"
+
+refuses no-site-count-check \
+  'del(.jobs.plan.steps[] | select((.run // "") | test("ratchet.py check")))' \
+  "job plan should check the site counts (scripts/mutation/ratchet.py check) in the weekly run"
+
+refuses no-stale-entries-listed \
+  'del(.jobs.plan.steps[] | select(.id == "stale"))' \
+  "job plan should list the stale entries (scripts/mutation/bulk.py stale) in the weekly run, as the step stale whose output the job gives as stale"
+
+refuses no-flake-records-kept \
+  'del(.jobs.finish.steps[] | select(.with.name == "mutation-flakes"))' \
+  "job finish should keep the weekly run's flake records as the artifact mutation-flakes"
+
 # --- The finish ------------------------------------------------------------------
+
+refuses a-finish-without-the-weekly-jobs \
+  '.jobs.finish.needs = ["plan", "shard"]' \
+  "job finish should need the canary and the properties with random seeds, so that the report names a failure of theirs"
 
 refuses no-finish \
   'del(.jobs.finish)' \
