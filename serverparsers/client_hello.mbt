@@ -101,10 +101,11 @@ fn read(data : BytesView, cost : ClientHelloCost) -> ClientHello {
       return Incomplete
     }
     cost.records += 1
-    // The header's octets in this fragment, while it lacks some.
+    // The header's octets in this fragment, while it lacks some, each in
+    // its place, the first highest.
     let mut at = pos + 5
     while gathered < 4 && at < end {
-      header = (header << 8) | data[at].to_int()
+      header = header | (data[at].to_int() << (24 - 8 * gathered))
       gathered += 1
       at += 1
     }

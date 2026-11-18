@@ -429,6 +429,31 @@ test "a ClientHello with a length field one octet past what holds it, or below t
       #|server_name: empty: ServerName(None)
     ),
   )
+  // The octets after a ClientHello are no part of it: its length fields
+  // count within the handshake message's own length (section 4). A client
+  // in middlebox compatibility mode may send a change_cipher_spec record
+  // right after its ClientHello (RFC 8446, appendix D.4); each ClientHello
+  // above, past the record and handshake lengths, reads the same with that
+  // record after it.
+  let change_cipher_spec = b"\x14\x03\x03\x00\x01\x01"
+  inspect(
+    cases[2:]
+    .map(case => "\{case.0}: \{read((case.1 + change_cipher_spec)[:])}")
+    .join("\n"),
+    content=(
+      #|legacy_session_id: the message ends one octet before its 32 do: ServerName(None)
+      #|cipher_suites: one octet more than the message has left: ServerName(None)
+      #|compression_methods: the message ends before its one octet: ServerName(None)
+      #|extensions: one octet more than the message has left: ServerName(None)
+      #|key_share, an extension before server_name: one octet more than the extensions have left: ServerName(None)
+      #|server_name: one octet more than the extensions have left: ServerName(None)
+      #|server_name_list: one octet more than the extension holds: ServerName(None)
+      #|HostName: one octet more than the list holds: ServerName(None)
+      #|HostName: empty: ServerName(None)
+      #|server_name_list: empty: ServerName(None)
+      #|server_name: empty: ServerName(None)
+    ),
+  )
 }
 
 ///|

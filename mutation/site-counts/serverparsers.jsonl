@@ -7,7 +7,7 @@
 {"file":"serverparsers/certificate_expiry.mbt","definition":"der_time","text":"2bb993386c284f91","pinned":{"BODY":1,"ROR":3,"IFC":3,"LCR":2,"NOT":1,"AOR":3,"INT":32,"STR":4},"full":{"BODY":1,"ROR":3,"IFC":6,"LCR":2,"NOT":1,"AOR":3,"INT":44,"STR":7}}
 {"file":"serverparsers/client_hello.mbt","definition":"MAX_CLIENT_HELLO","text":"67ed7fa14d01afdf","pinned":{"INT":1},"full":{"INT":3}}
 {"file":"serverparsers/client_hello.mbt","definition":"ClientHelloCost::new","text":"eebf27d31eeec332","pinned":{"INT":2},"full":{"INT":4}}
-{"file":"serverparsers/client_hello.mbt","definition":"read","text":"c55317d9f10c3bd7","pinned":{"ROR":8,"IFC":9,"LCR":1,"DEL":6,"AOR":11,"INT":21},"full":{"ROR":8,"IFC":18,"LCR":1,"DEL":6,"AOR":11,"INT":44}}
+{"file":"serverparsers/client_hello.mbt","definition":"read","text":"d871f11e644742de","pinned":{"ROR":8,"IFC":9,"LCR":1,"DEL":6,"AOR":13,"INT":22},"full":{"ROR":8,"IFC":18,"LCR":1,"DEL":6,"AOR":13,"INT":47}}
 {"file":"serverparsers/client_hello.mbt","definition":"body","text":"d79fc38509b4abe5","pinned":{"BODY":1,"ROR":2,"IFC":2,"DEL":5,"AOR":11,"INT":16},"full":{"BODY":1,"ROR":2,"IFC":4,"DEL":5,"AOR":11,"INT":30}}
 {"file":"serverparsers/client_hello.mbt","definition":"server_name","text":"a151417313cd8a77","pinned":{"BODY":1,"ROR":5,"IFC":7,"DEL":4,"AOR":13,"INT":16},"full":{"BODY":1,"ROR":5,"IFC":14,"DEL":4,"AOR":13,"INT":32}}
 {"file":"serverparsers/client_hello.mbt","definition":"host_name","text":"59f3c89fbd897f5f","pinned":{"BODY":1,"ROR":5,"IFC":5,"LCR":1,"DEL":2,"AOR":7,"INT":11},"full":{"BODY":1,"ROR":5,"IFC":10,"LCR":1,"DEL":2,"AOR":7,"INT":21}}
