@@ -840,6 +840,30 @@ check pod "the image, pull Secrets, annotations and scheduling come from the val
    and pod.tolerations == [{"key": "mocks", "operator": "Exists", "effect": "NoSchedule"}]
    and pod.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].weight == 1'
 
+# An image tag written as digits, such as a date, is a number to YAML; the
+# image names it with the digits of the values file all the same (#396). A
+# million or more, so that a number written as Go writes a float (2.0261119e+07)
+# shows too. A repository may be digits alone as well, in the grammar of
+# image references.
+cat >"$tmp/values-pod-digits.yaml" <<'YAML'
+image:
+  repository: 1000000
+  tag: 20261119
+YAML
+render pod-digits --values "$tmp/values-token.yaml" --values "$tmp/values-pod-digits.yaml"
+check_text pod-digits "an image repository and tag written as digits are the image's, with those digits" \
+  'smock.image == "\($repository):\($tag)"' \
+  --arg repository "$(yq '.image.repository' "$tmp/values-pod-digits.yaml")" \
+  --arg tag "$(yq '.image.tag' "$tmp/values-pod-digits.yaml")"
+# The values table: "Empty: the chart's appVersion". A tag of null, which
+# removes the default, is empty too.
+printf 'image:\n  tag: null\n' >"$tmp/values-tag-null.yaml"
+render tag-null --values "$tmp/values-token.yaml" --values "$tmp/values-tag-null.yaml"
+check_text tag-null "a tag of null is the chart's appVersion, as an empty one is" \
+  'smock.image == "\($repository):\($app_version)"' \
+  --arg repository "$(yq '.image.repository' "$chart/values.yaml")" \
+  --arg app_version "$(yq '.appVersion' "$chart/Chart.yaml")"
+
 # --- The released chart -------------------------------------------------------
 
 # The release workflow packages the chart with the release's version, so the

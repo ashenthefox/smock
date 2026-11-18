@@ -177,14 +177,17 @@ the JSON object smock reads.
 {{- end -}}
 
 {{/*
-A value as text, such as an environment variable's. Numbers from values
-files reach templates as floating point, which Go would write as
-1.048576e+07; they are written out in full, whatever their size: a whole
-one with all its digits, a fraction as JSON writes it, which is in full
-from a millionth up.
+A value as text, such as an environment variable's, an image tag or a Git
+ref. Numbers from values files reach templates as floating point, which Go
+would write as 1.048576e+07, and printf "%s" as %!s(float64=2024); they are
+written out in full, whatever their size: a whole one with all its digits,
+a fraction as JSON writes it, which is in full from a millionth up. Null,
+a value the values removed, is no text, so that a default for an empty
+value applies to it.
 */}}
 {{- define "smock.string" -}}
-{{- if not (kindIs "float64" .) -}}
+{{- if kindIs "invalid" . -}}
+{{- else if not (kindIs "float64" .) -}}
 {{- toString . -}}
 {{- else if eq (floor .) . -}}
 {{- printf "%.0f" . -}}
@@ -210,7 +213,10 @@ to a second, plus 10 s. It is always above the sleep plus the drain timeout
 {{/* The smock image's own user, nonroot of its distroless base. */}}
 {{- define "smock.uid" -}}65532{{- end -}}
 
-{{/* The smock image: the tag defaults to the chart's appVersion. */}}
+{{/*
+The smock image: the tag defaults to the chart's appVersion. Both parts
+are text, as smock.string writes them, so a tag of digits keeps them.
+*/}}
 {{- define "smock.image" -}}
-{{- printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) -}}
+{{- printf "%s:%s" (include "smock.string" .Values.image.repository) (include "smock.string" .Values.image.tag | default .Chart.AppVersion) -}}
 {{- end -}}
