@@ -293,7 +293,7 @@ reason = "An abort arm, which an invariant guards; its message: \"core_decimal g
 reviewer = "the maintainer, 2026-11-18"
 
 # The default of --journal, which follows the engine's (#320): UNREACHABLE,
-# with a written argument for the maintainer to approve.
+# with a written argument, which the maintainer accepted on 2026-11-18.
 
 [[exclusion]]
 file = "settings/settings.mbt"
@@ -303,4 +303,4 @@ text = "98db440d13edd3fc"
 category = "UNREACHABLE"
 reason = "The else arm of --journal's default, \"off\", which only a change of the engine's default would run."
 argument = "--journal's default is \"on\" when journal_defaults.enabled is true, and \"off\" otherwise. journal_defaults is @engine.JournalSettings() with no arguments, whose enabled is true by default (engine/journal.mbt), and the running guide's Settings table gives `on` as the default. It is a top-level value that no input and no test can change, so the arm runs only if the engine's default changes; it stays so that the help follows the engine then."
-reviewer = ""
+reviewer = "the maintainer, 2026-11-18"
