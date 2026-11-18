@@ -7,6 +7,10 @@
 #   as scripts/mutation/bulk.py's SCHEDULES gives them, and when started by
 #   hand (workflow_dispatch), so never on pull requests or on pushes: a
 #   bulk run holds the account's jobs;
+# - each run's name says its mode, "Mutation runs: <mode>", by the schedule
+#   that started it (as the same SCHEDULES gives it) or by the input mode:
+#   the release check (scripts/check-weekly-run.py) finds the weekly runs
+#   by their names;
 # - it takes the mode (each of bulk.py's, the weekly and the monthly run
 #   among them), the packages, the set, the seed, the size, the list, the
 #   width, whose default is the account's 20 concurrent jobs, and the
@@ -46,6 +50,11 @@ workflow=${1:-.github/workflows/mutation-runs.yml}
 # The schedules, in the order the workflow gives them: the weekly run's,
 # then the monthly run's (bulk.py's SCHEDULES).
 schedules="23 20 * * 5, 43 22 1 * *"
+# The name of each run: the mode each schedule starts (bulk.py's SCHEDULES),
+# or, started by hand, the input mode. The ${{ ... }} is the workflow's own
+# syntax.
+# shellcheck disable=SC2016
+run_name='Mutation runs: ${{ github.event.schedule == '"'23 20 * * 5'"' && '"'weekly'"' || github.event.schedule == '"'43 22 1 * *'"' && '"'monthly'"' || inputs.mode }}'
 
 failed=0
 fail() {
@@ -67,6 +76,8 @@ if [ "$triggers" = "schedule workflow_dispatch" ]; then
   [ "$crons" = "$schedules" ] ||
     fail "its schedules should be the weekly run's, 23 20 * * 5, and the monthly run's, 43 22 1 * *, as scripts/mutation/bulk.py's SCHEDULES gives them, not: $crons"
 fi
+[ "$(printf '%s\n' "$json" | jq -r '."run-name" // ""')" = "$run_name" ] ||
+  fail "it should name each run by its mode, as the release check finds the weekly runs by their names: run-name: \"$run_name\""
 
 printf '%s\n' "$json" | jq -e '
   def writes: type != "object" or any(.[]; . == "write");

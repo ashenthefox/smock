@@ -369,7 +369,7 @@ python3 scripts/check-merge.py <branch>   # whether the branch checks on the bra
 scripts/test-check-merge.sh          # the merge check, with a fake gh and canned runs on a small git history (needs python3, git and jq)
 scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs only by hand or when the weekly mutation run calls it, and installs its commit's toolchain before the replay (needs yq and jq)
 scripts/test-check-mutation-canary-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
-scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only on their weekly and monthly schedules and by hand, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
+scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only on their weekly and monthly schedules and by hand, named by their mode, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
 scripts/test-check-mutation-runs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
@@ -2447,6 +2447,14 @@ the run, and the report starts with the jobs that did not succeed. The
 report keeps this run's flake records as the artifact `mutation-flakes`
 for 90 days, which the next weekly run reads.
 
+Each run's name says its mode: "Mutation runs: weekly" for the weekly
+run, whether its schedule or a person started it, and "Mutation runs:
+monthly", "Mutation runs: sample" and so on for the others. The release
+workflow's check of the latest weekly run
+([What a tag does](docs/releasing.md#what-a-tag-does)) finds the weekly
+runs on `main` by that name. A run from before the workflow named its runs
+is called "Mutation runs" alone, and the check does not read it.
+
 **The monthly run**, on the 1st of each month at 22:43 UTC, and by hand
 before a release, runs the full set over the pure packages. It reports
 only: its report gives, per package, the unexplained survivors at the
@@ -2519,8 +2527,8 @@ earlier run's flake records and a monthly run of it, list the fixture's
 stale entry, run the properties with random seeds on a small module with
 a moon that fails one, and cut made-up survivors into triage tickets.
 `scripts/check-mutation-runs-workflow.sh`, in CI's job `scripts` with its
-test, checks when the workflow runs, that it passes each input to the
-plan, that its shards take their matrix and their width from the plan and
+test, checks when the workflow runs, that each run's name says its mode,
+that it passes each input to the plan, that its shards take their matrix and their width from the plan and
 run on amd64 within a job's time, the weekly run's other jobs, that only
 the job of the stale entries writes, and only issues, and that it keeps
 the merged report.

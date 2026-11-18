@@ -43,7 +43,15 @@
 # tab or with `gh workflow run mutation-runs.yml -f mode=sample -f
 # seed=<seed>`; scripts/check-mutation-runs-workflow.sh checks when it runs
 # and what it runs.
+#
+# Each run's name says its mode, "Mutation runs: weekly" for the weekly
+# run whether its schedule or a person started it: the release workflow's
+# check of the latest weekly run (scripts/check-weekly-run.py) finds the
+# weekly runs by their names.
 name: Mutation runs
+# The mode each schedule starts, as bulk.py's SCHEDULES gives it, or the
+# input mode of a run started by hand.
+run-name: "Mutation runs: ${{ github.event.schedule == '23 20 * * 5' && 'weekly' || github.event.schedule == '43 22 1 * *' && 'monthly' || inputs.mode }}"
 
 on:
   # scripts/mutation/bulk.py's SCHEDULES gives the run each one starts.
