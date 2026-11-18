@@ -990,10 +990,11 @@ class ImportersTest(unittest.TestCase):
         self.assertTrue({"smock/smock/schema", "smock/smock/yaml-test-suite"}
                         <= set(found["smock/yaml"]["native_only"]))
         self.assertIn("smock/smock/protobuf-conformance", found["smock/protobuf"]["native_only"])
-        # A test import reaches no further: server imports openssl, which
-        # imports testcerts only for its tests, so server is no importer.
+        # A test import reaches no further: cmd/smock imports server, which
+        # imports testcerts only for its tests (as openssl does, and since
+        # #384 server's own white-box tests), so cmd/smock is no importer.
         self.assertEqual((found["smock/smock/testcerts"]["importers"], found["smock/smock/testcerts"]["native_only"]),
-                         ([], ["smock/smock/e2e", "smock/smock/openssl"]))
+                         ([], ["smock/smock/e2e", "smock/smock/openssl", "smock/smock/server"]))
         for line in found.values():
             self.assertEqual(set(line["importers"]) & NATIVE_ONLY, set(), line["package"])
 
