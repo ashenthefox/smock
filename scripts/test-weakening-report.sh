@@ -6,7 +6,8 @@
 # branch and checks what the report lists: each kind of weakening shows,
 # and a branch that weakens nothing gives an empty report.
 #
-# It needs what the report needs: python3 and git.
+# It needs what the report needs, python3 and git, and yq (mikefarah/yq
+# v4, on GitHub's Ubuntu runners) to read the workflows' verdict steps.
 #
 # usage: scripts/test-weakening-report.sh
 #
@@ -1179,6 +1180,198 @@ if [ "$tools" -ge 5 ]; then
   pass "tool-files: the checkout has $tools files of the tools"
 else
   fail "tool-files: the checkout has $tools files of the tools, fewer than the five it names"
+fi
+
+# --- The verdict steps ---------------------------------------------------------
+
+# The steps of the workflows that judge a suite's results against its list
+# of the cases that may fail, a list the committed list names, and the
+# steps that test that judgment. Each script such a step runs, and each
+# script that one of those runs, decides a verdict, so the committed list
+# names it and the report shows a change to it (#395, which names the YAML
+# test suite's verdict script and its test). A step is named by its
+# workflow, its job and its name: a step renamed or gone fails the check,
+# so that it is looked at again.
+cat >"$tmp/verdict-steps" <<'TXT'
+.github/workflows/ci.yml	yaml-test-suite	Run yaml-test-suite against smock/yaml in both modes
+.github/workflows/ci.yml	scripts	Test the yaml-test-suite verdict
+.github/workflows/build-test.yml	release	Run h2spec against the plain port (h2c) and the TLS port (h2)
+.github/workflows/ci.yml	scripts	Test the h2spec verdict
+.github/workflows/build-test.yml	protobuf-conformance	Run protobuf's conformance suite against smock/protobuf
+TXT
+
+# step_scripts <root> <steps>: the scripts under <root> that the steps of
+# <root>'s workflows named in <steps> run, one path a line. A step runs the
+# scripts its run names as a command; a shell script runs those its code
+# names as a command, and a Python script those it holds as a string that
+# is the path alone. A step that is not there, or that runs no command, is
+# said on standard error, with status 1.
+step_scripts() {
+  python3 - "$1" "$2" <<'PY'
+import ast, json, os, re, subprocess, sys
+
+root, steps = sys.argv[1], sys.argv[2]
+PATH = r"(?:\./|\$PWD/|\$\{PWD\}/)?(scripts/[\w./-]+\.(?:sh|py))\b"
+COMMAND = re.compile(
+    r"(?:^|[;&|(`{]|\$\(|\b(?:then|do|else|exec)\s)\s*(?:[A-Za-z_]\w*=\S*\s+)*"
+    r"(?:(?:python3|sh|bash)(?:\s+-\w+)*\s+)?[\"']?" + PATH
+)
+
+
+def by_shell(text):
+    return [
+        found
+        for line in text.splitlines()
+        if not line.lstrip().startswith("#")
+        for found in COMMAND.findall(line)
+    ]
+
+
+def by_python(text):
+    return [
+        match.group(1)
+        for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        if (match := re.fullmatch(PATH, node.value))
+    ]
+
+
+status, queue, seen, workflows = 0, [], [], {}
+for line in open(steps):
+    workflow, job, name = line.rstrip("\n").split("\t")
+    if workflow not in workflows:
+        try:
+            yq = subprocess.run(["yq", "-o=json", os.path.join(root, workflow)], capture_output=True, text=True)
+        except OSError as error:
+            sys.exit(f"cannot run yq: {error}")
+        if yq.returncode != 0:
+            sys.exit(f"yq cannot read {workflow}: {yq.stderr.strip()}")
+        workflows[workflow] = json.loads(yq.stdout)
+    runs = [
+        step.get("run")
+        for step in ((workflows[workflow].get("jobs") or {}).get(job) or {}).get("steps") or []
+        if step.get("name") == name
+    ]
+    if len(runs) != 1 or not isinstance(runs[0], str):
+        print(f"{workflow}: job {job} has no step {name!r} that runs a command", file=sys.stderr)
+        status = 1
+        continue
+    queue += by_shell(runs[0])
+while queue:
+    path = queue.pop(0)
+    if path in seen or not os.path.isfile(os.path.join(root, path)):
+        continue
+    seen.append(path)
+    text = open(os.path.join(root, path)).read()
+    queue += by_python(text) if path.endswith(".py") else by_shell(text)
+print("\n".join(seen))
+sys.exit(status)
+PY
+}
+
+# The finder on a small tree: a step that runs a shell script, which runs
+# a Python script and names another in a message; the Python script runs
+# a third and names a fourth in its docstring. A step that is gone, and
+# one that runs no command, are said.
+steps=$tmp/steps
+rm -rf "$steps"
+mkdir -p "$steps/.github/workflows" "$steps/scripts"
+cat >"$steps/.github/workflows/ci.yml" <<'YML'
+jobs:
+  suite:
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v6
+      - name: Run the suite
+        run: |
+          mkdir -p out
+          FOO=1 scripts/run-suite.sh out
+YML
+cat >"$steps/scripts/run-suite.sh" <<'SH'
+#!/bin/sh
+# scripts/commented.sh is not run.
+python3 scripts/verdict.py "$1" || echo "see scripts/message.sh"
+SH
+cat >"$steps/scripts/verdict.py" <<'PY'
+"""Judges a run. scripts/docstring.sh tells how."""
+import subprocess
+subprocess.run(["sh", "scripts/helper.sh"], check=True)
+PY
+for name in commented.sh message.sh docstring.sh helper.sh; do
+  : >"$steps/scripts/$name"
+done
+printf '.github/workflows/ci.yml\tsuite\tRun the suite\n' >"$tmp/steps.tsv"
+if step_scripts "$steps" "$tmp/steps.tsv" >"$tmp/steps.out" &&
+  [ "$(tr '\n' ' ' <"$tmp/steps.out")" = "scripts/run-suite.sh scripts/verdict.py scripts/helper.sh " ]; then
+  pass "step-scripts: finds the scripts a step runs, through the scripts it runs"
+else
+  fail "step-scripts: finds $(tr '\n' ' ' <"$tmp/steps.out")"
+fi
+printf '.github/workflows/ci.yml\tsuite\tRun the old suite\n' >"$tmp/steps-gone.tsv"
+if step_scripts "$steps" "$tmp/steps-gone.tsv" >/dev/null 2>"$tmp/steps-gone.err"; then
+  fail "step-scripts: passes a step that is gone"
+elif grep -qF "job suite has no step 'Run the old suite' that runs a command" "$tmp/steps-gone.err"; then
+  pass "step-scripts: says a step that is gone"
+else
+  fail "step-scripts: says $(cat "$tmp/steps-gone.err")"
+fi
+printf '.github/workflows/ci.yml\tsuite\tSet up Python\n' >"$tmp/steps-uses.tsv"
+if step_scripts "$steps" "$tmp/steps-uses.tsv" >/dev/null 2>"$tmp/steps-uses.err"; then
+  fail "step-scripts: passes a step that runs no command"
+elif grep -qF "job suite has no step 'Set up Python' that runs a command" "$tmp/steps-uses.err"; then
+  pass "step-scripts: says a step that runs no command"
+else
+  fail "step-scripts: says $(cat "$tmp/steps-uses.err")"
+fi
+
+# unlisted <list> <name>: writes into $tmp/<name>.missing the scripts of
+# the verdict steps that the report does not show as files that decide a
+# verdict, under the list <list>, on a branch that adds each of them; the
+# report is <name>.
+unlisted() {
+  tree
+  package
+  branch
+  mkdir -p "$repo/scripts"
+  cp "$1" "$repo/$list"
+  while read -r path; do
+    file "$path" </dev/null
+  done <"$tmp/step-scripts"
+  report "$2"
+  : >"$tmp/$2.missing"
+  while read -r path; do
+    grep -qF -- "### \`$path\` (added)" "$tmp/$2.out" || echo "$path" >>"$tmp/$2.missing"
+  done <"$tmp/step-scripts"
+}
+
+# The committed list names every script of the verdict steps.
+if step_scripts . "$tmp/verdict-steps" >"$tmp/step-scripts" 2>"$tmp/step-scripts.err"; then
+  pass "verdict-steps: each verdict step is in its workflow"
+else
+  fail "verdict-steps: $(cat "$tmp/step-scripts.err")"
+fi
+for path in scripts/yaml-test-suite-verdict.py scripts/test-yaml-test-suite-verdict.sh scripts/h2spec-verdict.py; do
+  if grep -qxF -- "$path" "$tmp/step-scripts"; then
+    pass "verdict-steps: the verdict steps run $path"
+  else
+    fail "verdict-steps: the verdict steps do not run $path"
+  fi
+done
+unlisted "$list" verdict-steps
+if [ -s "$tmp/verdict-steps.missing" ]; then
+  fail "verdict-steps: the committed list does not name $(tr '\n' ' ' <"$tmp/verdict-steps.missing")"
+else
+  pass "verdict-steps: the committed list names the $(wc -l <"$tmp/step-scripts") scripts of the verdict steps"
+fi
+
+# The check fails when the list leaves one of them out: here the YAML test
+# suite's verdict script.
+grep -v '^scripts/yaml-test-suite-verdict\.py[[:space:]]' "$list" >"$tmp/short-list"
+unlisted "$tmp/short-list" verdict-steps-short
+if [ "$(cat "$tmp/verdict-steps-short.missing")" = scripts/yaml-test-suite-verdict.py ]; then
+  pass "verdict-steps: a list without the YAML test suite's verdict script fails the check"
+else
+  fail "verdict-steps: a list without the YAML test suite's verdict script misses $(tr '\n' ' ' <"$tmp/verdict-steps-short.missing")"
 fi
 
 echo
