@@ -550,6 +550,16 @@ of each GitHub release include its section
   the other two from 1 to 1073741824 (2^30). These are the values smock
   already took. The running guide's [Settings](docs/running.md#settings)
   table gives the same ranges.
+- The help texts of `--header-size-limit`, `--body-limit`,
+  `--journal-body-limit` and the four timeouts give their ranges too:
+  `--header-size-limit` from 1 to 1073741824 (2^30), `--body-limit` and
+  `--journal-body-limit` from 0 to 1073741824, `--read-timeout-ms`,
+  `--idle-timeout-ms` and `--write-timeout-ms` from 1 to 2147483647
+  (2^31 - 1), and `--drain-timeout-ms` from 0 to 2147483647. These are the
+  values smock already took. The running guide's
+  [Settings](docs/running.md#settings) table now gives the same ranges, and
+  the help of `smock check` and `smock render` gives the range of
+  `--header-size-limit`, which they take as `smock serve` does.
 - The Definition-file Schema's description of a connection Fault's `kind`
   gives its HTTP/2 form beside its HTTP/1.1 one: RST_STREAM on the
   request's stream for `reset`, half the response then RST_STREAM for

@@ -298,6 +298,9 @@ async test "smock check passes a missing definitions directory, as smock serve l
 
 ///|
 async test "smock check needs the definitions directory as its argument" {
+  // smock check takes --header-size-limit as smock serve does
+  // (docs/commands.md), so its help gives the range docs/running.md's
+  // Settings table gives: from 1 to 1073741824.
   inspect(
     check([]),
     content=(
@@ -316,7 +319,7 @@ async test "smock check needs the definitions directory as its argument" {
       #|  -h, --help                               Show help information.
       #|  --body-file-dir <body-file-dir>          The body-file subdirectory of the definitions directory. [env: SMOCK_BODY_FILE_DIR] [default: files]
       #|  --template-env <template-env>            The environment variables templates may read as env.NAME, separated by commas, such as REGION,API_BASE. Their values are read once, at startup. A listed value can show in responses, renderings and template error messages, so list only values that may be shown. A name is letters, digits and _, starting with a letter or _, and cannot start with SMOCK_. None by default. [env: SMOCK_TEMPLATE_ENV]
-      #|  --header-size-limit <header-size-limit>  The most bytes a request head (request line and header fields) may take. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection. It also bounds each block of a gRPC reply's metadata, its header block and its trailers, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL instead. [env: SMOCK_HEADER_SIZE_LIMIT] [default: 16384]
+      #|  --header-size-limit <header-size-limit>  The most bytes a request head (request line and header fields) may take, from 1 to 1073741824. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection. It also bounds each block of a gRPC reply's metadata, its header block and its trailers, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL instead. [env: SMOCK_HEADER_SIZE_LIMIT] [default: 16384]
       #|
       #|
     ),
@@ -325,6 +328,9 @@ async test "smock check needs the definitions directory as its argument" {
 
 ///|
 async test "smock check --help names its argument and its settings" {
+  // smock check takes --header-size-limit as smock serve does
+  // (docs/commands.md), so its help gives the range docs/running.md's
+  // Settings table gives: from 1 to 1073741824.
   inspect(
     check(["--help"]),
     content=(
@@ -340,7 +346,7 @@ async test "smock check --help names its argument and its settings" {
       #|  -h, --help                               Show help information.
       #|  --body-file-dir <body-file-dir>          The body-file subdirectory of the definitions directory. [env: SMOCK_BODY_FILE_DIR] [default: files]
       #|  --template-env <template-env>            The environment variables templates may read as env.NAME, separated by commas, such as REGION,API_BASE. Their values are read once, at startup. A listed value can show in responses, renderings and template error messages, so list only values that may be shown. A name is letters, digits and _, starting with a letter or _, and cannot start with SMOCK_. None by default. [env: SMOCK_TEMPLATE_ENV]
-      #|  --header-size-limit <header-size-limit>  The most bytes a request head (request line and header fields) may take. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection. It also bounds each block of a gRPC reply's metadata, its header block and its trailers, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL instead. [env: SMOCK_HEADER_SIZE_LIMIT] [default: 16384]
+      #|  --header-size-limit <header-size-limit>  The most bytes a request head (request line and header fields) may take, from 1 to 1073741824. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection. It also bounds each block of a gRPC reply's metadata, its header block and its trailers, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL instead. [env: SMOCK_HEADER_SIZE_LIMIT] [default: 16384]
       #|
     ),
   )

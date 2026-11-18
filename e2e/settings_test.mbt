@@ -1,11 +1,15 @@
 ///|
 async test "every serve setting is a flag with a matching SMOCK_ environment variable and a default" {
   // The ranges come from docs/running.md's Settings table: --replicas from
-  // 1 to 10000, --header-count-limit from 1 to 1073741824,
-  // --http2-max-concurrent-streams from 1 to 1000, --seed from 0 to
-  // 9007199254740991 and --journal-max-entries from 1 to 1073741824. The
-  // table gives no other flag a range, and neither does the help: for
-  // --journal-max-bytes and --state-max-bytes, both bound only the default.
+  // 1 to 10000, --header-size-limit and --header-count-limit from 1 to
+  // 1073741824, --body-limit from 0 to 1073741824,
+  // --http2-max-concurrent-streams from 1 to 1000, --read-timeout-ms,
+  // --idle-timeout-ms and --write-timeout-ms from 1 to 2147483647,
+  // --drain-timeout-ms from 0 to 2147483647, --seed from 0 to
+  // 9007199254740991, --journal-max-entries from 1 to 1073741824 and
+  // --journal-body-limit from 0 to 1073741824. The table gives no other flag
+  // a range, and neither does the help: for --journal-max-bytes and
+  // --state-max-bytes, both bound only the default.
   let (status, help) = smock_stdout(["serve", "--help"])
   inspect(
     "status \{status}\n\{help}",
@@ -33,19 +37,19 @@ async test "every serve setting is a flag with a matching SMOCK_ environment var
       #|  --log-format <log-format>                                      The log format: json or mockoon. [env: SMOCK_LOG_FORMAT] [default: json]
       #|  --body-file-dir <body-file-dir>                                The body-file subdirectory of the definitions directory. [env: SMOCK_BODY_FILE_DIR] [default: files]
       #|  --template-env <template-env>                                  The environment variables templates may read as env.NAME, separated by commas, such as REGION,API_BASE. Their values are read once, at startup. A listed value can show in responses, renderings and template error messages, so list only values that may be shown. A name is letters, digits and _, starting with a letter or _, and cannot start with SMOCK_. None by default. [env: SMOCK_TEMPLATE_ENV]
-      #|  --header-size-limit <header-size-limit>                        The most bytes a request head (request line and header fields) may take. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection. It also bounds each block of a gRPC reply's metadata, its header block and its trailers, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL instead. [env: SMOCK_HEADER_SIZE_LIMIT] [default: 16384]
+      #|  --header-size-limit <header-size-limit>                        The most bytes a request head (request line and header fields) may take, from 1 to 1073741824. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection. It also bounds each block of a gRPC reply's metadata, its header block and its trailers, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL instead. [env: SMOCK_HEADER_SIZE_LIMIT] [default: 16384]
       #|  --header-count-limit <header-count-limit>                      The most header fields a request may have, from 1 to 1073741824. More get 431. [env: SMOCK_HEADER_COUNT_LIMIT] [default: 100]
-      #|  --body-limit <body-limit>                                      The longest request body, in bytes. Longer bodies get 413, and a gRPC call RESOURCE_EXHAUSTED. [env: SMOCK_BODY_LIMIT] [default: 10485760]
+      #|  --body-limit <body-limit>                                      The longest request body, in bytes, from 0 to 1073741824. Longer bodies get 413, and a gRPC call RESOURCE_EXHAUSTED. [env: SMOCK_BODY_LIMIT] [default: 10485760]
       #|  --http2-max-concurrent-streams <http2-max-concurrent-streams>  The most streams an HTTP/2 connection may have in progress at once, from 1 to 1000. A stream past it is refused with REFUSED_STREAM. [env: SMOCK_HTTP2_MAX_CONCURRENT_STREAMS] [default: 100]
-      #|  --read-timeout-ms <read-timeout-ms>                            How long a request may take to arrive, in milliseconds, from its first byte to its last. Then the connection closes; over HTTP/2, a request that does not arrive in time resets its stream instead. [env: SMOCK_READ_TIMEOUT_MS] [default: 30000]
-      #|  --idle-timeout-ms <idle-timeout-ms>                            How long a connection may wait for a request, in milliseconds. Then it closes. [env: SMOCK_IDLE_TIMEOUT_MS] [default: 60000]
-      #|  --write-timeout-ms <write-timeout-ms>                          How long a write to a client may make no progress, in milliseconds, as when the client stops reading. Then the connection closes. [env: SMOCK_WRITE_TIMEOUT_MS] [default: 30000]
-      #|  --drain-timeout-ms <drain-timeout-ms>                          How long smock may drain after SIGTERM, in milliseconds: responses in progress, Server-Sent Event streams and delays still running then are cut, and smock exits. [env: SMOCK_DRAIN_TIMEOUT_MS] [default: 20000]
+      #|  --read-timeout-ms <read-timeout-ms>                            How long a request may take to arrive from its first byte to its last, in milliseconds, from 1 to 2147483647. Then the connection closes; over HTTP/2, a request that does not arrive in time resets its stream instead. [env: SMOCK_READ_TIMEOUT_MS] [default: 30000]
+      #|  --idle-timeout-ms <idle-timeout-ms>                            How long a connection may wait for a request, in milliseconds, from 1 to 2147483647. Then it closes. [env: SMOCK_IDLE_TIMEOUT_MS] [default: 60000]
+      #|  --write-timeout-ms <write-timeout-ms>                          How long a write to a client may make no progress, as when the client stops reading, in milliseconds, from 1 to 2147483647. Then the connection closes. [env: SMOCK_WRITE_TIMEOUT_MS] [default: 30000]
+      #|  --drain-timeout-ms <drain-timeout-ms>                          How long smock may drain after SIGTERM, in milliseconds, from 0 to 2147483647: responses in progress, Server-Sent Event streams and delays still running then are cut, and smock exits. [env: SMOCK_DRAIN_TIMEOUT_MS] [default: 20000]
       #|  --seed <seed>                                                  The seed of the process random generator, from 0 to 9007199254740991. Faults of Stubs without their own seed draw from it. Without it, smock picks a seed at startup and logs it. [env: SMOCK_SEED]
       #|  --journal <journal>                                            Whether smock records the requests it receives in the Journal: on or off. Off, it records none, and Journal queries are refused. [env: SMOCK_JOURNAL] [default: on]
       #|  --journal-max-entries <journal-max-entries>                    The most entries the Journal holds, from 1 to 1073741824. Beyond it, the oldest entries are evicted. [env: SMOCK_JOURNAL_MAX_ENTRIES] [default: 10000]
       #|  --journal-max-bytes <journal-max-bytes>                        The most bytes the Journal's entries take: each counts 256, two per character of its request line, header fields, names and Near miss values, 32 per value its Near miss keeps from a form or an XML body, and the body bytes it keeps. Beyond it, the oldest entries are evicted. Default: a quarter of the memory limit of smock's cgroup (cgroup v2 memory.max), at least 1048576 (1 MiB) and at most 67108864 (64 MiB); 67108864 when there is no limit or it cannot be read. [env: SMOCK_JOURNAL_MAX_BYTES]
-      #|  --journal-body-limit <journal-body-limit>                      The most bytes of a request body a Journal entry keeps; the rest is cut. Its Near miss keeps the values of form fields and XML paths up to the same total, each counting 32 bytes more. [env: SMOCK_JOURNAL_BODY_LIMIT] [default: 4096]
+      #|  --journal-body-limit <journal-body-limit>                      The most bytes of a request body a Journal entry keeps, from 0 to 1073741824; the rest is cut. Its Near miss keeps the values of form fields and XML paths up to the same total, each counting 32 bytes more. [env: SMOCK_JOURNAL_BODY_LIMIT] [default: 4096]
       #|  --state-max-bytes <state-max-bytes>                            The most bytes the per-Session state of the whole process takes, across every Mock and Session: each Mock and Session that holds Variables counts its Mock name, its Session key and 64; each Variable counts its name, 64, and its value as compact JSON with 16 more per JSON value in it. A request or an Admin API set whose writes would pass it writes nothing and gets 507, and a gRPC call RESOURCE_EXHAUSTED. Scenario state does not count. Default: an eighth of the memory limit of smock's cgroup (cgroup v2 memory.max), at least 1048576 (1 MiB) and at most 67108864 (64 MiB); 67108864 when there is no limit or it cannot be read. [env: SMOCK_STATE_MAX_BYTES]
       #|
     ),

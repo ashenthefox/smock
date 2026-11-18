@@ -7,7 +7,7 @@
 {"file":"settings/byte_bounds.mbt","definition":"memory_max_file","text":"9e12f62b373b57b2","pinned":{"BODY":1},"full":{"BODY":1}}
 {"file":"settings/byte_bounds.mbt","definition":"MemoryLimit::parse","text":"67ce4a898c820bd4","pinned":{"BODY":1,"ROR":1,"IFC":2,"INT":3},"full":{"BODY":1,"ROR":1,"IFC":4,"INT":6}}
 {"file":"settings/settings.mbt","definition":"InvalidSetting::message","text":"3a9c3e70fd9b7785","pinned":{"BODY":1},"full":{"BODY":1}}
-{"file":"settings/settings.mbt","definition":"serve_settings","text":"98db440d13edd3fc","pinned":{"IFC":1},"full":{"IFC":2}}
+{"file":"settings/settings.mbt","definition":"serve_settings","text":"9d083c35e4797860","pinned":{"IFC":1},"full":{"IFC":2}}
 {"file":"settings/settings.mbt","definition":"env_name","text":"6cfd1571736bea0b","pinned":{"BODY":1},"full":{"BODY":1}}
 {"file":"settings/settings.mbt","definition":"render_command","text":"943d3dc49ba53486","pinned":{"BOOL":2},"full":{"BOOL":2}}
 {"file":"settings/settings.mbt","definition":"import_openapi_command","text":"f41d34e72a2edaf4","pinned":{"BOOL":2},"full":{"BOOL":2}}
