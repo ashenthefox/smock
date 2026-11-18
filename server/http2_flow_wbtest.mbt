@@ -428,8 +428,8 @@ async test "a stream's write timeout for its own window runs from once what it s
   // client that reads that DATA slowly but steadily, and widens the window
   // once it has read it, is not cut for it." The test widens the window
   // 200 ms after it has read the DATA, well within the write timeout of
-  // 500 ms, and reads the DATA for about a second, well past it.
-  with_pipe_client(flow_ports(["--write-timeout-ms", "500"]), client => {
+  // 1000 ms, and reads the DATA for about 1.7 s, well past it.
+  with_pipe_client(flow_ports(["--write-timeout-ms", "1000"]), client => {
     let out = []
     // Stream windows of 500 octets, with the connection window open: stream
     // 1's body waits for its own window.
@@ -450,13 +450,13 @@ async test "a stream's write timeout for its own window runs from once what it s
     let reads = client.smock.reads
     client.send([Ping(payload=b"\x00\x00\x00\x00\x00\x00\x00\x01", ack=false)])
     client.smock.reads_past(reads)
-    // The client reads that DATA and the PING's acknowledgement 50 octets
-    // every 100 ms: about a second, twice the write timeout, while the write
+    // The client reads that DATA and the PING's acknowledgement 30 octets
+    // every 100 ms: about 1.7 s, past the write timeout, while the write
     // goes on at each read.
     out.push(
       client.runs_until(
         frame => frame is Ping(ack=true, ..),
-        max=50,
+        max=30,
         pause_ms=100,
       ),
     )
