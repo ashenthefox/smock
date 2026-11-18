@@ -163,12 +163,17 @@ fn add_file_fields(
 }
 
 ///|
-/// Sets the expiry metric to the expiry of the certificate as read last.
+/// Sets the expiry metric to the expiry of the certificate as read last,
+/// or to 0 when smock cannot read it, so that a rotation never leaves the
+/// series at the expiry of the certificate it replaced.
 fn Pair::set_expiry(self : Pair) -> Unit {
-  if self.last_read is Ok((cert, _)) &&
+  let seconds = if self.last_read is Ok((cert, _)) &&
     @serverparsers.certificate_expiry(cert) is Some(expiry) {
-    self.expiry.set(expiry.to_double() / 1000.0)
+    expiry.to_double() / 1000.0
+  } else {
+    0
   }
+  self.expiry.set(seconds)
 }
 
 ///|
