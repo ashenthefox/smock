@@ -363,7 +363,7 @@ scripts/test-latest-toolchain-plan.sh   # the plan that skips the weekly run wit
 scripts/check-branch-checks-workflow.sh   # the branch checks workflow writes the weakening report on each push to a branch but main (needs yq and jq)
 scripts/test-check-branch-checks-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 python3 scripts/weakening-report.py --base origin/main   # what this branch weakens, against its merge base with main (needs git)
-scripts/test-weakening-report.sh     # the weakening report, on small git histories (needs python3 and git)
+scripts/test-weakening-report.sh     # the weakening report, on small git histories, and its list of the files that decide a verdict (needs python3, git and yq)
 scripts/test-changed-lines.sh        # the changed-lines job of the branch checks, with a fake mutation runner on small git histories (needs python3, git and jq)
 python3 scripts/check-merge.py <branch>   # whether the branch checks on the branch's head let it be merged into main, and its weakening report (needs git and gh)
 scripts/test-check-merge.sh          # the merge check, with a fake gh and canned runs on a small git history (needs python3, git and jq)
@@ -1328,8 +1328,9 @@ report lists every entry whose reviewer changed.
   test's tickets from the subject of the commit that introduced it: the
   issues in that last parenthesis, or else every issue the subject names.
 - **The weakening report.** For each branch, against its merge base with
-  `main`, it lists the tests deleted; the assertion lines removed or
-  changed in tests that stay; the snapshot lines changed; the skip
+  `main`, it lists the tests deleted; the tests moved or renamed; the
+  assertion lines removed or changed in tests that stay; the snapshot
+  lines changed; the other lines changed in tests that stay; the skip
   attributes added; the package settings that stop a test from running on
   wasm-gc; and any change to what decides a verdict: the exclusion list,
   the operator set, the runner and its committed data, the coverage
@@ -2538,10 +2539,19 @@ so `keep` never waits for it.
 
 The report lists:
 
-- **Tests deleted**: each test block of the base that its package no
-  longer has. A test whose name changed is followed to the new test of
-  its package that holds most of its body, or whose name is much like its
-  own, as when a test is extended.
+- **Tests deleted**: each test block of the base that no test of the head
+  stands for. A test stays when its package keeps a test of its name;
+  else when another package has a new test of its name, to which it
+  moved; else when a new test of its package, or then of another, holds
+  most of its body or has a name much like its own, as when a test is
+  extended. So a test is deleted only when no test of its name is left
+  for it.
+- **Tests moved or renamed**: each test that stays in another file, of
+  its package or of another, or under another name, with where it is now
+  and whether its body changed. Its changed lines are in the sections
+  below, under its old place, with a line that says where it is now. The
+  helpers of a file whose tests moved to another package are followed to
+  the file they moved to.
 - **Assertions removed or changed in tests that stay**: in each test, and
   in each function or constant of a test file, that the head still has,
   the lines it removes or changes that assert something. Those are a call
@@ -2549,11 +2559,19 @@ The report lists:
   `fail`, `abort` or `panic`, a `guard`, an `if` whose block fails, and a
   line that compares two values. So an exact comparison made weaker and
   an upper bound raised show here. A line added inside an assertion is
-  not listed, since extending a test adds such lines.
+  not listed here, since extending a test adds such lines: it is among
+  the other lines.
 - **Snapshot lines changed**: the lines a test removes from, changes in or
   adds to a snapshot. A snapshot is the `content=` of `inspect`,
   `debug_inspect` or `json_inspect`, a constant or a variable that a
   `content=` names, or a file in `__snapshot__`.
+- **Other lines changed in tests that stay**: in the same tests,
+  functions and constants, every other line of code that the head
+  removes, changes or adds. A test that computes its result first and
+  asserts it later can be loosened here alone: a wait raised, a
+  condition changed in the list it builds, a fixture's delay or a call
+  of a helper changed. So every test whose code changed is in the report.
+  A comment or a blank line that changes alone is not listed.
 - **Skip attributes and target settings added**: a `#skip` or `#cfg`
   attribute that a test gains, a package whose supported targets no
   longer let its tests run on wasm-gc, and a test file that its package's
@@ -2561,25 +2579,43 @@ The report lists:
 - **Files that decide a verdict changed**: each change to a file that
   `scripts/verdict-files.txt` names, with its diff, and each change to
   that list.
+- **Exclusion entries whose reviewer changed**: each entry of
+  `exclusions.toml` whose reviewer the head fills in, changes or
+  empties, and each entry it adds with a reviewer, by the entry's id.
+  Only the maintainer fills in the reviewer ([Exclusions](#exclusions)).
+
+Each changed line of a test is in one section only. A block of changed
+lines that touches a snapshot is under the snapshots; else one that
+touches an assertion is under the assertions; else it is among the other
+lines. Lines are compared without their indentation, so a block moved
+deeper changes nothing. A test's name is left out: a new name shows
+among the tests moved or renamed.
 
 `scripts/verdict-files.txt` names, by path, every file that decides a
 verdict: the mutation runner and its data, the exclusion list, the
 coverage wrapper with its floors and scope, the canary's verdicts, the
 lists of packages at L4 and of tests kept, the merge and release checks,
-the mutation and coverage workflows, and the lists of cases that
-protobuf's conformance suite, h2spec and the YAML test suite may fail.
-Most of these files do not exist yet: the list fixes the paths they will
-have, and each line names the issue that creates them. A change that adds
-a file that decides a verdict puts it at a path the list names, or adds
-its path to the list in the same change. The report reads the base's list and the head's, so
-a file still shows when the same change takes its path off the list.
+the mutation and coverage workflows, the lists of cases that protobuf's
+conformance suite, h2spec and the YAML test suite may fail, and the
+scripts that run those suites and judge their results, with the tests of
+the verdicts. Most of these files do not exist yet: the list fixes the
+paths they will have, and each line names the issue that creates them. A
+change that adds a file that decides a verdict puts it at a path the list
+names, or adds its path to the list in the same change. The report reads
+the base's list and the head's, so a file still shows when the same
+change takes its path off the list. The report's tests
+(`scripts/test-weakening-report.sh`) read the verdict steps of the
+workflows, the steps that judge a suite's results against its list of
+cases and the steps that test that judgment, and fail when the list
+leaves out a script that such a step runs, or a script that one of those
+runs. A new verdict step goes into that test's list of steps.
 
 The report reads MoonBit by its lines and by `moon fmt`'s layout, not as
 the compiler does. So it may list a line that weakens nothing, such as a
 comparison in a helper's loop. A changed call of a helper that asserts is
-not listed, unless the call is an assertion itself; a change to the
-helper's own lines is. It reads only the MoonBit tests: the tests of the
-scripts are not in it.
+among the other lines, unless the call is an assertion itself; a change
+to the helper's own lines is in the helper's entry. It reads only the
+MoonBit tests: the tests of the scripts are not in it.
 
 To read it for a branch before pushing it:
 

@@ -6,7 +6,8 @@
 # branch and checks what the report lists: each kind of weakening shows,
 # and a branch that weakens nothing gives an empty report.
 #
-# It needs what the report needs: python3 and git.
+# It needs what the report needs, python3 and git, and yq (mikefarah/yq
+# v4, on GitHub's Ubuntu runners) to read the workflows' verdict steps.
 #
 # usage: scripts/test-weakening-report.sh
 #
@@ -101,6 +102,38 @@ lacks() {
   fi
 }
 
+# section <name> <heading>: the lines of the report <name> under the
+# heading "## <heading>", up to the next heading of its level.
+section() {
+  awk -v heading="## $2" '
+    $0 == heading { inside = 1; next }
+    /^## / { inside = 0 }
+    inside
+  ' "$tmp/$1.out"
+}
+
+# mentions_in <name> <heading> <text>: the report <name> holds <text> in a
+# line under the heading "## <heading>".
+mentions_in() {
+  if section "$1" "$2" | grep -qF -- "$3"; then
+    pass "$1: mentions $3 under $2"
+  else
+    fail "$1: does not mention $3 under $2"
+    sed 's/^/     /' "$tmp/$1.out"
+  fi
+}
+
+# lacks_in <name> <heading> <text>: the report <name> holds <text> in no
+# line under the heading "## <heading>".
+lacks_in() {
+  if section "$1" "$2" | grep -qF -- "$3"; then
+    fail "$1: mentions $3 under $2"
+    sed 's/^/     /' "$tmp/$1.out"
+  else
+    pass "$1: does not mention $3 under $2"
+  fi
+}
+
 # empty <name>: the report <name> lists nothing.
 empty() {
   if grep -qxF -- "Nothing to report." "$tmp/$1.out" && ! grep -q '^## ' "$tmp/$1.out"; then
@@ -110,6 +143,9 @@ empty() {
     sed 's/^/     /' "$tmp/$1.out"
   fi
 }
+
+# The headings of the report's sections that a test reads by name.
+other="Other lines changed in tests that stay"
 
 # A package with two tests and the function they test.
 package() {
@@ -312,7 +348,9 @@ mentions helper '`add/timed_test.mbt:15`: fn check_short'
 mentions helper '-    fail("too long: \{text}")'
 
 # Assertions added to a test that stays, a changed line that asserts
-# nothing, and the same test indented in a block of its own weaken nothing.
+# nothing, and the same test indented in a block of its own remove or
+# change no assertion. The added and changed lines show among the other
+# lines (#395), and the deeper indentation nowhere.
 tree
 package
 timed
@@ -342,20 +380,28 @@ fn check_short(text : String) -> Unit raise {
 }
 MBT
 report extended
-empty extended
+lacks extended "## Assertions removed or changed in tests that stay"
+lacks extended "## Snapshot lines changed"
+mentions_in extended "$other" '-  let took = 120L'
+mentions_in extended "$other" '+  let took = 121L'
+mentions_in extended "$other" '+    inspect(took > 0L, content="true")'
+lacks extended '+    guard took < 250L'
 
-# A case added inside an assertion, as extending a test adds one, weakens
-# nothing.
+# A case added inside an assertion, as extending a test adds one, removes
+# or changes no assertion: it shows among the other lines (#395).
 tree
 package
 timed
 branch
 sed -i 's/^    @add.add(took.to_int(), 1),$/    @add.add(took.to_int(), 1),\n    @add.add(1, 1),/' "$repo/add/timed_test.mbt"
 report case-added
-empty case-added
+lacks case-added "## Assertions removed or changed in tests that stay"
+lacks case-added "## Snapshot lines changed"
+mentions_in case-added "$other" '+    @add.add(1, 1),'
 
-# A test whose name is extended, with a case added, stays; one whose name
-# changes with an assertion is listed under its new name.
+# A test whose name is extended, with a case added, stays: its added case
+# is among the other lines (#395), and no assertion of it is listed. One
+# whose name changes with an assertion is listed under its new name.
 tree
 package
 timed
@@ -364,11 +410,206 @@ sed -i 's/test "answers in time"/test "answers in time, under 250 ms"/; s/^  ins
 sed -i 's/test "adds two numbers"/test "adds two positive numbers"/; s/assert_eq(@add.add(2, 3), 5)/assert_eq(@add.add(2, 3), 6)/' "$repo/add/add_test.mbt"
 report renamed
 lacks renamed "## Tests deleted"
-lacks renamed 'answers in time'
+lacks_in renamed "Assertions removed or changed in tests that stay" 'answers in time'
+lacks renamed "## Snapshot lines changed"
+mentions_in renamed "$other" '### `add/timed_test.mbt:2`: test "answers in time"'
+mentions_in renamed "$other" 'Now `add/timed_test.mbt:2`: test "answers in time, under 250 ms".'
+mentions_in renamed "$other" '+  inspect(took > 100L, content="true")'
 mentions renamed '### `add/add_test.mbt:2`: test "adds two numbers"'
 mentions renamed 'Now `add/add_test.mbt:2`: test "adds two positive numbers".'
 mentions renamed '-  assert_eq(@add.add(2, 3), 5)'
 mentions renamed '+  assert_eq(@add.add(2, 3), 6)'
+mentions_in renamed "Tests moved or renamed" '- `add/timed_test.mbt:2`: test "answers in time", now `add/timed_test.mbt:2`, test "answers in time, under 250 ms": its body changed, as listed below.'
+mentions_in renamed "Tests moved or renamed" '- `add/add_test.mbt:2`: test "adds two numbers", now `add/add_test.mbt:2`, test "adds two positive numbers": its body changed, as listed below.'
+
+# A test renamed and nothing else: the pairing shows, so that a reader
+# sees which new test stands for the old one.
+tree
+package
+branch
+sed -i 's/test "adds two numbers"/test "adds two numbers, 2 and 3"/' "$repo/add/add_test.mbt"
+report renamed-only
+mentions_in renamed-only "Tests moved or renamed" '- `add/add_test.mbt:2`: test "adds two numbers", now `add/add_test.mbt:2`, test "adds two numbers, 2 and 3": its body is unchanged.'
+lacks renamed-only "## $other"
+lacks renamed-only "## Tests deleted"
+lacks renamed-only "Nothing to report."
+
+# --- Tests moved or renamed -------------------------------------------------------
+
+# A test file of three tests and their helper, which a branch moves to
+# another package, as #317 moved the ClientHello tests from server to
+# serverparsers.
+reader() {
+  file add/reader_test.mbt <<'MBT'
+///|
+test "reads a name" {
+  let name = read("a.example")
+  inspect(name, content="Some(\"a.example\")")
+}
+
+///|
+test "reads no name" {
+  let name = read("")
+  inspect(name, content="None")
+}
+
+///|
+test "reads a name split in two" {
+  let name = read("b.example")
+  inspect(name, content="Some(\"b.example\")")
+}
+
+///|
+/// What the reader reads from the text.
+fn read(text : String) -> String? {
+  let name = text
+  if name.is_empty() {
+    None
+  } else {
+    Some(name)
+  }
+}
+MBT
+}
+
+# The file moved to another package and renamed: a test moved as it was,
+# one moved with a line added, and one deleted; the helper moved with a
+# changed line. In the package, a test moved to another file. A test is
+# deleted only when no test of its name is left (#395).
+tree
+package
+reader
+branch
+mkdir -p "$repo/parse"
+git -C "$repo" mv add/reader_test.mbt parse/parse_test.mbt
+sed -i 's/^  let name = read("")$/  let name = read("")\n  let _ = read("x")/; s/^  let name = text$/  let name = text.trim()/' "$repo/parse/parse_test.mbt"
+sed -i '/^test "reads a name split in two" {$/,/^}$/d' "$repo/parse/parse_test.mbt"
+file add/sum_test.mbt <<'MBT'
+///|
+test "adds two numbers" {
+  assert_eq(@add.add(2, 3), 5)
+}
+MBT
+file add/add_test.mbt <<'MBT'
+///|
+test "adds a negative number" {
+  inspect(@add.add(2, -3), content="-1")
+}
+MBT
+report moved
+moved="Tests moved or renamed"
+mentions moved "## $moved"
+mentions_in moved "$moved" '- `add/reader_test.mbt:2`: test "reads a name", now `parse/parse_test.mbt:2`: its body is unchanged.'
+mentions_in moved "$moved" '- `add/reader_test.mbt:8`: test "reads no name", now `parse/parse_test.mbt:8`: its body changed, as listed below.'
+mentions_in moved "$moved" '- `add/add_test.mbt:2`: test "adds two numbers", now `add/sum_test.mbt:2`: its body is unchanged.'
+lacks_in moved "$moved" 'split in two'
+lacks_in moved "$moved" 'fn read'
+mentions_in moved "Tests deleted" '- `add/reader_test.mbt:14`: test "reads a name split in two"'
+lacks_in moved "Tests deleted" 'test "reads a name"'
+lacks_in moved "Tests deleted" 'test "reads no name"'
+lacks_in moved "Tests deleted" 'test "adds two numbers"'
+mentions_in moved "$other" '### `add/reader_test.mbt:8`: test "reads no name"'
+mentions_in moved "$other" 'Now `parse/parse_test.mbt:8`: test "reads no name".'
+mentions_in moved "$other" '+  let _ = read("x")'
+mentions_in moved "$other" '### `add/reader_test.mbt:21`: fn read'
+mentions_in moved "$other" 'Now `parse/parse_test.mbt:18`: fn read.'
+mentions_in moved "$other" '+  let name = text.trim()'
+lacks_in moved "$other" 'test "reads a name"'
+
+# Moved to another package and renamed, its body kept: followed there, as
+# a rename in its package is. A test whose name is left in another
+# package has moved there, even when its own package gains a new test
+# with its body. A moved test whose comments alone changed says so.
+tree
+package
+reader
+branch
+mkdir -p "$repo/parse"
+git -C "$repo" mv add/reader_test.mbt parse/parse_test.mbt
+sed -i 's/^test "reads a name" {$/test "reads the name it asks for" {/' "$repo/parse/parse_test.mbt"
+sed -i 's/^  let name = read("b.example")$/  \/\/ Split as a client may split it.\n  let name = read("b.example")/' "$repo/parse/parse_test.mbt"
+file add/again_test.mbt <<'MBT'
+///|
+test "reads no name, again" {
+  let name = read("")
+  inspect(name, content="None")
+}
+MBT
+report moved-renamed
+mentions_in moved-renamed "$moved" '- `add/reader_test.mbt:2`: test "reads a name", now `parse/parse_test.mbt:2`, test "reads the name it asks for": its body is unchanged.'
+mentions_in moved-renamed "$moved" '- `add/reader_test.mbt:8`: test "reads no name", now `parse/parse_test.mbt:8`: its body is unchanged.'
+mentions_in moved-renamed "$moved" '- `add/reader_test.mbt:14`: test "reads a name split in two", now `parse/parse_test.mbt:14`: only comments or blank lines changed in its body.'
+lacks moved-renamed 'reads no name, again'
+lacks moved-renamed "## Tests deleted"
+lacks moved-renamed "## $other"
+
+# A test whose name is gone, alike a new test of its package and a new
+# test of another whose name is even more like its own: its package's
+# comes first.
+tree
+package
+reader
+branch
+sed -i 's/^test "reads a name" {$/test "reads the name it asks for" {/' "$repo/add/reader_test.mbt"
+file parse/parse_test.mbt <<'MBT'
+///|
+test "reads a name." {
+  let name = read("a.example")
+  inspect(name, content="Some(\"a.example\")")
+}
+MBT
+report renamed-here
+mentions_in renamed-here "$moved" '- `add/reader_test.mbt:2`: test "reads a name", now `add/reader_test.mbt:2`, test "reads the name it asks for": its body is unchanged.'
+lacks renamed-here 'reads a name.'
+
+# Two packages with a test and a helper of the same names, and a second
+# helper in the first. The branch deletes the first package's file, and
+# the second package gains a helper of the second's name. The first
+# package's test is deleted, since the test of its name that is left is
+# the second package's own, and its helpers are followed nowhere: its
+# tests moved nowhere.
+works() {
+  file "$1" <<'MBT'
+///|
+test "works" {
+  assert_true(check())
+}
+
+///|
+/// Whether it works.
+fn check() -> Bool {
+  true
+}
+MBT
+}
+tree
+package
+works add/works_test.mbt
+cat >>"$repo/add/works_test.mbt" <<'MBT'
+
+///|
+/// What it reads.
+fn read() -> Bool {
+  true
+}
+MBT
+works sub/works_test.mbt
+branch
+remove add/works_test.mbt
+cat >>"$repo/sub/works_test.mbt" <<'MBT'
+
+///|
+/// What it reads.
+fn read() -> Bool {
+  false
+}
+MBT
+report same-names
+mentions_in same-names "Tests deleted" '- `add/works_test.mbt:2`: test "works"'
+lacks_in same-names "Tests deleted" 'sub/works_test.mbt'
+lacks same-names "## $moved"
+lacks same-names "## $other"
+lacks same-names "## Assertions removed or changed in tests that stay"
 
 # --- Snapshot lines changed ------------------------------------------------------
 
@@ -466,7 +707,9 @@ mentions snapshot-file '+6'
 mentions snapshot-file '`add/__snapshot__/difference.txt`'
 lacks snapshot-file 'zero.txt'
 
-# The test's input changed, and a new snapshot added, weaken nothing.
+# The test's input changed, and a new snapshot added, change no snapshot
+# or assertion: the input's new line shows among the other lines (#395),
+# and the new test nowhere.
 tree
 package
 snapshots
@@ -485,7 +728,88 @@ test "writes one line" {
 }
 MBT
 report input
-empty input
+lacks input "## Snapshot lines changed"
+lacks input "## Assertions removed or changed in tests that stay"
+mentions_in input "$other" '+    #|c: 3'
+lacks input 'writes one line'
+
+# --- Other lines changed in tests that stay ---------------------------------------
+
+# A test that computes its result first and asserts it later, as the SSE
+# test of a client that closes the connection mid-stream does (#395): the
+# wait and the condition that decide what it shows are lines that assert
+# nothing, so its snapshot can stay while they loosen it.
+waited() {
+  file add/waited_test.mbt <<'MBT'
+///|
+test "ends soon after the close" {
+  let start = 0L
+  // The stream ends at smock's next write.
+  let ended = wait_for(3000)
+  let ended_ms = 120L - start
+  let out = [
+    if ended {
+      "ended"
+    } else {
+      "still runs 3 s after the close"
+    },
+  ]
+  inspect(out.join("\n"), content="ended")
+}
+
+///|
+/// Whether the stream ended within the wait.
+fn wait_for(ms : Int) -> Bool {
+  let waited = ms
+  waited > 0
+}
+MBT
+}
+
+# The wait raised, and the condition changed: issue #395's first example.
+# A line added that asserts nothing shows too.
+tree
+package
+waited
+branch
+sed -i 's/wait_for(3000)/wait_for(20000)/; s/^    if ended {$/    if ended \&\& ended_ms < 10000L {/' "$repo/add/waited_test.mbt"
+sed -i 's/^  let ended_ms = 120L - start$/  let ended_ms = 120L - start\n  let _ = ended_ms + 1L/' "$repo/add/waited_test.mbt"
+report other
+mentions other "## $other"
+mentions_in other "$other" '### `add/waited_test.mbt:2`: test "ends soon after the close"'
+mentions_in other "$other" '-  let ended = wait_for(3000)'
+mentions_in other "$other" '+  let ended = wait_for(20000)'
+mentions_in other "$other" '-    if ended {'
+mentions_in other "$other" '+    if ended && ended_ms < 10000L {'
+mentions_in other "$other" '+  let _ = ended_ms + 1L'
+lacks other "## Assertions removed or changed in tests that stay"
+lacks other "## Snapshot lines changed"
+lacks other "## Tests deleted"
+
+# A comment changed and a blank line added change no code: nothing shows.
+tree
+package
+waited
+branch
+sed -i "s|^  // The stream ends at smock's next write.\$|  // smock notices at its next write (the documents' words).\n|" "$repo/add/waited_test.mbt"
+report comment
+empty comment
+
+# The other lines of a helper of a test file show too, since a helper's
+# wait loosens every test that calls it; a changed comparison in it stays
+# with the assertions.
+tree
+package
+waited
+branch
+sed -i 's/^  waited > 0$/  waited >= 0/' "$repo/add/waited_test.mbt"
+sed -i 's/^fn wait_for(ms : Int) -> Bool {$/fn wait_for(ms : Int, patience? : Int = 20000) -> Bool {/' "$repo/add/waited_test.mbt"
+report other-helper
+mentions_in other-helper "$other" '### `add/waited_test.mbt:19`: fn wait_for'
+mentions_in other-helper "$other" '-fn wait_for(ms : Int) -> Bool {'
+mentions_in other-helper "$other" '+fn wait_for(ms : Int, patience? : Int = 20000) -> Bool {'
+mentions_in other-helper "Assertions removed or changed in tests that stay" '-  waited > 0'
+lacks_in other-helper "$other" '-  waited > 0'
 
 # --- Skip attributes and settings that keep tests off wasm-gc ---------------------
 
@@ -856,6 +1180,198 @@ if [ "$tools" -ge 5 ]; then
   pass "tool-files: the checkout has $tools files of the tools"
 else
   fail "tool-files: the checkout has $tools files of the tools, fewer than the five it names"
+fi
+
+# --- The verdict steps ---------------------------------------------------------
+
+# The steps of the workflows that judge a suite's results against its list
+# of the cases that may fail, a list the committed list names, and the
+# steps that test that judgment. Each script such a step runs, and each
+# script that one of those runs, decides a verdict, so the committed list
+# names it and the report shows a change to it (#395, which names the YAML
+# test suite's verdict script and its test). A step is named by its
+# workflow, its job and its name: a step renamed or gone fails the check,
+# so that it is looked at again.
+cat >"$tmp/verdict-steps" <<'TXT'
+.github/workflows/ci.yml	yaml-test-suite	Run yaml-test-suite against smock/yaml in both modes
+.github/workflows/ci.yml	scripts	Test the yaml-test-suite verdict
+.github/workflows/build-test.yml	release	Run h2spec against the plain port (h2c) and the TLS port (h2)
+.github/workflows/ci.yml	scripts	Test the h2spec verdict
+.github/workflows/build-test.yml	protobuf-conformance	Run protobuf's conformance suite against smock/protobuf
+TXT
+
+# step_scripts <root> <steps>: the scripts under <root> that the steps of
+# <root>'s workflows named in <steps> run, one path a line. A step runs the
+# scripts its run names as a command; a shell script runs those its code
+# names as a command, and a Python script those it holds as a string that
+# is the path alone. A step that is not there, or that runs no command, is
+# said on standard error, with status 1.
+step_scripts() {
+  python3 - "$1" "$2" <<'PY'
+import ast, json, os, re, subprocess, sys
+
+root, steps = sys.argv[1], sys.argv[2]
+PATH = r"(?:\./|\$PWD/|\$\{PWD\}/)?(scripts/[\w./-]+\.(?:sh|py))\b"
+COMMAND = re.compile(
+    r"(?:^|[;&|(`{]|\$\(|\b(?:then|do|else|exec)\s)\s*(?:[A-Za-z_]\w*=\S*\s+)*"
+    r"(?:(?:python3|sh|bash)(?:\s+-\w+)*\s+)?[\"']?" + PATH
+)
+
+
+def by_shell(text):
+    return [
+        found
+        for line in text.splitlines()
+        if not line.lstrip().startswith("#")
+        for found in COMMAND.findall(line)
+    ]
+
+
+def by_python(text):
+    return [
+        match.group(1)
+        for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        if (match := re.fullmatch(PATH, node.value))
+    ]
+
+
+status, queue, seen, workflows = 0, [], [], {}
+for line in open(steps):
+    workflow, job, name = line.rstrip("\n").split("\t")
+    if workflow not in workflows:
+        try:
+            yq = subprocess.run(["yq", "-o=json", os.path.join(root, workflow)], capture_output=True, text=True)
+        except OSError as error:
+            sys.exit(f"cannot run yq: {error}")
+        if yq.returncode != 0:
+            sys.exit(f"yq cannot read {workflow}: {yq.stderr.strip()}")
+        workflows[workflow] = json.loads(yq.stdout)
+    runs = [
+        step.get("run")
+        for step in ((workflows[workflow].get("jobs") or {}).get(job) or {}).get("steps") or []
+        if step.get("name") == name
+    ]
+    if len(runs) != 1 or not isinstance(runs[0], str):
+        print(f"{workflow}: job {job} has no step {name!r} that runs a command", file=sys.stderr)
+        status = 1
+        continue
+    queue += by_shell(runs[0])
+while queue:
+    path = queue.pop(0)
+    if path in seen or not os.path.isfile(os.path.join(root, path)):
+        continue
+    seen.append(path)
+    text = open(os.path.join(root, path)).read()
+    queue += by_python(text) if path.endswith(".py") else by_shell(text)
+print("\n".join(seen))
+sys.exit(status)
+PY
+}
+
+# The finder on a small tree: a step that runs a shell script, which runs
+# a Python script and names another in a message; the Python script runs
+# a third and names a fourth in its docstring. A step that is gone, and
+# one that runs no command, are said.
+steps=$tmp/steps
+rm -rf "$steps"
+mkdir -p "$steps/.github/workflows" "$steps/scripts"
+cat >"$steps/.github/workflows/ci.yml" <<'YML'
+jobs:
+  suite:
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v6
+      - name: Run the suite
+        run: |
+          mkdir -p out
+          FOO=1 scripts/run-suite.sh out
+YML
+cat >"$steps/scripts/run-suite.sh" <<'SH'
+#!/bin/sh
+# scripts/commented.sh is not run.
+python3 scripts/verdict.py "$1" || echo "see scripts/message.sh"
+SH
+cat >"$steps/scripts/verdict.py" <<'PY'
+"""Judges a run. scripts/docstring.sh tells how."""
+import subprocess
+subprocess.run(["sh", "scripts/helper.sh"], check=True)
+PY
+for name in commented.sh message.sh docstring.sh helper.sh; do
+  : >"$steps/scripts/$name"
+done
+printf '.github/workflows/ci.yml\tsuite\tRun the suite\n' >"$tmp/steps.tsv"
+if step_scripts "$steps" "$tmp/steps.tsv" >"$tmp/steps.out" &&
+  [ "$(tr '\n' ' ' <"$tmp/steps.out")" = "scripts/run-suite.sh scripts/verdict.py scripts/helper.sh " ]; then
+  pass "step-scripts: finds the scripts a step runs, through the scripts it runs"
+else
+  fail "step-scripts: finds $(tr '\n' ' ' <"$tmp/steps.out")"
+fi
+printf '.github/workflows/ci.yml\tsuite\tRun the old suite\n' >"$tmp/steps-gone.tsv"
+if step_scripts "$steps" "$tmp/steps-gone.tsv" >/dev/null 2>"$tmp/steps-gone.err"; then
+  fail "step-scripts: passes a step that is gone"
+elif grep -qF "job suite has no step 'Run the old suite' that runs a command" "$tmp/steps-gone.err"; then
+  pass "step-scripts: says a step that is gone"
+else
+  fail "step-scripts: says $(cat "$tmp/steps-gone.err")"
+fi
+printf '.github/workflows/ci.yml\tsuite\tSet up Python\n' >"$tmp/steps-uses.tsv"
+if step_scripts "$steps" "$tmp/steps-uses.tsv" >/dev/null 2>"$tmp/steps-uses.err"; then
+  fail "step-scripts: passes a step that runs no command"
+elif grep -qF "job suite has no step 'Set up Python' that runs a command" "$tmp/steps-uses.err"; then
+  pass "step-scripts: says a step that runs no command"
+else
+  fail "step-scripts: says $(cat "$tmp/steps-uses.err")"
+fi
+
+# unlisted <list> <name>: writes into $tmp/<name>.missing the scripts of
+# the verdict steps that the report does not show as files that decide a
+# verdict, under the list <list>, on a branch that adds each of them; the
+# report is <name>.
+unlisted() {
+  tree
+  package
+  branch
+  mkdir -p "$repo/scripts"
+  cp "$1" "$repo/$list"
+  while read -r path; do
+    file "$path" </dev/null
+  done <"$tmp/step-scripts"
+  report "$2"
+  : >"$tmp/$2.missing"
+  while read -r path; do
+    grep -qF -- "### \`$path\` (added)" "$tmp/$2.out" || echo "$path" >>"$tmp/$2.missing"
+  done <"$tmp/step-scripts"
+}
+
+# The committed list names every script of the verdict steps.
+if step_scripts . "$tmp/verdict-steps" >"$tmp/step-scripts" 2>"$tmp/step-scripts.err"; then
+  pass "verdict-steps: each verdict step is in its workflow"
+else
+  fail "verdict-steps: $(cat "$tmp/step-scripts.err")"
+fi
+for path in scripts/yaml-test-suite-verdict.py scripts/test-yaml-test-suite-verdict.sh scripts/h2spec-verdict.py; do
+  if grep -qxF -- "$path" "$tmp/step-scripts"; then
+    pass "verdict-steps: the verdict steps run $path"
+  else
+    fail "verdict-steps: the verdict steps do not run $path"
+  fi
+done
+unlisted "$list" verdict-steps
+if [ -s "$tmp/verdict-steps.missing" ]; then
+  fail "verdict-steps: the committed list does not name $(tr '\n' ' ' <"$tmp/verdict-steps.missing")"
+else
+  pass "verdict-steps: the committed list names the $(wc -l <"$tmp/step-scripts") scripts of the verdict steps"
+fi
+
+# The check fails when the list leaves one of them out: here the YAML test
+# suite's verdict script.
+grep -v '^scripts/yaml-test-suite-verdict\.py[[:space:]]' "$list" >"$tmp/short-list"
+unlisted "$tmp/short-list" verdict-steps-short
+if [ "$(cat "$tmp/verdict-steps-short.missing")" = scripts/yaml-test-suite-verdict.py ]; then
+  pass "verdict-steps: a list without the YAML test suite's verdict script fails the check"
+else
+  fail "verdict-steps: a list without the YAML test suite's verdict script misses $(tr '\n' ' ' <"$tmp/verdict-steps-short.missing")"
 fi
 
 echo
