@@ -23,6 +23,11 @@ pub enum ClientHello {
 const MAX_CLIENT_HELLO = 65536
 
 ///|
+/// The octets of a handshake message's header: its type, then its length
+/// in 3 octets (RFC 8446, section 4).
+const HANDSHAKE_HEADER = 4
+
+///|
 /// Reads the ClientHello at the start of `data`, the bytes a client has
 /// sent so far. The ClientHello may span several TLS records, and a record
 /// several reads.
@@ -79,8 +84,8 @@ fn read(data : BytesView, cost : ClientHelloCost) -> ClientHello {
     return ServerName(None)
   }
   // The octets of the handshake messages in the records walked so far, and
-  // the first four of them, the handshake header: the message's type (1 for
-  // ClientHello) and its length in 3 bytes, before its body.
+  // the header of the first: its type, 1 for ClientHello, in the highest
+  // octet, then its length.
   let mut gathered = 0
   let mut header = 0
   let mut pos = 0
@@ -104,18 +109,18 @@ fn read(data : BytesView, cost : ClientHelloCost) -> ClientHello {
     // The header's octets in this fragment, while it lacks some, each in
     // its place, the first highest.
     let mut at = pos + 5
-    while gathered < 4 && at < end {
+    while gathered < HANDSHAKE_HEADER && at < end {
       header = header | (data[at].to_int() << (24 - 8 * gathered))
       gathered += 1
       at += 1
     }
     gathered += end - at
     pos = end
-    if gathered >= 4 {
+    if gathered >= HANDSHAKE_HEADER {
       if header >> 24 != 1 {
         return ServerName(None)
       }
-      let length = 4 + (header & 0xffffff)
+      let length = HANDSHAKE_HEADER + (header & 0xffffff)
       if gathered >= length {
         return ServerName(server_name(body(data, length, cost)))
       }
@@ -124,13 +129,13 @@ fn read(data : BytesView, cost : ClientHelloCost) -> ClientHello {
 }
 
 ///|
-/// The body of the handshake message whose `length` octets, its 4-octet
-/// header first, the records at the start of `data` hold. It is read where
+/// The body of the handshake message whose `length` octets, its header
+/// first, the records at the start of `data` hold. It is read where
 /// it lies when the first record holds it whole, and is otherwise copied
 /// from the records' fragments, once.
 fn body(data : BytesView, length : Int32, cost : ClientHelloCost) -> BytesView {
   if uint16(data, 3) >= length {
-    return data[9:5 + length]
+    return data[5 + HANDSHAKE_HEADER:5 + length]
   }
   let message = FixedArray::make(length, b'\x00')
   // The octets of the message copied so far. The last record may hold more
@@ -146,7 +151,7 @@ fn body(data : BytesView, length : Int32, cost : ClientHelloCost) -> BytesView {
     copied += count
     pos += 5 + fragment
   }
-  message.unsafe_reinterpret_as_bytes()[4:]
+  message.unsafe_reinterpret_as_bytes()[HANDSHAKE_HEADER:]
 }
 
 ///|
