@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""Merges the outputs of the shards of one run of the mutation runner into
+the output of the run without shards: its records, its summary and its
+report (CONTRIBUTING.md, "Mutation runner").
+
+usage: python3 scripts/mutation/merge.py --out <dir> <shard's out>...
+
+Each <shard's out> is the directory a run of scripts/mutation/run.py with
+--shard k/n wrote. Every shard of the run must be given once, and their
+selections (the set, the packages, the ids, the sample) must be the same.
+The records are those of the shards, in shard order, which is the order
+of the run without shards. Each package's summary is its shards'
+summary, with the counts of the outcomes, of the comparison of the
+compiler's output, with the package's own tests alone, of the
+survivors after the exclusion list (exclusions.py) and of the
+pseudo-tested functions taken again from all its records, its importers' counts summed (importers.py), the counts of
+its native verdicts taken again from its records, with the runs without a
+mutant of the first shard that ran natively (native.py), and with
+"shards": what each shard that ran the package gave of its run (the
+mutants it ran, the run without a mutant and the time limit, those of
+its importers' tests, and its self-test), since each shard ran the tests
+without a mutant and the self-test on its own. When every shard wrote flake records, they merge as
+confirm.py merge merges them into flakes.json, and the summary and the
+report give this run's flaky results over all the shards. For a run in
+kill-matrix mode, each package's matrix is written again from all its
+records (matrix.py), and its counts taken again. The report is
+the one run.py writes from them, which it also prints; for a listed set,
+the keys that no longer apply are those the first shard gives; for a run
+on changed lines, the report starts with its base and lines.
+
+It exits with 0 when it merged them, and with 1 when it cannot.
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import changed
+import choice
+import compare
+import confirm
+import exclusions
+import importers
+import matrix
+import native
+import run
+
+# What a shard's summary of a package gives of its own run, beside the
+# counts of the outcomes, which the merge takes again from the records.
+OWN_RUN = ("mutants", "baseline", "limit_s", "self_test")
+
+
+class MergeError(Exception):
+    """What stops the merge: shards that are not all of one run."""
+
+
+def read(directory):
+    """A shard's summary, and its records, chosen mutants, keys that no
+    longer apply and flake records (None for a file the shard did not
+    write)."""
+    summary_path = directory / "summary.json"
+    if not summary_path.is_file():
+        raise MergeError(f"{directory} holds no summary.json")
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    lines = {}
+    for name in ("mutants.jsonl", "chosen.jsonl", "unapplied.jsonl"):
+        path = directory / name
+        lines[name] = ([json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                       if path.is_file() else None)
+    flakes_path = directory / "flakes.json"
+    flakes = json.loads(flakes_path.read_text(encoding="utf-8")) if flakes_path.is_file() else None
+    return summary, lines["mutants.jsonl"], lines["chosen.jsonl"], lines["unapplied.jsonl"], flakes
+
+
+def ordered(directories):
+    """The shards, read and sorted by their index, after checking that
+    they are every shard of one run, each given once."""
+    shards = []
+    for directory in directories:
+        summary, records, chosen, unapplied, flakes = read(directory)
+        selection = summary.get("selection") or {}
+        shard = selection.get("shard")
+        if not shard:
+            raise MergeError(f"{directory} is not a shard: its run had no --shard")
+        shards.append((shard["index"], shard["count"], directory, summary, records, chosen, unapplied, flakes))
+    count = shards[0][1]
+    if any(s[1] != count for s in shards):
+        raise MergeError("the shards are of runs in different numbers of shards: "
+                         + ", ".join(f"{s[0]}/{s[1]}" for s in shards))
+    shards.sort(key=lambda s: s[0])
+    indices = [s[0] for s in shards]
+    for index in range(1, count + 1):
+        if indices.count(index) > 1:
+            raise MergeError(f"shard {index}/{count} is given twice")
+        if index not in indices:
+            raise MergeError(f"shard {index}/{count} is missing")
+
+    def of_run(summary):
+        selection = dict(summary["selection"], shard=None)
+        return (summary.get("operator_set"), summary.get("set"), selection, summary.get("changed"),
+                summary.get("kill_matrix"))
+
+    first = of_run(shards[0][3])
+    for index, _, directory, summary, *_ in shards[1:]:
+        if of_run(summary) != first:
+            raise MergeError(f"shard {index}/{count} ({directory}) is of another run than shard 1/{count}:"
+                             " its operator set, set, selection, changed lines or kill-matrix mode differ")
+    return shards
+
+
+def merge(directories):
+    """The merged summary, records, chosen mutants, keys that no longer
+    apply and flake records (each None unless every shard wrote it)."""
+    shards = ordered(directories)
+    count = shards[0][1]
+    records = [r for s in shards for r in (s[4] or [])]
+    chosen = None if any(s[5] is None for s in shards) else [c for s in shards for c in s[5]]
+    unapplied = None if any(s[6] is None for s in shards) else [u for s in shards for u in s[6]]
+    first = shards[0][3]
+    chosen_set = first["set"]
+    summaries = []
+    for directory in first["selection"]["packages"]:
+        mine = [(s[0], p) for s in shards for p in s[3]["packages"] if p["directory"] == directory]
+        if not mine:
+            continue
+        summary = dict(mine[0][1])
+        if any(p["sets"] != summary["sets"] for _, p in mine):
+            raise MergeError(f"the shards count the sites of {directory} differently")
+        if "mutants" in summary:
+            package = [r for r in records if r["package"] == summary["package"]]
+            summary.update(run.outcome_counts(package))
+            summary.update(compare.counts(package))
+            summary.pop("exclusions", None)
+            summary.update(exclusions.counts(package))
+            summary.pop("body_mutants", None)
+            summary.pop("pseudo_tested", None)
+            summary.update(run.pseudo_tested(package))
+            if "own" in summary:
+                summary["own"] = run.outcome_counts(importers.own_records(package))
+            if "importers" in summary:
+                summary["importers"] = importers.merge_credits([p["importers"] for _, p in mine])
+            if "matrix" in summary:
+                summary["matrix"] = matrix.merged([p["matrix"] for _, p in mine], package, MergeError)
+            if chosen_set == "full":
+                summary.update(run.alternative_counts(package))
+            if any("native" in p for _, p in mine):
+                summary["native"] = native.merged([p["native"] for _, p in mine if "native" in p], package)
+            summary["shards"] = [{"shard": f"{index}/{count}", **{k: p[k] for k in OWN_RUN if k in p},
+                                  **importers_run(p)} for index, p in mine]
+        summaries.append(summary)
+    merged = {key: value for key, value in first.items() if key != "packages"}
+    merged["selection"] = dict(first["selection"], shard=None)
+    flakes = None
+    if all(s[7] is not None for s in shards):
+        try:
+            flakes = confirm.merge([s[7] for s in shards])
+        except (ValueError, KeyError) as problem:
+            raise MergeError(f"the shards' flake records do not merge: {problem}") from problem
+        if "flakes" in first:
+            merged["flakes"] = confirm.merged_summary([s[3]["flakes"] for s in shards], flakes)
+    merged["packages"] = summaries
+    return merged, records, chosen, unapplied, flakes
+
+
+def importers_run(package):
+    """What a shard's summary of a package gives of its importers' run
+    without a mutant, if their tests ran in it."""
+    found = package.get("importers", {})
+    return {"importers": {k: found[k] for k in ("baseline", "limit_s")}} if "baseline" in found else {}
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Merge the outputs of the shards of one mutation run.")
+    parser.add_argument("--out", required=True, help="where the merged records, summary and report go")
+    parser.add_argument("shards", nargs="+", help="the directories the shards' runs wrote")
+    args = parser.parse_args()
+    try:
+        summary, records, chosen, unapplied, flakes = merge([Path(d) for d in args.shards])
+    except MergeError as error:
+        print(f"merge: {error}", file=sys.stderr)
+        sys.exit(1)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    with open(out / "mutants.jsonl", "w", encoding="utf-8") as f:
+        for record in records:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    matrix.write(out, summary["operator_set"], summary["set"], summary["packages"], records)
+    for name, lines in (("chosen.jsonl", chosen), ("unapplied.jsonl", unapplied)):
+        if lines is not None:
+            with open(out / name, "w", encoding="utf-8") as f:
+                for line in lines:
+                    f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    if flakes is not None:
+        (out / "flakes.json").write_text(json.dumps(flakes, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    (out / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    text = run.report(summary["operator_set"], summary["set"], summary["packages"], records)
+    if unapplied is not None and chosen is None:
+        gone = {}
+        for line in unapplied:
+            gone.setdefault(line["directory"], []).append((line["listed"], line["why"]))
+        text += "\n".join(["", *choice.listed_report(summary["selection"]["packages"], records, gone)])
+    if "flakes" in summary:
+        text = text.rstrip("\n") + "\n\n" + "\n".join(confirm.summary_lines(summary["flakes"]))
+    if "changed" in summary:
+        text = "\n".join(changed.header(summary["changed"], summary["selection"]["set"], len(records))
+                         + ([text] if summary["packages"] else []))
+    (out / "report.md").write_text(text, encoding="utf-8")
+    print(text)
+
+
+if __name__ == "__main__":
+    main()

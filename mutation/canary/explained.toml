@@ -1,0 +1,24 @@
+# The explained differences of the mutation runner's canary
+# (CONTRIBUTING.md, "Mutation runner", "The canary"). The canary replays the
+# 250 mutants of mutation/canary/mutants.jsonl on the commit they were
+# sampled from, and compares each one's verdict with the recorded one. A
+# difference fails the replay unless it is here.
+#
+# A difference joins this list only after it has been explained on the
+# spec issue (#275) and the maintainer has accepted the explanation. Each
+# entry is a table [[difference]] with:
+#
+#   mutant    the mutant's name in mutants.jsonl
+#   recorded  its recorded verdict, as mutants.jsonl gives it
+#   replayed  the verdict the replay gives: killed (a time-out included),
+#             survived (an equivalent mutant included), unviable or
+#             unconfirmed
+#   category  what explains it: "flaky test", "time limit", "site finder"
+#             (the parse-based site finder places the mutant differently)
+#             or "importers' tests" (the replay ran tests that the
+#             recorded verdict did not); a bug in the runner is fixed
+#             instead
+#   reason    the explanation, in a sentence or two
+#   accepted  where the maintainer accepted it: a link to the comment
+#
+# The weakening report lists every change to this file.

@@ -80,14 +80,20 @@ async test "h2c: Rapid Reset with a delayed Stub: 100 streams that the client re
     let stopped = with_smock(["--dir", dir, "--port", "0"], smock => {
       let raw = smock.raw_h2()
       defer raw.close()
-      let start = @async.now()
       raw.send(raw.cancelled(1, 100, "/slow"))
       let open = raw.fenced()
       raw.send(raw.cancelled(201, 1, "/slow"))
       let closed = raw.tally_until_closed()
       let fresh = smock.fresh()
-      let entries = smock.journal_once(102, within=1000, limit=1000)
-      let committed_ms = @async.now() - start
+      // A reset stream "stops waiting at once" (docs/http2.md, Streams that
+      // wait), so each entry's duration, by smock's own clock, ends before
+      // the delays of 2000 ms.
+      let entries = smock.journal_durations(
+        102,
+        below=2000,
+        within=patience_ms,
+        limit=1000,
+      )
       inspect(
         [
           "100 streams reset:",
@@ -95,7 +101,7 @@ async test "h2c: Rapid Reset with a delayed Stub: 100 streams that the client re
           "one more:",
           closed,
           fresh,
-          "every entry committed before the delay was over: \{entries.length() == 102 && committed_ms < 2000}",
+          "every entry committed: \{entries.length() == 102}",
           tally(entries),
         ].join("\n"),
         content=(
@@ -107,9 +113,9 @@ async test "h2c: Rapid Reset with a delayed Stub: 100 streams that the client re
           #|GOAWAY last=201 ENHANCE_YOUR_CALM
           #|then a FIN
           #|then a fresh connection: 200 fast
-          #|every entry committed before the delay was over: true
-          #|/slow: stub "slow", status 200 x101
-          #|/fast: stub "fast", status 200
+          #|every entry committed: true
+          #|/slow: stub "slow", status 200, durationMs below 2000: true x101
+          #|/fast: stub "fast", status 200, durationMs below 2000: true
         ),
       )
     })
@@ -552,8 +558,10 @@ async test "h2c: MadeYouReset: delayed and event streams whose requests have end
         }
         resets == 10 || is_goaway(frame)
       })
-      let entries = smock.journal_once(10, within=1000)
-      let committed_ms = @async.now() - start
+      // A stream that smock resets for a frame the client sent on it stops
+      // waiting at once (docs/http2.md, Streams that wait), so each entry's
+      // duration, by smock's own clock, ends before the delays of 2000 ms.
+      let entries = smock.journal_durations(10, below=2000, within=patience_ms)
       raw.send([raw.get(21, "/fast")])
       let next = raw.frames_until_stream_ends(21)
       let out = []
@@ -565,7 +573,7 @@ async test "h2c: MadeYouReset: delayed and event streams whose requests have end
           ..out,
           "---",
           ..reset.shown,
-          "every entry committed before the delays were over: \{entries.length() == 10 && committed_ms < 2000}",
+          "every entry committed: \{entries.length() == 10}",
           tally(entries),
           "---",
           next,
@@ -595,9 +603,9 @@ async test "h2c: MadeYouReset: delayed and event streams whose requests have end
           #|RST_STREAM 17 PROTOCOL_ERROR
           #|HEADERS 19 END_HEADERS [:status: 200, content-type: text/event-stream, smock-mock: m; via=default, date: <now>]
           #|RST_STREAM 19 PROTOCOL_ERROR
-          #|every entry committed before the delays were over: true
-          #|/slow: stub "slow", status 200 x5
-          #|/events: stub "events", status 200 x5
+          #|every entry committed: true
+          #|/slow: stub "slow", status 200, durationMs below 2000: true x5
+          #|/events: stub "events", status 200, durationMs below 2000: true x5
           #|---
           #|HEADERS 21 END_HEADERS [:status: 200, smock-mock: m; via=default, date: <now>, content-length: 4]
           #|DATA 21 END_STREAM 4 octets
@@ -614,7 +622,6 @@ async test "h2c: MadeYouReset past the bound: 100 delayed and event streams that
     let stopped = with_smock(["--dir", dir, "--port", "0"], smock => {
       let raw = smock.raw_h2()
       defer raw.close()
-      let start = @async.now()
       // Each stream on its own, to mix the kinds with both Stubs.
       let made = (first : Int32, n : Int32) => {
         let frames = []
@@ -631,8 +638,15 @@ async test "h2c: MadeYouReset past the bound: 100 delayed and event streams that
       raw.send(made(201, 1))
       let closed = raw.tally_until_closed()
       let fresh = smock.fresh()
-      let entries = smock.journal_once(102, within=1000, limit=1000)
-      let committed_ms = @async.now() - start
+      // A stream that smock resets for a frame the client sent on it stops
+      // waiting at once (docs/http2.md, Streams that wait), so each entry's
+      // duration, by smock's own clock, ends before the delays of 2000 ms.
+      let entries = smock.journal_durations(
+        102,
+        below=2000,
+        within=patience_ms,
+        limit=1000,
+      )
       inspect(
         [
           "100 streams reset:",
@@ -640,7 +654,7 @@ async test "h2c: MadeYouReset past the bound: 100 delayed and event streams that
           "one more:",
           closed,
           fresh,
-          "every entry committed before the delays were over: \{entries.length() == 102 && committed_ms < 2000}",
+          "every entry committed: \{entries.length() == 102}",
           tally(entries),
         ].join("\n"),
         content=(
@@ -657,10 +671,10 @@ async test "h2c: MadeYouReset past the bound: 100 delayed and event streams that
           #|GOAWAY last=201 ENHANCE_YOUR_CALM
           #|then a FIN
           #|then a fresh connection: 200 fast
-          #|every entry committed before the delays were over: true
-          #|/slow: stub "slow", status 200 x51
-          #|/events: stub "events", status 200 x50
-          #|/fast: stub "fast", status 200
+          #|every entry committed: true
+          #|/slow: stub "slow", status 200, durationMs below 2000: true x51
+          #|/events: stub "events", status 200, durationMs below 2000: true x50
+          #|/fast: stub "fast", status 200, durationMs below 2000: true
         ),
       )
     })

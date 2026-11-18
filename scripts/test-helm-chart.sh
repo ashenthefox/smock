@@ -7,7 +7,8 @@
 # accepts as they are. scripts/test-helm-chart-on-kind.sh installs the chart
 # on a real cluster.
 #
-# It needs helm (v3.8 or later, or v4), yq (mikefarah/yq v4) and jq.
+# It needs helm (v3.13 or later, for `helm install --dry-run=client`, or
+# v4), yq (mikefarah/yq v4) and jq.
 #
 # usage: scripts/test-helm-chart.sh
 #
@@ -50,6 +51,21 @@ render() {
   else
     fail "$name: rendering failed: $(cat "$tmp/$name.err")"
     echo '[]' >"$tmp/$name.json"
+  fi
+}
+
+# notes <name> [helm install flags...]: the notes that `helm install` shows
+# after it installs the chart, as release "smock" in namespace "mocks", into
+# $tmp/<name>.notes. A client-side dry run renders them without a cluster.
+notes() {
+  name=$1
+  shift
+  if KUBECONFIG="$tmp/no-cluster" helm install smock "$chart" --namespace mocks --dry-run=client "$@" \
+    >"$tmp/$name.install" 2>"$tmp/$name.err"; then
+    sed -n '/^NOTES:$/,$p' "$tmp/$name.install" >"$tmp/$name.notes"
+  else
+    fail "$name: the dry-run install failed: $(cat "$tmp/$name.err")"
+    : >"$tmp/$name.notes"
   fi
 }
 
@@ -133,6 +149,28 @@ check() {
   else
     fail "$1: $2"
     echo "     filter: $3"
+    if [ -s "$tmp/jq.err" ]; then
+      sed 's/^/     /' "$tmp/jq.err"
+    fi
+  fi
+}
+
+# check_text <name> <description> <jq filter> [jq arguments...]: like check,
+# but each number in the manifests rendered as <name> is a string, the text
+# the chart wrote for it, so the filter sees how a number is written. In
+# JSON, 1e+06 and 1000000 are the same number. The arguments, such as
+# --arg, give the filter its variables.
+check_text() {
+  name=$1 description=$2 filter=$3
+  shift 3
+  if yq --output-format=json eval-all '[.] | map(select(. != null))
+       | (.. | select(tag == "!!int" or tag == "!!float")) |= to_string' \
+    "$tmp/$name.yaml" >"$tmp/$name.text.json" 2>"$tmp/jq.err" &&
+    jq -e "$@" "$defs $filter" "$tmp/$name.text.json" >/dev/null 2>"$tmp/jq.err"; then
+    pass "$name: $description"
+  else
+    fail "$name: $description"
+    echo "     filter: $filter"
     if [ -s "$tmp/jq.err" ]; then
       sed 's/^/     /' "$tmp/jq.err"
     fi
@@ -268,6 +306,23 @@ check body-file-dir "the body-file subdirectory follows definitions.bodyFileDir"
   "$layout"' == {"users.json": "{\"stubs\":[]}", "bodies/users/1.json": "{\"id\":1}", "bodies/README.txt": "not a Definition file"}
    and env("SMOCK_BODY_FILE_DIR").value == "bodies"'
 
+# A file whose content in a values file is a number of a million or more,
+# such as a JSON body of 1000000, keeps the digits of the values file in
+# the ConfigMap (#377).
+cat >"$tmp/values-number-files.yaml" <<'YAML'
+definitions:
+  configMap:
+    files:
+      count.json: 1000000
+    bodyFiles:
+      total.json: 1234567
+YAML
+render number-files --values "$tmp/values-token.yaml" --values "$tmp/values-number-files.yaml"
+check_text number-files "a Definition file and a body file of a million or more keep their digits" \
+  "$layout"' == {"count.json": $count, "files/total.json": $total}' \
+  --arg count "$(yq '.definitions.configMap.files["count.json"]' "$tmp/values-number-files.yaml")" \
+  --arg total "$(yq '.definitions.configMap.bodyFiles["total.json"]' "$tmp/values-number-files.yaml")"
+
 for path in ../escape.json /etc/passwd users/../../x .hidden/1.json users/.1.json users//1.json; do
   printf 'definitions:\n  configMap:\n    bodyFiles:\n      "%s": x\n' "$path" >"$tmp/values-bad.yaml"
   refuse body-file-path "a body file path $path that leaves the subdirectory or that smock skips" \
@@ -305,6 +360,9 @@ definitions:
     repo: https://example.com/team/mocks.git
     ref: main
     path: mocks/dev
+    depth: 0
+    extraArgs:
+      - --stale-worktree-timeout=30s
 YAML
 render git-sync --values "$tmp/values-token.yaml" --values "$tmp/values-git-sync.yaml"
 check git-sync "no ConfigMap: the Definition files come from the Git repository" \
@@ -325,6 +383,37 @@ check git-sync "git-sync writes its home in a volume of its own, since its root 
   'mount("git-sync"; "git-sync-home") == {"name": "git-sync-home", "mountPath": "/tmp"}
    and mount("git-sync-init"; "git-sync-home") == {"name": "git-sync-home", "mountPath": "/tmp"}
    and volume("git-sync-home") == {"name": "git-sync-home", "emptyDir": {}}'
+# The README's values table: definitions.gitSync.depth is how many commits
+# of history to fetch, 0 for all of it, and definitions.gitSync.extraArgs
+# are more git-sync flags, such as the --stale-worktree-timeout that its
+# git-sync section names. A depth of 0 must not be dropped as empty.
+check git-sync "both git-sync containers fetch the depth set, 0 for the whole history, and take the extra flags" \
+  '[container("git-sync", "git-sync-init")] as $c
+   | ($c | length) == 2
+   and all($c[]; [.args[] | select(startswith("--depth"))] == ["--depth=0"]
+     and (.args | index("--stale-worktree-timeout=30s")))'
+
+# Helm reads a number in a values file as a floating-point number, which Go
+# writes as 1e+06 from a million up; git-sync's --depth and Kubernetes'
+# runAsUser and runAsGroup take only whole numbers. A UID of this size is
+# what some platforms assign to a namespace. Both reach the two git-sync
+# containers with the digits of the values file (#377).
+cat >"$tmp/values-git-sync-large.yaml" <<'YAML'
+definitions:
+  gitSync:
+    depth: 1000000
+    uid: 1000680000
+YAML
+depth=$(yq '.definitions.gitSync.depth' "$tmp/values-git-sync-large.yaml")
+uid=$(yq '.definitions.gitSync.uid' "$tmp/values-git-sync-large.yaml")
+render git-sync-large --values "$tmp/values-token.yaml" --values "$tmp/values-git-sync.yaml" \
+  --values "$tmp/values-git-sync-large.yaml"
+check_text git-sync-large "a depth and a UID of a million or more from a values file reach both git-sync containers in full" \
+  '[container("git-sync", "git-sync-init")] as $c
+   | ($c | length) == 2
+   and all($c[]; [.args[] | select(startswith("--depth"))] == ["--depth=\($depth)"]
+     and .securityContext.runAsUser == $uid and .securityContext.runAsGroup == $uid)' \
+  --arg depth "$depth" --arg uid "$uid"
 
 render git-sync-root --values "$tmp/values-token.yaml" --set definitions.source=gitSync --set definitions.gitSync.repo=https://example.com/m.git
 check git-sync-root "without a path, the Definition files are at the top of the repository" \
@@ -478,6 +567,49 @@ check custom-ports "ports from the values reach smock, the Pod and the Services"
    and [service("smock") | .spec.ports[] | .port] == [8080, 8443]
    and [service("smock-admin") | .spec.ports[] | .port] == [9999]'
 
+# Ports and the replica count, a million or more each, from a values file:
+# the Pod, the Services, the Deployment and the notes after an install write
+# them with the digits of the values file, as the chart writes every number
+# it prints from values (#377). No port goes that high; the chart leaves the
+# range to Kubernetes.
+cat >"$tmp/values-large.yaml" <<'YAML'
+replicas: 1000000
+ports:
+  plain: 1008080
+  tls: 1008443
+  admin: 1009091
+service:
+  plainPort: 1000080
+  tlsPort: 1000443
+adminService:
+  port: 1009090
+YAML
+replicas=$(yq '.replicas' "$tmp/values-large.yaml")
+plain_port=$(yq '.service.plainPort' "$tmp/values-large.yaml")
+tls_port=$(yq '.service.tlsPort' "$tmp/values-large.yaml")
+admin_port=$(yq '.adminService.port' "$tmp/values-large.yaml")
+render large --values "$tmp/values-token.yaml" --values "$tmp/values-large.yaml"
+check_text large "ports and a replica count of a million or more from a values file are written in full" \
+  '[smock | .ports[] | .containerPort] == [$smock_plain, $smock_tls, $smock_admin]
+   and [service("smock") | .spec.ports[] | .port] == [$plain, $tls]
+   and [service("smock-admin") | .spec.ports[] | .port] == [$admin]
+   and deployment.spec.replicas == $replicas' \
+  --arg smock_plain "$(yq '.ports.plain' "$tmp/values-large.yaml")" \
+  --arg smock_tls "$(yq '.ports.tls' "$tmp/values-large.yaml")" \
+  --arg smock_admin "$(yq '.ports.admin' "$tmp/values-large.yaml")" \
+  --arg plain "$plain_port" --arg tls "$tls_port" --arg admin "$admin_port" --arg replicas "$replicas"
+notes large --values "$tmp/values-token.yaml" --values "$tmp/values-large.yaml"
+missing=
+for text in "(ports $plain_port and $tls_port)" "(port $admin_port)" "port-forward service/smock-admin $admin_port" \
+  "localhost:$admin_port/v1/status" "With $replicas replicas"; do
+  grep -qF -- "$text" "$tmp/large.notes" || missing="$missing \"$text\""
+done
+if [ -z "$missing" ]; then
+  pass "large: the notes after an install write those ports and that replica count in full"
+else
+  fail "large: the notes after an install lack$missing: $(cat "$tmp/large.notes")"
+fi
+
 check ports "the probes call /startupz, /readyz and /livez on the admin port, without a token" \
   '[smock | .startupProbe, .readinessProbe, .livenessProbe | .httpGet] == [
      {"path": "/startupz", "port": "admin"},
@@ -597,8 +729,8 @@ check pre-stop "a longer preStop sleep reaches smock's container and lengthens t
   'smock.lifecycle.preStop.sleep.seconds == 15 and pod.terminationGracePeriodSeconds == 45'
 printf 'lifecycle:\n  preStopSleepSeconds: 1000000\n' >"$tmp/values-pre-stop.yaml"
 render pre-stop-long --values "$tmp/values-token.yaml" --values "$tmp/values-pre-stop.yaml"
-check pre-stop-long "a preStop sleep from a values file is written out in full" \
-  'smock.lifecycle.preStop.sleep.seconds == 1000000 and pod.terminationGracePeriodSeconds == 1000030'
+check_text pre-stop-long "a preStop sleep from a values file is written out in full" \
+  'smock.lifecycle.preStop.sleep.seconds == "1000000" and pod.terminationGracePeriodSeconds == "1000030"'
 render pre-stop-off --values "$tmp/values-token.yaml" --set lifecycle.preStopSleepSeconds=0
 check pre-stop-off "a preStop sleep of 0 leaves the hook out, so the chart also runs before Kubernetes 1.30" \
   '(smock | has("lifecycle") | not) and pod.terminationGracePeriodSeconds == 30'
@@ -629,16 +761,25 @@ render grace-no-sleep --values "$tmp/values-token.yaml" --set terminationGracePe
 check grace-no-sleep "without the sleep, a grace period 1 s above the drain timeout is kept" \
   'pod.terminationGracePeriodSeconds == 21'
 
+# The last three are beyond what smock takes: 2^63, 10^21 and a fraction of
+# a million or more. The chart writes them in full all the same, whatever
+# their size (#377), and leaves the range to smock.
 cat >"$tmp/values-env.yaml" <<'YAML'
 env:
   SMOCK_IDLE_TIMEOUT_MS: "120000"
   SMOCK_SEED: 9007199254740991
   SMOCK_BODY_LIMIT: 10485760
+  SMOCK_JOURNAL_MAX_BYTES: 9223372036854775808
+  SMOCK_STATE_MAX_BYTES: 1000000000000000000000
+  SMOCK_WRITE_TIMEOUT_MS: 1234567.5
 YAML
 render env --values "$tmp/values-token.yaml" --values "$tmp/values-env.yaml"
 check env "other smock settings are set as SMOCK_<NAME> variables, numbers written out in full" \
   'env("SMOCK_IDLE_TIMEOUT_MS").value == "120000" and env("SMOCK_SEED").value == "9007199254740991"
-   and env("SMOCK_BODY_LIMIT").value == "10485760"'
+   and env("SMOCK_BODY_LIMIT").value == "10485760"
+   and env("SMOCK_JOURNAL_MAX_BYTES").value == "9223372036854775808"
+   and env("SMOCK_STATE_MAX_BYTES").value == "1000000000000000000000"
+   and env("SMOCK_WRITE_TIMEOUT_MS").value == "1234567.5"'
 check env "each variable is set once" 'envs | length == (unique | length)'
 # The chart's README sets the mockoon log format this way: through env,
 # with no value of the chart's own.

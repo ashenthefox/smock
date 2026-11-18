@@ -17,10 +17,18 @@ report reads the items so, and their statements by moon fmt's layout.
 What it lists, each under a heading, or "Nothing to report.":
 
   Tests deleted
-      each test block of the base that its package no longer has. A test
-      whose name is gone is matched with the new test of its package
-      that holds most of its body, or whose name is much like its own,
-      and is then a test that stays.
+      each test block of the base that no test of the head stands for.
+      A test stays when its package keeps a test of its name; else when
+      another package has a new test of its name, to which it moved;
+      else when a new test of its package, or then of another, holds
+      most of its body or has a name much like its own, as when a test
+      is extended. Each test of the head stands for one of the base.
+  Tests moved or renamed
+      each test that stays in another file or under another name, with
+      where it is now and whether its body changed; the changed lines
+      are under the sections below. The other items of a file whose
+      tests moved to another package are followed to the file they
+      moved to.
   Assertions removed or changed in tests that stay
       in each test, and each other item of a test file, that the head
       still has, the lines it removes or changes that assert something:
@@ -28,12 +36,21 @@ What it lists, each under a heading, or "Nothing to report.":
       function, fail, abort or panic; a guard; an if whose block fails;
       and a line that compares two values (==, !=, <, <=, > or >=).
       Lines are compared without their indentation. Lines added inside
-      an assertion are not listed, as extending a test adds them.
+      an assertion are not listed here, as extending a test adds them.
   Snapshot lines changed
       the lines a test removes from, changes in or adds to a snapshot:
       the content= of a call of inspect, debug_inspect or json_inspect,
       or a constant or a variable that a content= names; and each file
       in a __snapshot__ directory that the head changes or deletes.
+  Other lines changed in tests that stay
+      in the same items, every other line of code that the head removes,
+      changes or adds: such as a wait, or a condition that a test
+      computes before it asserts the result, and the lines added inside
+      an assertion. So each item whose code changed is in the report.
+      Each changed line is in one section only: a hunk of lines that
+      touches a snapshot is under the snapshots, else one that touches
+      an assertion under the assertions. A hunk of comments and blank
+      lines alone is not listed.
   Skip attributes and target settings added
       each #skip or #cfg attribute that a test gains, a package whose
       supported targets no longer let its tests run on wasm-gc, and a
@@ -41,6 +58,11 @@ What it lists, each under a heading, or "Nothing to report.":
   Files that decide a verdict changed
       each changed file that scripts/verdict-files.txt names, in the base
       or in the head, with its diff, and each change to that list.
+  Exclusion entries whose reviewer changed
+      each entry of the exclusion list, exclusions.toml, whose reviewer
+      the head fills in, changes or empties, and each entry it adds with a
+      reviewer, by the entry's id: only the maintainer fills in the
+      reviewer (CONTRIBUTING.md, "Exclusions").
 
 It exits with 2 when git cannot answer, such as when <base> or <head> is
 not a commit.
@@ -53,6 +75,7 @@ import posixpath
 import re
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
 
 
@@ -370,35 +393,70 @@ def snapshot_spans(item, names):
     return spans
 
 
-def weakened(before, after, names):
-    """The hunks in which after removes or changes a snapshot or an
-    assertion of before, or adds lines inside a snapshot: those of
-    snapshots, and those of other assertions. Lines added inside another
-    assertion, such as a case added to the value an inspect shows, are not
-    listed: they change its snapshot when they change what it shows. Lines
-    are compared without their indentation, so that a block moved deeper
-    changes nothing."""
+def is_comment(line):
+    """Whether a line holds no code: blank, or a comment alone."""
+    stripped = line.strip()
+    return not stripped or stripped.startswith("//")
+
+
+def compared(item):
+    """An item's lines as the report compares them: without their
+    indentation, and a test's header without the test's name, which the
+    section on tests moved or renamed shows."""
+    lines = [line.strip() for line in item.lines]
+    if item.kind == "test" and lines and (match := TEST_HEADER.match(lines[0])) and match.group(1):
+        lines[0] = lines[0][: match.start(1)] + lines[0][match.end(1) :]
+    return lines
+
+
+@dataclass
+class Changes:
+    """What the head changed in an item that stays, as hunks by section:
+    those of snapshots, those of other assertions, and every other hunk;
+    and the hunks of comments and blank lines alone, which are not
+    listed."""
+
+    snapshot: list
+    assertion: list
+    other: list
+    comment: list
+
+    def listed(self):
+        """Whether any of its hunks is listed."""
+        return bool(self.snapshot or self.assertion or self.other)
+
+
+def changes(before, after, names):
+    """The hunks in which after changes before, each in one section: those
+    that remove or change a snapshot's lines, or add lines inside one; of
+    the rest, those that remove or change an assertion; and every other
+    hunk that changes code, such as a wait or a condition computed before
+    it is asserted, or lines added inside an assertion, as extending a
+    test adds them. Lines are compared without their indentation, so that
+    a block moved deeper changes nothing."""
     snapshots = snapshot_spans(before, names)
     assertions = assertion_spans(before.lines)
-    matcher = difflib.SequenceMatcher(
-        None,
-        [line.strip() for line in before.lines],
-        [line.strip() for line in after.lines],
-        autojunk=False,
-    )
-    found = {"snapshot": [], "assertion": []}
+    matcher = difflib.SequenceMatcher(None, compared(before), compared(after), autojunk=False)
+    found = Changes([], [], [], [])
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
         hunk = Hunk(before.line + i1, before.lines[i1:i2], after.line + j1, after.lines[j1:j2])
         if i1 == i2:
-            if i1 > 0 and inside(snapshots, i1 - 1, i1):
-                found["snapshot"].append(hunk)
-        elif touches(snapshots, i1, i2 - 1):
-            found["snapshot"].append(hunk)
-        elif touches(assertions, i1, i2 - 1):
-            found["assertion"].append(hunk)
-    return found["snapshot"], found["assertion"]
+            snapshot = i1 > 0 and inside(snapshots, i1 - 1, i1)
+            assertion = False
+        else:
+            snapshot = touches(snapshots, i1, i2 - 1)
+            assertion = touches(assertions, i1, i2 - 1)
+        if snapshot:
+            found.snapshot.append(hunk)
+        elif assertion:
+            found.assertion.append(hunk)
+        elif all(is_comment(line) for line in hunk.base + hunk.head):
+            found.comment.append(hunk)
+        else:
+            found.other.append(hunk)
+    return found
 
 
 def package_items(repo, rev, package):
@@ -444,36 +502,66 @@ def likeness(before, after):
     return difflib.SequenceMatcher(None, before.name or "", after.name or "").ratio()
 
 
+def package_of(item):
+    """The package an item is in: its file's directory."""
+    return posixpath.dirname(item.path)
+
+
 def pair(base_items, head_items):
     """The items of the base that the head still has, each with its head
-    item; those it does not; and the head's new items. An item keeps its
-    key; one of several of the same key is matched in its file first. A
-    test whose name is gone is the new test of its package that holds most
-    of its body, or whose name is much like its own: renamed, as when a
-    test is extended."""
+    item, in the base's order; those it does not; and the head's new
+    items. An item keeps its key in its package; one of several of the
+    same key is matched in its file first. A test whose key is gone from
+    its package has moved to the new test of its name in another package.
+    A test whose name is gone is the new test of its package, else of
+    another, that holds most of its body, or whose name is much like its
+    own: renamed, as when a test is extended. Another item of a file whose
+    tests moved to another package is the new item of its key in the file
+    they moved to."""
     free = list(head_items)
     pairs, gone = [], []
+
+    def take(item, chosen):
+        free.remove(chosen)
+        pairs.append((item, chosen))
+
     for item in base_items:
-        candidates = [other for other in free if key(other) == key(item)]
+        candidates = [
+            other for other in free if key(other) == key(item) and package_of(other) == package_of(item)
+        ]
         if not candidates:
             gone.append(item)
             continue
         same_file = [other for other in candidates if other.path == item.path]
-        chosen = (same_file or candidates)[0]
-        free.remove(chosen)
-        pairs.append((item, chosen))
+        take(item, (same_file or candidates)[0])
     for item in [item for item in gone if item.kind == "test"]:
-        scored = [
+        candidates = [other for other in free if key(other) == key(item)]
+        if candidates:
+            gone.remove(item)
+            take(item, candidates[0])
+    for item in [item for item in gone if item.kind == "test"]:
+        alike = [
             (overlap(item, other) + likeness(item, other), other.path == item.path, -n, other)
             for n, other in enumerate(free)
             if other.kind == "test"
             and (overlap(item, other) >= 0.6 or likeness(item, other) >= 0.75)
         ]
-        if scored:
-            chosen = max(scored, key=lambda score: score[:3])[3]
-            free.remove(chosen)
+        here = [score for score in alike if package_of(score[3]) == package_of(item)]
+        if here or alike:
             gone.remove(item)
-            pairs.append((item, chosen))
+            take(item, max(here or alike, key=lambda score: score[:3])[3])
+    moved_to = {}
+    for before, after in pairs:
+        moved_to.setdefault(before.path, set()).add(after.path)
+    for item in [item for item in gone if item.kind != "test"]:
+        candidates = [
+            other for other in free if key(other) == key(item) and other.path in moved_to.get(item.path, ())
+        ]
+        if candidates:
+            gone.remove(item)
+            take(item, candidates[0])
+    order = {id(item): n for n, item in enumerate(base_items)}
+    pairs.sort(key=lambda found: order[id(found[0])])
     return pairs, gone, free
 
 
@@ -717,6 +805,49 @@ def verdict_files(repo, base, head, changed):
     return out
 
 
+# --- The exclusion list's reviewers ------------------------------------------------
+
+EXCLUSIONS = "exclusions.toml"
+
+
+def reviewers(text):
+    """Each entry of an exclusion list's text, by its id, with its
+    reviewer: a mutant's id, or a point's file, definition and position;
+    None when the text is not TOML."""
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return None
+    found = {}
+    for fields in data.get("exclusion", []):
+        if isinstance(fields, dict):
+            key = fields.get("mutant") or f"{fields.get('file')},{fields.get('definition')},{fields.get('position')}"
+            found[key] = fields.get("reviewer") or ""
+    return found
+
+
+def reviewer_changes(repo, base, head, changed):
+    """The entries of the exclusion list whose reviewer the head changes,
+    and those it adds with a reviewer, as Markdown lines."""
+    if not any(path == EXCLUSIONS for _, path in changed):
+        return []
+    lists = [reviewers(show(repo, rev, EXCLUSIONS)) if exists(repo, rev, EXCLUSIONS) else {} for rev in (base, head)]
+    if None in lists:
+        return [f"- the report cannot read `{EXCLUSIONS}` as TOML: see its diff"]
+
+    def shown(reviewer):
+        return json.dumps(reviewer, ensure_ascii=False) if reviewer else "none"
+
+    before, after = lists
+    out = []
+    for key, reviewer in after.items():
+        if key in before and before[key] != reviewer:
+            out.append(f"- `{key}`: from {shown(before[key])} to {shown(reviewer)}")
+        elif key not in before and reviewer:
+            out.append(f"- `{key}`: a new entry, reviewed by {shown(reviewer)}")
+    return out
+
+
 # --- The report ----------------------------------------------------------------
 
 
@@ -730,26 +861,33 @@ def report(repo, base_ref, head_ref):
         for line in git(repo, "diff", "--name-status", "--no-renames", base, head).splitlines()
     ]
 
-    deleted, assertions, snapshots, skips = [], [], [], []
+    moved, assertions, snapshots, others, skips = [], [], [], [], []
     packages = sorted({posixpath.dirname(path) for _, path in changed if is_moonbit(path)})
+    base_items, head_items, names = [], [], {}
     for package in packages:
-        base_items = package_items(repo, base, package)
-        head_items = package_items(repo, head, package)
-        names = snapshot_names(base_items + head_items)
-        pairs, gone, new = pair(base_items, head_items)
-        deleted.extend(item for item in gone if item.kind == "test")
-        for before, after in pairs + [(None, item) for item in new]:
-            skips.extend(
-                f"- `{after.path}:{after.line}`: {after.title()}: `{text}`"
-                for text in skips_added(before, after)
-            )
-            if before is None:
-                continue
-            in_snapshots, in_assertions = weakened(before, after, names)
-            if in_snapshots:
-                snapshots.append(changed_item(before, after, in_snapshots))
-            if in_assertions:
-                assertions.append(changed_item(before, after, in_assertions))
+        in_base = package_items(repo, base, package)
+        in_head = package_items(repo, head, package)
+        names[package] = snapshot_names(in_base + in_head)
+        base_items += in_base
+        head_items += in_head
+    pairs, gone, new = pair(base_items, head_items)
+    deleted = [item for item in gone if item.kind == "test"]
+    for before, after in pairs + [(None, item) for item in new]:
+        skips.extend(
+            f"- `{after.path}:{after.line}`: {after.title()}: `{text}`"
+            for text in skips_added(before, after)
+        )
+        if before is None:
+            continue
+        found = changes(before, after, names[package_of(before)])
+        if after.kind == "test" and (after.path, after.name) != (before.path, before.name):
+            moved.append(moved_test(before, after, found))
+        if found.snapshot:
+            snapshots.append(changed_item(before, after, found.snapshot))
+        if found.assertion:
+            assertions.append(changed_item(before, after, found.assertion))
+        if found.other:
+            others.append(changed_item(before, after, found.other))
     for status, path in changed:
         if "__snapshot__" in path.split("/") and status in ("M", "D"):
             snapshots.append(changed_file(repo, base, head, path))
@@ -772,9 +910,12 @@ def report(repo, base_ref, head_ref):
         out += ["## Tests deleted", ""]
         out += [f"- `{item.path}:{item.line}`: {item.title()}" for item in deleted]
         out.append("")
+    if moved:
+        out += ["## Tests moved or renamed", "", *moved, ""]
     for title, entries in (
         ("Assertions removed or changed in tests that stay", assertions),
         ("Snapshot lines changed", snapshots),
+        ("Other lines changed in tests that stay", others),
     ):
         if entries:
             out += [f"## {title}", ""]
@@ -785,7 +926,10 @@ def report(repo, base_ref, head_ref):
     verdicts = verdict_files(repo, base, head, changed)
     if verdicts:
         out += ["## Files that decide a verdict changed", "", *verdicts]
-    if not (deleted or assertions or snapshots or skips or verdicts):
+    reviewed = reviewer_changes(repo, base, head, changed)
+    if reviewed:
+        out += ["## Exclusion entries whose reviewer changed", "", *reviewed, ""]
+    if not (deleted or moved or assertions or snapshots or others or skips or verdicts or reviewed):
         out += ["Nothing to report.", ""]
     return out
 
@@ -793,6 +937,21 @@ def report(repo, base_ref, head_ref):
 def changed_file(repo, base, head, path):
     """A file and its diff, as Markdown lines."""
     return [f"### `{path}`", "", *fenced(diff_of(repo, base, head, path), "diff"), ""]
+
+
+def moved_test(before, after, found):
+    """A test of the base that the head has in another file or under
+    another name, with whether its body changed, as a Markdown line."""
+    now = f"`{after.path}:{after.line}`"
+    if after.name != before.name:
+        now += f", {after.title()}"
+    if found.listed():
+        state = "its body changed, as listed below"
+    elif found.comment:
+        state = "only comments or blank lines changed in its body"
+    else:
+        state = "its body is unchanged"
+    return f"- `{before.path}:{before.line}`: {before.title()}, now {now}: {state}."
 
 
 def changed_item(before, after, hunks):

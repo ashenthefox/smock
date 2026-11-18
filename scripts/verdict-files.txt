@@ -13,27 +13,47 @@
 #
 # A change that adds a file that decides a verdict puts it at a path named
 # here, or adds its path here, in the same change. Most of these files do
-# not exist yet: the issue named in a line creates them.
+# not exist yet: the issue named in a line creates them. The tests of the
+# weakening report (scripts/test-weakening-report.sh) fail when this list
+# leaves out a script that a workflow's verdict step runs: a step that
+# judges a suite's results against its list of cases, or that tests that
+# judgment, and the scripts such a step runs, through the scripts it runs.
 
 scripts/verdict-files.txt              the list of the files that decide a verdict
 scripts/weakening-report.py            the weakening report, which reads this list
+scripts/test-weakening-report.sh       the tests of the weakening report, which hold the check that this list names every script of the workflows' verdict steps (#395)
 .github/workflows/branch-checks.yml    the branch checks workflow: the weakening report, and the mutants on the changed lines (#311)
+scripts/changed-lines.py               the changed-lines job: the shards' budget on a push, what counts as covering the whole diff, and the report of the survivors on the changed lines that the merge check reads (#311)
 exclusions.*                           the exclusion list of surviving mutants and uncovered points, with each entry's category, reason and reviewer (#302)
 mutation/l4-packages.txt               the list of packages at L4 (#312)
 mutation/kept-tests.*                  the keep list: the tests kept for reasons the kill matrix cannot see (#351)
+mutation/site-counts/                  the site counts: each package's sites, per definition and operator, which must be the site finder's on the head, and which the site-count check compares with the merge base's (#309)
+mutation/approved-drops.txt            the drops of sites that the maintainer approved, each with its reason, which the site-count check reads (#309)
 docs/ledgers/                          the use-case and boundary ledgers, whose rows keep their tests under removal rule (C) (#286)
 scripts/mutation/                      the mutation runner and its site finder (#298), operator set v1 and its alternative rule, whose version every record carries (operators.py, #299), and the fixture module with its expected sites and verdicts (#298, #299)
 mutation/                              the mutation runner's committed data: the site counts and approved drops (#309), the flake threshold, and the flake rates if they are committed (#301), and the canary's mutants, recorded verdicts and explained differences (#308)
-coverage/                              the coverage wrapper and its committed data: the bisect parser (#296), the floors and approved raises (#297), and the scope's list of generated files
+scripts/coverage.sh                    the coverage wrapper, which runs the tests with coverage on and reports the uncovered points (#296)
+scripts/coverage-report.py             the coverage report: the bisect parser, which reads the points and their counters (#296)
+scripts/coverage-tests/                the coverage report's committed reports and tree, which its test judges it by (#296)
+scripts/coverage-ratchet.py            the coverage ratchet, which holds each package's uncovered points to its floor and refuses a raised floor that no recorded raise covers (#297)
+coverage/                              the coverage ledger's committed data: the floors and approved raises (#297), and the scope's list of generated files
 scripts/check-merge.*                  the merge check (#312)
 scripts/check-weekly-run.*             the release's check of the latest weekly run (#316)
-.github/workflows/mutation*.yml        a mutation workflow: the bulk runs (#313), the weekly and monthly runs (#314), and server and cmd/smock through e2e (#344, #346)
+.github/workflows/mutation*.yml        a mutation workflow: the canary (#308), the bulk runs (#313), the weekly and monthly runs (#314), and server and cmd/smock through e2e (#344, #346)
 .github/workflows/coverage*.yml        a coverage workflow beside CI's coverage job, such as e2e's (#342)
 .github/workflows/ci.yml               the workflow that runs on every push, which holds the coverage job (#297)
 .github/workflows/build-test.yml       the workflow that builds and tests, which runs the mutation runner's own tests, its self-test and its site-count check (#298, #309)
 .github/workflows/release.yml          the release workflow, which runs the release's check of the latest weekly run (#316)
 docs/adr/0006-*                        ADR 0006, which pins operator set v1 and its alternative rule (#277)
 protobuf-conformance/failure_list.txt  the cases of protobuf's conformance suite that may fail
+scripts/check-conformance.sh           the run of protobuf's conformance suite, which fails on a case that differs from the list of the cases that may fail (#395)
 scripts/h2spec/                        the cases of h2spec that may fail or be skipped on each port
+scripts/check-h2spec.sh                the runs of h2spec against the plain port and the TLS port, each judged against the port's list of cases (#395)
+scripts/h2spec-verdict.py              h2spec's verdict: which cases of a run pass, against the port's list of cases (#395)
+scripts/test-h2spec-verdict.sh         the tests of h2spec's verdict (#395)
 yaml-test-suite/safe.txt               the cases of the YAML test suite that may fail or be skipped in the safe subset
 yaml-test-suite/openapi.txt            the cases of the YAML test suite that may fail or be skipped in the mode for OpenAPI documents
+scripts/check-yaml-test-suite.sh       the run of the YAML test suite in both modes, each judged against the mode's list of cases (#395)
+scripts/fetch-yaml-test-suite.sh       the pinned release of the YAML test suite that its run fetches (#395)
+scripts/yaml-test-suite-verdict.py     the YAML test suite's verdict: which cases pass in a mode, against the mode's list of cases (#395)
+scripts/test-yaml-test-suite-verdict.sh  the tests of the YAML test suite's verdict (#395)

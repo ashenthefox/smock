@@ -81,19 +81,19 @@ reported and the current one keeps serving
 | `--log-format` | `SMOCK_LOG_FORMAT` | `json` by default (stderr, smock's own shape), or `mockoon` (stdout, the Mockoon CLI's shape, [for Mockoon users](migrating-from-mockoon.md#logs)) |
 | `--body-file-dir` | `SMOCK_BODY_FILE_DIR` | `files` |
 | `--template-env` | `SMOCK_TEMPLATE_ENV` | none: templates read no environment variable; a comma-separated list of names lets them read those as `env.NAME`, with values read once at startup ([Environment variables](definition-files/templates.md#environment-variables)) |
-| `--header-size-limit` | `SMOCK_HEADER_SIZE_LIMIT` | 16384 bytes (16 KiB): larger request heads get 431; over HTTP/2, a larger header list, counted as RFC 7541 counts it, gets 431 on its stream, and a header block over twice the limit closes the connection ([Header lists](http2.md#header-lists)); it also bounds each block of a gRPC reply's metadata, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL ([Metadata size](grpc/metadata-and-status.md#metadata-size)) |
+| `--header-size-limit` | `SMOCK_HEADER_SIZE_LIMIT` | 16384 bytes (16 KiB), from 1 to 1073741824 (2^30): larger request heads get 431; over HTTP/2, a larger header list, counted as RFC 7541 counts it, gets 431 on its stream, and a header block over twice the limit closes the connection ([Header lists](http2.md#header-lists)); it also bounds each block of a gRPC reply's metadata, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL ([Metadata size](grpc/metadata-and-status.md#metadata-size)) |
 | `--header-count-limit` | `SMOCK_HEADER_COUNT_LIMIT` | 100 header fields, from 1 to 1073741824 (2^30): more get 431 |
-| `--body-limit` | `SMOCK_BODY_LIMIT` | 10485760 bytes (10 MiB): longer bodies get 413; over HTTP/2, per stream, on that stream alone ([Request bodies](http2.md#request-bodies)); a gRPC call gets RESOURCE_EXHAUSTED instead, and its message's decoded JSON is held to the limit too ([The body limit](grpc/unmatched-and-refused-calls.md#the-body-limit)), and to 32,768 values and 4 more for each octet of the message ([The values a message may print](grpc/unmatched-and-refused-calls.md#the-values-a-message-may-print)) |
+| `--body-limit` | `SMOCK_BODY_LIMIT` | 10485760 bytes (10 MiB), from 0 to 1073741824 (2^30): longer bodies get 413; over HTTP/2, per stream, on that stream alone ([Request bodies](http2.md#request-bodies)); a gRPC call gets RESOURCE_EXHAUSTED instead, and its message's decoded JSON is held to the limit too ([The body limit](grpc/unmatched-and-refused-calls.md#the-body-limit)), and to 32,768 values and 4 more for each octet of the message ([The values a message may print](grpc/unmatched-and-refused-calls.md#the-values-a-message-may-print)) |
 | `--http2-max-concurrent-streams` | `SMOCK_HTTP2_MAX_CONCURRENT_STREAMS` | 100, from 1 to 1000: the most streams an HTTP/2 connection may have in progress at once; a stream past it gets RST_STREAM `REFUSED_STREAM` ([Limits and timeouts](http2.md#limits-and-timeouts)) |
-| `--read-timeout-ms` | `SMOCK_READ_TIMEOUT_MS` | 30000: a request must arrive whole within 30 s of its first byte, or, when it was pipelined behind a response, of that response; over HTTP/2, a stream whose request is late gets RST_STREAM `CANCEL` alone ([Limits and timeouts](http2.md#limits-and-timeouts)) |
-| `--idle-timeout-ms` | `SMOCK_IDLE_TIMEOUT_MS` | 60000: a connection that waits 60 s for a request closes |
-| `--write-timeout-ms` | `SMOCK_WRITE_TIMEOUT_MS` | 30000: a connection closes when a write to it makes no progress for 30 s, as when the client stops reading; over HTTP/2, also when a response waits that long for the client to widen the connection window, and a stream whose own window stays at zero that long gets RST_STREAM `CANCEL` alone ([Timeouts](http2.md#timeouts)) |
-| `--drain-timeout-ms` | `SMOCK_DRAIN_TIMEOUT_MS` | 20000: how long smock drains after SIGTERM before it cuts what is still running |
+| `--read-timeout-ms` | `SMOCK_READ_TIMEOUT_MS` | 30000, from 1 to 2147483647 (2^31 - 1): a request must arrive whole within 30 s of its first byte, or, when it was pipelined behind a response, of that response; over HTTP/2, a stream whose request is late gets RST_STREAM `CANCEL` alone ([Limits and timeouts](http2.md#limits-and-timeouts)) |
+| `--idle-timeout-ms` | `SMOCK_IDLE_TIMEOUT_MS` | 60000, from 1 to 2147483647 (2^31 - 1): a connection that waits 60 s for a request closes |
+| `--write-timeout-ms` | `SMOCK_WRITE_TIMEOUT_MS` | 30000, from 1 to 2147483647 (2^31 - 1): a connection closes when a write to it makes no progress for 30 s, as when the client stops reading; over HTTP/2, also when a response waits that long for the client to widen the connection window, and a stream whose own window stays at zero that long gets RST_STREAM `CANCEL` alone ([Timeouts](http2.md#timeouts)) |
+| `--drain-timeout-ms` | `SMOCK_DRAIN_TIMEOUT_MS` | 20000, from 0 to 2147483647 (2^31 - 1): how long smock drains after SIGTERM before it cuts what is still running |
 | `--seed` | `SMOCK_SEED` | none: smock picks the seed of its random generator, from 0 to 9007199254740991, and logs it ([Faults](definition-files/faults.md#seeds)) |
 | `--journal` | `SMOCK_JOURNAL` | `on`: requests are recorded in the [Journal](admin-api.md#the-journal); `off` records none |
 | `--journal-max-entries` | `SMOCK_JOURNAL_MAX_ENTRIES` | 10000, from 1 to 1073741824 (2^30): beyond it, the oldest entries are evicted |
 | `--journal-max-bytes` | `SMOCK_JOURNAL_MAX_BYTES` | a quarter of smock's memory limit (cgroup v2 `memory.max`), at least 1048576 bytes (1 MiB) and at most 67108864 (64 MiB); 64 MiB without a limit ([The Journal](admin-api.md#the-journal)): beyond it, the oldest entries are evicted |
-| `--journal-body-limit` | `SMOCK_JOURNAL_BODY_LIMIT` | 4096 bytes (4 KiB): the most of a request body an entry keeps, and of the form and XML values its Near miss keeps, in total |
+| `--journal-body-limit` | `SMOCK_JOURNAL_BODY_LIMIT` | 4096 bytes (4 KiB), from 0 to 1073741824 (2^30): the most of a request body an entry keeps, and of the form and XML values its Near miss keeps, in total |
 | `--state-max-bytes` | `SMOCK_STATE_MAX_BYTES` | an eighth of smock's memory limit (cgroup v2 `memory.max`), at least 1048576 bytes (1 MiB) and at most 67108864 (64 MiB); 64 MiB without a limit ([The state bound](definition-files/variables.md#the-state-bound)): the most bytes the per-Session state of the whole process takes; a request or an Admin API set whose writes would pass it gets 507, and a gRPC call RESOURCE_EXHAUSTED ([smock's own failures](grpc/unmatched-and-refused-calls.md#smocks-own-failures)) |
 
 ## Logs
@@ -163,6 +163,12 @@ without a response. A request rejected this way gets no log line in either
 format, and neither does a read or an idle timeout. A write timeout is not
 logged either, but in the `mockoon` format the request whose response it
 cut short still gets its `Transaction recorded` line.
+
+Over HTTP/1.1, neither the read nor the idle timeout runs while smock
+waits before a response, as for a delay, or writes one, however long that
+takes: the idle timeout runs from the end of the last response. A request
+that has begun holds off the idle timeout, even a shorter one: from its
+first byte it has the whole read timeout to arrive.
 
 Known limitation: after answering a request with 400, 413, 431, 501 or 505,
 smock closes the connection without reading the rest of the request. A
@@ -365,7 +371,9 @@ smock serve --dir defs --tls-cert-file /etc/smock/tls/tls.crt --tls-key-file /et
 - Each pair is loaded at startup, and one that cannot be loaded stops
   `smock serve` with exit status 1, as for the default pair. A value that is
   not such a JSON object, or an entry without both files, exits with
-  status 2.
+  status 2. So does an entry with a member beside `certFile` and
+  `keyFile`, such as a `ca`: an entry holds the two files and nothing
+  else.
 - Each pair rotates as the default certificate does.
 
 ### Certificate expiry
@@ -376,7 +384,13 @@ presents expires (its notAfter), in seconds since the Unix epoch: `mock=""`
 for the default certificate, the generated self-signed one included, and
 `mock="<name>"` for a Mock's own. It follows rotations and new self-signed
 certificates, so an alert on it notices a renewal that stopped working
-before clients fail.
+before clients fail. When smock cannot read the notAfter of a certificate
+it loads at startup, such as one whose notAfter is not a time in RFC
+5280's form, which OpenSSL still loads, the certificate's series gives 0.
+A rotation to such a certificate sets the series to 0 too, and the
+reload's log entry gives `"expiry":null`
+([Rotating certificates](#rotating-certificates)). A failed reload keeps
+the previous certificate, and the series keeps its notAfter.
 
 ### The self-signed certificate
 

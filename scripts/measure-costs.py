@@ -38,17 +38,16 @@ its start to its exit, measured here.
         in moon's dry run of the native-only packages' tests and of the
         binary, the commands that run the system's C compiler and those
         that run tcc, and how the native-only packages' test programs
-        started, as executables or through tcc: on amd64, moon's debug
-        builds skip the system's C compiler. With coverage, moon_cove reports the points covered, which
-        tells that the coverage build works.
+        started, as executables or through tcc. With coverage, moon_cove
+        reports the points covered, which tells that the coverage build
+        works.
   summary
         Prints what the parts wrote, as Markdown, and writes it to
         summary.md; it says which part failed or did not run.
 
 It refuses to run when a variable that gives moon another C compiler, a
-wrapper of it or flags is set (MOON_CC, MOON_AR, MOON_CC_WRAPPER): on amd64,
-moon's native debug builds skip the system C compiler, and the measurement
-is of the builds as CI's test job makes them.
+wrapper of it or flags is set (MOON_CC, MOON_AR, MOON_CC_WRAPPER), so that
+it measures the builds as CI's test job makes them.
 
 scripts/estimate-costs.py recomputes the cost model from what the parts
 write on two architectures. scripts/test-measure-costs.sh tests this script
@@ -344,13 +343,14 @@ def part_rebuild(out, args):
 # overflows wasm-gc's stack when it is instrumented (#275, step 2).
 NATIVE_ONLY = [
     "smock/smock/server", "smock/smock/defdir", "smock/smock/watch", "smock/smock/openssl",
-    "smock/smock/protobuf-conformance", "smock/smock/schema",
+    "smock/smock/protobuf-conformance", "smock/smock/yaml-test-suite", "smock/smock/schema",
 ]
 WASM_GC = [
     "smock/smock/buildinfo", "smock/smock/cookies", "smock/smock/definitions", "smock/smock/engine",
     "smock/smock/importopenapi", "smock/smock/llm", "smock/smock/log", "smock/smock/metrics",
-    "smock/smock/prng", "smock/smock/settings", "smock/smock/template", "smock/smock/unicode",
-    "smock/smock/usage", "smock/grpc", "smock/http1", "smock/protobuf", "smock/re2", "smock/xml",
+    "smock/smock/prng", "smock/smock/serverparsers", "smock/smock/settings", "smock/smock/template",
+    "smock/smock/unicode", "smock/smock/usage", "smock/grpc", "smock/http1", "smock/protobuf",
+    "smock/re2", "smock/xml",
 ]
 YAML_NATIVE = ["smock/yaml"]
 

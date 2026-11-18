@@ -40,6 +40,30 @@ pre-merge run compares with them.
   `yaml-test-suite/safe.txt` and `yaml-test-suite/openapi.txt`, may keep
   entries marked as bugs, each with its issue, until yaml's L4 ticket
   (#323) fixes them. A listed case that passes already fails the run.
+- [ ] **The merge check passes**, and you have read the weakening report
+  that it prints, and acknowledged it in the merge record. Bring `main`
+  up to date first, since the check compares the branch with it:
+
+  ```sh
+  git switch main && git pull --ff-only && git switch -
+  python3 scripts/check-merge.py integration/<name>
+  ```
+
+  It reads the reports that the branch checks kept on the push of the
+  branch's head ([The changed-lines job](../CONTRIBUTING.md#the-changed-lines-job)).
+  It refuses the merge, and says why with the run's link, when that run
+  is missing, still running or failed, compared the branch with another
+  base than `main`, or did not cover the whole diff, and when its report
+  shows an unexplained survivor on the changed lines of a package at L4,
+  which `mutation/l4-packages.txt` names (none at first). A diff too large
+  for a push's shards is covered by a run started by hand:
+  `gh workflow run branch-checks.yml --ref integration/<name>`, then the
+  check again once that run has passed. The check prints the unexplained
+  survivors in the other packages, which only report, and each
+  stale-covered survivor with its stale entry's id, which does not block:
+  the stale entries are re-triaged in a batch. An outside contributor's
+  pull request is first pushed to a branch here, so that the branch checks
+  run on it; Dependabot's pull requests keep their own path.
 - [ ] **If the branch raises moonhttp**, it has passed the gate of
   [Upgrading moonhttp](releasing.md#upgrading-moonhttp): h2spec against
   both traffic ports, the e2e tests, and the interop check by hand with

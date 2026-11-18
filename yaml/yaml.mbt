@@ -54,18 +54,24 @@ pub impl Show for ParseError with fn output(self, logger) {
 /// Rejected, each with a message naming it: anchors, aliases, tags, merge
 /// keys (`<<`), duplicate keys, multiple documents, directives, explicit
 /// keys (`?`), block scalar indentation indicators, empty values (YAML
-/// reads them as null; write `null`), tabs in indentation, control
-/// characters, and nesting deeper than 1024 collections, the limit of
-/// `@json.parse`.
+/// reads them as null; write `null`), tabs in indentation (the white space
+/// between a `-` and a mapping or a sequence that starts on its line is
+/// indentation too), control characters, and nesting deeper than 1024
+/// collections, the limit of `@json.parse`.
 ///
 /// Rejected too, on purpose, though YAML allows them: a text with no
 /// document, such as an empty one or one of comments only; a key that is a
 /// collection, such as `[a, b]: 1`; a `key: value` pair in a flow sequence
 /// without braces (a single pair mapping), such as `[a: 1]`; a key of a
 /// flow mapping written over several lines, such as a plain key whose `:`
-/// is on the next line; and a tab in the white space at the start of a
-/// line, even where YAML reads it as separation rather than as
-/// indentation.
+/// is on the next line; a tab in the white space at the start of a line,
+/// even where YAML reads it as separation rather than as indentation; and
+/// a line of white space whose tab comes before a block scalar's
+/// indentation, with nothing after it but empty lines, comments and the
+/// `...` that may end the document, as when `a: |` and `  x` are followed
+/// by a last line of a space and a tab. YAML 1.2.2 reads that line as a
+/// comment line after the document (`l-yaml-stream`, production 211);
+/// `parse` rejects it as a tab in indentation, as libyaml and PyYAML do.
 ///
 /// With `openapi=true`, `parse` reads the text as OpenAPI asks YAML to be
 /// read: by the YAML 1.2 core schema, with every key a string. This mode is
@@ -103,6 +109,15 @@ pub impl Show for ParseError with fn output(self, logger) {
 ///   "duplicate key". Keys are compared as the strings they read as, so
 ///   `a:` and `"a":` repeat each other.
 /// - The members of a mapping are read in the order they are written.
+/// - A `#` starts a comment only at the start of a line or after a space
+///   or a tab (YAML 1.2.2, section 6.6). Right after other text of a plain
+///   scalar, it is part of the scalar, as in `path: /a#b`; anywhere else,
+///   such as right after a quoted value or a flow collection, it is
+///   rejected with "a comment needs a space before its #".
+/// - A block scalar whose last line ends the text without a line break
+///   gets no line break added, as YAML 1.2.2 says (section 8.1.1.2), with
+///   each chomping indicator: a text that ends with `a: |` and then `  x`,
+///   with no line break after it, reads `a` as `"x"`.
 /// - In the mode for OpenAPI documents, a plain scalar that JSON cannot
 ///   hold, such as `.inf`, `.NaN` or a hexadecimal or octal integer above
 ///   2^53 - 1, is rejected with a message that ends in "quote this value".

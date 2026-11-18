@@ -27,8 +27,10 @@ cd "$(dirname "$0")/.."
 modules="grpc http1 protobuf re2 xml yaml"
 
 # The packages of smock/smock that decide a response, the packages of
-# smock/smock they import, and the OpenAPI import's converter.
-packages="definitions engine template llm prng cookies log unicode importopenapi"
+# smock/smock they import, the OpenAPI import's converter, and the parsers
+# of server that do no I/O. The last import no moonhttp either, as ADR 0005
+# and ADR 0006 require: anything that needs it stays in server.
+packages="definitions engine template llm prng cookies log unicode importopenapi serverparsers"
 
 # Prints every quoted string inside the import blocks of a moon.mod or moon.pkg.
 imports() {

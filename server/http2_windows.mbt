@@ -7,13 +7,18 @@
 // The streams that wait for window take it in the order they began to
 // wait: one woken for part of the connection window has that part set
 // aside until its task has sent it, and one that has sent what its windows
-// allowed waits again, behind the others. Priority signals are ignored.
+// allowed waits again, behind the others. A stream begins to wait as soon
+// as what the windows allow of its body is queued and more is left
+// (`begin_wait`), before its task next runs, so that no stream whose task
+// runs first goes ahead of it. Priority signals are ignored.
 //
 // The write timeout runs while they wait, since a client that keeps a
 // window at zero would otherwise hold their bodies for good: for the
 // connection window, it closes the connection; for a stream's own window,
 // it resets that stream. Each widening of the window waited for restarts
-// it.
+// it. It runs for a stream once what the stream queued before has been
+// written: while its DATA still goes out, the write timeout of that write
+// runs instead (`WindowWait::watched`).
 
 ///|
 /// A slow write while it waits for the client to widen a window.
@@ -22,7 +27,8 @@ priv struct WindowWait {
   ready : @async.CondVar
   /// How much of the body is still to send.
   mut rest : Int32
-  /// Whether the task has been woken and has not run since.
+  /// Whether the stream has been given part of the windows and its task
+  /// has not taken it yet.
   mut woken : Bool
   /// While the task is woken, how much of the connection window is set
   /// aside for it.
@@ -30,6 +36,11 @@ priv struct WindowWait {
   /// While the stream's own window is at zero, when the write timeout
   /// resets the stream; `forever` while it is not (`watch_windows`).
   mut deadline : Int64
+  /// Whether the write timeout watches the wait: from when the stream's
+  /// task waits for a widening, once what it queued before has been
+  /// written, until it takes what it is woken for (`trickle`), or the
+  /// stream is reset (`unblock`). `H2Connection::watched` counts these.
+  mut watched : Bool
 }
 
 ///|
@@ -75,14 +86,18 @@ fn H2Connection::settings_received(
 ///   until the client widens the stream's window. While the connection
 ///   window is at zero, `Conn::window` cannot tell, so each stays as it is.
 ///
+/// A slow write counts once the write timeout watches its wait
+/// (`WindowWait::watched`), when its task waits with what it queued
+/// written: before then, its DATA may still go out.
+///
 /// The widenings (`window_updated`, `settings_received`) stop them, as
 /// progress; this starts again those still due, from `now`. It is called
 /// whenever the windows or the slow writes may have changed: by the reader
 /// before each read, by a slow write before it waits, by a stream's task
 /// once it is done, and by the watchdog (`H2Connection::expire`). With no
-/// slow write, it costs a compare.
+/// slow write that the write timeout watches, it costs a compare.
 fn H2Connection::watch_windows(self : H2Connection, now : Int64) -> Unit {
-  if self.blocked.is_empty() {
+  if self.watched == 0 {
     self.window_deadline = forever
     return
   }
@@ -95,7 +110,7 @@ fn H2Connection::watch_windows(self : H2Connection, now : Int64) -> Unit {
   }
   guard self.conn.window(0) > 0 else { return }
   for stream, wait in self.blocked {
-    if wait.woken || self.conn.window(stream) > 0 {
+    if !wait.watched || wait.woken || self.conn.window(stream) > 0 {
       wait.deadline = forever
     } else if wait.deadline == forever {
       wait.deadline = now + timeout
@@ -158,7 +173,8 @@ fn H2Connection::widened(self : H2Connection, stream : Int32) -> Unit {
 /// Wakes the task of the slow write of `stream`, which waits as `wait`
 /// says, if it can send any of the `free` octets of the connection window
 /// that are not set aside, sets aside what it will send, and returns how
-/// much that is.
+/// much that is. A task that has not reached its wait yet finds `woken` set
+/// when it does (`trickle`).
 fn H2Connection::wake(
   self : H2Connection,
   stream : Int32,
@@ -186,12 +202,37 @@ fn H2Connection::wake(
 }
 
 ///|
+/// The windows have held back `rest` octets of the body queued on `stream`:
+/// the stream waits for them from now, behind the streams that wait
+/// already, whatever runs before its task sends the rest (`trickle`).
+/// `queue` and `queue_reply` call it as they queue a response without all
+/// of its body; the task's wait costs no more than when the task made it.
+fn H2Connection::begin_wait(
+  self : H2Connection,
+  stream : Int32,
+  rest : Int32,
+) -> Unit {
+  self.blocked[stream] = {
+    ready: @async.CondVar::Cond(),
+    rest,
+    woken: false,
+    claim: 0,
+    deadline: forever,
+    watched: false,
+  }
+}
+
+///|
 /// `stream` was reset while its slow write waits for window, if it does:
 /// it waits no more, and what was set aside for it, if its task was woken,
 /// goes to the streams waiting after it.
 fn H2Connection::unblock(self : H2Connection, stream : Int32) -> Unit {
   guard self.blocked.get(stream) is Some(wait) else { return }
   self.blocked.remove(stream)
+  if wait.watched {
+    wait.watched = false
+    self.watched -= 1
+  }
   if wait.woken {
     wait.woken = false
     self.claimed -= wait.claim
@@ -259,12 +300,15 @@ fn[S : @io.Writer + ReadOutput] H2Connection::write_slowly(
 /// sends what the windows allow, but no more than the output bound leaves
 /// for one DATA frame (`H2Writer::frame_room`), and has the writer write it
 /// to `out` before it sends more. So a client that does not read holds no more
-/// of the body than that. When the windows allow nothing, it waits until
+/// of the body than that. Once it has sent what the windows allow, the
+/// stream waits for more at once, behind the streams that wait already,
+/// as it does from when `rest` was left when its response was queued
+/// (`begin_wait`); and once what it queued is written, the task waits until
 /// the client widens the stream's window, the connection's, or every
-/// stream's with SETTINGS (`widened`). So a client that grants window a few
-/// octets at a time gets one small DATA frame for each grant, and its whole
-/// response in the end. What it queues last is left for the caller to
-/// write.
+/// stream's with SETTINGS (`widened`), unless that has happened meanwhile.
+/// So a client that grants window a few octets at a time gets one small
+/// DATA frame for each grant, and its whole response in the end. What it
+/// queues last is left for the caller to write.
 ///
 /// What was set aside for the task when it was last woken stays set aside
 /// while it waits for its writes, so that no stream behind it takes that
@@ -274,6 +318,11 @@ fn[S : @io.Writer + ReadOutput] H2Connection::write_slowly(
 /// write timeout's does when a window stays at zero (`watch_windows`).
 /// While it writes, the reset leaves it be (`H2Writer::write_for`), and it
 /// ends as soon as the write is done.
+///
+/// `begun` is false for an event (`send_events`), whose stream never waits
+/// from when its response was queued (`begin_wait`): the task then does
+/// not look for such a wait, so an event that fits the windows costs no
+/// lookup.
 async fn[S : @io.Writer + ReadOutput] H2Connection::trickle(
   self : H2Connection,
   stream : Int32,
@@ -281,13 +330,22 @@ async fn[S : @io.Writer + ReadOutput] H2Connection::trickle(
   entry : @engine.JournalEntry?,
   out : WatchedStream[S],
   end~ : Bool = true,
+  begun~ : Bool = true,
 ) -> Bool {
   let ports = self.ports
   let mut entry = entry
   defer ports.commit(entry)
-  // Made when the task first waits for window, so that an event that fits
-  // the windows costs none.
-  let mut held : WindowWait? = None
+  // The stream's wait for window: the one `begin_wait` made, when `begun`,
+  // or else made when the task first waits, so that an event that fits the
+  // windows costs none; kept for the task's later waits.
+  let mut held : WindowWait? = if begun {
+    self.blocked.get(stream)
+  } else {
+    None
+  }
+  // Whether the stream waits in `blocked`, until its task takes what it is
+  // woken for.
+  let mut waits = held is Some(_)
   let mut rest = rest
   // What is still set aside for the task since it was last woken, which
   // `claimed` counts until the task sends it.
@@ -300,6 +358,24 @@ async fn[S : @io.Writer + ReadOutput] H2Connection::trickle(
     // What was queued before, the task's own DATA included, goes out
     // before it queues more; the windows may widen meanwhile.
     guard self.output_written(stream, out) else { return false }
+    if waits && held is Some(wait) {
+      if !wait.woken {
+        // What it queued is written: the write timeout watches the wait
+        // from now.
+        wait.watched = true
+        self.watched += 1
+        self.watch_windows(@async.now())
+        wait.ready.wait()
+        // A reset since the task was woken has taken it out of `blocked`.
+        guard wait.woken else { return false }
+        wait.watched = false
+        self.watched -= 1
+      }
+      waits = false
+      wait.woken = false
+      claim = wait.claim
+      self.blocked.remove(stream)
+    }
     let window = self.room(stream, own=claim)
     let bound = self.writer.frame_room()
     let room = if window < bound { window } else { bound }
@@ -332,11 +408,12 @@ async fn[S : @io.Writer + ReadOutput] H2Connection::trickle(
       }
       return true
     }
-    // The bound held it back, or it sent what the windows allowed and may
-    // send more once that is written.
-    if window > 0 {
+    // The bound held it back: it sends more once that is written.
+    if n < window {
       continue
     }
+    // It sent what the windows allowed: it waits for more from now, behind
+    // the others.
     let wait = match held {
       Some(wait) => wait
       None => {
@@ -346,6 +423,7 @@ async fn[S : @io.Writer + ReadOutput] H2Connection::trickle(
           woken: false,
           claim: 0,
           deadline: forever,
+          watched: false,
         }
         held = Some(wait)
         wait
@@ -353,12 +431,6 @@ async fn[S : @io.Writer + ReadOutput] H2Connection::trickle(
     }
     wait.rest = rest.length()
     self.blocked[stream] = wait
-    self.watch_windows(@async.now())
-    wait.ready.wait()
-    // A reset since the task was woken has taken it out of `blocked`.
-    guard wait.woken else { return false }
-    wait.woken = false
-    claim = wait.claim
-    self.blocked.remove(stream)
+    waits = true
   }
 }

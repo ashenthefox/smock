@@ -724,11 +724,12 @@ fn reply_at(index : Int32?) -> String {
 /// does not end the stream, then the trailers. One that does not fit gets
 /// as much as the windows allow; the rest is returned, which the caller
 /// sends in the stream's task, with the trailers after it and the entry
-/// still to commit. HEADERS or trailers the `Conn` refuses get RST_STREAM
-/// INTERNAL_ERROR, the entry committed just before (`reset_after`). In the
-/// stream's task, `bounded` is true: the message queued now is also no
-/// more than the output bound leaves for one DATA frame
-/// (`H2Writer::frame_room`), as `queue` holds a body to it. With
+/// still to commit; when the windows held the rest back, the stream waits
+/// for window from then on (`begin_wait`). HEADERS or trailers the `Conn`
+/// refuses get RST_STREAM INTERNAL_ERROR, the entry committed just before
+/// (`reset_after`). In the stream's task, `bounded` is true: the message
+/// queued now is also no more than the output bound leaves for one DATA
+/// frame (`H2Writer::frame_room`), as `queue` holds a body to it. With
 /// `partial`, as for a partial Fault, `framed` is the half of the message
 /// that the Fault sends, and RST_STREAM INTERNAL_ERROR follows it in place
 /// of the trailers, the entry committed just before; a rest is reset by
@@ -749,7 +750,8 @@ fn H2Connection::queue_reply(
       return framed[0:0]
     }
   }
-  let mut room = self.room(stream)
+  let window = self.room(stream)
+  let mut room = window
   if bounded {
     let bound = self.writer.frame_room()
     if bound < room {
@@ -761,6 +763,11 @@ fn H2Connection::queue_reply(
       self.conn.data(stream, framed[0:room]) catch {
         _ => return framed[0:0]
       }
+    }
+    // The windows, not the bound, held back the rest: the stream waits for
+    // them from now, as `queue` has it.
+    if room == window {
+      self.begin_wait(stream, framed.length() - room)
     }
     return framed[room:]
   }

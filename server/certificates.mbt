@@ -163,11 +163,17 @@ fn add_file_fields(
 }
 
 ///|
-/// Sets the expiry metric to the expiry of the certificate as read last.
+/// Sets the expiry metric to the expiry of the certificate as read last,
+/// or to 0 when smock cannot read it, so that a rotation never leaves the
+/// series at the expiry of the certificate it replaced.
 fn Pair::set_expiry(self : Pair) -> Unit {
-  if self.last_read is Ok((cert, _)) && certificate_expiry(cert) is Some(expiry) {
-    self.expiry.set(expiry.to_double() / 1000.0)
+  let seconds = if self.last_read is Ok((cert, _)) &&
+    @serverparsers.certificate_expiry(cert) is Some(expiry) {
+    expiry.to_double() / 1000.0
+  } else {
+    0
   }
+  self.expiry.set(seconds)
 }
 
 ///|
@@ -242,7 +248,11 @@ fn Certificates::warn_undeclared(self : Certificates) -> Unit {
 /// Checks every pair on each check of `watch`, the watch of the
 /// certificate and key files, until the task is cancelled.
 async fn Certificates::run(self : Certificates, watch : @watch.Watch) -> Unit {
-  let check = async fn(_) { if !self.check() { watch.forget() } }
+  let check = async fn(check) {
+    if !self.check(check, watch) {
+      watch.forget()
+    }
+  }
   watch.run(check, on_ahead=(file, time) => {
     self.logger.warn(
       "a TLS certificate or key file has a time ahead of the clock",
@@ -255,44 +265,68 @@ async fn Certificates::run(self : Certificates, watch : @watch.Watch) -> Unit {
 }
 
 ///|
-/// Reads every pair again, and loads each one whose files changed. A check
-/// that fails in an unforeseen way is logged. Tells whether it read the
-/// files of every pair: when it did not, the next poll reads again, though
-/// the files may not have changed, since the problem may have passed.
-async fn Certificates::check(self : Certificates) -> Bool {
+/// Reads every pair again, on a check of `watch`, and loads each one whose
+/// files changed. A read that fails in an unforeseen way is logged. Tells
+/// whether it read the files of every pair: when it did not, the next poll
+/// reads again, though the files may not have changed, since the problem
+/// may have passed.
+///
+/// An `Unsure` check loads nothing. Its read comes at the poll, with no
+/// quiet period, so it may find a file half written, as a certificate
+/// rewritten in place right after the poll's stamp, before its key is.
+/// When the files of a pair differ from those read last, it tells `watch`,
+/// which lets the change settle and checks again, `Changed`, once it has;
+/// it tells that it read the files of every pair then, so that the watch
+/// keeps the stamp that the quiet period compares with.
+async fn Certificates::check(
+  self : Certificates,
+  check : @watch.Check,
+  watch : @watch.Watch,
+) -> Bool {
   let pairs = match self.default {
     Files(pair) => [pair, ..self.by_mock.values()]
     SelfSigned(_) => [..self.by_mock.values()]
   }
   let mut read_all = true
   for pair in pairs {
-    let read = self.check_pair(pair) catch {
+    let read = read_pair(pair.files) catch {
       err => {
         let fields = pair_fields(pair.mock, pair.files)
         fields["error"] = Json::string(err.to_string())
         self.logger.error("TLS certificate reload failed", fields~)
-        false
+        read_all = false
+        continue
       }
     }
-    read_all = read_all && read
+    if read != pair.last_read {
+      if check is Unsure {
+        watch.found_change()
+        return true
+      }
+      self.load_changed(pair, read)
+    }
+    read_all = read_all && read is Ok(_)
   }
   read_all
 }
 
 ///|
-/// Reads `pair` again, and when its files changed, loads them and swaps
-/// them in, or keeps presenting the pair loaded before when they cannot be
-/// used. Either way, one log entry names the pair and the new expiry.
-/// Tells whether its files could be read.
-async fn Certificates::check_pair(self : Certificates, pair : Pair) -> Bool {
-  let read = read_pair(pair.files)
-  if read == pair.last_read {
-    return read is Ok(_)
-  }
+/// Loads `pair` from `read`, its files as read again, which changed, and
+/// swaps it in, or keeps presenting the pair loaded before when they
+/// cannot be used. Either way, one log entry names the pair and the new
+/// expiry.
+fn Certificates::load_changed(
+  self : Certificates,
+  pair : Pair,
+  read : Result[(Bytes, Bytes), String],
+) -> Unit {
   pair.last_read = read
   let (loaded, expiry) = match read {
     Ok((cert, key)) =>
-      (load_pair(cert, key, alpn=self.alpn), certificate_expiry(cert))
+      (
+        load_pair(cert, key, alpn=self.alpn),
+        @serverparsers.certificate_expiry(cert),
+      )
     Err(reason) => (Err(reason), None)
   }
   let fields = pair_fields(pair.mock, pair.files)
@@ -311,5 +345,4 @@ async fn Certificates::check_pair(self : Certificates, pair : Pair) -> Bool {
       self.logger.error("TLS certificate reload failed", fields~)
     }
   }
-  read is Ok(_)
 }

@@ -16,9 +16,8 @@
 #   it failed (if: ${{ !cancelled() }});
 # - it sets no variable through which moon takes another C compiler, a
 #   wrapper or flags (MOON_CC, MOON_AR, MOON_CC_WRAPPER, CC, CFLAGS and the
-#   like), anywhere: on amd64, moon's native debug builds skip the system C
-#   compiler, which such a variable would bring back, and the measurement
-#   is of the builds as CI's test job makes them.
+#   like), anywhere, so that it measures the builds as CI's test job makes
+#   them.
 #
 # scripts/test-check-measure-costs-workflow.sh tests this check. It needs yq
 # (mikefarah/yq v4, on GitHub's Ubuntu runners) and jq.

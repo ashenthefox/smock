@@ -52,6 +52,25 @@ async test "h2c and h2: with SMOCK_LOG_FORMAT=mockoon, each request a Mock handl
 }
 
 ///|
+/// When smock received the request for `path`, by the `receivedAt` of the
+/// one entry its Journal holds for that path: in milliseconds since the Unix
+/// epoch, as `@async.now()` and a log line's `timestamp` give times.
+async fn Smock::received_at(self : Smock, path : String) -> Int64 {
+  let query = "{ \"filter\": { \"path\": \"\{path}\" } }"
+  guard self.journal(query~)
+    is (
+      200,
+      Object(
+        { "entries": Array([Object({ "receivedAt": String(at), .. })]), .. }
+      ),
+    ) &&
+    @log.parse_time(at) is Some(at) else {
+    fail("not exactly one Journal entry for \{path}")
+  }
+  at
+}
+
+///|
 async test "h2c: a delayed response logs after its delay, while a fast stream on the connection logs at once, and a Server-Sent Event stream logs once, after its last event" {
   with_definitions([("slow.json", slow)], dir => {
     let env = { "SMOCK_LOG_FORMAT": "mockoon" }
@@ -63,13 +82,22 @@ async test "h2c: a delayed response logs after its delay, while a fast stream on
       let delayed = client.send("GET", "/delayed", authority="localhost")
       let quick = client.request("GET", "/quick", authority="localhost")
       out.push("/quick answers: \{quick.status}")
-      let line = smock.transaction_lines(1)[0]
-      out.push(mask_timestamp(line))
-      out.push("written during the delay: \{written_at(line) - start < 1000}")
+      let quick_line = smock.transaction_lines(1)[0]
+      out.push(mask_timestamp(quick_line))
       out.push("/delayed answers: \{client.response(delayed).status}")
       let line = smock.transaction_lines(2)[1]
       out.push(mask_timestamp(line))
       out.push("written after the delay: \{written_at(line) - start >= 1000}")
+      // A response that waits "holds up no other stream's line"
+      // (docs/http2.md, Logs): the fast stream's line is written during the
+      // delayed stream's delay, by smock's own clock. That delay of 1000 ms
+      // began no sooner than smock received the delayed request, at the
+      // `receivedAt` of its Journal entry, so it was not over before 1000 ms
+      // after that.
+      let received = smock.received_at("/delayed")
+      out.push(
+        "the fast stream's line written during the delay, before the delayed request's receivedAt plus 1000 ms: \{written_at(quick_line) < received + 1000}",
+      )
       let start = @async.now()
       let stream = client.send("GET", "/stream", authority="localhost")
       guard client.stream_event(stream) is Response(_) else {
@@ -97,10 +125,10 @@ async test "h2c: a delayed response logs after its delay, while a fast stream on
         content=(
           #|/quick answers: 200
           #|{"app":"smock","environmentName":"slow","level":"info","message":"Transaction recorded","requestMethod":"GET","requestPath":"/quick","requestProxied":false,"responseStatus":200,"timestamp":"<timestamp>"}
-          #|written during the delay: true
           #|/delayed answers: 200
           #|{"app":"smock","environmentName":"slow","level":"info","message":"Transaction recorded","requestMethod":"GET","requestPath":"/delayed","requestProxied":false,"responseStatus":200,"timestamp":"<timestamp>"}
           #|written after the delay: true
+          #|the fast stream's line written during the delay, before the delayed request's receivedAt plus 1000 ms: true
           #|after the first event: 0 lines
           #|/stream ends: end
           #|{"app":"smock","environmentName":"slow","level":"info","message":"Transaction recorded","requestMethod":"GET","requestPath":"/stream","requestProxied":false,"responseStatus":200,"timestamp":"<timestamp>"}
@@ -180,16 +208,20 @@ async test "h2c: a stream the client resets while its response waits, for a dela
       let out = []
       let client = smock.h2c()
       defer client.close()
+      // Such a stream "logs its planned status at once" (docs/http2.md,
+      // Logs): before its delay, or its last event, 1000 ms after the
+      // request, would have come. Timed from before each request.
+      let sent_at = @async.now()
       let delayed = client.send("GET", "/delayed", authority="localhost")
       @async.sleep(200)
-      let reset_at = @async.now()
       client.conn.reset(delayed, code=@http2.error_cancel)
       client.flush()
       let line = smock.transaction_lines(1)[0]
       out.push(mask_timestamp(line))
       out.push(
-        "written at the reset, before the delay is over: \{written_at(line) - reset_at < 500}",
+        "written at the reset, before the delay is over: \{written_at(line) - sent_at < 1000}",
       )
+      let sent_at = @async.now()
       let stream = client.send("GET", "/stream", authority="localhost")
       guard client.stream_event(stream) is Response(_) else {
         fail("no HEADERS")
@@ -197,13 +229,12 @@ async test "h2c: a stream the client resets while its response waits, for a dela
       guard client.stream_event(stream) is Data(_) else {
         fail("no first event")
       }
-      let reset_at = @async.now()
       client.conn.reset(stream, code=@http2.error_cancel)
       client.flush()
       let line = smock.transaction_lines(2)[1]
       out.push(mask_timestamp(line))
       out.push(
-        "written at the reset, before the last event: \{written_at(line) - reset_at < 500}",
+        "written at the reset, before the last event: \{written_at(line) - sent_at < 1000}",
       )
       // Each was one request: no more lines come once their waits are over.
       @async.sleep(1200)
@@ -285,6 +316,10 @@ async test "h2c: a response the write timeout cuts logs its planned status when 
         // Stream windows of 0, with the connection window open: stream 1's
         // body waits for its own window until the write timeout resets it,
         // while stream 3's widens and its body goes out.
+        // A response the write timeout cuts logs when it is cut
+        // (docs/http2.md, Logs), which the test allows up to 4 times the
+        // write timeout.
+        let write = 500L
         let raw = smock.raw_h2(settings=false)
         defer raw.close()
         let start = @async.now()
@@ -300,7 +335,7 @@ async test "h2c: a response the write timeout cuts logs its planned status when 
         out.push(masked_lines(lines))
         let reset_ms = written_at(lines[1]) - start
         out.push(
-          "stream 1's line at its reset, after at least 500 ms: \{reset_ms >= 500}, within 2000 ms: \{reset_ms < 2000}",
+          "stream 1's line at its reset, after at least 500 ms: \{reset_ms >= write}, within 4 times the write timeout: \{reset_ms < 4 * write}",
         )
         // Wide stream windows, so that only the connection window of 65,535
         // octets holds the body back, until the write timeout closes the
@@ -321,7 +356,7 @@ async test "h2c: a response the write timeout cuts logs its planned status when 
         out.push(mask_timestamp(line))
         let closed_ms = written_at(line) - start
         out.push(
-          "written when the connection closed, after at least 500 ms: \{closed_ms >= 500}, within 2000 ms: \{closed_ms < 2000}",
+          "written when the connection closed, after at least 500 ms: \{closed_ms >= write}, within 4 times the write timeout: \{closed_ms < 4 * write}",
         )
         inspect(
           out.join("\n"),
@@ -329,10 +364,10 @@ async test "h2c: a response the write timeout cuts logs its planned status when 
             #|stream 1 ended by RST_STREAM 1 CANCEL
             #|{"app":"smock","environmentName":"m","level":"info","message":"Transaction recorded","requestMethod":"GET","requestPath":"/item","requestProxied":false,"responseStatus":200,"timestamp":"<timestamp>"}
             #|{"app":"smock","environmentName":"m","level":"info","message":"Transaction recorded","requestMethod":"GET","requestPath":"/item","requestProxied":false,"responseStatus":200,"timestamp":"<timestamp>"}
-            #|stream 1's line at its reset, after at least 500 ms: true, within 2000 ms: true
+            #|stream 1's line at its reset, after at least 500 ms: true, within 4 times the write timeout: true
             #|the connection ended by a FIN
             #|{"app":"smock","environmentName":"m","level":"info","message":"Transaction recorded","requestMethod":"GET","requestPath":"/big","requestProxied":false,"responseStatus":200,"timestamp":"<timestamp>"}
-            #|written when the connection closed, after at least 500 ms: true, within 2000 ms: true
+            #|written when the connection closed, after at least 500 ms: true, within 4 times the write timeout: true
           ),
         )
       },
@@ -347,14 +382,17 @@ async test "h2c: a stream whose client closes the connection during its delay lo
     let _ = with_smock(["--dir", dir, "--port", "0"], env~, smock => {
       let out = []
       let client = smock.h2c()
+      // The streams of a connection that ends while they wait log when it
+      // ends (docs/http2.md, Logs): before the delay of 1000 ms would have
+      // ended, timed from before the request.
+      let sent_at = @async.now()
       let _ = client.send("GET", "/delayed", authority="localhost")
       @async.sleep(200)
-      let closed_at = @async.now()
       client.close()
       let line = smock.transaction_lines(1)[0]
       out.push(mask_timestamp(line))
       out.push(
-        "written when the connection ended, before the delay is over: \{written_at(line) - closed_at < 500}",
+        "written when the connection ended, before the delay is over: \{written_at(line) - sent_at < 1000}",
       )
       @async.sleep(1000)
       out.push("lines in all: \{transactions(smock.stdout).length()}")

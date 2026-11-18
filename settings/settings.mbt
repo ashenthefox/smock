@@ -269,7 +269,7 @@ let template_env_setting : Setting = {
 /// render share, since a static reply over it does not load.
 let header_size_limit_setting : Setting = {
   name: "header-size-limit",
-  about: "The most bytes a request head (request line and header fields) may take. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection. It also bounds each block of a gRPC reply's metadata, its header block and its trailers, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL instead.",
+  about: "The most bytes a request head (request line and header fields) may take, from 1 to \{max_size}. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection. It also bounds each block of a gRPC reply's metadata, its header block and its trailers, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL instead.",
   default: Some("16384"),
 }
 
@@ -355,7 +355,7 @@ let serve_settings : Array[Setting] = [
   },
   {
     name: "body-limit",
-    about: "The longest request body, in bytes. Longer bodies get 413, and a gRPC call RESOURCE_EXHAUSTED.",
+    about: "The longest request body, in bytes, from 0 to \{max_size}. Longer bodies get 413, and a gRPC call RESOURCE_EXHAUSTED.",
     default: Some("10485760"),
   },
   {
@@ -365,22 +365,22 @@ let serve_settings : Array[Setting] = [
   },
   {
     name: "read-timeout-ms",
-    about: "How long a request may take to arrive, in milliseconds, from its first byte to its last. Then the connection closes; over HTTP/2, a request that does not arrive in time resets its stream instead.",
+    about: "How long a request may take to arrive from its first byte to its last, in milliseconds, from 1 to \{max_duration_ms}. Then the connection closes; over HTTP/2, a request that does not arrive in time resets its stream instead.",
     default: Some("30000"),
   },
   {
     name: "idle-timeout-ms",
-    about: "How long a connection may wait for a request, in milliseconds. Then it closes.",
+    about: "How long a connection may wait for a request, in milliseconds, from 1 to \{max_duration_ms}. Then it closes.",
     default: Some("60000"),
   },
   {
     name: "write-timeout-ms",
-    about: "How long a write to a client may make no progress, in milliseconds, as when the client stops reading. Then the connection closes.",
+    about: "How long a write to a client may make no progress, as when the client stops reading, in milliseconds, from 1 to \{max_duration_ms}. Then the connection closes.",
     default: Some("30000"),
   },
   {
     name: "drain-timeout-ms",
-    about: "How long smock may drain after SIGTERM, in milliseconds: responses in progress, Server-Sent Event streams and delays still running then are cut, and smock exits.",
+    about: "How long smock may drain after SIGTERM, in milliseconds, from 0 to \{max_duration_ms}: responses in progress, Server-Sent Event streams and delays still running then are cut, and smock exits.",
     default: Some("20000"),
   },
   {
@@ -405,7 +405,7 @@ let serve_settings : Array[Setting] = [
   },
   {
     name: "journal-body-limit",
-    about: "The most bytes of a request body a Journal entry keeps; the rest is cut. Its Near miss keeps the values of form fields and XML paths up to the same total, each counting 32 bytes more.",
+    about: "The most bytes of a request body a Journal entry keeps, from 0 to \{max_size}; the rest is cut. Its Near miss keeps the values of form fields and XML paths up to the same total, each counting 32 bytes more.",
     default: Some(journal_defaults.body_limit.to_string()),
   },
   {

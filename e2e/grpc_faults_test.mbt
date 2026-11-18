@@ -357,14 +357,16 @@ async test "a close Fault sends GOAWAY NO_ERROR, then closes the connection, whi
         [..raw.hello_call(1), ..raw.hello_call(3, more=[("x-fault", "close")])],
       )
       let frames = raw.frames_until(start, _ => false)
-      // The status a client derives, on a connection of its own.
+      // The status a client derives, on a connection of its own. The call
+      // that waits ends with the connection, `(closed)` without its
+      // message, so before its delay is over: `close` "ends every call on
+      // the connection" (docs/grpc/state-and-faults.md, Faults).
       let client = smock.h2c()
       defer client.close()
       let slow = client.start_call()
       let closing = client.start_call(headers=[("x-fault", "close")])
       let closed = client.reply(closing)
       let waiting = client.reply(slow)
-      let ended_ms = @async.now() - start
       inspect(
         [
           ..frames.shown,
@@ -375,7 +377,6 @@ async test "a close Fault sends GOAWAY NO_ERROR, then closes the connection, whi
           "the call that waits:",
           waiting.render(),
           "the client sees \{derived_status(waiting)}",
-          "both before the delay is over: \{ended_ms < 3000}",
           "Journal:",
           fault_answers(smock),
         ].join("\n"),
@@ -392,7 +393,6 @@ async test "a close Fault sends GOAWAY NO_ERROR, then closes the connection, whi
           #|HEADERS
           #|(closed)
           #|the client sees UNAVAILABLE
-          #|both before the delay is over: true
           #|Journal:
           #|"closing" null - "close"
           #|"slow" 200 "OK" null
@@ -534,12 +534,24 @@ async test "a deadline that cuts a delay short comes before the Fault, which wou
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let client = smock.h2c()
       defer client.close()
+      // smock "counts the call's deadline from the arrival of its HEADERS",
+      // and "the Journal records the call when it ends at its deadline"
+      // (docs/grpc/state-and-faults.md, Deadlines), oldest first
+      // (docs/admin-api.md). So the entries come in the order of the
+      // deadlines, which the calls' timeouts set 300 ms apart: three times
+      // the 100 ms that Deadlines allows a client's reset before a
+      // deadline, the only width it gives one. Equal timeouts would leave
+      // the order to whichever call's task smock ran first.
       let start = @async.now()
       let streams = []
-      for fault in ["cut-reset", "cut-partial", "cut-close"] {
-        streams.push(
-          client.start_call(timeout="500m", headers=[("x-fault", fault)]),
-        )
+      for
+        cut in [
+          ("cut-reset", "500m"),
+          ("cut-partial", "800m"),
+          ("cut-close", "1100m"),
+        ] {
+        let (fault, timeout) = cut
+        streams.push(client.start_call(timeout~, headers=[("x-fault", fault)]))
       }
       let out = []
       for stream in streams {

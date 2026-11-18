@@ -160,11 +160,16 @@ async test "h2c: an llm stream with fixed waits sends its HEADERS and opening ch
       let hello = client.send("GET", "/hello", authority="localhost")
       // The HEADERS go out at once, so the waits, counted from them, count
       // from the request too: the opening chunk at once, the pieces "Hi t",
-      // "here" and "!" 400, 700 and 1000 ms after the HEADERS, then the
-      // closing chunk and [DONE] right after the last piece.
+      // "here" and "!" 1000, 1300 and 1600 ms after the HEADERS, then the
+      // closing chunk and [DONE] right after the last piece
+      // (docs/definition-files/llm-responses.md, Timing: "`first` is the
+      // wait before the first piece, and `interval` the wait before each
+      // later one"). What is due at once comes before the first piece, the
+      // fast stream's too, which is answered meanwhile (docs/http2.md,
+      // Streams that wait).
       let shown = client.timeline(
         start~,
-        due=[(stream, [0, 0, 400, 700, 1000, 1000, 1000]), (hello, [0, 0])],
+        due=[(stream, [0, 0, 1000, 1300, 1600, 1600, 1600]), (hello, [0, 0])],
         data=carried,
       )
       let entries = smock.journal_once(2, within=0)
@@ -172,17 +177,17 @@ async test "h2c: an llm stream with fixed waits sends its HEADERS and opening ch
         [shown, "---", ..entries].join("\n"),
         content=(
           #|stream 1:
-          #|  HEADERS at 0 ms: :status: 200, content-type: text/event-stream, x-request-id: req_TZp9I060Mzd0w4SDwiWTe2c8, smock-mock: openai; via=default, date: <now>
-          #|  DATA at 0 ms: opening chunk
-          #|  DATA at 400 ms: piece "Hi t"
-          #|  DATA at 700 ms: piece "here"
-          #|  DATA at 1000 ms: piece "!"
-          #|  DATA at 1000 ms: closing chunk
-          #|  DATA at 1000 ms: [DONE]
+          #|  HEADERS at once: :status: 200, content-type: text/event-stream, x-request-id: req_TZp9I060Mzd0w4SDwiWTe2c8, smock-mock: openai; via=default, date: <now>
+          #|  DATA at once: opening chunk
+          #|  DATA at 1000 ms: piece "Hi t"
+          #|  DATA at 1300 ms: piece "here"
+          #|  DATA at 1600 ms: piece "!"
+          #|  DATA at 1600 ms: closing chunk
+          #|  DATA at 1600 ms: [DONE]
           #|  end
           #|stream 3:
-          #|  HEADERS at 0 ms: :status: 200, smock-mock: openai; via=default, date: <now>, content-length: 5
-          #|  DATA at 0 ms: "hello"
+          #|  HEADERS at once: :status: 200, smock-mock: openai; via=default, date: <now>, content-length: 5
+          #|  DATA at once: "hello"
           #|  end
           #|---
           #|/hello: stub "hello", status 200
@@ -194,7 +199,7 @@ async test "h2c: an llm stream with fixed waits sends its HEADERS and opening ch
 }
 
 ///|
-async test "h2c: an llm stream that the client resets mid-stream ends at once: its entry is committed then, its duration up to the reset, and no more of its chunks is sent" {
+async test "h2c: an llm stream that the client resets mid-stream ends at once: its entry's duration, by smock's own clock, ends before the first piece was due, and no more of its chunks is sent" {
   with_definitions([("openai.json", paced_openai)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let raw = smock.raw_h2()
@@ -202,24 +207,22 @@ async test "h2c: an llm stream that the client resets mid-stream ends at once: i
       let start = @async.now()
       raw.send(raw.post_json(1, "/v1/chat/completions", chat_request("true")))
       // The HEADERS and the opening chunk, which come at once; the first
-      // piece is due 400 ms after them.
+      // piece is due 1000 ms after them.
       let out = [raw.runs_until(data_seen(1, 1))]
       raw.send([RstStream(stream_id=1, error_code=@http2.error_cancel)])
-      let entries = smock.journal_durations(1, below=400, within=300)
-      let committed_ms = @async.now() - start
-      // Past the time of the stream's last chunk, 1000 ms after its
+      // A reset ends the stream at once, as an event stream's does
+      // (docs/http2.md, Server-Sent Events), so the entry's duration, by
+      // smock's own clock, ends before the first piece was due.
+      let entries = smock.journal_durations(1, below=1000, within=patience_ms)
+      // Past the time of the stream's last chunk, 1600 ms after its
       // HEADERS, a fast stream is answered, and nothing more came on the
       // reset stream.
-      @async.sleep((1300L - (@async.now() - start)).to_int())
+      @async.sleep((1900L - (@async.now() - start)).to_int())
       raw.send([raw.get(3, "/hello")])
       out.push("--- the reset sent")
       out.push(raw.runs_until(frame => ends_stream(frame, 3)))
       inspect(
-        [
-          ..out,
-          "--- committed before the first piece was due: \{entries.length() == 1 && committed_ms < 400}",
-          ..entries,
-        ].join("\n"),
+        [..out, "--- committed: \{entries.length() == 1}", ..entries].join("\n"),
         content=(
           #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
           #|SETTINGS ACK
@@ -228,8 +231,8 @@ async test "h2c: an llm stream that the client resets mid-stream ends at once: i
           #|--- the reset sent
           #|HEADERS 3 END_HEADERS [:status: 200, smock-mock: openai; via=default, date: <now>, content-length: 5]
           #|DATA 3 END_STREAM: 1 frames, 5 octets
-          #|--- committed before the first piece was due: true
-          #|/v1/chat/completions: stub "paced", status 200, durationMs below 400: true
+          #|--- committed: true
+          #|/v1/chat/completions: stub "paced", status 200, durationMs below 1000: true
         ),
       )
     })

@@ -2,7 +2,15 @@
 /// Ends the process with `code`, through `moonbitlang/x`'s supported exit:
 /// neither core nor `moonbitlang/async` exposes one with a status. Usage
 /// errors, including invalid settings, exit with 2.
+///
+/// With `SMOCK_COVERAGE_DUMP` set and not empty, it first writes the
+/// coverage counters to stdout, for the e2e tests' coverage: core's
+/// coverage runtime prints them only there. A build without coverage has no
+/// counters to write.
 fn exit(code : Int32) -> Unit {
+  if @env.get_env_var("SMOCK_COVERAGE_DUMP") is Some(value) && value != "" {
+    @coverage.end()
+  }
   @sys.exit(code)
 }
 

@@ -4,14 +4,14 @@
 // Hosts of a listed Mock gets that Mock's certificate, and one without SNI
 // the default certificate (docs/running.md, "Certificates for single
 // Mocks"). The ClientHellos are captured from a real client
-// (client_hello_captures_wbtest.mbt), or derived from those here: sent in
+// (client_hello_captures_test.mbt), or derived from those here: sent in
 // other records, grown, or with one length field changed.
 
 ///|
 /// What the reader gives for `data`, the octets received so far, written
 /// as its constructors read.
 fn read(data : BytesView) -> String {
-  match read_client_hello(data) {
+  match @serverparsers.read_client_hello(data) {
     Incomplete => "Incomplete"
     ServerName(Some(name)) => "ServerName(Some(\"\{name}\"))"
     ServerName(None) => "ServerName(None)"
@@ -198,6 +198,109 @@ test "a ClientHello spread over two TLS records, split at any octet, reads as it
 }
 
 ///|
+test "a record of the handshake type with an empty fragment, which a client must not send (RFC 8446, section 5.1), is skipped wherever it comes, as OpenSSL 4.1.0 skips it: the ClientHello around it reads as its name" {
+  // OpenSSL 4.1.0's `s_server -servername users.example.test
+  // -servername_fatal` went on with the handshake for each of these, and
+  // with `-servername orders.example.test` for the TLS 1.2 capture, so it
+  // read the name each capture asks for (with another -servername, it sent
+  // unrecognized_name for each). It skips up to 32 empty records in a row
+  // and refuses the 33rd (unexpected_message), whatever certificate the
+  // name chose; the reader skips every one and leaves that to OpenSSL. A
+  // record's position is an offset in the handshake message: `ends` holds
+  // an offset once more for each empty record there.
+  let shown = (capture : Bytes) => {
+    let message = message(capture)
+    let one_octet = []
+    for at in 1..<message.length() {
+      one_octet.push(at)
+      one_octet.push(at)
+    }
+    one_octet.push(message.length())
+    [
+      ("an empty record first", records(message, ends=[0])),
+      (
+        "split inside the handshake header, at 2, an empty record between",
+        records(message, ends=[2, 2]),
+      ),
+      (
+        "split at 100, an empty record between",
+        records(message, ends=[100, 100]),
+      ),
+      (
+        "split at 100, 32 empty records between",
+        records(message, ends=Array::make(33, 100)),
+      ),
+      (
+        "split at 100, 33 empty records between",
+        records(message, ends=Array::make(34, 100)),
+      ),
+      (
+        "in records of one octet, each followed by an empty record",
+        records(message, ends=one_octet),
+      ),
+      ("whole, then an empty record", capture + records(b"")),
+    ]
+    .map(case => "\{case.0}: \{read(case.1[:])}")
+    .join("\n")
+  }
+  inspect(
+    shown(tls13_sni),
+    content=(
+      #|an empty record first: ServerName(Some("users.example.test"))
+      #|split inside the handshake header, at 2, an empty record between: ServerName(Some("users.example.test"))
+      #|split at 100, an empty record between: ServerName(Some("users.example.test"))
+      #|split at 100, 32 empty records between: ServerName(Some("users.example.test"))
+      #|split at 100, 33 empty records between: ServerName(Some("users.example.test"))
+      #|in records of one octet, each followed by an empty record: ServerName(Some("users.example.test"))
+      #|whole, then an empty record: ServerName(Some("users.example.test"))
+    ),
+  )
+  inspect(
+    shown(tls12_sni),
+    content=(
+      #|an empty record first: ServerName(Some("orders.example.test"))
+      #|split inside the handshake header, at 2, an empty record between: ServerName(Some("orders.example.test"))
+      #|split at 100, an empty record between: ServerName(Some("orders.example.test"))
+      #|split at 100, 32 empty records between: ServerName(Some("orders.example.test"))
+      #|split at 100, 33 empty records between: ServerName(Some("orders.example.test"))
+      #|in records of one octet, each followed by an empty record: ServerName(Some("orders.example.test"))
+      #|whole, then an empty record: ServerName(Some("orders.example.test"))
+    ),
+  )
+  // An empty record does not complete what came before it: OpenSSL waited
+  // for more after the first 100 octets of the message and an empty
+  // record, and the reader is incomplete until the last octet arrives.
+  inspect(
+    read_prefixes(records(message(tls12_sni), ends=[100, 100])),
+    content=(
+      #|0..230: Incomplete
+      #|231: ServerName(Some("orders.example.test"))
+    ),
+  )
+}
+
+///|
+test "a ClientHello followed by more octets in its last record reads as its name, as OpenSSL 4.1.0 reads a TLS 1.2 ClientHello so followed (RFC 8446, section 5.1: handshake messages may be coalesced into one record)" {
+  // OpenSSL 4.1.0's `s_server -servername orders.example.test
+  // -servername_fatal` went on with the handshake for both. The octets
+  // after the ClientHello are a handshake header of certificate_verify
+  // (15) with an empty body. A TLS 1.3 ClientHello so followed OpenSSL
+  // refuses (unexpected_message: section 5.1 has a ClientHello end at a
+  // record's end), whatever certificate the name chose.
+  let message = message(tls12_sni) + b"\x0f\x00\x00\x00"
+  inspect(
+    [
+      "in one record: \{read(records(message)[:])}",
+      "in two records, split at 100: \{read(records(message, ends=[100])[:])}",
+    ].join("\n"),
+    content=(
+      #|in one record: ServerName(Some("orders.example.test"))
+      #|in two records, split at 100: ServerName(Some("orders.example.test"))
+    ),
+  )
+}
+
+///|
 test "a ClientHello without SNI reads as no name, so the handshake gets the default certificate (docs/running.md, Certificates for single Mocks), whether it arrives whole or split across reads" {
   inspect(
     read_prefixes(no_sni),
@@ -326,6 +429,31 @@ test "a ClientHello with a length field one octet past what holds it, or below t
       #|server_name: empty: ServerName(None)
     ),
   )
+  // The octets after a ClientHello are no part of it: its length fields
+  // count within the handshake message's own length (section 4). A client
+  // in middlebox compatibility mode may send a change_cipher_spec record
+  // right after its ClientHello (RFC 8446, appendix D.4); each ClientHello
+  // above, past the record and handshake lengths, reads the same with that
+  // record after it.
+  let change_cipher_spec = b"\x14\x03\x03\x00\x01\x01"
+  inspect(
+    cases[2:]
+    .map(case => "\{case.0}: \{read((case.1 + change_cipher_spec)[:])}")
+    .join("\n"),
+    content=(
+      #|legacy_session_id: the message ends one octet before its 32 do: ServerName(None)
+      #|cipher_suites: one octet more than the message has left: ServerName(None)
+      #|compression_methods: the message ends before its one octet: ServerName(None)
+      #|extensions: one octet more than the message has left: ServerName(None)
+      #|key_share, an extension before server_name: one octet more than the extensions have left: ServerName(None)
+      #|server_name: one octet more than the extensions have left: ServerName(None)
+      #|server_name_list: one octet more than the extension holds: ServerName(None)
+      #|HostName: one octet more than the list holds: ServerName(None)
+      #|HostName: empty: ServerName(None)
+      #|server_name_list: empty: ServerName(None)
+      #|server_name: empty: ServerName(None)
+    ),
+  )
 }
 
 ///|
@@ -420,10 +548,109 @@ test "octets that are not a TLS handshake record, or a handshake message that is
       read(b"GET / HTTP/1.1\r\nHost: users.example.test\r\n\r\n"[:]),
       // The TLS 1.3 capture with its msg_type changed to 2, server_hello.
       read(records(with_length(message(tls13_sni), 0, 1, 2))[:]),
+      // Its handshake header alone, in a record of its own: the msg_type
+      // tells already, before its body arrives. OpenSSL 4.1.0's s_server
+      // refused it at once (unexpected_message).
+      read(records(with_length(message(tls13_sni), 0, 1, 2)[:4].to_owned())[:]),
     ].join("\n"),
     content=(
       #|ServerName(None)
       #|ServerName(None)
+      #|ServerName(None)
+    ),
+  )
+}
+
+///|
+/// What the reader costs for `data`, as `client_hello_cost` counts it: the
+/// record headers it walks and the octets it copies (#388).
+fn cost(data : BytesView) -> String {
+  let cost = @serverparsers.client_hello_cost(data)
+  "records walked \{cost.records}, octets copied \{cost.copied}"
+}
+
+///|
+/// The handshake header of a ClientHello that announces 2^24 - 1 octets,
+/// the most its 3-octet length counts (RFC 8446, section 4), so that no
+/// octets received before the cap make it whole.
+let endless_header : Bytes = b"\x01\xff\xff\xff"
+
+///|
+test "a reading of a ClientHello that is not whole yet walks each record's header once and copies none of its octets, however many records hold them, so that a client that paces it costs each reading steps in line with the octets received (#388)" {
+  // #388's two inputs: a record of that header, then records of one octet
+  // each, as many as come in before the cap; and a record whose fragment,
+  // 2^14 octets (RFC 8446, section 5.1), starts with that header, then
+  // records with an empty fragment. A client that sends one record per
+  // read has the reader read each prefix of these.
+  let one_octet = (count : Int32) => {
+    records(
+      endless_header + Bytes::make(count, b'\x00'),
+      ends=Array::makei(count, i => 4 + i),
+    )
+  }
+  let empty = (count : Int32) => {
+    records(
+      endless_header + Bytes::make(MAX_FRAGMENT - 4, b'\x00'),
+      ends=Array::make(count, MAX_FRAGMENT),
+    )
+  }
+  let shown = (what : String, data : Bytes) => {
+    "\{what}, \{data.length()} octets: \{read(data[:])}, \{cost(data[:])}"
+  }
+  inspect(
+    [
+      shown("1 one-octet record", one_octet(1)),
+      shown("10 one-octet records", one_octet(10)),
+      shown("100 one-octet records", one_octet(100)),
+      shown("1,000 one-octet records", one_octet(1000)),
+      shown("10,921 one-octet records", one_octet(10921)),
+      shown("1 empty record", empty(1)),
+      shown("1,000 empty records", empty(1000)),
+      shown("9,829 empty records", empty(9829)),
+    ].join("\n"),
+    content=(
+      #|1 one-octet record, 15 octets: Incomplete, records walked 2, octets copied 0
+      #|10 one-octet records, 69 octets: Incomplete, records walked 11, octets copied 0
+      #|100 one-octet records, 609 octets: Incomplete, records walked 101, octets copied 0
+      #|1,000 one-octet records, 6009 octets: Incomplete, records walked 1001, octets copied 0
+      #|10,921 one-octet records, 65535 octets: Incomplete, records walked 10922, octets copied 0
+      #|1 empty record, 16394 octets: Incomplete, records walked 2, octets copied 0
+      #|1,000 empty records, 21389 octets: Incomplete, records walked 1001, octets copied 0
+      #|9,829 empty records, 65534 octets: Incomplete, records walked 9830, octets copied 0
+    ),
+  )
+}
+
+///|
+test "a reading of a whole ClientHello reads it where it lies when one record holds it, and otherwise walks its records a second time and copies it once, so that a ClientHello in one record costs one record's walk and no copy (#388: a ClientHello in one record costs no more than before)" {
+  let tls13 = message(tls13_sni)
+  let tls12 = message(tls12_sni)
+  let shown = (what : String, data : Bytes) => {
+    "\{what}, \{data.length()} octets: \{read(data[:])}, \{cost(data[:])}"
+  }
+  inspect(
+    [
+      shown("the TLS 1.3 capture, in one record", tls13_sni),
+      shown("in two records, split at 100", records(tls13, ends=[100])),
+      shown(
+        "the TLS 1.2 capture, in records of one octet",
+        records(tls12, ends=Array::makei(tls12.length() - 1, i => i + 1)),
+      ),
+      shown(
+        "grown to end at the 65,535th octet, in four records",
+        grown(tls13, extensions=135, received=65535),
+      ),
+      shown(
+        "grown to end at the 65,536th octet",
+        grown(tls13, extensions=135, received=65536),
+      ),
+    ].join("\n"),
+    content=(
+      #|the TLS 1.3 capture, in one record, 1610 octets: ServerName(Some("users.example.test")), records walked 1, octets copied 0
+      #|in two records, split at 100, 1615 octets: ServerName(Some("users.example.test")), records walked 4, octets copied 1605
+      #|the TLS 1.2 capture, in records of one octet, 1296 octets: ServerName(Some("orders.example.test")), records walked 432, octets copied 216
+      #|grown to end at the 65,535th octet, in four records, 65535 octets: ServerName(Some("users.example.test")), records walked 8, octets copied 65515
+      #|grown to end at the 65,536th octet, 65536 octets: ServerName(None), records walked 0, octets copied 0
     ),
   )
 }

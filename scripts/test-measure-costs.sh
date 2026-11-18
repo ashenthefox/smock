@@ -356,8 +356,11 @@ cp engine/range.mbt "$tree/engine/"
 
 # --- coverage: builds and runs with coverage and without ------------------------------
 
-native_only="smock/smock/server smock/smock/defdir smock/smock/watch smock/smock/openssl smock/smock/protobuf-conformance smock/smock/schema"
-wasm_gc="smock/smock/buildinfo smock/smock/cookies smock/smock/definitions smock/smock/engine smock/smock/importopenapi smock/smock/llm smock/smock/log smock/smock/metrics smock/smock/prng smock/smock/settings smock/smock/template smock/smock/unicode smock/smock/usage smock/grpc smock/http1 smock/protobuf smock/re2 smock/xml"
+# The packages of CONTRIBUTING.md's Terms: the native-only ones that have
+# tests (cmd/smock and e2e aside), and the pure ones but yaml, serverparsers
+# among them.
+native_only="smock/smock/server smock/smock/defdir smock/smock/watch smock/smock/openssl smock/smock/protobuf-conformance smock/smock/yaml-test-suite smock/smock/schema"
+wasm_gc="smock/smock/buildinfo smock/smock/cookies smock/smock/definitions smock/smock/engine smock/smock/importopenapi smock/smock/llm smock/smock/log smock/smock/metrics smock/smock/prng smock/smock/serverparsers smock/smock/settings smock/smock/template smock/smock/unicode smock/smock/usage smock/grpc smock/http1 smock/protobuf smock/re2 smock/xml"
 
 # The calls of one mode, with <cov> for its flag, <plan1> and <plan2> for
 # the dry runs' target directories, <dir> for its tests' and <bin> for the

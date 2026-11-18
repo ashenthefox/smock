@@ -5,7 +5,10 @@ each site's mutant in the pinned set has a known outcome, which a comment
 beside the site gives with its reason, and so does each site of the
 package log in both sets; the package shapes holds one site in each kind
 of definition, and look-alikes that are not sites; the package forms holds
-each form of each operator.
+each form of each operator. In the package units, each mutant of the
+pinned set has a known outcome with units' own tests and, for those that
+survive them, with the tests of the packages that import units (meter,
+and dial through meter; probe imports it too, but builds only natively).
 
 The operators, their alternatives and the pinned rule are those of
 operator set v1 (#275, ADR 0006 and CONTRIBUTING.md, "Operator set v1"),
@@ -13,9 +16,28 @@ which #299 completes: BODY, ROR, IFC, LCR, NOT, DEL, BOOL, AOR, INT and
 STR. The expected sites below are v1's, worked out by hand from those
 rules; a change to the rules is a new version, and these tables change
 with it. The time limit, 1.25 times the baseline run plus 4 s, is #298's.
+Kill credit for a pure package (#275, "Kill credit, pure packages", and
+#300): the package's own tests run first, and the survivors run again
+with the wasm-gc tests of every package that imports it, directly or
+through another package; e2e tests and the tests of other native-only
+packages give none. Kill confirmation (#275, "Kill confirmation", and
+#301): the tests run twice without a mutant before any mutant; a kill
+counts only when the tests that failed fail again with the mutant on and
+pass with it off, and a time-out only when it happens again and the run
+without the mutant finishes within the limit; a test that failed without
+a mutant in this run, or whose flake rate is above the flake threshold of
+mutation/flakes.toml, gives no kill credit. A fake moon answers the runs
+of tests from a script, so that a flaky failure and a time-out that does
+not repeat happen every time.
+
+In the fixture's package same, each mutant of the pinned set has a known
+outcome and a known result of the comparison of the compiler's output,
+which compare.py makes before any test runs (#303); a comment beside each
+site gives both, with the reasons.
 
 They need python3, git, moon and moonc (the toolchain of .moonbit-version),
-and take about half a minute: one mutant of the fixture times out.
+and take about a minute and a half: one mutant of the fixture times out,
+and the scripted time-outs each take a time limit.
 
 usage: python3 -m unittest discover -s scripts/mutation -v
 """
@@ -26,6 +48,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -88,6 +111,63 @@ LOG = [
     ('log/lines.mbt,is_comment,STR,"#","",0', False, "survived"),
     ('log/lines.mbt,cut_mark,BODY,{…},{ "" },0', True, "killed"),
     ('log/lines.mbt,cut_mark,STR,"~","_",0', True, "survived"),
+]
+
+# The sites of units' pinned set, from units/units.mbt: each one's id, the
+# outcome that the comment beside it gives with units' own tests, the
+# outcome after the importers' tests, and the packages of the tests that
+# killed it.
+UNITS = [
+    ("units/units.mbt,within,BODY,{…},{ false },0", "killed", "killed", ["mutation/fixture/units"]),
+    ("units/units.mbt,within,ROR,<=,<,0", "survived", "killed", ["mutation/fixture/meter"]),
+    ("units/units.mbt,within,LCR,&&,||,0", "killed", "killed", ["mutation/fixture/units"]),
+    ("units/units.mbt,within,ROR,<=,<,1", "survived", "killed", ["mutation/fixture/dial"]),
+    ("units/units.mbt,past,BODY,{…},{ false },0", "killed", "killed", ["mutation/fixture/units"]),
+    ("units/units.mbt,past,ROR,>,>=,0", "survived", "survived", []),
+]
+
+# calc's tests that the confirmation tests script, as moon names them: the
+# only test that kills `low < n` and the only one that kills `||`.
+LOW = ("mutation/fixture/calc", "calc_test.mbt", 0, "a number at the low end is in range")
+BELOW = ("mutation/fixture/calc", "calc_test.mbt", 1, "a number below the range is not in it")
+
+# The packages of smock that build only natively (CONTRIBUTING.md, "Terms":
+# the native-only packages). None of them gives a pure package credit.
+NATIVE_ONLY = {"smock/smock/server", "smock/smock/cmd/smock", "smock/smock/defdir", "smock/smock/watch",
+               "smock/smock/openssl", "smock/smock/protobuf-conformance", "smock/smock/yaml-test-suite",
+               "smock/smock/schema", "smock/smock/e2e"}
+
+# The mutants of same's pinned set: each one's id, the outcome that the
+# comment beside its site gives, and what the comparison of the compiler's
+# output found before any test ran (#303).
+SAME = [
+    ("same/same.mbt,TRACING,BOOL,false,true,0", "killed", "not compared"),
+    ("same/same.mbt,total,BODY,{…},{ 0 },0", "killed", "differs"),
+    ("same/same.mbt,total,INT,0,1,0", "killed", "differs"),
+    # The condition is false already: the mutant shortens its line.
+    ("same/same.mbt,total,IFC,TRACING,false,0", "equivalent", "identical"),
+    # A call over three lines, deleted: equivalent only because the runner
+    # keeps the lines, which a later message names.
+    ("same/same.mbt,total,DEL,trace.push(…),,0", "equivalent", "identical"),
+    ("same/same.mbt,total,DEL,sum = sum + x,,0", "unviable", None),
+    ("same/same.mbt,total,AOR,+,-,0", "killed", "differs"),
+    # Its BODY's 0 goes into the caller: the mutant's output has no
+    # function of its own for count_a.
+    ("same/same.mbt,count_a,BODY,{…},{ 0 },0", "killed", "not compared"),
+    ("same/same.mbt,count_a,INT,0,1,0", "killed", "differs"),
+    ("same/same.mbt,count_a,IFC,c == 'a',false,0", "killed", "differs"),
+    ("same/same.mbt,count_a,DEL,n += 1,,0", "unviable", None),
+    ("same/same.mbt,count_a,AOR,+=,-=,0", "killed", "differs"),
+    ("same/same.mbt,count_a,INT,1,2,0", "killed", "differs"),
+    ("same/same.mbt,count_a_if,BODY,{…},{ 0 },0", "killed", "differs"),
+    ("same/same.mbt,count_a_if,IFC,wanted,false,0", "duplicate", "duplicate"),
+    ("same/same.mbt,count_a_if,INT,0,1,0", "killed", "differs"),
+    ("same/same.mbt,refuse,BODY,{…},{ () },0", "killed", "differs"),
+    # An implementation that a public function calls, and one that none
+    # does, which the output leaves out.
+    ("same/same.mbt,impl Show for Tally with output,BODY,{…},{ () },0", "killed", "differs"),
+    ("same/same.mbt,impl Eq for Tally with equal,BODY,{…},{ false },0", "killed", "not compared"),
+    ('same/same.mbt,describe,BODY,{…},{ "" },0', "killed", "differs"),
 ]
 
 
@@ -430,6 +510,23 @@ class StringsTest(unittest.TestCase):
             self.assertEqual(scoped.get(file), {None}, file)
         self.assertEqual(scoped.get("usage/usage.mbt"), {"outside scope"})
 
+    def test_strs_scope_holds_the_parsers_moved_out_of_server(self):
+        # serverparsers holds server's pure parsers (#317, #318, #319), whose
+        # strings STR's scope covered while they were in server, so it holds
+        # them there too: each string of the forms is a site in both.
+        with tempfile.TemporaryDirectory() as tmp:
+            for package in ("server", "serverparsers"):
+                (Path(tmp) / package).mkdir()
+                shutil.copy(FIXTURE / "forms" / "strings.mbt", Path(tmp) / package / "strings.mbt")
+            found = [s for s in find_sites(tmp, "server", "serverparsers", chosen="full") if s["operator"] == "STR"]
+        sites = {}
+        for s in found:
+            package = s["file"].split("/")[0]
+            sites.setdefault(package, set()).add((s["line"], s["original"], s["replacement"], s.get("skipped")))
+        self.assertEqual({p: {skipped for *_, skipped in held} for p, held in sites.items()},
+                         {"server": {None}, "serverparsers": {None}})
+        self.assertEqual(sites["serverparsers"], sites["server"])
+
 
 def logging_moon(directory, fail_build_when=None):
     """A moon that logs each of its command lines and runs the real one."""
@@ -505,6 +602,28 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(record["outcome"], "unviable")
         self.assertIn("never used", record["message"])
 
+    def test_each_kill_and_the_time_out_are_confirmed(self):
+        # calc's tests are not flaky: each kill fails again with the mutant
+        # on and passes with it off, and the endless loop times out again,
+        # while the run without it finishes within the limit.
+        judged = [r for r in self.records if r["outcome"] in ("killed", "timed out")]
+        self.assertEqual(len(judged), 15)
+        for record in judged:
+            self.assertEqual(record["confirmation"], "confirmed", record["id"])
+            self.assertGreater(record["timings"]["without_s"], 0)
+        timed_out = next(r for r in judged if r["outcome"] == "timed out")
+        self.assertGreaterEqual(timed_out["timings"]["again_s"], timed_out["timings"]["limit_s"])
+        self.assertLess(timed_out["timings"]["without_s"], timed_out["timings"]["limit_s"])
+        killed = {r["id"]: [t["name"] for t in r["killing_tests"]] for r in judged}
+        self.assertEqual(killed["calc/calc.mbt,in_range,ROR,<=,<,0"], [LOW[3]])
+        # The tests ran twice without a mutant; the longer run sets the limit.
+        summary = json.loads((self.out / "summary.json").read_text())["packages"][0]
+        self.assertEqual(len(summary["baseline"]["runs_s"]), 2)
+        self.assertEqual(summary["baseline"]["run_s"], max(summary["baseline"]["runs_s"]))
+        self.assertEqual(summary["baseline"]["failed"], [])
+        # A confirmed time-out counts as killed (#275, "Outcomes").
+        self.assertEqual((summary["unconfirmed"], summary["score"]), (0, round(15 / 24, 4)))
+
     def test_the_summary_counts_each_outcome_of_the_package(self):
         summary = json.loads((self.out / "summary.json").read_text())
         self.assertEqual((summary["operator_set"], summary["set"]), (VERSION, "pinned"))
@@ -539,6 +658,60 @@ class RunnerTest(unittest.TestCase):
         self.assertNotIn("calc/calc.mbt,is_odd,NOT,!,,0", report)
         # The run prints the report.
         self.assertIn("-  low <= n && n <= high\n+  low <= n && n < high\n", self.result.stdout)
+
+    def test_each_survivor_has_its_status_after_the_exclusion_list(self):
+        # The fixture's exclusion list (fixture/exclusions.toml) has three
+        # entries for calc's survivors: a current ARID one, which accepts
+        # its survivor; a current DEFERRED one, which still counts as
+        # unexplained; and a stale one, whose survivor is stale-covered
+        # (#302). The other survivors have none: unexplained.
+        status = {r["id"]: r["exclusion"] for r in self.records if r["outcome"] == "survived"}
+        self.assertEqual(status.pop("calc/calc.mbt,is_blank,BOOL,true,false,0"),
+                         {"status": "accepted", "entry": "calc/calc.mbt,is_blank,BOOL,true,false,0",
+                          "category": "ARID"})
+        self.assertEqual(status.pop("calc/calc.mbt,is_odd,INT,0,-1,0"),
+                         {"status": "unexplained", "entry": "calc/calc.mbt,is_odd,INT,0,-1,0",
+                          "category": "DEFERRED", "issue": 1})
+        self.assertEqual(status.pop("calc/calc.mbt,halve_until,INT,2,3,0"),
+                         {"status": "stale-covered", "entry": "calc/calc.mbt,halve_until,INT,2,3,0",
+                          "category": "ARID"})
+        self.assertEqual(len(status), 6)
+        self.assertEqual(status, {i: {"status": "unexplained"} for i in status})
+        # Only a survivor has a status.
+        self.assertFalse(any("exclusion" in r for r in self.records if r["outcome"] != "survived"))
+
+    def test_the_summary_and_the_report_count_the_survivors_after_the_exclusion_list(self):
+        package = json.loads((self.out / "summary.json").read_text())["packages"][0]
+        self.assertEqual(package["exclusions"], {"unexplained": 7, "stale_covered": 1, "accepted": 1,
+                                                 "accepted_by_category": {"ARID": 1}})
+        report = (self.out / "report.md").read_text()
+        self.assertIn("After the exclusion list: 7 unexplained, 1 stale-covered, 1 accepted (ARID 1).", report)
+        self.assertIn("#### `calc/calc.mbt,halve_until,INT,2,3,0`\n\nStale-covered: its only entry,"
+                      " `calc/calc.mbt,halve_until,INT,2,3,0`, is stale.\n", report)
+        self.assertIn("#### `calc/calc.mbt,is_odd,INT,0,-1,0`\n\nUnexplained: DEFERRED to #1.\n", report)
+        self.assertIn("#### `calc/calc.mbt,is_blank,BOOL,true,false,0`\n\nAccepted by the exclusion list: ARID.\n",
+                      report)
+        self.assertIn("#### `calc/calc.mbt,is_blank,NOT,!,,0`\n\nUnexplained.\n", report)
+        # The unexplained survivors come first, then the stale-covered one,
+        # then the accepted one.
+        self.assertLess(report.index("`calc/calc.mbt,is_odd,INT,0,-1,0`\n"),
+                        report.index("`calc/calc.mbt,halve_until,INT,2,3,0`\n"))
+        self.assertLess(report.index("`calc/calc.mbt,halve_until,INT,2,3,0`\n"),
+                        report.index("`calc/calc.mbt,is_blank,BOOL,true,false,0`\n"))
+
+    def test_the_summary_and_the_report_list_the_pseudo_tested_functions(self):
+        # #275, "Terms": "A function whose BODY mutant survives is
+        # pseudo-tested"; #313's baseline gives them per package. Of calc's
+        # four BODY mutants, only halve_until's survives (CALC).
+        package = json.loads((self.out / "summary.json").read_text())["packages"][0]
+        self.assertEqual(package["body_mutants"], 4)
+        self.assertEqual(package["pseudo_tested"], [
+            {"definition": "halve_until", "file": "calc/calc.mbt",
+             "mutant": "calc/calc.mbt,halve_until,BODY,{…},{ 0 },0", "status": "unexplained"}])
+        report = (self.out / "report.md").read_text()
+        self.assertIn("### Pseudo-tested functions (1 of 4 BODY mutants)\n\n"
+                      "Each function's BODY mutant survived; L2 needs it killed or excluded.\n\n"
+                      "- `halve_until` (calc/calc.mbt): Unexplained.\n", report)
 
     def test_the_runner_never_passes_u(self):
         # in_range's first mutant is killed by a snapshot alone, which -u
@@ -677,6 +850,524 @@ class FullSetTest(unittest.TestCase):
         self.assertIn("## mutation/fixture/forms", report)
         self.assertIn("Sites skipped in this set: AOR string operand 2, BODY FFI 1, BODY no default 3,"
                       " LCR binds a name 1, STR outside scope 15.", report)
+
+
+class ImportersTest(unittest.TestCase):
+    """One run of units' pinned set, whose survivors run again with the
+    tests of the packages that import units, and the importers of smock's
+    own packages."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-mutation-importers-"))
+        cls.moon, cls.log = logging_moon(cls.tmp)
+        cls.out = cls.tmp / "units"
+        cls.result = subprocess.run(
+            [sys.executable, str(RUN), "--root", str(FIXTURE), "--work", str(cls.tmp / "work"), "--out", str(cls.out),
+             "--moon", str(cls.moon), "units"],
+            capture_output=True, text=True)
+        if cls.result.returncode != 0:
+            raise AssertionError(f"run.py failed ({cls.result.returncode}):\n{cls.result.stderr}")
+        cls.records = [json.loads(line) for line in (cls.out / "mutants.jsonl").read_text().splitlines()]
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_an_importers_test_kills_what_the_packages_own_tests_leave(self):
+        self.assertEqual([(r["id"], r["outcome"]) for r in self.records],
+                         [(i, after) for i, _, after, _ in UNITS])
+
+    def test_a_record_names_the_package_of_each_test_that_killed_it(self):
+        self.assertEqual([(r["id"], sorted({t["package"] for t in r["killing_tests"]})) for r in self.records],
+                         [(i, packages) for i, _, _, packages in UNITS])
+        killed = {r["id"]: [t["name"] for t in r["killing_tests"]] for r in self.records}
+        self.assertEqual(killed["units/units.mbt,within,ROR,<=,<,0"],
+                         ["a reading at the low end of the scale is on it"])
+        self.assertEqual(killed["units/units.mbt,within,ROR,<=,<,1"],
+                         ["a reading at the high end of a scale from 0 to 10 is on it"])
+
+    def test_only_the_survivors_of_the_packages_own_tests_run_again(self):
+        # With the tests of meter and of dial, which reaches units through
+        # meter; not with probe's, which builds only natively.
+        importers = ["mutation/fixture/dial", "mutation/fixture/meter"]
+        self.assertEqual([(r["id"], r["importers"]) for r in self.records],
+                         [(i, importers if own == "survived" else []) for i, own, _, _ in UNITS])
+        for record in self.records:
+            if record["importers"]:
+                self.assertGreater(record["timings"]["importers"]["run_s"], 0)
+            else:
+                self.assertNotIn("importers", record["timings"])
+        # Only the last survivor keeps its diff.
+        self.assertEqual([r["id"] for r in self.records if "diff" in r], ["units/units.mbt,past,ROR,>,>=,0"])
+
+    def test_a_native_only_importers_tests_never_run(self):
+        # probe's test would kill `n >= high`, but a pure package's verdict
+        # is taken on wasm-gc. moon is only asked whether probe builds there.
+        runs = [line.split() for line in self.log.read_text().splitlines()
+                if "mutation/fixture/probe" in line.split()]
+        self.assertTrue(runs)
+        for words in runs:
+            self.assertIn("--dry-run", words)
+
+    def test_the_summary_counts_the_outcomes_before_and_after_the_importers_tests(self):
+        package = json.loads((self.out / "summary.json").read_text())["packages"][0]
+        self.assertEqual({k: package["own"][k] for k in ("mutants", "killed", "timed_out", "survived", "unviable")},
+                         {"mutants": 6, "killed": 3, "timed_out": 0, "survived": 3, "unviable": 0})
+        self.assertEqual(package["own"]["score"], 0.5)
+        self.assertEqual({k: package[k] for k in ("mutants", "killed", "timed_out", "survived", "unviable")},
+                         {"mutants": 6, "killed": 5, "timed_out": 0, "survived": 1, "unviable": 0})
+        importers = package["importers"]
+        self.assertEqual(importers["packages"], ["mutation/fixture/dial", "mutation/fixture/meter"])
+        self.assertEqual(importers["native_only"], ["mutation/fixture/probe"])
+        self.assertEqual(importers["baseline"]["tests"], 2)
+        self.assertAlmostEqual(importers["limit_s"], 1.25 * importers["baseline"]["run_s"] + 4, places=2)
+        self.assertEqual((importers["reran"], importers["killed"]), (3, 2))
+        self.assertEqual(importers["killed_by"], {"mutation/fixture/dial": 1, "mutation/fixture/meter": 1})
+
+    def test_the_report_gives_the_importers_and_what_their_tests_killed(self):
+        report = (self.out / "report.md").read_text()
+        self.assertIn("With its own tests alone: 6 mutants, killed 3, timed out 0, survived 3, unviable 0,"
+                      " score 50.0%.", report)
+        self.assertIn("Importers that build on wasm-gc: mutation/fixture/dial, mutation/fixture/meter.", report)
+        self.assertIn("Importers that build only natively, whose tests give no credit: mutation/fixture/probe.",
+                      report)
+        self.assertIn("Their tests ran the 3 survivors of its own tests again and killed 2:"
+                      " mutation/fixture/dial 1, mutation/fixture/meter 1.", report)
+        self.assertIn("### Survivors (1)", report)
+        self.assertIn("units/units.mbt,past,ROR,>,>=,0", report)
+        self.assertNotIn("#### `units/units.mbt,within,ROR,<=,<,0`", report)
+
+    def test_the_importers_tests_never_run_when_nothing_survives(self):
+        # meter's one mutant, BODY's `{ false }`, is killed by meter's own
+        # test, so dial's tests, which import meter, are not even built.
+        before = len(self.log.read_text().splitlines())
+        out = self.tmp / "meter"
+        result = subprocess.run(
+            [sys.executable, str(RUN), "--root", str(FIXTURE), "--work", str(self.tmp / "work"), "--out", str(out),
+             "--moon", str(self.moon), "meter"],
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        records = [json.loads(line) for line in (out / "mutants.jsonl").read_text().splitlines()]
+        self.assertEqual([(r["id"], r["outcome"], r["importers"]) for r in records],
+                         [("meter/meter.mbt,on_scale,BODY,{…},{ false },0", "killed", [])])
+        importers = json.loads((out / "summary.json").read_text())["packages"][0]["importers"]
+        self.assertEqual((importers["packages"], importers["reran"], importers["killed"]),
+                         (["mutation/fixture/dial"], 0, 0))
+        self.assertNotIn("baseline", importers)
+        for line in self.log.read_text().splitlines()[before:]:
+            if "mutation/fixture/dial" in line.split():
+                self.assertIn("--dry-run", line.split())
+
+    def test_smocks_importers_come_from_the_build_and_leave_out_native_only_packages(self):
+        # Worked out by hand from each package's moon.pkg: its imports, for
+        # its source and for its tests, and its supported_targets.
+        result = subprocess.run([sys.executable, str(HERE / "importers.py"), "--root", str(REPO),
+                                 "template", "log", "yaml", "protobuf", "testcerts", "unicode"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        found = {line["package"]: line for line in map(json.loads, result.stdout.splitlines())}
+        # template: llm and definitions import it, engine, importopenapi,
+        # serverparsers (which imports definitions since #318) and settings
+        # through them; defdir, server and cmd/smock build only natively
+        # (#300: engine's tests killed 16 of template's survivors).
+        self.assertEqual(found["smock/smock/template"]["importers"],
+                         ["smock/smock/definitions", "smock/smock/engine", "smock/smock/importopenapi",
+                          "smock/smock/llm", "smock/smock/serverparsers", "smock/smock/settings"])
+        self.assertEqual(found["smock/smock/template"]["native_only"],
+                         ["smock/smock/cmd/smock", "smock/smock/defdir", "smock/smock/server"])
+        # Through as many packages as it takes: only template imports
+        # unicode, definitions imports template, and settings imports
+        # definitions, but neither template nor unicode.
+        self.assertIn("smock/smock/settings", found["smock/smock/unicode"]["importers"])
+        # e2e imports log for its tests, and builds only natively: e2e tests
+        # give no credit for a pure package.
+        self.assertIn("smock/smock/e2e", found["smock/smock/log"]["native_only"])
+        self.assertIn("smock/smock/template", found["smock/smock/log"]["importers"])
+        # schema imports yaml for its tests, and yaml-test-suite imports it;
+        # protobuf-conformance imports protobuf; all three build only
+        # natively (#300, "Native-only importers").
+        self.assertTrue({"smock/smock/schema", "smock/smock/yaml-test-suite"}
+                        <= set(found["smock/yaml"]["native_only"]))
+        self.assertIn("smock/smock/protobuf-conformance", found["smock/protobuf"]["native_only"])
+        # A test import reaches no further: cmd/smock imports server, which
+        # imports testcerts only for its tests (as openssl does, and since
+        # #384 server's own white-box tests), so cmd/smock is no importer.
+        self.assertEqual((found["smock/smock/testcerts"]["importers"], found["smock/smock/testcerts"]["native_only"]),
+                         ([], ["smock/smock/e2e", "smock/smock/openssl", "smock/smock/server"]))
+        for line in found.values():
+            self.assertEqual(set(line["importers"]) & NATIVE_ONLY, set(), line["package"])
+
+
+# A moon that answers the runs of tests, but not their builds nor the dry
+# runs, from a script: a JSON list of answers, taken in turn. "real" runs
+# the real moon; {"fail": [test, ...]} prints what moon prints when those
+# tests fail, and exits as it does; {"sleep": s} waits s seconds, and the
+# runner stops it at its time limit. Once the script is used up, the real
+# moon answers. Its arguments: the script, a log of the command lines, the
+# real moon, then moon's own.
+SCRIPTED_MOON = '''\
+import json, os, sys, time
+script, log, real, args = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+with open(log, "a") as f:
+    f.write(" ".join(args) + "\\n")
+if args[:1] == ["test"] and "--build-only" not in args and "--dry-run" not in args:
+    with open(script) as f:
+        answers = json.load(f)
+    if answers:
+        answer = answers.pop(0)
+        with open(script, "w") as f:
+            json.dump(answers, f)
+        if isinstance(answer, dict) and "fail" in answer:
+            for package, filename, index, name in answer["fail"]:
+                print(json.dumps({"package": package, "filename": filename, "index": str(index),
+                                  "test_name": name, "message": "a scripted failure"}))
+            print(f"Total tests: 7, passed: {7 - len(answer['fail'])}, failed: {len(answer['fail'])}.")
+            sys.exit(2)
+        if isinstance(answer, dict) and "sleep" in answer:
+            time.sleep(answer["sleep"])
+os.execv(real, [real, *args])
+'''
+
+
+class FlakeRecordsTest(unittest.TestCase):
+    """The flake records of one run made of shards, each of which writes
+    its own (#301: a weekly run on Actions is sharded, and the next run
+    reads one file)."""
+
+    def test_the_shards_of_a_run_make_one_run(self):
+        earlier = {"suites": {"p/a": 4}, "tests": [{"package": "p/a", "file": "a_test.mbt", "name": "x",
+                                                      "flaked": 1, "reruns": 0}]}
+        shards = [
+            {"suites": {"p/a": 2, "p/b": 3},
+             "tests": [{"package": "p/a", "file": "a_test.mbt", "name": "x", "flaked": 1, "reruns": 2}]},
+            {"suites": {"p/a": 2},
+             "tests": [{"package": "p/a", "file": "a_test.mbt", "name": "x", "flaked": 0, "reruns": 1},
+                       {"package": "p/b", "file": "b_test.mbt", "name": "y", "flaked": 1, "reruns": 0}]},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for n, mine in enumerate(shards):
+                path = Path(tmp) / f"shard-{n}.json"
+                path.write_text(json.dumps({"version": 1, "threshold": 0.01, "recent_runs": 10,
+                                            "runs": [earlier, mine], "rates": []}))
+                paths.append(str(path))
+            result = subprocess.run([sys.executable, str(HERE / "confirm.py"), "merge", *paths],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            merged = json.loads(result.stdout)
+            self.assertEqual(merged["runs"], [earlier, {
+                "suites": {"p/a": 4, "p/b": 3},
+                "tests": [{"package": "p/a", "file": "a_test.mbt", "name": "x", "flaked": 1, "reruns": 3},
+                          {"package": "p/b", "file": "b_test.mbt", "name": "y", "flaked": 1, "reruns": 0}]}])
+            # x: 2 flaky results in 4 + 4 runs of p/a and 3 reruns; y: 1 in 3.
+            self.assertEqual(merged["rates"], [
+                {"package": "p/b", "file": "b_test.mbt", "name": "y", "flaked": 1, "observed": 3,
+                 "rate": round(1 / 3, 6)},
+                {"package": "p/a", "file": "a_test.mbt", "name": "x", "flaked": 2, "observed": 11,
+                 "rate": round(2 / 11, 6)}])
+            # Shards that read different records are not one run.
+            other = Path(tmp) / "other.json"
+            other.write_text(json.dumps({"version": 1, "threshold": 0.01, "recent_runs": 10,
+                                         "runs": [shards[0]], "rates": []}))
+            result = subprocess.run([sys.executable, str(HERE / "confirm.py"), "merge", paths[0], str(other)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("did not read the same flake records", result.stderr)
+
+
+class ConfirmationTest(unittest.TestCase):
+    """Runs of one or two of calc's mutants each, with a moon that answers
+    from a script, so that a flaky failure, a time-out that does not repeat
+    and a slow runner happen every time; and a run that reads flake
+    records."""
+
+    @classmethod
+    def setUpClass(cls):
+        moon = shutil.which("moon")
+        if moon is None:
+            raise unittest.SkipTest("moon is not on PATH")
+        cls.real = moon
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-mutation-confirm-"))
+        cls.fake = cls.tmp / "scripted_moon.py"
+        cls.fake.write_text(SCRIPTED_MOON)
+        cls.runs = 0
+        with open(HERE.parent.parent / "mutation" / "flakes.toml", "rb") as f:
+            cls.policy = tomllib.load(f)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def run_scripted(self, answers, *args):
+        """Runs the runner on calc with the moon that answers from the
+        script: its result, records, package summary and whole summary."""
+        type(self).runs += 1
+        name = f"run-{self.runs}"
+        script = self.tmp / f"{name}.json"
+        script.write_text(json.dumps(answers))
+        moon = f"{sys.executable} {self.fake} {script} {self.tmp / f'{name}.log'} {self.real}"
+        out = self.tmp / name
+        result = subprocess.run(
+            [sys.executable, str(RUN), "--root", str(FIXTURE), "--work", str(self.tmp / "work"), "--out", str(out),
+             "--moon", moon, *args, "calc"],
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        records = [json.loads(line) for line in (out / "mutants.jsonl").read_text().splitlines()]
+        summary = json.loads((out / "summary.json").read_text())
+        return out, records, summary["packages"][0], summary
+
+    # The runs of tests, in turn, for one mutant: the two runs without a
+    # mutant, the self-test's run (#309, which the real moon answers), the
+    # mutant's run, its run again with the mutant on, and the run without
+    # it.
+
+    def test_a_kill_that_does_not_repeat_is_not_counted(self):
+        # `n < high` survives calc's tests; a flaky failure says otherwise once.
+        out, records, package, _ = self.run_scripted(["real", "real", "real", {"fail": [LOW]}],
+                                                     "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,1")
+        [record] = records
+        self.assertEqual((record["outcome"], record["first_outcome"], record["confirmation"]),
+                         ("unconfirmed", "killed", "the tests that failed passed when run again with the mutant on"))
+        self.assertEqual([t["name"] for t in record["failed_first"]], [LOW[3]])
+        self.assertEqual(record["killing_tests"], [])
+        self.assertEqual((package["killed"], package["unconfirmed"], package["survived"]), (0, 1, 0))
+        # The test failed once of the one time it ran again with the mutant
+        # on, and passed the two runs without a mutant.
+        flaked = json.loads((out / "flakes.json").read_text())["runs"][-1]
+        self.assertEqual(flaked["suites"], {"mutation/fixture/calc": 2})
+        self.assertEqual(flaked["tests"], [{"package": LOW[0], "file": LOW[1], "name": LOW[3], "flaked": 1,
+                                            "reruns": 1}])
+        report = (out / "report.md").read_text()
+        self.assertIn("### Unconfirmed (1)", report)
+        self.assertIn("the tests that failed passed when run again with the mutant on", report)
+
+    def test_a_kill_whose_tests_fail_without_the_mutant_is_not_counted(self):
+        # `low < n` is killed by LOW, which then fails without it too.
+        out, records, package, _ = self.run_scripted(["real", "real", "real", "real", "real", {"fail": [LOW]}],
+                                                     "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,0")
+        [record] = records
+        self.assertEqual((record["outcome"], record["confirmation"]),
+                         ("unconfirmed", "the tests that failed fail without the mutant too"))
+        self.assertEqual((package["killed"], package["unconfirmed"]), (0, 1))
+        flaked = json.loads((out / "flakes.json").read_text())["runs"][-1]
+        self.assertEqual(flaked["suites"], {"mutation/fixture/calc": 3})
+        self.assertEqual(flaked["tests"], [{"package": LOW[0], "file": LOW[1], "name": LOW[3], "flaked": 1,
+                                            "reruns": 1}])
+
+    def test_a_time_out_that_does_not_repeat_is_unconfirmed(self):
+        out, records, package, _ = self.run_scripted(["real", "real", "real", {"sleep": 120}],
+                                                     "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,1")
+        [record] = records
+        self.assertEqual((record["outcome"], record["first_outcome"], record["confirmation"]),
+                         ("unconfirmed", "timed out", "the mutant did not time out again"))
+        self.assertGreaterEqual(record["timings"]["run_s"], record["timings"]["limit_s"])
+        self.assertLess(record["timings"]["again_s"], record["timings"]["limit_s"])
+        self.assertEqual((package["timed_out"], package["unconfirmed"], package["score"]), (0, 1, None))
+        report = (out / "report.md").read_text()
+        self.assertIn("the mutant did not time out again", report)
+
+    def test_a_time_out_whose_run_without_the_mutant_is_too_slow_is_unconfirmed(self):
+        # A slow runner: everything times out, the run without the mutant too.
+        _, records, package, _ = self.run_scripted(["real", "real", "real", {"sleep": 120}, {"sleep": 120}, {"sleep": 120}],
+                                                   "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,1")
+        [record] = records
+        self.assertEqual((record["outcome"], record["confirmation"]),
+                         ("unconfirmed", "the run without the mutant did not finish within the limit"))
+        self.assertGreaterEqual(record["timings"]["again_s"], record["timings"]["limit_s"])
+        self.assertGreaterEqual(record["timings"]["without_s"], record["timings"]["limit_s"])
+        self.assertEqual((package["timed_out"], package["unconfirmed"]), (0, 1))
+
+    def test_a_test_that_fails_without_a_mutant_gives_no_credit_in_that_run(self):
+        # LOW fails in the second run without a mutant, and then is the only
+        # test that kills `low < n`.
+        out, records, package, summary = self.run_scripted(["real", {"fail": [LOW]}],
+                                                           "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,0")
+        self.assertEqual(package["baseline"]["failed"],
+                         [{"package": LOW[0], "file": LOW[1], "name": LOW[3], "runs": [2]}])
+        [record] = records
+        self.assertEqual((record["outcome"], record["confirmation"]),
+                         ("survived", "only tests that give no kill credit failed"))
+        self.assertEqual([t["name"] for t in record["no_credit"]], [LOW[3]])
+        self.assertEqual(summary["flakes"]["flaked"], [{"package": LOW[0], "file": LOW[1], "name": LOW[3],
+                                                        "flaked": 1, "observed": 2, "rate": 0.5}])
+        report = (out / "report.md").read_text()
+        self.assertIn(f"Tests that failed without a mutant, which give no kill credit in this run: `{LOW[3]}`"
+                      f" ({LOW[0]}, {LOW[1]}, run 2).", report)
+
+    def test_a_test_above_the_flake_threshold_gives_no_credit(self):
+        # Records of an earlier run in which LOW flaked in every run, and
+        # BELOW in exactly the threshold's share of its runs.
+        runs = 1_000_000
+        at = round(self.policy["threshold"] * runs)
+        self.assertEqual(at / runs, self.policy["threshold"])
+        records_file = self.tmp / "earlier-flakes.json"
+        records_file.write_text(json.dumps({"version": 1, "runs": [{
+            "suites": {"mutation/fixture/calc": runs},
+            "tests": [{"package": LOW[0], "file": LOW[1], "name": LOW[3], "flaked": runs, "reruns": 0},
+                      {"package": BELOW[0], "file": BELOW[1], "name": BELOW[3], "flaked": at, "reruns": 0}]}]}))
+        out, records, package, summary = self.run_scripted(
+            [], "--flakes", str(records_file),
+            "--mutant", "calc/calc.mbt,in_range,ROR,<=,<,0", "--mutant", "calc/calc.mbt,in_range,LCR,&&,||,0")
+        outcomes = {r["id"]: (r["outcome"], [t["name"] for t in r["killing_tests"]]) for r in records}
+        self.assertEqual(outcomes, {"calc/calc.mbt,in_range,ROR,<=,<,0": ("survived", []),
+                                    "calc/calc.mbt,in_range,LCR,&&,||,0": ("killed", [BELOW[3]])})
+        self.assertEqual([t["name"] for t in summary["flakes"]["above"]], [LOW[3]])
+        self.assertEqual(summary["flakes"]["runs_read"], 1)
+        report = (out / "report.md").read_text()
+        self.assertIn("Above the threshold, so they give no kill credit in this run: 1.", report)
+        self.assertIn(f"- `{LOW[3]}` ({LOW[0]}, {LOW[1]}): {runs} of {runs} runs, 100.00%", report)
+        # The records kept for the next run: the earlier run, then this one.
+        kept = json.loads((out / "flakes.json").read_text())
+        self.assertEqual(len(kept["runs"]), 2)
+        # The two runs without a mutant, and the run without `||` that
+        # confirms its kill; `low < n`'s only failed test gives no credit,
+        # so it is not run again.
+        self.assertEqual(kept["runs"][-1]["suites"], {"mutation/fixture/calc": 3})
+        self.assertEqual((kept["threshold"], kept["recent_runs"]),
+                         (self.policy["threshold"], self.policy["recent_runs"]))
+
+    def test_a_flaky_test_gives_credit_again_once_its_flaky_runs_are_not_among_the_latest(self):
+        # As many earlier runs as the policy counts: in the oldest, LOW
+        # flaked in every one of its many runs; in the others, never.
+        flaky = {"suites": {"mutation/fixture/calc": 1_000_000},
+                 "tests": [{"package": LOW[0], "file": LOW[1], "name": LOW[3], "flaked": 1_000_000, "reruns": 0}]}
+        clean = {"suites": {"mutation/fixture/calc": 2}, "tests": []}
+        recent = self.policy["recent_runs"]
+        records_file = self.tmp / "older-flakes.json"
+        records_file.write_text(json.dumps({"version": 1, "runs": [flaky] + [clean] * (recent - 1)}))
+        mutant = ("--mutant", "calc/calc.mbt,in_range,ROR,<=,<,0")
+        out, records, _, summary = self.run_scripted([], "--flakes", str(records_file), *mutant)
+        self.assertEqual(summary["flakes"]["runs_read"], recent)
+        self.assertEqual([t["name"] for t in summary["flakes"]["above"]], [LOW[3]])
+        self.assertEqual([r["outcome"] for r in records], ["survived"])
+        # The records this run keeps leave the oldest run out, so the next
+        # run, which reads them, takes LOW's kill.
+        kept = json.loads((out / "flakes.json").read_text())
+        self.assertEqual(len(kept["runs"]), recent)
+        self.assertNotIn(flaky, kept["runs"])
+        self.assertEqual(kept["rates"], [])
+        _, records, _, summary = self.run_scripted([], "--flakes", str(out / "flakes.json"), *mutant)
+        self.assertEqual(summary["flakes"]["above"], [])
+        self.assertEqual([(r["outcome"], r["confirmation"]) for r in records], [("killed", "confirmed")])
+        # Records that hold one run more than the policy counts: the oldest
+        # is not read.
+        records_file.write_text(json.dumps({"version": 1, "runs": [flaky] + [clean] * recent}))
+        _, records, _, summary = self.run_scripted([], "--flakes", str(records_file), *mutant)
+        self.assertEqual((summary["flakes"]["runs_read"], summary["flakes"]["above"]), (recent, []))
+        self.assertEqual([r["outcome"] for r in records], ["killed"])
+
+
+class OutputNamesTest(unittest.TestCase):
+    """The compiler numbers its locals, labels and closures in the order it
+    makes them, and a closure's name holds the line of its definition: the
+    comparison replaces every name of the output, and keeps its text."""
+
+    # A closure at line 30, in moonc's WAT, and a SourceLoc that the program
+    # holds as text.
+    OUTPUT = """(func $_M0FP38mutation7fixture4same5totalC12l30 (param $_M0L1yS3 i32) (result i32)
+ (loop $loop:4 (result i32)
+  (i32.add (local.get $_M0L1yS3) (call $_M0FP38mutation7fixture4same4next (i32.const 1)))))
+(data $moonbit.const_data "s\\00a\\00m\\00e\\00:\\003\\000\\00")"""
+
+    def test_names_that_differ_alone_compare_alike(self):
+        import compare
+        moved = (self.OUTPUT.replace("C12l30", "C14l31").replace("S3", "S5").replace("$loop:4", "$loop:9"))
+        self.assertNotEqual(moved, self.OUTPUT)
+        self.assertEqual(compare.digest(moved), compare.digest(self.OUTPUT))
+
+    def test_text_and_the_names_pattern_of_use_still_differ(self):
+        import compare
+        # The program's own text, here the line of a SourceLoc.
+        self.assertNotEqual(compare.digest(self.OUTPUT.replace("\\003\\000", "\\003\\001")),
+                            compare.digest(self.OUTPUT))
+        # Two functions that were one.
+        call = "$_M0FP38mutation7fixture4same4next"
+        self.assertNotEqual(compare.digest(self.OUTPUT.replace(call, "$_M0FP38mutation7fixture4same5totalC12l30")),
+                            compare.digest(self.OUTPUT))
+
+
+class CompilerOutputTest(unittest.TestCase):
+    """One run of same's pinned set, whose mutants the compiler's output
+    judges before any test runs (#303)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="test-mutation-same-"))
+        cls.moon, cls.log = logging_moon(cls.tmp)
+        cls.work = cls.tmp / "work"
+        cls.out = cls.tmp / "same"
+        cls.result = subprocess.run(
+            [sys.executable, str(RUN), "--root", str(FIXTURE), "--work", str(cls.work), "--out", str(cls.out),
+             "--moon", str(cls.moon), "same"],
+            capture_output=True, text=True)
+        if cls.result.returncode != 0:
+            raise AssertionError(f"run.py failed ({cls.result.returncode}):\n{cls.result.stderr}")
+        cls.records = [json.loads(line) for line in (cls.out / "mutants.jsonl").read_text().splitlines()]
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_each_mutant_has_its_known_outcome(self):
+        self.assertEqual([(r["id"], r["outcome"], r.get("compiler_output", {}).get("result")) for r in self.records],
+                         SAME)
+
+    def test_an_equivalent_mutant_or_a_duplicate_runs_no_tests(self):
+        runs = [line for line in self.log.read_text().splitlines() if "--test-failure-json" in line.split()]
+        # The run without a mutant, twice, the self-test once (#309), and
+        # each mutant that compiled and was neither equivalent nor a
+        # duplicate, three times: each of them is killed, and a kill is
+        # confirmed by a run with the mutant on and one without it (#301).
+        ran = [outcome for _, outcome, _ in SAME if outcome not in ("unviable", "equivalent", "duplicate")]
+        self.assertEqual(set(ran), {"killed"})
+        self.assertEqual(len(runs), 2 + 1 + 3 * len(ran))
+        for record in self.records:
+            if record["outcome"] in ("equivalent", "duplicate"):
+                self.assertEqual((record["killing_tests"], record["timings"]["run_s"]), ([], 0), record["id"])
+                self.assertGreater(record["timings"]["compare_s"], 0)
+
+    def test_a_duplicate_names_the_first_mutant_that_compiled_alike(self):
+        duplicate = next(r for r in self.records if r["outcome"] == "duplicate")
+        self.assertEqual(duplicate["duplicate_of"], "same/same.mbt,count_a_if,BODY,{…},{ 0 },0")
+        # Both compiled alike, and unlike the package without a mutant.
+        first = next(r for r in self.records if r["id"] == duplicate["duplicate_of"])
+        self.assertEqual(duplicate["compiler_output"]["digest"], first["compiler_output"]["digest"])
+        equivalent = next(r for r in self.records if r["outcome"] == "equivalent")
+        self.assertNotEqual(first["compiler_output"]["digest"], equivalent["compiler_output"]["digest"])
+
+    def test_a_mutant_the_output_does_not_hold_is_not_compared(self):
+        reasons = {r["id"]: r["compiler_output"]["reason"] for r in self.records
+                   if r.get("compiler_output", {}).get("result") == "not compared"}
+        self.assertEqual(reasons, {
+            "same/same.mbt,TRACING,BOOL,false,true,0":
+                "the output has no function of its own for TRACING",
+            "same/same.mbt,count_a,BODY,{…},{ 0 },0":
+                "the mutant's output has no function of its own for count_a",
+            "same/same.mbt,impl Eq for Tally with equal,BODY,{…},{ false },0":
+                "the output has no function of its own for impl Eq for Tally with equal",
+        })
+
+    def test_the_summary_counts_them_apart(self):
+        package = json.loads((self.out / "summary.json").read_text())["packages"][0]
+        self.assertEqual(
+            {k: package[k] for k in ("mutants", "killed", "timed_out", "survived", "unviable", "equivalent",
+                                     "duplicate", "not_compared")},
+            {"mutants": 20, "killed": 15, "timed_out": 0, "survived": 0, "unviable": 2, "equivalent": 2,
+             "duplicate": 1, "not_compared": 3})
+        # Neither counts as killed nor as survived.
+        self.assertEqual(package["score"], 1.0)
+
+    def test_the_report_counts_and_lists_them(self):
+        report = (self.out / "report.md").read_text()
+        self.assertIn("By the compiler's output: 2 equivalent and 1 duplicate, which ran no tests;"
+                      " 15 mutants compared, 3 not compared.", report)
+        self.assertIn("### Equivalent by the compiler's output (2)\n\n"
+                      "- `same/same.mbt,total,IFC,TRACING,false,0`\n"
+                      "- `same/same.mbt,total,DEL,trace.push(…),,0`\n", report)
+        self.assertIn("### Duplicates by the compiler's output (1)\n\n"
+                      "- `same/same.mbt,count_a_if,IFC,wanted,false,0`, as"
+                      " `same/same.mbt,count_a_if,BODY,{…},{ 0 },0` (killed)\n", report)
 
 
 if __name__ == "__main__":

@@ -67,7 +67,7 @@ fn set_self_signed_expiry(
   expiry : @metrics.GaugeSeries,
   certificate : Bytes,
 ) -> Unit {
-  if certificate_expiry(certificate) is Some(ms) {
+  if @serverparsers.certificate_expiry(certificate) is Some(ms) {
     expiry.set(ms.to_double() / 1000.0)
   }
 }

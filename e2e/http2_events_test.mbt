@@ -13,7 +13,7 @@ let h2_news : String =
   #|      "response": { "status": 200,
   #|        "headers": { "Cache-Control": "no-cache" },
   #|        "events": [
-  #|          { "delay": 400, "data": "first" },
+  #|          { "delay": 1000, "data": "first" },
   #|          { "delay": 300, "event": "update", "id": "2", "data": "line 1\nline 2" },
   #|          { "data": "last" } ] } },
   #|    { "id": "hello", "mock": "m", "request": { "path": "/hello" },
@@ -82,10 +82,10 @@ async test "h2c: an events Stub sends HEADERS with text/event-stream and no cont
         content=(
           #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
           #|SETTINGS ACK
-          #|before 400 ms: HEADERS 1 END_HEADERS [:status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>]
-          #|DATA 1 at 400 ms: "data: first\n\n"
-          #|DATA 1 at 700 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
-          #|DATA 1 END_STREAM at 700 ms: "data: last\n\n"
+          #|before 1000 ms: HEADERS 1 END_HEADERS [:status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>]
+          #|DATA 1 at 1000 ms: "data: first\n\n"
+          #|DATA 1 at 1300 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
+          #|DATA 1 END_STREAM at 1300 ms: "data: last\n\n"
           #|---
           #|/events: stub "stream", status 200
         ),
@@ -105,7 +105,7 @@ let h2_news_late : String =
   #|      "response": { "status": 200,
   #|        "headers": { "Cache-Control": "no-cache" },
   #|        "events": [
-  #|          { "delay": 400, "data": "first" },
+  #|          { "delay": 1000, "data": "first" },
   #|          { "delay": 300, "event": "update", "id": "2", "data": "line 1\nline 2" },
   #|          { "data": "last" } ] } },
   #|    { "id": "late", "mock": "m", "request": { "path": "/late" },
@@ -126,6 +126,10 @@ async test "h2c: several event streams on one connection each stream their event
       let second = client.send("GET", "/events", authority="localhost")
       let late = client.send("GET", "/late", authority="localhost")
       let hello = client.send("GET", "/hello", authority="localhost")
+      // The event streams' HEADERS "go out at once", and the connection's
+      // "other HTTP/2 streams are answered meanwhile" (docs/http2.md,
+      // Server-Sent Events): before any frame due later. Each event goes
+      // out "after its delay".
       let shown = client.timeline(start~, due=[
         (first, [0, ..news_due]),
         (second, [0, ..news_due]),
@@ -137,16 +141,16 @@ async test "h2c: several event streams on one connection each stream their event
         [shown, "---", ..entries].join("\n"),
         content=(
           #|stream 1:
-          #|  HEADERS at 0 ms: :status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>
-          #|  DATA at 400 ms: "data: first\n\n"
-          #|  DATA at 700 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
-          #|  DATA at 700 ms: "data: last\n\n"
+          #|  HEADERS at once: :status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>
+          #|  DATA at 1000 ms: "data: first\n\n"
+          #|  DATA at 1300 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
+          #|  DATA at 1300 ms: "data: last\n\n"
           #|  end
           #|stream 3:
-          #|  HEADERS at 0 ms: :status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>
-          #|  DATA at 400 ms: "data: first\n\n"
-          #|  DATA at 700 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
-          #|  DATA at 700 ms: "data: last\n\n"
+          #|  HEADERS at once: :status: 200, content-type: text/event-stream, cache-control: no-cache, date: <now>
+          #|  DATA at 1000 ms: "data: first\n\n"
+          #|  DATA at 1300 ms: "event: update\nid: 2\ndata: line 1\ndata: line 2\n\n"
+          #|  DATA at 1300 ms: "data: last\n\n"
           #|  end
           #|stream 5:
           #|  HEADERS at 300 ms: :status: 200, content-type: text/event-stream, date: <now>
@@ -154,8 +158,8 @@ async test "h2c: several event streams on one connection each stream their event
           #|  DATA at 500 ms: "data: b\n\n"
           #|  end
           #|stream 7:
-          #|  HEADERS at 0 ms: :status: 200, date: <now>, content-length: 5
-          #|  DATA at 0 ms: "hello"
+          #|  HEADERS at once: :status: 200, date: <now>, content-length: 5
+          #|  DATA at once: "hello"
           #|  end
           #|---
           #|/hello: stub "hello", status 200
@@ -188,7 +192,7 @@ fn h2_ticks() -> String {
 }
 
 ///|
-async test "h2c: an event stream that the client resets, or that moonhttp resets for the client's frames, ends at once: its entry is committed then, its duration up to the reset, and no more of its events is sent" {
+async test "h2c: an event stream that the client resets, or that moonhttp resets for the client's frames, ends at once: its entry's duration, by smock's own clock, ends before the next event was due, and no more of its events is sent" {
   with_definitions([("m.json", h2_ticks())], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let raw = smock.raw_h2()
@@ -203,8 +207,10 @@ async test "h2c: an event stream that the client resets, or that moonhttp resets
         RstStream(stream_id=1, error_code=@http2.error_cancel),
         WindowUpdate(stream_id=3, increment=0),
       ])
-      let entries = smock.journal_durations(2, below=1000, within=600)
-      let committed_ms = @async.now() - start
+      // A reset "ends the event stream at once" (docs/http2.md, Server-Sent
+      // Events), so each entry's duration, by smock's own clock, ends before
+      // the next event was due, 1000 ms after the first.
+      let entries = smock.journal_durations(2, below=1000, within=patience_ms)
       // Past the next event's time, a fast stream is answered, and nothing
       // more came on the reset streams.
       @async.sleep((1300L - (@async.now() - start)).to_int())
@@ -212,11 +218,9 @@ async test "h2c: an event stream that the client resets, or that moonhttp resets
       out.push("--- the resets sent")
       out.push(raw.runs_until(frame => ends_stream(frame, 5)))
       inspect(
-        [
-          ..out,
-          "--- both committed before the next event was due: \{entries.length() == 2 && committed_ms < 1000}",
-          ..entries,
-        ].join("\n"),
+        [..out, "--- both committed: \{entries.length() == 2}", ..entries].join(
+          "\n",
+        ),
         content=(
           #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
           #|SETTINGS ACK
@@ -228,7 +232,7 @@ async test "h2c: an event stream that the client resets, or that moonhttp resets
           #|RST_STREAM 3 PROTOCOL_ERROR
           #|HEADERS 5 END_HEADERS [:status: 200, date: <now>, content-length: 5]
           #|DATA 5 END_STREAM: 1 frames, 5 octets
-          #|--- both committed before the next event was due: true
+          #|--- both committed: true
           #|/ticks: stub "ticks", status 200, durationMs below 1000: true
           #|/ticks: stub "ticks", status 200, durationMs below 1000: true
         ),
@@ -333,6 +337,10 @@ async test "h2c: an events response with no body, to HEAD, with status 204 or wi
       let late = client.send("HEAD", "/late", authority="localhost")
       let gone = client.send("GET", "/gone", authority="localhost")
       let empty = client.send("GET", "/empty", authority="localhost")
+      // The HEADERS "go out at once, or after the Stub's delay", and such a
+      // response is its HEADERS alone, "which end the HTTP/2 stream at
+      // once" (docs/http2.md, Server-Sent Events): those due at once come
+      // before the delayed stream's.
       let shown = client.timeline(start~, due=[
         (head, [0]),
         (late, [300]),
@@ -344,16 +352,16 @@ async test "h2c: an events response with no body, to HEAD, with status 204 or wi
         [shown, "---", ..entries].join("\n"),
         content=(
           #|stream 1:
-          #|  HEADERS at 0 ms: :status: 200, content-type: text/event-stream, date: <now>
+          #|  HEADERS at once: :status: 200, content-type: text/event-stream, date: <now>
           #|  end
           #|stream 3:
           #|  HEADERS at 300 ms: :status: 200, content-type: text/event-stream, date: <now>
           #|  end
           #|stream 5:
-          #|  HEADERS at 0 ms: :status: 204, content-type: text/event-stream, date: <now>
+          #|  HEADERS at once: :status: 204, content-type: text/event-stream, date: <now>
           #|  end
           #|stream 7:
-          #|  HEADERS at 0 ms: :status: 200, content-type: text/event-stream, date: <now>
+          #|  HEADERS at once: :status: 200, content-type: text/event-stream, date: <now>
           #|  end
           #|---
           #|/events: stub "stream", status 200

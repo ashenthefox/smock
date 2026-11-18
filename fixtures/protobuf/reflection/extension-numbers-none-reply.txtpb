@@ -1,0 +1,7 @@
+valid_host: "reflected.svc"
+original_request {
+  all_extension_numbers_of_type: "annotated.Account"
+}
+all_extension_numbers_response {
+  base_type_name: "annotated.Account"
+}

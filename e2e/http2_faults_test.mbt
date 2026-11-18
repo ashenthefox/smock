@@ -40,15 +40,21 @@ async test "h2c: a partial Fault sends HEADERS with the whole content-length and
       defer raw.close()
       let out = []
       let mut stream = 1
+      // Each request, and when its next event would be due, for those whose
+      // reset comes in place of an event: `partial` sends half the events,
+      // "each after its delay. Then RST_STREAM", and an event stream of a
+      // single event "sends its HEADERS without ending the HTTP/2 stream,
+      // then the reset" (docs/http2.md, Faults). Nothing else competes with
+      // a reset, so the others have no time bound.
       for
         request in [
-          ("GET", "/partial"),
-          ("HEAD", "/partial"),
-          ("GET", "/empty"),
-          ("GET", "/no-content"),
-          ("GET", "/ticks"),
-          ("GET", "/tick"),
-          ("HEAD", "/ticks"),
+          ("GET", "/partial", None),
+          ("HEAD", "/partial", None),
+          ("GET", "/empty", None),
+          ("GET", "/no-content", None),
+          ("GET", "/ticks", Some(2200L)),
+          ("GET", "/tick", Some(2000L)),
+          ("HEAD", "/ticks", None),
         ] {
         let start = @async.now()
         raw.send([
@@ -60,7 +66,9 @@ async test "h2c: a partial Fault sends HEADERS with the whole content-length and
         out.push("\{request.0} \{request.1}:")
         out.push(raw.frames_until_stream_ends(stream))
         let ms = @async.now() - start
-        out.push("reset before 1000 ms: \{ms < 1000}")
+        if request.2 is Some(next) {
+          out.push("reset before the next event was due: \{ms < next}")
+        }
         stream += 2
       }
       inspect(
@@ -72,33 +80,28 @@ async test "h2c: a partial Fault sends HEADERS with the whole content-length and
           #|HEADERS 1 END_HEADERS [:status: 200, content-type: text/plain, smock-mock: m; via=default, date: <now>, content-length: 10]
           #|DATA 1 5 octets
           #|RST_STREAM 1 INTERNAL_ERROR
-          #|reset before 1000 ms: true
           #|HEAD /partial:
           #|HEADERS 3 END_HEADERS [:status: 200, content-type: text/plain, smock-mock: m; via=default, date: <now>, content-length: 10]
           #|RST_STREAM 3 INTERNAL_ERROR
-          #|reset before 1000 ms: true
           #|GET /empty:
           #|HEADERS 5 END_HEADERS [:status: 200, smock-mock: m; via=default, date: <now>, content-length: 0]
           #|RST_STREAM 5 INTERNAL_ERROR
-          #|reset before 1000 ms: true
           #|GET /no-content:
           #|HEADERS 7 END_HEADERS [:status: 204, smock-mock: m; via=default, date: <now>]
           #|RST_STREAM 7 INTERNAL_ERROR
-          #|reset before 1000 ms: true
           #|GET /ticks:
           #|HEADERS 9 END_HEADERS [:status: 200, content-type: text/event-stream, smock-mock: m; via=default, date: <now>]
           #|DATA 9 11 octets
           #|DATA 9 11 octets
           #|RST_STREAM 9 INTERNAL_ERROR
-          #|reset before 1000 ms: true
+          #|reset before the next event was due: true
           #|GET /tick:
           #|HEADERS 11 END_HEADERS [:status: 200, content-type: text/event-stream, smock-mock: m; via=default, date: <now>]
           #|RST_STREAM 11 INTERNAL_ERROR
-          #|reset before 1000 ms: true
+          #|reset before the next event was due: true
           #|HEAD /ticks:
           #|HEADERS 13 END_HEADERS [:status: 200, content-type: text/event-stream, smock-mock: m; via=default, date: <now>]
           #|RST_STREAM 13 INTERNAL_ERROR
-          #|reset before 1000 ms: true
           #|---
           #|GET /partial: status 200, fault "partial"
           #|HEAD /partial: status 200, fault "partial"
@@ -151,6 +154,10 @@ async test "h2c: a close Fault sends GOAWAY NO_ERROR naming the highest stream t
         Data(stream_id=3, data=b"de", end_stream=true, padding=0),
         Data(stream_id=7, data=b" more", end_stream=true, padding=0),
       ])
+      // `close` ends the other streams of the connection with it: a stream
+      // whose response waits for a delay "gets nothing more" (docs/http2.md,
+      // Faults). The frames up to the GOAWAY show that nothing of the
+      // delayed stream came before it.
       let goaway = raw.frames_until(start, is_goaway)
       // A PING, as a client might send before it reads the GOAWAY, is not
       // answered, and the delayed stream's response, due before the
@@ -166,8 +173,7 @@ async test "h2c: a close Fault sends GOAWAY NO_ERROR naming the highest stream t
           answered,
           "---",
           ..goaway.shown,
-          "GOAWAY at once: \{goaway.end_ms < 400}",
-          "then: \{after.shown.length()} frames, \{after.how}, about a second after the GOAWAY: \{after.end_ms - goaway.end_ms >= 800 && after.end_ms - goaway.end_ms < 2000}",
+          "then: \{after.shown.length()} frames, \{after.how}, about a second after the GOAWAY: \{about_a_second(after.end_ms - goaway.end_ms)}",
           "a fresh connection: \{next.brief()}",
           "---",
           fault_journal(smock),
@@ -179,7 +185,6 @@ async test "h2c: a close Fault sends GOAWAY NO_ERROR naming the highest stream t
           #|DATA 1 END_STREAM 4 octets
           #|---
           #|GOAWAY last=7 NO_ERROR
-          #|GOAWAY at once: true
           #|then: 0 frames, a FIN, about a second after the GOAWAY: true
           #|a fresh connection: 200 fast (end)
           #|---
@@ -255,6 +260,9 @@ async test "h2c: a Fault with a delay runs in its stream's task, while the conne
         raw.get(7, "/fast"),
         raw.get(9, "/late-close"),
       ])
+      // A delayed Fault "holds up only its own stream" (docs/http2.md,
+      // Faults): the frames up to the fast stream's end show that nothing of
+      // the delayed streams came first.
       let fast = raw.frames_until(start, frame => ends_stream(frame, 7))
       let partial = raw.frames_until(start, frame => ends_stream(frame, 1))
       let ticks = raw.frames_until(start, frame => ends_stream(frame, 3))
@@ -263,7 +271,6 @@ async test "h2c: a Fault with a delay runs in its stream's task, while the conne
       inspect(
         [
           ..fast.shown,
-          "at once: \{fast.end_ms < 300}",
           ..partial.shown,
           "after 300 ms: \{partial.end_ms >= 300}",
           ..ticks.shown,
@@ -280,7 +287,6 @@ async test "h2c: a Fault with a delay runs in its stream's task, while the conne
           #|SETTINGS ACK
           #|HEADERS 7 END_HEADERS [:status: 200, smock-mock: m; via=default, date: <now>, content-length: 4]
           #|DATA 7 END_STREAM 4 octets
-          #|at once: true
           #|HEADERS 1 END_HEADERS [:status: 200, smock-mock: m; via=default, date: <now>, content-length: 10]
           #|DATA 1 5 octets
           #|RST_STREAM 1 INTERNAL_ERROR

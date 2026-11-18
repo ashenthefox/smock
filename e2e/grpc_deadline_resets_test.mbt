@@ -82,9 +82,11 @@ async fn RawH2::goaways(self : RawH2) -> String {
 }
 
 ///|
-/// Waits until the Journal holds `count` entries, for 5 s at most, and
-/// shows how many have each Stub, HTTP status and gRPC status, in the order
-/// each first comes.
+/// Waits until the Journal holds `count` entries, for the harness's
+/// patience at most, and shows how many have each Stub, HTTP status and
+/// gRPC status, in the order each first comes. An entry is committed when
+/// its call ends, and no document gives that a time, so only a test that
+/// would hang runs out of patience.
 async fn Smock::statuses(self : Smock, count : Int32) -> String {
   let start = @async.now()
   for ;; {
@@ -92,7 +94,8 @@ async fn Smock::statuses(self : Smock, count : Int32) -> String {
     guard journal is Object({ "entries": Array(entries), .. }) else {
       fail("no entries: \{journal.stringify()}")
     }
-    if entries.length() >= count || @async.now() - start >= 5000 {
+    if entries.length() >= count ||
+      @async.now() - start >= patience_ms.to_int64() {
       let counts : Map[String, Int32] = Map([])
       for entry in entries {
         guard entry

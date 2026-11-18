@@ -303,17 +303,20 @@ change, without a restart:
   pair, and for a directory of a thousand body files about 1,500, which
   keep 1% to 2% of an Apple M1 core busy while smock is idle. While a
   change settles, it compares every 250 ms. File times are coarse, so the
-  polls of the 2 s after a change compare and read the files too, but
-  reload only when they differ from those read last. After a read that
-  met a problem reading the directory, such as a file that cannot be
-  read, each poll reads again while the problem lasts: smock reads and
-  hashes every file each second until it is fixed. Those reads come at
-  the poll, without waiting for the files to settle, so a change of
-  several files made while the problem lasts can be read apart. A file
-  time ahead of the clock is logged as a warning, once. A modification
-  time ahead, as from an archive made on a host whose clock ran ahead,
-  changes nothing else; a change time ahead, which only a clock set back
-  gives, makes each poll read the files until the clock passes it.
+  polls of the 2 s after a change compare and read the files too, also
+  right after startup when the files were written less than 2 s before.
+  After a read that met a problem reading the directory, such as a file
+  that cannot be read, each poll reads again while the problem lasts:
+  smock reads and hashes every file each second until it is fixed. These
+  reads come at the poll, with no quiet period, so they reload nothing.
+  When the files differ from those read last, perhaps because one was
+  read half written, smock waits for them to settle, as when a poll finds
+  a change, and reloads them then. So a change of several files made just
+  as such a read begins still gives one reload. A file time ahead of the
+  clock is logged as a warning, once. A modification time ahead, as from
+  an archive made on a host whose clock ran ahead, changes nothing else;
+  a change time ahead, which only a clock set back gives, makes each poll
+  read the files until the clock passes it.
 - A reload reads and validates every file, builds a whole new definition
   set and swaps it in at once, so no request sees half of a reload.
   Requests already being handled finish with the set they started with,
@@ -624,15 +627,24 @@ only a safe subset of YAML (`yaml/`):
   would type, such as `yes`, `on`, `~`, `True`, `0x1F`, `007`, `1_000`,
   `.inf` or `2001-12-14`, is rejected with "quote this value". Every other
   plain scalar is a string.
-- Anchors, aliases, tags, merge keys, duplicate keys and multiple documents
-  are rejected.
+- Anchors, aliases, tags, merge keys, duplicate keys, multiple documents
+  and tabs in indentation are rejected. A mapping or a sequence that
+  starts on the line of a `-` is indented by the `-` and the white space
+  after it, so a tab there is rejected too. Before a scalar or a flow
+  collection, a tab after `-` only separates them.
 - Some valid YAML is rejected too, on purpose: a file with no document,
   such as an empty file or one of comments only; a key that is a
   collection, such as `[a, b]: 1`; a `key: value` pair in a flow sequence
   without braces, such as `[a: 1]` (write `[{a: 1}]`); a key of a flow
   mapping written over several lines, such as a plain key whose `:` is on
-  the next line; and a tab in the white space at the start of a line, even
-  where YAML would read it as a separator rather than as indentation.
+  the next line; a tab in the white space at the start of a line, even
+  where YAML would read it as a separator rather than as indentation; and
+  a line of white space whose tab comes before a block scalar's
+  indentation, with nothing after it but empty lines, comments and the
+  `...` that may end the document, as when `body: |` and `  hello` are
+  followed by a last line of a space and a tab. YAML reads that line as a
+  comment after the document; smock rejects it as a tab in indentation,
+  as libyaml and PyYAML do.
 
 A JSON file with a key repeated in one object is rejected too, at the later
 key: JSON parsers disagree on which of the two values counts.
@@ -646,6 +658,15 @@ The YAML parser also holds to these rules:
 - A key that repeats in a mapping is rejected at the later key, with
   "duplicate key". `id:` and `"id":` are the same key.
 - The members of a mapping are read in the order they are written.
+- A `#` starts a comment only at the start of a line or after a space or
+  a tab, as YAML says. Right after other text of a plain value, it is part
+  of the value, as in `path: /a#b`; anywhere else, such as right after a
+  quoted value or a flow collection, as in `body: "x"# note`, it is
+  rejected with "a comment needs a space before its #".
+- A block scalar whose last line ends the file without a line break gets
+  no line break added, as YAML 1.2.2 says (section 8.1.1.2), with each
+  chomping indicator: a file that ends with `body: |` and then `  hello`,
+  with no line break after it, reads `body` as `"hello"`.
 
 Every problem is reported with the file and the JSON Pointer of the value,
 such as `users.yaml: /stubs/0/request/method: "on" may be read as a boolean;

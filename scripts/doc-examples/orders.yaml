@@ -1,0 +1,4 @@
+# The Mock orders, which an example of docs/definition-files/scenarios.md
+# uses and the document does not declare.
+mocks:
+  - name: orders

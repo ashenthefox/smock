@@ -468,8 +468,14 @@ of each GitHub release include its section
     health service too, from the descriptor smock embeds unless the set
     defines `grpc.health.v1`. It answers one request per call, once the
     request's message is whole, then resets the stream with NO_ERROR if
-    the client still sends. A Mock with reflection on keeps its set's
-    files as encoded, beside the set's model. See
+    the client still sends. It reads the request as protobuf's parsers
+    read a message. A field it knows that comes with another wire type
+    than its type's, such as `file_by_filename` sent as a varint, is
+    skipped, as an unknown field is. `file_containing_extension` records
+    in a row merge, as the records of a message field do, so the
+    containing type can come in one record and the extension number in
+    the next. A Mock with reflection on keeps its set's files as encoded,
+    beside the set's model. See
     [Reflection](docs/grpc/services-and-connections.md#reflection).
   - **Health.** With `grpc: { health: true }`, a Mock answers gRPC's
     `grpc.health.v1.Health` as gRPC's health servers do: `Check` says
@@ -544,6 +550,16 @@ of each GitHub release include its section
   the other two from 1 to 1073741824 (2^30). These are the values smock
   already took. The running guide's [Settings](docs/running.md#settings)
   table gives the same ranges.
+- The help texts of `--header-size-limit`, `--body-limit`,
+  `--journal-body-limit` and the four timeouts give their ranges too:
+  `--header-size-limit` from 1 to 1073741824 (2^30), `--body-limit` and
+  `--journal-body-limit` from 0 to 1073741824, `--read-timeout-ms`,
+  `--idle-timeout-ms` and `--write-timeout-ms` from 1 to 2147483647
+  (2^31 - 1), and `--drain-timeout-ms` from 0 to 2147483647. These are the
+  values smock already took. The running guide's
+  [Settings](docs/running.md#settings) table now gives the same ranges, and
+  the help of `smock check` and `smock render` gives the range of
+  `--header-size-limit`, which they take as `smock serve` does.
 - The Definition-file Schema's description of a connection Fault's `kind`
   gives its HTTP/2 form beside its HTTP/1.1 one: RST_STREAM on the
   request's stream for `reset`, half the response then RST_STREAM for
@@ -690,6 +706,97 @@ of each GitHub release include its section
   gRPC in its description of smock, as the README's opening line does: "A
   mock server for HTTP/1.1, HTTP/2, HTTPS, Server-Sent Events and gRPC
   unary calls." It left gRPC out.
+- The Helm chart writes every number from a values file in full. Helm
+  reads such a number as a floating-point number, and the chart wrote some
+  of a million or more in exponent form: `definitions.gitSync.depth:
+  1000000` gave git-sync `--depth=1e+06`, and `definitions.gitSync.uid:
+  1000680000` gave `runAsUser: 1.00068e+09`, where git-sync and
+  Kubernetes take an integer. The Services' ports, the replica count in
+  the notes after an install, and Definition files or body files given as
+  numbers were written the same way.
+- The certificate expiry metric, and the `expiry` of a reload's log entry,
+  now give the notAfter of the certificate that the TLS port presents:
+  the first block of the certificate file labelled `CERTIFICATE`,
+  `X509 CERTIFICATE` or `TRUSTED CERTIFICATE`, the block OpenSSL loads.
+  smock read the first block whose label ended with `CERTIFICATE`, so a
+  file that started with an `ATTRIBUTE CERTIFICATE` got a metric of 0 and
+  an `expiry` of null, and one that started with an `X.509 CERTIFICATE`,
+  which OpenSSL skips, got that block's notAfter.
+- A YAML Definition file or OpenAPI document that starts with two `---`
+  markers with nothing but comments between them is now rejected as
+  multiple documents, as the documents say: the first `---` starts an empty
+  document and the second starts another. smock read the second `---` as
+  the document's text, so `---` on two lines read as the string `---`
+  ([smock#365](https://github.com/hirunefu/smock/issues/365)).
+- In YAML, a `#` with no space or tab before it no longer starts a
+  comment, as YAML says. After a quoted value or a flow collection, such
+  as `key: "value"# note` or `[a, b]#note`, smock dropped the rest of the
+  line as a comment; it now rejects the text, with "a comment needs a
+  space before its #". Inside a plain value, as in `path: /a#b`, the `#`
+  is part of the value, as before
+  ([smock#366](https://github.com/hirunefu/smock/issues/366)).
+- In YAML, a tab between two `-` on one line, as in `-<tab>- x`, is now
+  rejected as a tab in indentation, as the documents say: the white space
+  after the first `-` indents the nested sequence. smock read it as a
+  nested sequence, and in an OpenAPI document `-<tab>-` read as `[[null]]`
+  ([smock#367](https://github.com/hirunefu/smock/issues/367)).
+- In a YAML block scalar, a tab after the spaces of the indentation is now
+  text, as YAML says, also on a line that holds nothing else. smock read
+  such a line as an empty line and dropped the tab: `foo: |`, then a line
+  of one space and a tab, then `bar: 1`, read `foo` as `""`, and now reads
+  it as `"\t\n"`. On a line of white space, a tab after fewer spaces than
+  the indentation is now rejected as a tab in indentation; smock read that
+  line as an empty line too
+  ([smock#369](https://github.com/hirunefu/smock/issues/369)).
+- In YAML, a tab between a `-` and a mapping that starts on its line, as
+  in `-<tab>id: a`, is now rejected as a tab in indentation, as YAML says:
+  the white space after the `-` indents the mapping. smock read it as the
+  mapping, so a Definition file or an OpenAPI document written that way
+  loaded, and is now rejected. A tab between a `-` and a scalar still
+  separates them
+  ([smock#382](https://github.com/hirunefu/smock/issues/382)).
+- A poll that reads the files at once, with no quiet period, no longer
+  reloads what it reads. File times are coarse, so the polls of the 2 s
+  after a change read the Definition files and the certificate and key
+  files, also right after startup when the files were written just
+  before, and so do the polls while a problem reading the definitions
+  directory lasts. A file rewritten in place just as such a read began
+  was read half written, and reloaded: smock logged a failed reload, such
+  as "TLS certificate reload failed" with "no PEM certificate found", or
+  served a half-written set, such as a body file read empty, for about a
+  second, until the next poll. Two files written 100 ms apart could be
+  read apart the same way. When such a read finds the files changed,
+  smock now waits for them to settle, as for any change, and then reloads
+  them once ([smock#384](https://github.com/hirunefu/smock/issues/384)).
+- After a rotation to a certificate whose notAfter smock cannot read, the
+  certificate expiry metric now gives 0 for it, as at startup. It kept the
+  notAfter of the certificate before, which the TLS port no longer
+  presented, so an alert on the metric watched a certificate that was no
+  longer served. A failed reload still keeps the series of the certificate
+  that smock keeps presenting
+  ([smock#385](https://github.com/hirunefu/smock/issues/385)).
+- A TLS client that sends its ClientHello slowly, in many small records,
+  no longer costs smock seconds of CPU before the handshake. smock reads
+  the name the client asks for by SNI again each time more octets arrive,
+  and copied what it had of the ClientHello once for every record, so a
+  client that sent a record of one octet every few milliseconds cost
+  about 5 s of CPU on an Apple M1, and a dozen such clients stalled every
+  port until the idle timeout cut them. A reading now walks each record
+  once and copies the ClientHello at most once, when it is whole: such a
+  client costs about 0.2 s, and a ClientHello in one record costs less
+  than before ([smock#388](https://github.com/hirunefu/smock/issues/388)).
+- The certificate expiry metric, and the `expiry` of a reload's log entry,
+  now give the notAfter of the leaf that the TLS port presents when the
+  certificate file starts with a UTF-8 byte order mark, as Windows
+  PowerShell 5.1's `Out-File -Encoding utf8` writes it. OpenSSL drops the
+  mark and presents the leaf. smock kept it, skipped the leaf and read the
+  next certificate, so a chain got the notAfter of the certificate after
+  the leaf, usually years later, and a certificate alone got 0. smock now
+  drops the mark where OpenSSL does: on the first line of the file, and on
+  the line right after the END line of a block that OpenSSL skips, such as
+  a private key. A BEGIN line with white space before it is now no BEGIN
+  line, as for OpenSSL, which then presents the certificate after it
+  ([smock#389](https://github.com/hirunefu/smock/issues/389)).
 
 ## [0.4.0] - 2026-11-01
 

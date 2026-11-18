@@ -11,9 +11,11 @@
 #
 # A case that fails or is skipped without being listed so fails the run,
 # and so does a listed case that passes: it must come off. A case with one
-# of the constructs of yaml-test-suite/README.md's table is never listed
+# of the constructs of yaml-test-suite/README.md's table is not listed
 # here: it passes when smock refuses it with the message the documents
-# give for that construct. Before a branch merges into main, this list may
+# give for that construct. The one exception is a case that smock refuses
+# first for a known difference: it is listed as differs, and its reason
+# says that it holds the construct too. Before a branch merges into main, this list may
 # keep its bugs, each with its issue, until yaml's L4 ticket (#323) fixes
 # them (docs/merging-into-main.md).
 
@@ -44,7 +46,7 @@ QF4Y  differs  A flow sequence holds a key: value pair without braces, a single 
 9BXH     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
 9SA2     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
 NJ66     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
-UT92     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
+UT92     differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line". The case also holds two documents, and the documents say that both modes refuse several documents; smock refuses the key first, in the first document, so the case is listed with the known difference (the maintainer's decision of 2026-11-17).
 VJP3/01  differs  A key of a flow mapping spans lines, or its ":" is on the next line, which YAML 1.2.2 allows in a flow mapping's entries (7.4.2). The documents list it among the valid YAML that smock refuses on purpose: "a key of a flow mapping written over several lines" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "a key must be on a single line".
 
 # Tabs in the white space at the start of a line.
@@ -52,15 +54,6 @@ VJP3/01  differs  A key of a flow mapping spans lines, or its ":" is on the next
 DK95/00  differs  The white space at the start of a line holds a tab, before content. YAML reads the tab as separation, since only spaces indent (YAML 1.2.2, 6.1). The documents list it among the valid YAML that smock refuses on purpose: "a tab in the white space at the start of a line" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "tabs are not allowed in indentation".
 Q5MG     differs  The white space at the start of a line holds a tab, before content. YAML reads the tab as separation, since only spaces indent (YAML 1.2.2, 6.1). The documents list it among the valid YAML that smock refuses on purpose: "a tab in the white space at the start of a line" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock refuses it: "tabs are not allowed in indentation".
 
-# Bugs.
-6XDY      #365     A bug: two document markers, ---, with nothing between them, are read as one document that holds the plain scalar "---". The documents say multiple documents are refused.
-9JBA      #366     A bug: smock reads a comment that no white space separates from what comes before it, which YAML refuses (YAML 1.2.2, 6.6: "Comments must be separated from other tokens by white space characters").
-CVW2      #366     A bug: smock reads a comment that no white space separates from what comes before it, which YAML refuses (YAML 1.2.2, 6.6: "Comments must be separated from other tokens by white space characters").
-SU5Z      #366     A bug: smock reads a comment that no white space separates from what comes before it, which YAML refuses (YAML 1.2.2, 6.6: "Comments must be separated from other tokens by white space characters").
-Y79Y/004  #367     A bug: a tab separates two block sequence indicators on one line, which YAML refuses: the inner sequence would be indented by a tab (YAML 1.2.2, 6.1). smock reads [[null]].
-Y79Y/005  #367     A bug: a tab separates two block sequence indicators on one line, which YAML refuses: the inner sequence would be indented by a tab (YAML 1.2.2, 6.1). smock reads [[null]].
-JEF9/02   #368     A bug: the last line of a block scalar ends the input, with no line break. The suite reads a line break there, and smock reads none.
-L24T/01   #368     A bug: the last line of a block scalar ends the input, with no line break. The suite reads a line break there, and smock reads none.
-Y79Y/000  #369     A bug: a line of a block scalar holds a tab where its content would be indented, which YAML refuses: only spaces indent (YAML 1.2.2, 6.1 and 8.1.1.1). smock reads an empty line.
-Y79Y/001  #369     A bug: a line of a block scalar holds a tab after its indentation, and nothing else. YAML reads the tab as content, since only spaces indent (YAML 1.2.2, 8.1.1.1, Example 8.2). smock reads an empty line.
-R4YG      #369     A bug: a line of a block scalar holds a tab after its indentation, and nothing else. YAML reads the tab as content, since only spaces indent (YAML 1.2.2, 8.1.1.1, Example 8.2). smock reads an empty line.
+# Block scalars that end the input without a line break.
+JEF9/02  differs  The last line of a block scalar ends the input, with no line break. The suite reads a line break there. YAML 1.2.2's grammar reads none: the last line break of a clipped or kept scalar may be the end of the input (8.1.1.2, production 165), and smock keeps that reading (the maintainer's decision of 2026-11-18, #368). The documents say so: "A block scalar whose last line ends the file without a line break gets no line break added, as YAML 1.2.2 says (section 8.1.1.2)" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock reads [""].
+L24T/01  differs  The last line of a block scalar ends the input, with no line break. The suite reads a line break there. YAML 1.2.2's grammar reads none: the last line break of a clipped or kept scalar may be the end of the input (8.1.1.2, production 165), and smock keeps that reading (the maintainer's decision of 2026-11-18, #368). The documents say so: "A block scalar whose last line ends the file without a line break gets no line break added, as YAML 1.2.2 says (section 8.1.1.2)" (docs/openapi/references-and-yaml.md, How YAML is read; yaml/yaml.mbt, parse). smock reads {"foo": "x\n "}.

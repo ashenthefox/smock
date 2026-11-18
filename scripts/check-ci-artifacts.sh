@@ -32,6 +32,11 @@
 #   Every other job runs in every run: it has no condition.
 # - The jobs that plan may skip are checks, test and release-test, and no
 #   other.
+# - The job checks, which runs with either toolchain, runs the mutation
+#   runner's tests, its self-test on the fixture module and the site-count
+#   check against the merge base with main (#309), and the check of the
+#   exclusion list (#302), each once, and checks out the whole history, so
+#   that the site-count check finds that merge base.
 # - Every job with a matrix runs once for amd64 on x86_64 and once for arm64
 #   on aarch64, on the runner its matrix names, and every native setup
 #   checks that machine and installs the toolchain of the call.
@@ -62,8 +67,17 @@
 #   continues on error or hides a failed command, and no other job uploads
 #   smock-linux-<arch>.
 # - Those jobs run, each once: this check and its test, yaml-test-suite
-#   against smock's YAML parser (scripts/check-yaml-test-suite.sh), and the
-#   test of its verdict (scripts/test-yaml-test-suite-verdict.sh).
+#   against smock's YAML parser (scripts/check-yaml-test-suite.sh), the
+#   test of its verdict (scripts/test-yaml-test-suite-verdict.sh), the
+#   coverage run (scripts/coverage.sh), the coverage ratchet against the
+#   merge base with main (scripts/coverage-ratchet.py check), and the
+#   ratchet's test (scripts/test-coverage-ratchet.sh).
+# - The coverage job (#297) runs the ratchet after the coverage run, on an
+#   amd64 runner, never on the arm64 native tests' path, and checks out the
+#   whole history, so that the ratchet finds the merge base with main. It
+#   keeps the report and the bisect report as coverage-report, once, for 7
+#   days, also when a step before failed (!cancelled()). No other artifact
+#   is uploaded here.
 #
 # scripts/test-check-ci-artifacts.sh tests this check. It needs yq
 # (mikefarah/yq v4, on GitHub's Ubuntu runners) and jq.
@@ -90,6 +104,11 @@ push_to_main="inputs.toolchain == 'pinned' && github.event_name == 'push' && git
 plan_command='scripts/ci-plan.sh >>"$GITHUB_OUTPUT"'
 # The calling workflow's concurrency group: one for each branch or pull
 # request, and one for each run on main.
+# The coverage job's two commands: the coverage run, whose report is kept,
+# and the ratchet on its bisect report, against the merge base with main.
+coverage='scripts/coverage.sh >coverage-report.txt'
+# shellcheck disable=SC2016 # the workflow's own text
+ratchet='python3 scripts/coverage-ratchet.py check --base origin/main --summary "$GITHUB_STEP_SUMMARY" _coverage/coverage.bisect'
 # shellcheck disable=SC2016 # the workflow's own text
 group='ci-${{ github.event_name }}-${{ github.ref == '"'refs/heads/main'"' && github.run_id || github.ref }}'
 
@@ -241,6 +260,17 @@ problems=$(yq --output-format=json "$workflow" | jq -r \
          "job \(.key) does not wait for plan, so it should run in every run, not \(condition | shown)"
        else empty end),
 
+  # What governs the mutation runner, in job checks.
+    ($all[] | select(.key == "checks") | . as $job
+     | (("python3 -m unittest discover -s scripts/mutation -v",
+         "python3 scripts/mutation/run.py --root scripts/mutation/fixture --self-test-only calc log",
+         "python3 scripts/mutation/ratchet.py check --base origin/main",
+         "python3 scripts/mutation/exclusions.py check") as $command
+        | ([$job.value.steps[]? | select(command == $command)] | length) as $times
+        | if $times != 1 then "job checks should run \($command) once, not \($times) times" else empty end),
+       (if any(.value.steps[]?; ((.uses // "") | startswith("actions/checkout@")) and .with["fetch-depth"] == 0) then empty
+        else "job checks should check out the whole history (fetch-depth: 0), so that the site-count check finds the merge base with main" end)),
+
     (([$all[] | select((needed | index("plan")) != null) | .key] | sort) as $skipped
      | if $skipped != ["checks", "release-test", "test"] then
          "the jobs that plan may skip should be checks, release-test and test, not: \(if $skipped == [] then "none" else $skipped | join(", ") end)"
@@ -299,7 +329,7 @@ fi
 
 # What is wrong with the calling workflow, one line each.
 problems=$(yq --output-format=json "$caller" | jq -r --arg workflow "$(basename "$workflow")" \
-  --arg group "$group" "$common"'
+  --arg group "$group" --arg coverage "$coverage" --arg ratchet "$ratchet" "$common"'
   [.jobs | to_entries[]] as $all
   | [$all[] | select((.value.uses // "") | endswith("/" + $workflow))] as $calls
   | [$all[] | select(any(.value.steps[]?; merges))] as $keep
@@ -369,9 +399,43 @@ problems=$(yq --output-format=json "$caller" | jq -r --arg workflow "$(basename 
      | select($if != null and $if != "!cancelled()")
      | "the step \"\(step_name)\" of job \($job) should run whenever its job does (no condition, or !cancelled() to run after a failed step), not if: \($if)"),
     (("scripts/check-ci-artifacts.sh", "scripts/test-check-ci-artifacts.sh",
-      "scripts/check-yaml-test-suite.sh", "scripts/test-yaml-test-suite-verdict.sh") as $command
+      "scripts/check-yaml-test-suite.sh", "scripts/test-yaml-test-suite-verdict.sh",
+      $coverage, $ratchet, "scripts/test-coverage-ratchet.sh") as $command
      | ([$all[] | select(.key as $key | any($keep[]; .key == $key) | not) | .value.steps[]? | select(command == $command)] | length) as $times
      | if $times != 1 then "a job that the binaries wait for should run \($command) once, not \($times) times" else empty end),
+
+  # The coverage job: the coverage run, then the ratchet on its report, on
+  # an amd64 runner, with the history that holds the merge base with main;
+  # the report kept, also when the ratchet failed.
+    ($all[] | select(any(.value.steps[]?; command == $coverage)) | .key as $job
+     | (.value.steps | to_entries) as $steps
+     | ([$steps[] | select(.value | command == $coverage) | .key] | first) as $run
+     | (if any($steps[]; (.value | command == $ratchet) and .key > $run) then empty
+        else "job \($job) should check the floors (python3 scripts/coverage-ratchet.py check) after scripts/coverage.sh, in the same job" end),
+       (if (.value["runs-on"] | tostring | test("arm")) then
+          "job \($job) should run on an amd64 runner, not \(.value["runs-on"])"
+        else empty end),
+       (if any(.value.steps[]?; ((.uses // "") | startswith("actions/checkout@")) and .with["fetch-depth"] == 0) then empty
+        else "job \($job) should check out the whole history (fetch-depth: 0), so that the ratchet finds the merge base with main" end),
+       ([$steps[] | select(.value | uploads) | select(.value.with.name == "coverage-report")] as $kept
+        | if ($kept | length) != 1 then
+            "job \($job) should keep the coverage report as coverage-report once, not \($kept | length) times"
+          else
+            $kept[0] as $upload
+            | (if $upload.key < $run then "job \($job) keeps coverage-report before it runs scripts/coverage.sh" else empty end),
+              (if ($upload.value.with.path | tostring | split("\n") | map(select(. != "")) | sort) != ["_coverage/coverage.bisect", "coverage-report.txt"] then
+                 "job \($job) should keep coverage-report.txt and _coverage/coverage.bisect as coverage-report, not \($upload.value.with.path)"
+               else empty end),
+              ($upload.value | days_problem("coverage-report of job \($job)")),
+              (($upload.value.if | expression) as $if
+               | if $if != "!cancelled()" then
+                   "job \($job) should keep coverage-report also when a step before it failed (if: !cancelled()), not \($if | shown)"
+                 else empty end)
+          end)),
+    ($all[] | .key as $job | .value.steps[]? | select(uploads)
+     | select(((.with.name // "") | startswith("smock-linux-")) | not)
+     | select(.with.name != "coverage-report" or (any($all[]; .key == $job and any(.value.steps[]?; command == $coverage)) | not))
+     | "job \($job) should upload only coverage-report, from job coverage, not \(.with.name)"),
 
   # Nothing hides a failure, and nothing else keeps a binary.
     ($all[] | continues | "\(.) should not continue on error: a failed check would pass"),

@@ -430,11 +430,7 @@ async test "an invalid definitions directory gives the messages smock check give
       ),
     ],
     dir => {
-      let (check_status, check_stdout, _) = @process.collect_output(
-        binary,
-        ["check", dir],
-        inherit_env=false,
-      )
+      let (check_status, check_stdout, _) = smock_output(["check", dir])
       let (status, stdout, stderr) = render_output([
         "--dir",
         dir,
@@ -443,7 +439,7 @@ async test "an invalid definitions directory gives the messages smock check give
         "\{dir}/samples/user.json",
       ])
       inspect(
-        "check: status \{check_status}\n\{check_stdout.text()}render: status \{status}, stdout \{stdout.escape()}\n\{stderr}",
+        "check: status \{check_status}\n\{check_stdout}render: status \{status}, stdout \{stdout.escape()}\n\{stderr}",
         content=(
           #|check: status 1
           #|30-broken.json: /mocks/0/name: the Mock name "users" is already declared at 10-users.json: /mocks/0/name
@@ -677,6 +673,9 @@ async test "smock render needs the definitions directory, a Stub ID and a sample
 
 ///|
 async test "smock render --help names its argument, its inputs and the settings it shares with smock serve" {
+  // smock render takes --header-size-limit as smock serve does
+  // (docs/commands.md), so its help gives the range docs/running.md's
+  // Settings table gives: from 1 to 1073741824.
   inspect(
     render(["--help"]),
     content=(
@@ -693,7 +692,7 @@ async test "smock render --help names its argument, its inputs and the settings 
       #|  --dir <dir>                              The definitions directory, read as smock serve reads it. [env: SMOCK_DIR]
       #|  --body-file-dir <body-file-dir>          The body-file subdirectory of the definitions directory. [env: SMOCK_BODY_FILE_DIR] [default: files]
       #|  --template-env <template-env>            The environment variables templates may read as env.NAME, separated by commas, such as REGION,API_BASE. Their values are read once, at startup. A listed value can show in responses, renderings and template error messages, so list only values that may be shown. A name is letters, digits and _, starting with a letter or _, and cannot start with SMOCK_. None by default. [env: SMOCK_TEMPLATE_ENV]
-      #|  --header-size-limit <header-size-limit>  The most bytes a request head (request line and header fields) may take. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection. It also bounds each block of a gRPC reply's metadata, its header block and its trailers, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL instead. [env: SMOCK_HEADER_SIZE_LIMIT] [default: 16384]
+      #|  --header-size-limit <header-size-limit>  The most bytes a request head (request line and header fields) may take, from 1 to 1073741824. Larger heads get 431. Over HTTP/2, a header list is counted as RFC 7541 counts it, each field with 32 octets more, and a larger one gets 431 on its stream; a header block over twice the limit closes the connection. It also bounds each block of a gRPC reply's metadata, its header block and its trailers, counted the same way: a static reply over it does not load, and a rendered one gets INTERNAL instead. [env: SMOCK_HEADER_SIZE_LIMIT] [default: 16384]
       #|  --request <request>                      A file that holds the sample request as JSON: {method, path, query, headers, body, session, vars, data}, each optional.
       #|  --time <time>                            The time the sample request is received at, as an RFC 3339 date-time such as 2026-10-12T14:30:05Z. Default: now.
       #|  --seed <seed>                            The seed of the random source the rendering draws from, from 0 to 9007199254740991. Default: the Stub's fault.seed, or a fresh seed when it has none.
@@ -704,9 +703,26 @@ async test "smock render --help names its argument, its inputs and the settings 
 }
 
 ///|
-/// A Mock `market` with a Stub of two weighted responses and a Stub with
-/// `response`, each with its own seed, so that every rendering of them is
-/// the same.
+/// A Stub `hundred` of the Mock `market` with 100 responses, the most that
+/// `responses` holds (docs/definition-files/responses.md), each a JSON body
+/// that names its index, and a seed of its own.
+fn hundred_responses() -> String {
+  let responses = []
+  for i in 0..<100 {
+    responses.push("{ \"status\": 200, \"json\": { \"response\": \{i} } }")
+  }
+  (
+    $|{ "stubs": [
+    $|    { "id": "hundred", "mock": "market", "request": { "path": "/hundred" },
+    $|      "responses": [\{responses.join(", ")}],
+    $|      "fault": { "seed": 5 } } ] }
+  )
+}
+
+///|
+/// A Mock `market` with a Stub of two weighted responses, a Stub with
+/// `response`, and a Stub of 100 responses (`hundred_responses`), each with
+/// its own seed, so that every rendering of them is the same.
 let weighted_definitions : Array[(String, String)] = [
   (
     "prices.json",
@@ -723,6 +739,7 @@ let weighted_definitions : Array[(String, String)] = [
       #|      "response": { "status": 204 }, "fault": { "seed": 3 } } ] }
     ),
   ),
+  ("hundred.json", hundred_responses()),
   ("samples/get.json", "{ \"path\": \"/prices\" }"),
 ]
 
@@ -739,7 +756,7 @@ fn picked(json : Json) -> String {
 }
 
 ///|
-async test "smock render --response and the Admin render operation's response parameter render the same given response, and refuse an index the Stub does not have" {
+async test "smock render --response and the Admin render operation's response parameter render the same given response, the one at index 99 of a Stub with 100 too, and refuse an index the Stub does not have" {
   with_definitions(weighted_definitions, dir => {
     let sample = "\{dir}/samples/get.json"
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
@@ -751,6 +768,9 @@ async test "smock render --response and the Admin render operation's response pa
           ("get-prices", Some("1")),
           ("plain", None),
           ("plain", Some("0")),
+          // 99, the largest index (docs/definition-files/templates.md,
+          // Rendering a template), of a Stub that has it.
+          ("hundred", Some("99")),
         ] {
         let (id, index) = case
         let (args, query) = match index {
@@ -798,6 +818,8 @@ async test "smock render --response and the Admin render operation's response pa
           #|  {"seed":3,"responseIndex":null,"response":{"status":204,"headers":[],"body":{"encoding":"utf-8","data":"","size":0,"truncated":false},"events":null}}
           #|plain --response=0: render 0, admin 200, same: true
           #|  {"seed":3,"responseIndex":null,"response":{"status":204,"headers":[],"body":{"encoding":"utf-8","data":"","size":0,"truncated":false},"events":null}}
+          #|hundred --response=99: render 0, admin 200, same: true
+          #|  {"seed":5,"responseIndex":99,"response":{"status":200,"headers":[{"name":"Content-Type","value":"application/json"}],"body":{"encoding":"utf-8","data":"{\"response\":99}","size":15,"truncated":false},"events":null}}
           #|status 1
           #|stderr:
           #|smock render: the Stub "get-prices" has no response 2: its responses run from 0 to 1

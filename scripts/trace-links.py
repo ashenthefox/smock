@@ -2,8 +2,8 @@
 """Derives the trace links of smock's tests, the third of the three sets
 that the removal rule's (A) compares (#275, "The removal rule and its
 proof"): from the commit that introduced each test block, following moves
-and copies across files, to the ticket that commit's subject names, to
-that issue's acceptance criteria. It writes them out per test, as JSON,
+and copies across files, to the tickets that commit's subject names, to
+those issues' acceptance criteria. It writes them out per test, as JSON,
 for the comparison before and after a removal and for the keep reasons of
 rule (C).
 
@@ -37,9 +37,12 @@ header is an older test's of the same name, not a copy of it. The
 block's commit is then the one that wrote most of those other lines (the
 first of them on a tie).
 
-The ticket is the issue number in the commit's subject: the one in a
-trailing "(#N)", or else the only #N the subject names. A subject that
-names none, or several and no trailing one, gives no ticket.
+The tickets are the issue numbers in the commit's subject, by the rule
+for commit subjects in CONTRIBUTING.md (Rules for the work): those of a
+parenthesis that ends the subject and holds only issue numbers, such as
+"(#12)" or "(#258, #43)", or else every #N the subject names, in order
+and once each. A subject that names none gives no ticket. owner/repo#N
+names an issue of another repository, and does not count.
 
 The issues come from gh: `gh api` on the checkout's repository, which
 needs a token in GH_TOKEN on CI. --dump-issues prints them as gh gives
@@ -69,8 +72,9 @@ What it prints is one JSON object:
             commit        the commit that introduced it;
             introduced_in the file that commit wrote it in;
             subject       that commit's subject;
-            issue         the ticket the subject names, or null.
-  issues  for each ticket that a test's issue names, by its number:
+            tickets       the tickets the subject names, in order: a
+                          list of numbers, empty when it names none.
+  issues  for each ticket that a test names, by its number:
             title, state, labels, pull_request (whether it is a pull
             request), and criteria: its acceptance criteria, a list of
             texts, or null when its body has no such heading or label.
@@ -255,17 +259,19 @@ def blame(repo, rev, path, blocks):
     return lines
 
 
-TRAILING_ISSUE = re.compile(r"\(#(\d+)\)\s*$")
+TRAILING_ISSUES = re.compile(r"\((#\d+(?:\s*,\s*#\d+)*)\)\s*$")
 ANY_ISSUE = re.compile(r"(?<![\w/#])#(\d+)\b")
 
 
-def issue_of(subject):
-    """The ticket a commit's subject names: the number of a trailing
-    "(#N)", or else the only #N in it, or None."""
-    if match := TRAILING_ISSUE.search(subject):
-        return int(match.group(1))
-    numbers = set(ANY_ISSUE.findall(subject))
-    return int(numbers.pop()) if len(numbers) == 1 else None
+def tickets_of(subject):
+    """The tickets a commit's subject names, in order and once each: the
+    numbers of a parenthesis that ends it and holds only issue numbers,
+    such as "(#258, #43)", or else every #N in it."""
+    if match := TRAILING_ISSUES.search(subject):
+        numbers = re.findall(r"#(\d+)", match.group(1))
+    else:
+        numbers = ANY_ISSUE.findall(subject)
+    return list(dict.fromkeys(int(n) for n in numbers))
 
 
 # A letter or a digit.
@@ -313,7 +319,7 @@ def links_of(repo, rev, path, package):
             "commit": line["commit"],
             "introduced_in": line["filename"],
             "subject": subject,
-            "issue": issue_of(subject),
+            "tickets": tickets_of(subject),
         })
     return records
 
@@ -496,7 +502,7 @@ def main():
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
             found = pool.map(lambda file: links_of(args.repo, rev, *file), files)
             tests = [record for records in found for record in records]
-        numbers = sorted({t["issue"] for t in tests if t["issue"] is not None})
+        numbers = sorted({n for t in tests for n in t["tickets"]})
         if args.issues:
             known = read_issues(issues_from(args.issues))
         else:
@@ -508,7 +514,7 @@ def main():
     json.dump({"rev": rev, "tests": tests, "issues": issues}, sys.stdout, indent=1,
               ensure_ascii=False)
     print()
-    linked = sum(1 for t in tests if t["issue"] is not None)
+    linked = sum(1 for t in tests if t["tickets"])
     without = sum(1 for i in issues.values() if i.get("criteria") is None)
     print(f"trace-links: {counted(len(tests), 'test')}, {linked} with a ticket;"
           f" {counted(len(issues), 'ticket')}, {without} of them without acceptance criteria",

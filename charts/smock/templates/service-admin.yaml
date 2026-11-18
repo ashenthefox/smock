@@ -20,6 +20,6 @@ spec:
     {{- include "smock.selectorLabels" . | nindent 4 }}
   ports:
     - name: admin
-      port: {{ .Values.adminService.port }}
+      port: {{ include "smock.string" .Values.adminService.port }}
       targetPort: admin
       protocol: TCP

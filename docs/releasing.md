@@ -153,6 +153,16 @@ the toolchain, so check it by hand after a toolchain update. mimalloc's
 objdump -d --disassemble=mi_version ~/.moon/lib/libmoonbitrun.o
 ```
 
+Before the release, start the monthly mutation run by hand on `main`,
+and read its report, the artifact `mutation-report` of the run. It runs
+the full set of mutants over the pure packages and reports only: its
+survivors stop no release
+([Bulk runs on Actions](../CONTRIBUTING.md#bulk-runs-on-actions)).
+
+```sh
+gh workflow run mutation-runs.yml -R hirunefu/smock --ref main -f mode=monthly
+```
+
 Push the release commit to `main`, and wait until CI's run on that push
 has passed:
 

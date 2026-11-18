@@ -34,7 +34,11 @@ fail() {
 export HANDED='release-linux-${{ matrix.arch }}'
 export PINNED="inputs.toolchain == 'pinned'"
 export GATED='${{ !cancelled() && needs.plan.outputs.full != '"'false'"' }}'
-export KEEP='${{ !cancelled() && needs.build-test.result == '"'success'"' && needs.scripts.result == '"'success'"' && needs.yaml-test-suite.result == '"'success'"' }}'
+export KEEP='${{ !cancelled() && needs.build-test.result == '"'success'"' && needs.coverage.result == '"'success'"' && needs.scripts.result == '"'success'"' && needs.yaml-test-suite.result == '"'success'"' }}'
+# The coverage job's commands (#297), and the condition of its upload.
+export COVERAGE='scripts/coverage.sh >coverage-report.txt'
+export RATCHET='python3 scripts/coverage-ratchet.py check --base origin/main --summary "$GITHUB_STEP_SUMMARY" _coverage/coverage.bisect'
+export UNCANCELLED='${{ !cancelled() }}'
 
 # check <name>: runs the check on the copies, its output into
 # $tmp/<name>.out and its exit status into $tmp/<name>.status.
@@ -97,6 +101,11 @@ for written in \
     fail "unchanged: ${rest%%|*} of $file is not: ${rest#*|}"
   fi
 done
+if [ "$(yq '.jobs.coverage.steps[] | select(.with.name == "coverage-report") | .if' .github/workflows/ci.yml)" = "$UNCANCELLED" ]; then
+  pass "unchanged: the condition of coverage-report's upload in ci.yml is as this test expects"
+else
+  fail "unchanged: the condition of coverage-report's upload in ci.yml is not: $UNCANCELLED"
+fi
 
 # --- The jobs that build the release binary ----------------------------------
 
@@ -321,6 +330,54 @@ refuses checks-with-the-latest-toolchain workflow \
   '(.jobs.checks.steps[] | select(.run == "scripts/install-moonbit.sh \"$TOOLCHAIN\"") | .env.TOOLCHAIN) = "latest"' \
   'job checks should install the toolchain of the call (scripts/install-moonbit.sh "$TOOLCHAIN" with TOOLCHAIN: ${{ inputs.toolchain }})'
 
+# --- What governs the mutation runner (#309, #302) --------------------------------
+
+# The runner's tests, its self-test on the fixture module, the site-count
+# check and the check of the exclusion list run in job checks, which the
+# weekly run with the latest MoonBit runs too, once each.
+export SELF_TEST='python3 scripts/mutation/run.py --root scripts/mutation/fixture --self-test-only calc log'
+export SITE_COUNTS='python3 scripts/mutation/ratchet.py check --base origin/main'
+export RUNNER_TESTS='python3 -m unittest discover -s scripts/mutation -v'
+export EXCLUSIONS_CHECK='python3 scripts/mutation/exclusions.py check'
+for named in "self-test|$SELF_TEST" "site-counts|$SITE_COUNTS" "runner-tests|$RUNNER_TESTS" \
+  "exclusions|$EXCLUSIONS_CHECK"; do
+  export COMMAND="${named#*|}"
+  refuses "no-${named%%|*}" workflow \
+    'del(.jobs.checks.steps[] | select(.run == strenv(COMMAND)))' \
+    "job checks should run $COMMAND once, not 0 times"
+done
+
+refuses the-self-test-twice workflow \
+  '.jobs.checks.steps += [{"name": "Again", "run": strenv(SELF_TEST)}]' \
+  "job checks should run $SELF_TEST once, not 2 times"
+
+# On a machine of its own, it would not run in the weekly run's job checks.
+refuses the-site-counts-in-another-job workflow \
+  '(.jobs.test.steps += [.jobs.checks.steps[] | select(.run == strenv(SITE_COUNTS))]) | del(.jobs.checks.steps[] | select(.run == strenv(SITE_COUNTS)))' \
+  "job checks should run $SITE_COUNTS once, not 0 times"
+
+refuses the-site-counts-against-another-base workflow \
+  '(.jobs.checks.steps[] | select(.run == strenv(SITE_COUNTS)) | .run) = "python3 scripts/mutation/ratchet.py check --base HEAD"' \
+  "job checks should run $SITE_COUNTS once, not 0 times"
+
+refuses the-self-test-with-the-pinned-toolchain-only workflow \
+  '(.jobs.checks.steps[] | select(.run == strenv(SELF_TEST)) | .if) = strenv(PINNED)' \
+  "the step \"Run the mutation runner's self-test on its fixture\" of job checks should run whenever its job does, not if: inputs.toolchain =="
+
+# The check of the exclusion list reads the definitions with the compiler's
+# parser, so it runs where the toolchain is, in job checks, not elsewhere.
+refuses the-exclusion-list-in-another-job workflow \
+  '(.jobs.test.steps += [.jobs.checks.steps[] | select(.run == strenv(EXCLUSIONS_CHECK))]) | del(.jobs.checks.steps[] | select(.run == strenv(EXCLUSIONS_CHECK)))' \
+  "job checks should run $EXCLUSIONS_CHECK once, not 0 times"
+
+refuses checks-without-the-history workflow \
+  'del(.jobs.checks.steps[] | select(.uses == "actions/checkout@v7") | .with)' \
+  "job checks should check out the whole history (fetch-depth: 0), so that the site-count check finds the merge base with main"
+
+refuses checks-with-one-commit workflow \
+  '(.jobs.checks.steps[] | select(.uses == "actions/checkout@v7") | .with.fetch-depth) = 1' \
+  "job checks should check out the whole history (fetch-depth: 0)"
+
 # --- Each step runs whenever its job does --------------------------------------
 
 refuses a-test-step-never workflow \
@@ -505,6 +562,92 @@ refuses yaml-test-suite-after-the-build caller \
   '.jobs.yaml-test-suite.needs = "build-test"' \
   "job yaml-test-suite should run in every run, once: no condition, no needs and no matrix"
 
+# --- The coverage job (#297) ---------------------------------------------------------
+
+# The coverage ratchet runs in every run, after the coverage run of the
+# same job, against the merge base with main: a run without it would keep
+# binaries whose floors nothing checked.
+refuses coverage-not-run caller \
+  'del(.jobs.coverage.steps[] | select(.run == strenv(COVERAGE)))' \
+  "a job that the binaries wait for should run $COVERAGE once, not 0 times"
+
+refuses ratchet-not-run caller \
+  'del(.jobs.coverage.steps[] | select(.run == strenv(RATCHET)))' \
+  "a job that the binaries wait for should run $RATCHET once, not 0 times"
+
+refuses ratchet-may-fail caller \
+  '(.jobs.coverage.steps[] | select(.run == strenv(RATCHET)) | .run) = strenv(RATCHET) + " || true"' \
+  "a job that the binaries wait for should run $RATCHET once, not 0 times"
+
+refuses ratchet-against-another-base caller \
+  '(.jobs.coverage.steps[] | select(.run == strenv(RATCHET)) | .run) |= sub("origin/main"; "HEAD")' \
+  "a job that the binaries wait for should run $RATCHET once, not 0 times"
+
+refuses ratchet-test-not-run caller \
+  'del(.jobs.scripts.steps[] | select(.run == "scripts/test-coverage-ratchet.sh"))' \
+  "a job that the binaries wait for should run scripts/test-coverage-ratchet.sh once, not 0 times"
+
+# The ratchet reads the bisect report that the coverage run wrote on the
+# same runner.
+refuses ratchet-in-another-job caller \
+  '.jobs.scripts.steps += [.jobs.coverage.steps[] | select(.run == strenv(RATCHET))] | del(.jobs.coverage.steps[] | select(.run == strenv(RATCHET)))' \
+  "job coverage should check the floors (python3 scripts/coverage-ratchet.py check) after scripts/coverage.sh"
+
+refuses ratchet-before-the-run caller \
+  '.jobs.coverage.steps = [.jobs.coverage.steps[] | select(.run == strenv(RATCHET))] + [.jobs.coverage.steps[] | select(.run != strenv(RATCHET))]' \
+  "job coverage should check the floors (python3 scripts/coverage-ratchet.py check) after scripts/coverage.sh"
+
+# Off the arm64 native tests' path: amd64's native builds are about six
+# times faster (#276).
+refuses coverage-on-arm caller \
+  '.jobs.coverage.runs-on = "ubuntu-24.04-arm"' \
+  "job coverage should run on an amd64 runner, not ubuntu-24.04-arm"
+
+refuses coverage-without-the-history caller \
+  'del(.jobs.coverage.steps[] | select(.uses == "actions/checkout@v7") | .with)' \
+  "job coverage should check out the whole history (fetch-depth: 0), so that the ratchet finds the merge base with main"
+
+refuses coverage-on-pull-requests-only caller \
+  '.jobs.coverage.if = "github.event_name == '"'"'pull_request'"'"'"' \
+  "job coverage should run in every run, once: no condition, no needs and no matrix"
+
+refuses coverage-after-the-build caller \
+  '.jobs.coverage.needs = "build-test"' \
+  "job coverage should run in every run, once: no condition, no needs and no matrix"
+
+refuses coverage-that-continues-on-error caller \
+  '.jobs.coverage.continue-on-error = true' \
+  "job coverage should not continue on error: a failed check would pass"
+
+refuses ratchet-that-continues-on-error caller \
+  '(.jobs.coverage.steps[] | select(.run == strenv(RATCHET)) | .continue-on-error) = true' \
+  'of job coverage should not continue on error'
+
+# The report is kept, also when the ratchet failed, under one name.
+refuses no-coverage-report caller \
+  'del(.jobs.coverage.steps[] | select(.with.name == "coverage-report"))' \
+  "job coverage should keep the coverage report as coverage-report once, not 0 times"
+
+refuses coverage-report-twice caller \
+  '.jobs.coverage.steps += [.jobs.coverage.steps[] | select(.with.name == "coverage-report")]' \
+  "job coverage should keep the coverage report as coverage-report once, not 2 times"
+
+refuses coverage-report-only-after-success caller \
+  'del(.jobs.coverage.steps[] | select(.with.name == "coverage-report") | .if)' \
+  "job coverage should keep coverage-report also when a step before it failed (if: !cancelled()), not none"
+
+refuses coverage-report-kept-one-day caller \
+  '(.jobs.coverage.steps[] | select(.with.name == "coverage-report") | .with.retention-days) = 1' \
+  "coverage-report of job coverage should be kept for 7 days (retention-days), not 1"
+
+refuses coverage-report-without-the-report caller \
+  '(.jobs.coverage.steps[] | select(.with.name == "coverage-report") | .with.path) = "_coverage/coverage.bisect"' \
+  "job coverage should keep coverage-report.txt and _coverage/coverage.bisect as coverage-report"
+
+refuses another-artifact-in-the-caller caller \
+  '.jobs.scripts.steps += [{"uses": "actions/upload-artifact@v7", "with": {"name": "scripts-logs", "path": "logs"}}]' \
+  "job scripts should upload only coverage-report, from job coverage, not scripts-logs"
+
 refuses called-with-the-latest-toolchain caller \
   '.jobs.build-test.with.toolchain = "latest"' \
   "it should call build-test.yml with toolchain: pinned, with which the release binaries are handed over"
@@ -568,7 +711,7 @@ refuses kept-whatever-happened caller \
   '(.jobs.keep.steps[] | select(.with.name == "smock-linux-arm64") | .if) = "always()"' \
   "job keep should make smock-linux-arm64 whenever it runs, not if: always()"
 
-for job in build-test scripts yaml-test-suite; do
+for job in build-test scripts yaml-test-suite coverage; do
   refuses "keep-without-$job" caller \
     ".jobs.keep.needs -= [\"$job\"]" \
     "job keep should need job $job, so that it keeps nothing when that job fails"

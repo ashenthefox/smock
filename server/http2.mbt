@@ -167,6 +167,7 @@ async fn[S : @io.Reader + @io.Writer + ReadOutput] MockPorts::serve_http2(
       past_deadline: Map([]),
       deadline_ended: [],
       blocked: Map([]),
+      watched: 0,
       claimed: 0,
       window_deadline: forever,
       initial_window: 65535,
@@ -305,8 +306,14 @@ priv struct H2Connection {
   /// (`deadline_reset`).
   deadline_ended : Array[Int32]
   /// The slow writes waiting for the client to widen a window, by stream,
-  /// in the order they began to wait, which a `Map` keeps.
+  /// in the order they began to wait, which a `Map` keeps: from when what
+  /// the windows allow of a body is queued and more is left
+  /// (`begin_wait`), until the stream's task takes what it is woken for.
   blocked : Map[Int32, WindowWait]
+  /// How many of the waits in `blocked` the write timeout watches
+  /// (`WindowWait::watched`): while none, no write timeout of a wait for
+  /// window runs.
+  mut watched : Int32
   /// The octets of the connection window that the slow writes woken from
   /// `blocked` are still to send: set aside when each is woken, until its
   /// task has sent them, so that no other stream takes them meanwhile.
@@ -604,7 +611,12 @@ fn[S : @io.Writer + ReadOutput] H2Connection::hand(
           self.will_refuse(stream, 431)
           continue
         }
-        if request.is_malformed() {
+        if @serverparsers.is_malformed_http2_request(
+            meth=request.meth,
+            target=request.target,
+            authority=request.authority,
+            headers=request.headers,
+          ) {
           self.will_refuse(stream, 400)
           continue
         }
@@ -1418,7 +1430,8 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answered(
 /// A body that does not fit gets its HEADERS and as much of the body as the
 /// windows allow; `queue` then returns the rest, which the caller sends in
 /// the stream's task as the windows widen (`trickle`), with the entry still
-/// to commit. Otherwise it returns nothing.
+/// to commit. When the windows held the rest back, the stream waits for
+/// window from then on (`begin_wait`). Otherwise it returns nothing.
 ///
 /// With a partial Fault, the HEADERS carry the length of the whole `body`,
 /// and the DATA half of it, rounded down, which does not end the stream:
@@ -1473,7 +1486,8 @@ fn H2Connection::queue(
       return sent[0:0]
     }
   }
-  let mut room = self.room(stream)
+  let window = self.room(stream)
+  let mut room = window
   if bounded {
     let bound = self.writer.frame_room()
     if bound < room {
@@ -1485,6 +1499,11 @@ fn H2Connection::queue(
       self.conn.data(stream, sent[0:room]) catch {
         _ => return sent[0:0]
       }
+    }
+    // The windows, not the bound, held back the rest: the stream waits for
+    // them from now.
+    if room == window {
+      self.begin_wait(stream, sent.length() - room)
     }
     return sent[room:]
   }

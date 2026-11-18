@@ -979,8 +979,11 @@ async fn RawH2::frames_until_ping_acked(self : RawH2, since : Int64) -> Frames {
 /// `due`, what came on it, a line each: its HEADERS with their fields, each
 /// DATA with its octets as text, as `data` shows them, and how it ended.
 /// `due` gives, for each stream, when its HEADERS are due and then when
-/// each DATA is, in milliseconds after `start`, and each line says whether
-/// it came then (`arrival`).
+/// each DATA is, in milliseconds after `start`. A frame due later says
+/// whether it came then (`arrival`). A frame due at once, at 0, says `at
+/// once` when it came before every frame due later, on any stream of the
+/// connection: smock sends a connection's frames in one order, so that
+/// order, not the runner's speed, shows that it did not wait.
 async fn H2Client::timeline(
   self : H2Client,
   start~ : Int64,
@@ -992,13 +995,21 @@ async fn H2Client::timeline(
     seen[stream.0] = []
   }
   let mut open = due.length()
+  // Whether a frame due later than at once has come, on any stream.
+  let later = Ref(false)
   let when = (stream : Int32, ms : Int64) => {
     let lines = seen.get(stream).unwrap()
     let times = due.filter(entry => entry.0 == stream)[0].1
-    if lines.length() < times.length() {
-      arrival(ms, times[lines.length()])
-    } else {
+    if lines.length() >= times.length() {
+      later.val = true
       "at \{ms} ms, after the frames due"
+    } else if times[lines.length()] > 0 {
+      later.val = true
+      arrival(ms, times[lines.length()])
+    } else if later.val {
+      "at \{ms} ms, after a frame due later"
+    } else {
+      "at once"
     }
   }
   while open > 0 {
@@ -1047,16 +1058,20 @@ async fn H2Client::timeline(
 ///|
 /// The Journal's entries, each shown as its target, its Stub, its status
 /// and whether its `durationMs` is below `below`, once there are `count`
-/// of them, or as they are after `within` milliseconds.
+/// of them, or as they are after `within` milliseconds: the first 100, or
+/// the first `limit`. `durationMs` runs "from the request being read to
+/// the last byte being written" (openapi/admin.json), by smock's own clock,
+/// so the test's own pace does not enter it.
 async fn Smock::journal_durations(
   self : Smock,
   count : Int32,
   below~ : Int32,
   within~ : Int32,
+  limit~ : Int32 = 100,
 ) -> Array[String] {
   let start = @async.now()
   for ;; {
-    let (_, journal) = self.journal()
+    let (_, journal) = self.journal(query="{\"limit\":\{limit}}")
     guard journal is Object({ "entries": Array(entries), .. }) else {
       fail("no entries: \{journal.stringify()}")
     }
@@ -1662,4 +1677,17 @@ async fn RawH2::frames_until(
 /// Whether `frame` is a GOAWAY.
 fn is_goaway(frame : @http2.Frame) -> Bool {
   frame is GoAway(..)
+}
+
+///|
+/// Whether `ms`, the time from one of smock's steps to the next that comes
+/// "a second" after it, is about a second: at least 800 ms, which allows for
+/// a first step read late, and less than 3 seconds. After a GOAWAY with
+/// `NO_ERROR`, smock reads what the client sends "until the client closes
+/// the connection, or for one second at most, and then closes"
+/// (docs/http2.md, Timeouts), and in a drain it sends the final GOAWAY "a
+/// second after the first" when the client does not answer its PING
+/// (docs/http2.md, The drain).
+fn about_a_second(ms : Int64) -> Bool {
+  ms >= 800 && ms < 3 * 1000
 }

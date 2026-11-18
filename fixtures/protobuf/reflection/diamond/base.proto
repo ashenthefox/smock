@@ -1,0 +1,10 @@
+// Written for smock's tests of the reflection service: the file that
+// left.proto and right.proto both import, so that a file that imports
+// those two reaches it twice.
+syntax = "proto3";
+
+package diamond;
+
+message Base {
+  string id = 1;
+}

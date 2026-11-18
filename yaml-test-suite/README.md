@@ -69,6 +69,13 @@ the suite's events or from the input:
 | A plain key that YAML 1.1 or 1.2 does not read as a string | the events | the safe subset | "quote this key" |
 | A plain value that is a number JSON cannot hold | the events | the mode for OpenAPI documents | "quote this value" |
 
+A message names a construct when it holds the construct's name, as the
+table gives it, as whole words, in the singular or the plural: "anchor"
+or "anchors" names an anchor, "multiple documents" several documents, and
+"empty" an empty value or key, while a longer word that holds the name,
+such as "unanchored", names nothing. The maintainer gave this reading of
+`parse`'s "each with a message naming it" on 2026-11-17 (#275).
+
 A plain scalar's type comes from the regular expressions of YAML 1.1's
 types ([yaml.org/type](https://yaml.org/type/): bool, int, float, null,
 timestamp, merge and value) and of the YAML 1.2 core schema (YAML 1.2.2,
@@ -87,13 +94,28 @@ and the reason:
   a file with no document, a key that is a collection, a `key: value`
   pair in a flow sequence without braces, a key of a flow mapping written
   over several lines, and a tab in the white space at the start of a
-  line. Each entry quotes and cites the sentence.
+  line. One more is a reading, not a refusal: a block scalar whose last
+  line ends the input without a line break gets no line break added, as
+  YAML 1.2.2's grammar says, where the suite reads one; the documents
+  state it among the rules the parser holds to, and the maintainer kept
+  it on 2026-11-18 (#368). Each entry quotes and cites the sentence.
+  The documents list one more refusal that no case of the suite has, so
+  that no entry names it: a line of white space whose tab comes before a
+  block scalar's indentation, with nothing after it but empty lines,
+  comments and the `...` that may end the document. YAML 1.2.2 reads that
+  line as a comment line after the document (production 211), and smock
+  refuses it as a tab in indentation, as libyaml and PyYAML do; the
+  maintainer decided so on 2026-11-18 (#369), and yaml's own tests pin it.
 - `skipped`: the testee skips the case.
 - `#<issue>`: a bug, which fails until the issue is done.
 
-A case with one of the constructs of the table is never listed: it
+A case with one of the constructs of the table is not listed: it
 passes when smock refuses it as the documents say, and fails
-otherwise. The run fails on a case that fails or is skipped without being
+otherwise. One exception, which the maintainer allowed on 2026-11-17: a
+case that smock refuses first for one of the known differences, before
+it reaches the construct, is listed as `differs`, and its reason says
+that the case holds the construct too. UT92, a key of a flow mapping over
+several lines in a stream of two documents, is such a case. The run fails on a case that fails or is skipped without being
 listed so, on a listed case that passes, which must come off the list, and
 on a listed case that the suite does not have. Its output lists every
 listed case with its outcome and reason.
@@ -101,7 +123,7 @@ listed case with its outcome and reason.
 Unlike h2spec's lists, these may keep entries marked as bugs, each with
 its issue, when a branch merges into `main`, until yaml's L4 ticket (#323)
 fixes them ([Before merging into main](../docs/merging-into-main.md)).
-Each bug has an issue of its own, which its entries name: #365 to #369.
+None is listed now.
 
 ## How it runs
 

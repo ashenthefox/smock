@@ -20,7 +20,7 @@ async test "h2c: a response body larger than both of the client's windows goes o
       let client = smock.h2c()
       defer client.close()
       let response = client.request("GET", "/big", authority="localhost")
-      let entries = smock.journal_once(1, within=1000)
+      let entries = smock.journal_once(1, within=patience_ms)
       inspect(
         [response.checked(big_body), ..entries].join("\n"),
         content=(
@@ -181,7 +181,7 @@ async test "h2c: two bodies larger than the windows, on one connection, both arr
           "---",
           second_response.checked(big_body),
           "---",
-          ..smock.journal_once(2, within=1000),
+          ..smock.journal_once(2, within=patience_ms),
         ].join("\n"),
         content=(
           #|200
@@ -207,18 +207,18 @@ async test "h2c: two bodies larger than the windows, on one connection, both arr
 }
 
 ///|
-/// A predicate on frames that holds once each of `streams` has ended,
-/// counting from when it is made.
-fn all_ended(streams : Array[Int32]) -> (@http2.Frame) -> Bool {
-  let left = streams.copy()
+/// A predicate on frames that holds once `octets` of DATA have come, on
+/// any of the streams, counting from when it is made: all that a widening
+/// of the connection window by `octets` lets smock send. A share of the
+/// window that goes to the wrong stream then shows in what was read, where
+/// waiting for a stream to end would wait in vain.
+fn data_total(octets : Int32) -> (@http2.Frame) -> Bool {
+  let mut seen = 0
   frame => {
-    for i, stream in left {
-      if ends_stream(frame, stream) {
-        left.remove(i) |> ignore
-        break
-      }
+    if frame is Data(data~, ..) {
+      seen += data.length()
     }
-    left.is_empty()
+    seen >= octets
   }
 }
 
@@ -250,15 +250,28 @@ async test "h2c: streams waiting on the connection window get it in the order th
       out.push("--- the connection window widened by 500, and stream 5 opened")
       raw.send([WindowUpdate(stream_id=0, increment=500), raw.get(5, "/item")])
       out.push(raw.runs_until(data_seen(1, 500)))
-      out.push("--- the connection window widened by 250000")
-      raw.send([WindowUpdate(stream_id=0, increment=250_000)])
-      let rest = raw.runs_until(all_ended([1, 3, 5])).split("\n").collect()
-      // Stream 3 waited first; streams 1 and 5 began to wait again at about
-      // the same time.
-      out.push(rest[0].to_owned())
-      let after = rest[1:].iter().map(line => line.to_owned()).collect()
-      after.sort()
-      out.append(after)
+      // Stream 3 has waited longest: "When several streams wait for the
+      // connection window, they get it in the order they began to wait, and
+      // a stream that has sent what it was given waits behind the others"
+      // (docs/http2.md, Streams that wait). So a widening of the 83,965
+      // octets left of its body goes to it alone. A wider one would give
+      // streams 5 and 1 their shares too, and their tasks could send them
+      // between stream 3's DATA frames.
+      out.push("--- the connection window widened by 83965")
+      raw.send([WindowUpdate(stream_id=0, increment=83_965)])
+      out.push(raw.runs_until(data_total(83_965)))
+      // Then the 149,505 octets left of the bodies of streams 1 and 5, which
+      // one widening gives to both: their tasks may send in either order,
+      // which is not checked here. The next test checks which of the two
+      // waits first, as the maintainer decided on 2026-11-18: a stream
+      // begins to wait as soon as the windows hold back part of its body
+      // (#381, #391).
+      out.push("--- the connection window widened by 149505")
+      raw.send([WindowUpdate(stream_id=0, increment=149_505)])
+      let rest = raw.runs_until(data_total(149_505)).split("\n").collect()
+      let rest = rest.iter().map(line => line.to_owned()).collect()
+      rest.sort()
+      out.append(rest)
       inspect(
         out.join("\n"),
         content=(
@@ -272,9 +285,131 @@ async test "h2c: streams waiting on the connection window get it in the order th
           #|--- the connection window widened by 500, and stream 5 opened
           #|HEADERS 5 END_HEADERS [:status: 200, date: <now>, content-length: 5]
           #|DATA 1: 1 frames, 500 octets
-          #|--- the connection window widened by 250000
+          #|--- the connection window widened by 83965
           #|DATA 3 END_STREAM: 6 frames, 83965 octets
+          #|--- the connection window widened by 149505
           #|DATA 5 END_STREAM: 1 frames, 5 octets
+          #|DATA 1 END_STREAM: 10 frames, 149500 octets
+        ),
+      )
+    })
+  })
+}
+
+///|
+/// The Mock `greeter`, for the Host `greeter.svc`, with gRPC's helloworld
+/// set, and a gRPC Stub on SayHello whose reply is HelloReply with the
+/// message "Hello Tom": 16 octets once framed, as
+/// e2e/grpc_headers_test.mbt shows them.
+let flow_greeter : String =
+  #|mocks:
+  #|  - name: greeter
+  #|    hosts: [greeter.svc]
+  #|    grpc: { descriptorSet: greeter.binpb }
+  #|stubs:
+  #|  - id: hello
+  #|    mock: greeter
+  #|    request: { path: /helloworld.Greeter/SayHello }
+  #|    response: { json: { message: Hello Tom } }
+
+///|
+async test "h2c: a response or a gRPC reply that the windows hold back waits for the connection window from then, so a stream that has just sent what it was given waits behind them (#381, #391)" {
+  with_definitions([..flow_definitions(), ("greeter.yaml", flow_greeter)], dir => {
+    write_bytes(
+      dir,
+      "files/greeter.binpb",
+      @fs.read_file(greeter_set_path).binary(),
+    )
+    let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let raw = smock.raw_h2(settings=false)
+      defer raw.close()
+      let out = []
+      // Wide stream windows, so that only the connection window of 65,535
+      // octets holds the bodies back. Stream 3 takes all of it at once and
+      // waits for more; stream 1, after its delay, finds none, and waits
+      // behind it.
+      raw.send([
+        Settings(
+          params=[(@http2.settings_initial_window_size, 1_000_000)],
+          ack=false,
+        ),
+        raw.get(1, "/slow-big"),
+        raw.get(3, "/big"),
+      ])
+      out.push(raw.runs_until(frame => frame is Headers(stream_id=1, ..)))
+      out.push("--- the connection window widened by 500")
+      raw.send([WindowUpdate(stream_id=0, increment=500)])
+      out.push(raw.runs_until(data_seen(3, 500)))
+      // In one write: the next 500 octets, which go to stream 1; stream 5,
+      // whose response smock queues before stream 1 has sent them, with no
+      // room for its body; and stream 7, a gRPC call whose reply smock
+      // queues the same way, with no room for its message.
+      out.push(
+        "--- the connection window widened by 500, and streams 5 and 7 opened, in one write",
+      )
+      raw.send([
+        WindowUpdate(stream_id=0, increment=500),
+        raw.get(5, "/item"),
+        headers_frame(
+          7,
+          raw.block(call_fields("/helloworld.Greeter/SayHello", "greeter.svc")),
+          end_stream=false,
+        ),
+        Data(
+          stream_id=7,
+          data=framed(@fs.read_file(hello_request_path).binary()),
+          end_stream=true,
+          padding=0,
+        ),
+      ])
+      out.push(raw.runs_until(data_seen(1, 500)))
+      // "When several streams wait for the connection window, they get it in
+      // the order they began to wait, and a stream that has sent what it was
+      // given waits behind the others" (docs/http2.md, Streams that wait).
+      // Stream 3 has waited longest, so the 83,965 octets left of its body
+      // go to it. "A stream begins to wait as soon as the windows hold back
+      // part of its body" (the same section, #381, #391): stream 5 began to
+      // wait as its response was queued, with no room for its body, before
+      // stream 1 sent its 500 octets, so the next 5 octets go to stream 5.
+      // A gRPC reply "waits for window as a response body does, in the same
+      // order as the connection's other streams" (docs/grpc/messages.md, The
+      // reply): stream 7 began to wait after stream 5, and before stream 1
+      // sent its 500 octets, so the 16 octets after those go to stream 7,
+      // and its trailers follow. Stream 1 gets the rest after them.
+      out.push("--- the connection window widened by 83965")
+      raw.send([WindowUpdate(stream_id=0, increment=83_965)])
+      out.push(raw.runs_until(data_total(83_965)))
+      out.push("--- the connection window widened by 5")
+      raw.send([WindowUpdate(stream_id=0, increment=5)])
+      out.push(raw.runs_until(data_total(5)))
+      out.push("--- the connection window widened by 16")
+      raw.send([WindowUpdate(stream_id=0, increment=16)])
+      out.push(raw.runs_until(data_total(16)))
+      out.push("--- the connection window widened by 149500")
+      raw.send([WindowUpdate(stream_id=0, increment=149_500)])
+      out.push(raw.runs_until(data_total(149_500)))
+      inspect(
+        out.join("\n"),
+        content=(
+          #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
+          #|SETTINGS ACK
+          #|HEADERS 3 END_HEADERS [:status: 200, accept-ranges: bytes, date: <now>, content-length: 150000]
+          #|DATA 3: 4 frames, 65535 octets
+          #|HEADERS 1 END_HEADERS [:status: 200, accept-ranges: bytes, date: <now>, content-length: 150000]
+          #|--- the connection window widened by 500
+          #|DATA 3: 1 frames, 500 octets
+          #|--- the connection window widened by 500, and streams 5 and 7 opened, in one write
+          #|HEADERS 5 END_HEADERS [:status: 200, date: <now>, content-length: 5]
+          #|HEADERS 7 END_HEADERS [:status: 200, content-type: application/grpc, date: <now>]
+          #|DATA 1: 1 frames, 500 octets
+          #|--- the connection window widened by 83965
+          #|DATA 3 END_STREAM: 6 frames, 83965 octets
+          #|--- the connection window widened by 5
+          #|DATA 5 END_STREAM: 1 frames, 5 octets
+          #|--- the connection window widened by 16
+          #|DATA 7: 1 frames, 16 octets
+          #|--- the connection window widened by 149500
+          #|HEADERS 7 END_STREAM END_HEADERS [grpc-status: 0]
           #|DATA 1 END_STREAM: 10 frames, 149500 octets
         ),
       )
@@ -308,7 +443,7 @@ async test "h2c: a fast stream is answered at once while a large body on the sam
       ])
       out.push(raw.runs_until(frame => ends_stream(frame, 1)))
       out.push("---")
-      out.append(smock.journal_once(2, within=1000))
+      out.append(smock.journal_once(2, within=patience_ms))
       inspect(
         out.join("\n"),
         content=(
@@ -360,7 +495,7 @@ async test "h2c: a stream reset while its body waits for window ends its slow wr
       let more = raw.frames_until_ping_ack()
       out.push(if more == "" { "(no frame)" } else { more })
       out.push("---")
-      out.append(smock.journal_once(2, within=1000))
+      out.append(smock.journal_once(2, within=patience_ms))
       inspect(
         out.join("\n"),
         content=(
@@ -457,7 +592,7 @@ async test "h2c: a stream reset while its task writes part of its body to a clie
       let more = raw.frames_until_ping_ack()
       out.push(if more == "" { "(no frame)" } else { more })
       out.push("---")
-      out.append(smock.journal_once(2, within=1000))
+      out.append(smock.journal_once(2, within=patience_ms))
       inspect(
         out.join("\n"),
         content=(

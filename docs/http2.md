@@ -484,7 +484,15 @@ or with a SETTINGS frame that raises the initial window. So a client with
 small windows still gets the whole body, and the other streams of the
 connection go on meanwhile. When several streams wait for the connection
 window, they get it in the order they began to wait, and a stream that has
-sent what it was given waits behind the others. Priority signals are
+sent what it was given waits behind the others. A stream begins to wait as
+soon as the windows hold back part of its body or of an event: when smock
+queues what they allow, and more is left, before that has gone out. So a
+response queued while another stream is about to send what it was given
+waits ahead of that stream, and one queued while that stream's DATA goes
+out waits behind it. A body that only [the output
+bound](#the-output-bound) holds back does not wait for window: it sends
+more once what it queued has gone out, and a response queued meanwhile can
+take the rest of the connection window first. Priority signals are
 accepted and ignored.
 
 A client that keeps a window at zero does not hold a body for good: the
@@ -678,7 +686,9 @@ says so, instead of 413 ([The body
 limit](grpc/unmatched-and-refused-calls.md#the-body-limit)).
 
 - A `content-length` over the limit gets `413 Content Too Large` at once,
-  before any of the body is read.
+  before any of the body is read. smock reads its digits until the length
+  reaches 4,294,967,296 (2^32), which is over every limit, so a longer one,
+  however many digits it has, gets 413 too.
 - A body that passes the limit as it arrives gets 413 then. smock keeps
   none of it past the limit.
 - When the client has not sent all of the request yet, the 413 is followed
@@ -792,6 +802,12 @@ connection.
     initial window, starts it again. Past it, the stream gets RST_STREAM
     `CANCEL`, and the connection's other streams go on. Its request is in
     the Journal, as a request whose client goes away is.
+
+  A stream that begins to wait while its DATA is still being written
+  ([Streams that wait](#streams-that-wait)) counts for this timeout only
+  once that DATA has gone out: until then, the write timeout of that write
+  runs instead. So the time a client takes to read that DATA, slowly but
+  steadily, does not count toward that stream's wait.
 
   So a client that widens its windows slowly but steadily, a few octets at
   a time, gets its whole response, however long it takes in all. A

@@ -129,7 +129,9 @@ pub fn Schedule::due(self : Schedule, now : Int64) -> Due? {
 ///   nothing.
 /// - A poll that notes the same as a stamp that cannot be trusted, or that
 ///   has none to compare with, checks at once, `Unsure`, with no quiet
-///   period: no stamp shows a change under way.
+///   period: no stamp shows a change under way. When that check's read
+///   finds a change all the same, `Watch::found_change` tells the
+///   schedule, as a poll that notes a change would.
 /// - A stamp of the quiet period that notes a change checks nothing: the
 ///   change goes on settling, and the 10 s still count from when it was
 ///   first seen.

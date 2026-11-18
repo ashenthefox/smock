@@ -1,0 +1,14 @@
+{"file":"defdir/defdir.mbt","definition":"digest_step_bytes","text":"2966eba9b19bd05f","pinned":{"INT":1},"full":{"INT":3}}
+{"file":"defdir/defdir.mbt","definition":"digest","text":"c8bc45119e33cb38","pinned":{"BODY":1,"IFC":1},"full":{"BODY":1,"IFC":1}}
+{"file":"defdir/defdir.mbt","definition":"stamp","text":"c8473d58b52f3c3d","pinned":{"BODY":1,"DEL":1},"full":{"BODY":1,"DEL":1}}
+{"file":"defdir/defdir.mbt","definition":"DirReader::read","text":"3adf9fe0ad3b1d94","pinned":{"IFC":5,"NOT":3,"DEL":6},"full":{"IFC":8,"NOT":3,"DEL":6}}
+{"file":"defdir/defdir.mbt","definition":"DirReader::note","text":"6b4a12fc83ebee9d","pinned":{"BODY":1,"IFC":1,"DEL":1},"full":{"BODY":1,"IFC":1,"DEL":1}}
+{"file":"defdir/defdir.mbt","definition":"DirReader::glance_at","text":"7dafa254e1b11b36","pinned":{"BODY":1,"IFC":1,"DEL":1},"full":{"BODY":1,"IFC":1,"DEL":1}}
+{"file":"defdir/defdir.mbt","definition":"DirReader::path","text":"d79e7556e6809e1d","pinned":{"BODY":1,"IFC":1},"full":{"BODY":1,"IFC":2}}
+{"file":"defdir/defdir.mbt","definition":"DirReader::problem","text":"9bc3206031255ab0","pinned":{"BODY":1,"IFC":1},"full":{"BODY":1,"IFC":2}}
+{"file":"defdir/defdir.mbt","definition":"DirReader::read_body_files","text":"59a47e89b67dfe80","pinned":{"BODY":1,"IFC":4,"NOT":1,"DEL":2,"AOR":1,"INT":2},"full":{"BODY":1,"IFC":9,"NOT":1,"DEL":2,"AOR":1,"INT":2}}
+{"file":"defdir/defdir.mbt","definition":"DirReader::stays_inside","text":"555c7f271af6d09a","pinned":{"BODY":1,"IFC":2,"LCR":1,"DEL":1,"BOOL":2},"full":{"BODY":1,"IFC":4,"LCR":1,"DEL":1,"BOOL":2}}
+{"file":"defdir/defdir.mbt","definition":"DirReader::visible_entries","text":"e37de488556108a9","pinned":{"BODY":1,"NOT":1,"DEL":4},"full":{"BODY":1,"NOT":1,"DEL":4}}
+{"file":"defdir/defdir.mbt","definition":"DirReader::realpath","text":"c8207527efe232d9","pinned":{"BODY":1,"DEL":2},"full":{"BODY":1,"DEL":2}}
+{"file":"defdir/defdir.mbt","definition":"DirReader::kind","text":"d17ed9261410074d","pinned":{"BODY":1,"IFC":2,"DEL":2},"full":{"BODY":1,"IFC":4,"DEL":2}}
+{"file":"defdir/defdir.mbt","definition":"DirReader::read_file","text":"df4a05c3a122fa02","pinned":{"BODY":1,"IFC":1,"DEL":2},"full":{"BODY":1,"IFC":1,"DEL":2}}

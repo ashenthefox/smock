@@ -1,0 +1,306 @@
+# The exclusion list (CONTRIBUTING.md, "Exclusions"; #302): the one list
+# that accepts a surviving mutant or an uncovered point. No attribute in
+# the source excludes anything. scripts/mutation/exclusions.py reads it,
+# and `exclusions.py check`, in CI's job checks, checks each entry; the
+# coverage report, the coverage floors and the mutation runner count after
+# it. `exclusions.py new <file>:<line>:<column>` or `new <mutant id>`
+# prints a new entry's stanza.
+#
+# Each entry names a mutant by its id (mutant), or a point by its file,
+# its definition and its position in the definition (its line, counted
+# from the definition's first line, and its column), and gives its
+# definition's text when it was made (text), a category of ADR 0006, a
+# reason and the reviewer. An entry whose definition's text changed is
+# stale: it accepts nothing until it is triaged again.
+#
+# Which entries the maintainer reads: every entry in the protocol
+# packages (http1, grpc, yaml, re2, xml and protobuf) and in
+# serverparsers, and one in five of the others, which the maintainer
+# draws once the batch is frozen (the branch's last push), so that its
+# author cannot know which: `exclusions.py review --seed <seed>` lists
+# them. If a sampled entry is rejected, its author triages the whole batch
+# again, and the maintainer draws a new sample. Only the maintainer fills
+# in the reviewer, in a commit the maintainer makes or acknowledges at the
+# merge; the weakening report lists every entry whose reviewer changed.
+
+# The first batch: the 28 entries below, all abort arms that an invariant
+# guards. The maintainer read its two entries in the protocol packages
+# (protobuf and yaml) and six of the other 26, drawn with the seed
+# 20261118 once the batch was frozen, and accepted the batch on 2026-11-18
+# (#302).
+
+# The abort arms that the coverage baseline found uncovered at d953f320
+# (UNREACHABLE: an arm that an invariant guards with an abort). The
+# baseline counted 29 such points, but two of them are no abort arm: the
+# two points of `Remove => return self.apply_whole(at, write.op, bucket,
+# value)` in engine/writes.mbt's WorkingCopies::apply, at 37:17 and 37:29
+# in the definition. They have no entry: they stay uncovered, to be tested
+# by engine's L4 ticket (#333).
+
+[[exclusion]]
+file = "definitions/read.mbt"
+definition = "File::read_grpc"
+position = "24:14"
+text = "5d3a5d2013e89308"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a Descriptor set that decodes splits into its files\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/crud.mbt"
+definition = "crud_call"
+position = "6:13"
+text = "2e77cf0f70f849a0"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a CRUD Stub matched a request it does not serve\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/crud.mbt"
+definition = "crud_read"
+position = "13:38"
+text = "f71c2fcf0ba1d471"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a keyed bucket holds an array\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/crud.mbt"
+definition = "crud_apply"
+position = "30:20"
+text = "1e49cbb55eedb4d2"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a list or a read writes nothing\"."
+reviewer = "the maintainer, 2026-11-18, in the sample drawn with seed 20261118"
+
+[[exclusion]]
+file = "engine/crud.mbt"
+definition = "item_key"
+position = "5:5"
+text = "7f5d450f8328963d"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a stored item has a key\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/engine.mbt"
+definition = "Engine::handle"
+position = "134:9"
+text = "91ed38c1397d928c"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a matched Stub has the Mock that answered\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/ephemeral.mbt"
+definition = "Engine::add_ephemeral_stub"
+position = "24:39"
+text = "27292b80912385a7"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a valid Stub is an object\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/journal.mbt"
+definition = "no_conditions"
+position = "4:15"
+text = "220f696c98bd8652"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"no conditions are valid conditions\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/keyed.mbt"
+definition = "kept_key"
+position = "14:5"
+text = "a277ab66a2890b9c"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"an item found by its key has its key member\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/keyed.mbt"
+definition = "WorkingCopies::set_item"
+position = "11:5"
+text = "f8cd356c2abe7555"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a keyed bucket holds an array\"."
+reviewer = "the maintainer, 2026-11-18, in the sample drawn with seed 20261118"
+
+[[exclusion]]
+file = "engine/keyed.mbt"
+definition = "WorkingCopies::set_item"
+position = "16:5"
+text = "f8cd356c2abe7555"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"own() keeps the value's kind\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/keyed.mbt"
+definition = "WorkingCopies::merge_item"
+position = "11:5"
+text = "128c65c8a21fd362"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a keyed bucket holds an array\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/keyed.mbt"
+definition = "WorkingCopies::merge_item"
+position = "16:5"
+text = "128c65c8a21fd362"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"own() keeps the value's kind, and a keyed bucket holds objects\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/keyed.mbt"
+definition = "WorkingCopies::remove_item"
+position = "9:5"
+text = "5ff5460848faab38"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a keyed bucket holds an array\"."
+reviewer = "the maintainer, 2026-11-18, in the sample drawn with seed 20261118"
+
+[[exclusion]]
+file = "engine/keyed.mbt"
+definition = "WorkingCopies::remove_item"
+position = "13:5"
+text = "5ff5460848faab38"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"own() keeps the value's kind\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/keyed.mbt"
+definition = "WorkingCopies::append_item"
+position = "11:5"
+text = "0dcd21129d8b590b"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a keyed bucket holds an array\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/keyed.mbt"
+definition = "WorkingCopies::append_item"
+position = "26:5"
+text = "0dcd21129d8b590b"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"own() keeps the value's kind\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/list_query.mbt"
+definition = "crud_list"
+position = "8:38"
+text = "fdf40226759d5818"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a keyed bucket holds an array\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/render.mbt"
+definition = "call_answer"
+position = "13:5"
+text = "2b1d574ffa2a19a3"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"every plan of a gRPC Stub has a gRPC part\"."
+reviewer = "the maintainer, 2026-11-18, in the sample drawn with seed 20261118"
+
+[[exclusion]]
+file = "engine/render.mbt"
+definition = "render_crud"
+position = "22:5"
+text = "fc3dc0cac698596e"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a CRUD Stub serves a keyed bucket of its Mock\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/respond.mbt"
+definition = "pick_response"
+position = "15:3"
+text = "eeffd1393994d4e5"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"the pick ran past the last response\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/verify.mbt"
+definition = "VerifyRequest::from_json"
+position = "48:37"
+text = "8fbd860b41c293c9"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a valid request has a check\"."
+reviewer = "the maintainer, 2026-11-18, in the sample drawn with seed 20261118"
+
+[[exclusion]]
+file = "engine/writes.mbt"
+definition = "WorkingCopies::apply"
+position = "14:5"
+text = "4dc974267fc72429"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"check_write_buckets found every write's bucket\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/writes.mbt"
+definition = "WorkingCopies::apply"
+position = "36:16"
+text = "4dc974267fc72429"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"a merge without a key reached a keyed bucket\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/writes.mbt"
+definition = "WorkingCopies::apply_whole"
+position = "29:9"
+text = "af34eed022fc49c7"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"own() keeps the value's kind\"."
+reviewer = ""
+
+[[exclusion]]
+file = "engine/writes.mbt"
+definition = "WorkingCopies::apply_whole"
+position = "41:9"
+text = "af34eed022fc49c7"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"own() keeps the value's kind\"."
+reviewer = "the maintainer, 2026-11-18, in the sample drawn with seed 20261118"
+
+[[exclusion]]
+file = "protobuf/printed.mbt"
+definition = "number_of"
+position = "3:10"
+text = "aa6fa5137018e310"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"\\{text} is not a JSON number\"."
+reviewer = "the maintainer, 2026-11-18"
+
+# The abort arm that #280 put in place of a message no input reaches, which
+# the maintainer approved (UNREACHABLE).
+
+[[exclusion]]
+file = "yaml/scalar.mbt"
+definition = "resolve_core"
+position = "29:12"
+text = "1836af689293fe31"
+category = "UNREACHABLE"
+reason = "An abort arm, which an invariant guards; its message: \"core_decimal gives a number in JSON syntax\"."
+reviewer = "the maintainer, 2026-11-18"
+
+# The default of --journal, which follows the engine's (#320): UNREACHABLE,
+# with a written argument, which the maintainer accepted on 2026-11-18.
+
+[[exclusion]]
+file = "settings/settings.mbt"
+definition = "serve_settings"
+position = "118:63"
+text = "9d083c35e4797860"
+category = "UNREACHABLE"
+reason = "The else arm of --journal's default, \"off\", which only a change of the engine's default would run."
+argument = "--journal's default is \"on\" when journal_defaults.enabled is true, and \"off\" otherwise. journal_defaults is @engine.JournalSettings() with no arguments, whose enabled is true by default (engine/journal.mbt), and the running guide's Settings table gives `on` as the default. It is a top-level value that no input and no test can change, so the arm runs only if the engine's default changes; it stays so that the help follows the engine then."
+reviewer = "the maintainer, 2026-11-18"

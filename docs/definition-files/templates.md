@@ -317,7 +317,10 @@ users.yaml: /stubs/1/response/bodyFile: template: line 3, column 5: unknown help
 For a literal that is not well-formed, such as the number `1e` in
 `${1e}`, the column is the literal's first character. For a message that
 says what it found, such as `expected } to end the ${, found "q"`, it is
-the character found.
+the character found. For an unknown name or helper, or a reference or a
+call that is wrong as a whole, such as `${path.x}` or `${fake.int(1)}`, it
+is the first character of the reference or the call: column 3 in each of
+these.
 
 These are checked when the files are loaded:
 

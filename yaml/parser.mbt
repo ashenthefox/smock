@@ -146,8 +146,20 @@ fn Parser::skip_space(self : Parser) -> Unit {
 }
 
 ///|
-fn Parser::skip_comment(self : Parser) -> Unit {
+/// What a `#` right after other text is rejected with, where a comment
+/// could start after white space: it starts no comment (YAML 1.2.2,
+/// section 6.6).
+const NO_SPACE_BEFORE_COMMENT : String = "a comment needs a space before its #"
+
+///|
+/// Skips a comment: a `#` at the start of a line or after white space, to
+/// the end of its line. A `#` right after other text starts no comment
+/// (YAML 1.2.2, section 6.6), so it is rejected.
+fn Parser::skip_comment(self : Parser) -> Unit raise ParseError {
   if self.peek() == '#' {
+    if self.pos > self.line_start && !(self.chars[self.pos - 1] is (' ' | '\t')) {
+      self.fail(NO_SPACE_BEFORE_COMMENT)
+    }
     while !(self.peek() is ('\n' | EOF)) {
       self.bump()
     }
@@ -213,6 +225,11 @@ fn Parser::document(self : Parser) -> Json raise ParseError {
       inline = true
     }
   }
+  // A second `---` before any content ends the first document, which is
+  // empty, and starts another.
+  if content && self.at_marker('-') {
+    self.fail("multiple documents are not supported", pointer="")
+  }
   if !content || self.at_marker('.') {
     self.fail("the document is empty", pointer="")
   }
@@ -250,10 +267,12 @@ fn Parser::block_node(
 ) -> Json raise ParseError {
   self.reached = pointer
   let column = self.column()
+  let start = self.pos
   if self.at_sequence_item() {
     if inline {
       self.fail("a block sequence must start on its own line")
     }
+    self.check_indentation(start)
     return self.block_sequence(column, pointer)
   }
   if self.peek() is ('|' | '>') {
@@ -276,10 +295,30 @@ fn Parser::block_node(
         "unexpected ':' after a value; a nested mapping must start on its own line",
       )
     }
+    self.check_indentation(start)
     return self.block_mapping(column, pointer, scalar)
   }
   let _ = self.next_content()
   self.scalar_value(scalar)
+}
+
+///|
+/// Rejects a tab in the white space before `start`, where a block collection
+/// starts. A collection that starts on a `-` line is indented by the `-` and
+/// the white space after it (YAML 1.2.2, section 8.2.1), and a tab must not
+/// be used in indentation (section 6.1). Only that white space can hold a
+/// tab: one at the start of a line is rejected before.
+fn Parser::check_indentation(
+  self : Parser,
+  start : Int32,
+) -> Unit raise ParseError {
+  let mut i = start - 1
+  while i >= 0 && self.chars[i] is (' ' | '\t') {
+    if self.chars[i] == '\t' {
+      self.fail("tabs are not allowed in indentation")
+    }
+    i -= 1
+  }
 }
 
 ///|
@@ -687,7 +726,9 @@ fn Parser::block_scalar(self : Parser, parent : Int32) -> Json raise ParseError 
   } else if !self.openapi && self.peek() is ('0'..<='9') {
     self.fail("block scalar indentation indicators are not supported")
   }
-  if !is_blank_or_eof(self.peek()) {
+  if self.peek() == '#' {
+    self.fail(NO_SPACE_BEFORE_COMMENT)
+  } else if !is_blank_or_eof(self.peek()) {
     self.fail("invalid block scalar header")
   }
   self.skip_space()
@@ -713,24 +754,31 @@ fn Parser::block_scalar(self : Parser, parent : Int32) -> Json raise ParseError 
       spaces += 1
     }
     if indent < 0 || spaces < indent {
-      // Fewer spaces than the content: an empty line, or the end.
+      // Fewer spaces than the content, or before its first line: an empty
+      // line, the first line, or the end.
       let blank_end = self.pos
       self.skip_space()
-      if self.peek() == '\n' {
+      if self.pos > blank_end && self.peek() is ('\n' | EOF) {
+        // White space with a tab after the spaces. An empty line holds only
+        // spaces (YAML 1.2.2, section 6.4), so the tab is the first line's
+        // text after its indentation (section 8.1.1.1, Example 8.2), or it
+        // is in the indentation.
+        if indent >= 0 || spaces <= parent {
+          self.fail("tabs are not allowed in indentation")
+        }
+      } else if self.peek() == '\n' {
         empty += 1
         if indent < 0 && spaces > leading_spaces {
           leading_spaces = spaces
         }
         continue
-      }
-      if self.at_eof() {
+      } else if self.at_eof() {
         break
-      }
-      self.pos = blank_end
-      if indent >= 0 || spaces <= parent {
+      } else if indent >= 0 || spaces <= parent {
         self.pos = line_start
         break
       }
+      self.pos = blank_end
       // YAML versions disagree on what such a line means.
       if leading_spaces > spaces {
         self.fail(
@@ -877,6 +925,7 @@ fn Parser::block_mapping(
     }
     key = self.scalar(column, flow=false)
     self.skip_space()
+    self.skip_comment()
     if !self.at_key_indicator() {
       self.fail("expected a key followed by ':'")
     }

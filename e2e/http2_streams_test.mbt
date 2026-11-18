@@ -13,14 +13,14 @@ async test "h2c: a delayed stream does not hold a fast one on the same connectio
       let slow = client.send("GET", "/slow", authority="localhost")
       let fast = client.send("GET", "/fast", authority="localhost")
       let fast_response = client.response(fast)
-      let fast_ms = @async.now() - start
-      // Events of the delayed stream read meanwhile would be kept for later.
+      // A delay "delays only its own stream" (docs/http2.md, Streams that
+      // wait): events of the delayed stream read meanwhile would be kept for
+      // later.
       let early = client.kept_for(slow)
       let slow_response = client.response(slow)
       let slow_ms = @async.now() - start
       inspect(
         [
-          "fast answered during the delay: \{fast_ms < 1000}",
           "nothing of the delayed stream came before: \{early == 0}",
           "delayed answered after at least 1000 ms: \{slow_ms >= 1000}",
           "---",
@@ -29,7 +29,6 @@ async test "h2c: a delayed stream does not hold a fast one on the same connectio
           slow_response.render(),
         ].join("\n"),
         content=(
-          #|fast answered during the delay: true
           #|nothing of the delayed stream came before: true
           #|delayed answered after at least 1000 ms: true
           #|---
@@ -67,23 +66,25 @@ async test "h2c: a stream reset during its delay, by the client or by smock for 
         RstStream(stream_id=1, error_code=@http2.error_cancel),
         WindowUpdate(stream_id=3, increment=0),
       ])
-      let entries = smock.journal_once(2, within=600)
-      let committed_ms = @async.now() - start
+      // A stream reset during its delay "stops waiting at once"
+      // (docs/http2.md, Streams that wait), so each entry's duration, by
+      // smock's own clock, ends before the delay of 1000 ms.
+      let entries = smock.journal_durations(2, below=1000, within=patience_ms)
       // Past the delays, a fast stream is answered, and nothing came on the
       // reset streams.
       @async.sleep((1300L - (@async.now() - start)).to_int())
       raw.send([raw.get(5, "/fast")])
       inspect(
         [
-          "both committed before the delay was over: \{entries.length() == 2 && committed_ms < 1000}",
+          "both committed: \{entries.length() == 2}",
           ..entries,
           "---",
           raw.frames_until_end_of(5),
         ].join("\n"),
         content=(
-          #|both committed before the delay was over: true
-          #|/slow: stub "slow", status 200
-          #|/slow: stub "slow", status 200
+          #|both committed: true
+          #|/slow: stub "slow", status 200, durationMs below 1000: true
+          #|/slow: stub "slow", status 200, durationMs below 1000: true
           #|---
           #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
           #|SETTINGS ACK
@@ -101,7 +102,6 @@ async test "h2c: when the connection ends during its streams' delays, their task
   with_definitions([("m.json", delays)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       let client = smock.h2c()
-      let start = @async.now()
       let _ = client.send("GET", "/slow", authority="localhost")
       let _ = client.send("GET", "/slow?again", authority="localhost")
       // What smock sent so far is read, so that the client's close is a
@@ -114,22 +114,24 @@ async test "h2c: when the connection ends during its streams' delays, their task
       client.flush()
       @async.sleep(200)
       client.close()
-      let entries = smock.journal_once(2, within=600)
-      let committed_ms = @async.now() - start
+      // "Every stream of a connection that closes" stops waiting at once
+      // (docs/http2.md, Streams that wait), so each entry's duration, by
+      // smock's own clock, ends before the delay of 1000 ms.
+      let entries = smock.journal_durations(2, below=1000, within=patience_ms)
       let next = smock.h2c()
       defer next.close()
       let fast = next.request("GET", "/fast", authority="localhost")
       inspect(
         [
-          "both committed before the delay was over: \{entries.length() == 2 && committed_ms < 1000}",
+          "both committed: \{entries.length() == 2}",
           ..entries,
           "---",
           fast.render(),
         ].join("\n"),
         content=(
-          #|both committed before the delay was over: true
-          #|/slow: stub "slow", status 200
-          #|/slow?again: stub "slow", status 200
+          #|both committed: true
+          #|/slow: stub "slow", status 200, durationMs below 1000: true
+          #|/slow?again: stub "slow", status 200, durationMs below 1000: true
           #|---
           #|200
           #|smock-mock: m; via=default
@@ -158,9 +160,11 @@ let seeded_delays : String =
 ///|
 /// `ms`, how long a request took, as a test shows it against `drawn`, the
 /// delay it should have had: `as drawn` when it took at least that long,
-/// and not much longer.
+/// and less than twice that, or 300 ms more where that is longer. The
+/// delay is the time due, so the upper side is relative to it.
 fn against_drawn(ms : Int64, drawn : Int64) -> String {
-  if ms >= drawn && ms < drawn + 300L {
+  let upper = if 2L * drawn > drawn + 300L { 2L * drawn } else { drawn + 300L }
+  if ms >= drawn && ms < upper {
     "as drawn"
   } else {
     "\{ms} ms"

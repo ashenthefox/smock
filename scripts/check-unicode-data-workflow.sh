@@ -5,7 +5,10 @@
 # writes from the pinned version of the Unicode Character Database.
 #
 # - It runs on a push and on a pull request, on a weekly schedule and when
-#   started by hand (workflow_dispatch), and on nothing else.
+#   started by hand (workflow_dispatch), and on nothing else. #288's first
+#   criterion gives the push, the pull request and the schedule; the start
+#   by hand, to try the workflow or to run it again after a network
+#   failure, is the maintainer's, confirmed on 2026-11-17 (#275).
 # - A push or a pull request runs it only when it changes the table
 #   (unicode/data.mbt), the generator or the workflow itself (paths), and
 #   on every such change: the check downloads its sources from unicode.org,
