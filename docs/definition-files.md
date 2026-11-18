@@ -637,8 +637,14 @@ only a safe subset of YAML (`yaml/`):
   collection, such as `[a, b]: 1`; a `key: value` pair in a flow sequence
   without braces, such as `[a: 1]` (write `[{a: 1}]`); a key of a flow
   mapping written over several lines, such as a plain key whose `:` is on
-  the next line; and a tab in the white space at the start of a line, even
-  where YAML would read it as a separator rather than as indentation.
+  the next line; a tab in the white space at the start of a line, even
+  where YAML would read it as a separator rather than as indentation; and
+  a line of white space whose tab comes before a block scalar's
+  indentation, with nothing after it but empty lines, comments and the
+  `...` that may end the document, as when `body: |` and `  hello` are
+  followed by a last line of a space and a tab. YAML reads that line as a
+  comment after the document; smock rejects it as a tab in indentation,
+  as libyaml and PyYAML do.
 
 A JSON file with a key repeated in one object is rejected too, at the later
 key: JSON parsers disagree on which of the two values counts.

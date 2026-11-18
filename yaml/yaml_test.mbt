@@ -216,8 +216,8 @@ test "comments run from a # after white space to the end of the line" {
   // first three inputs, SU5Z, 9JBA and CVW2, as errors. `parse` documents
   // the message: "anywhere else, such as right after a quoted value or a
   // flow collection, it is rejected with 'a comment needs a space before
-  // its #'". The pointer is the deepest node reached, as `ParseError`
-  // documents. The nearest inputs that stay valid follow: a `#` after a
+  // its #'", words that the maintainer approved on 2026-11-18 (#366). The
+  // pointer is the deepest node reached, as `ParseError` documents. The nearest inputs that stay valid follow: a `#` after a
   // space or a tab, which section 6.6 allows, and a `#` inside a plain
   // scalar, which section 7.3.3 allows after a character that is not white
   // space ("An ns-char preceding").
@@ -814,6 +814,36 @@ test "tabs in indentation give an error; tabs elsewhere are white space" {
       #|"a: |\n  x\n\t\nb: 1" -> error /a: tabs are not allowed in indentation
       #|"a: |\n  x\n  \t\n" -> {"a":"x\n\t\n"}
       #|"a: |\n  x\n \n  y\n" -> {"a":"x\n\ny\n"}
+    ),
+  )
+  // At the end of the text, YAML 1.2.2 reads the same line as a comment
+  // line after the document (`l-comment` in `l-yaml-stream`, production
+  // 211), but `parse` rejects it there too, with the message above, as
+  // libyaml and PyYAML do. The maintainer decided so on 2026-11-18 (#369),
+  // and `parse`'s documentation lists it among the valid YAML rejected on
+  // purpose: "a line of white space whose tab comes before a block
+  // scalar's indentation, with nothing after it but empty lines, comments
+  // and the `...` that may end the document". No case of yaml-test-suite
+  // has it. The nearest inputs that stay valid follow: a last line of
+  // spaces only, which is an empty line, and such a line after a comment
+  // that ends the scalar, which YAML reads as a comment line after the
+  // scalar's trailing comment (`l-trail-comments`, production 169).
+  inspect(
+    each([
+      "a: |\n  x\n \t\n", "a: |\n  x\n \t", "a: |\n  x\n \t\n\n# end\n", "a: |\n  x\n \t\n...\n",
+      "a: |\n\t\n", "- |\n  x\n \t\n", "a:\n  b: |\n    x\n  \t\n", "a: |\n  x\n \n",
+      "a: |\n  x\n# end\n \t\n",
+    ]),
+    content=(
+      #|"a: |\n  x\n \t\n" -> error /a: tabs are not allowed in indentation
+      #|"a: |\n  x\n \t" -> error /a: tabs are not allowed in indentation
+      #|"a: |\n  x\n \t\n\n# end\n" -> error /a: tabs are not allowed in indentation
+      #|"a: |\n  x\n \t\n...\n" -> error /a: tabs are not allowed in indentation
+      #|"a: |\n\t\n" -> error /a: tabs are not allowed in indentation
+      #|"- |\n  x\n \t\n" -> error /0: tabs are not allowed in indentation
+      #|"a:\n  b: |\n    x\n  \t\n" -> error /a/b: tabs are not allowed in indentation
+      #|"a: |\n  x\n \n" -> {"a":"x\n"}
+      #|"a: |\n  x\n# end\n \t\n" -> {"a":"x\n"}
     ),
   )
 }

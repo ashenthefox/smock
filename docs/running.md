@@ -371,7 +371,9 @@ smock serve --dir defs --tls-cert-file /etc/smock/tls/tls.crt --tls-key-file /et
 - Each pair is loaded at startup, and one that cannot be loaded stops
   `smock serve` with exit status 1, as for the default pair. A value that is
   not such a JSON object, or an entry without both files, exits with
-  status 2.
+  status 2. So does an entry with a member beside `certFile` and
+  `keyFile`, such as a `ca`: an entry holds the two files and nothing
+  else.
 - Each pair rotates as the default certificate does.
 
 ### Certificate expiry

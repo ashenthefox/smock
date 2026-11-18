@@ -5,8 +5,9 @@
 // of these values through the binary; these run in-process. The message
 // names the flag and its variable, in the form `InvalidSetting::message`
 // documents. The documents say which values a setting takes, but not the
-// words of a refusal's reason: those are the code's, which #320 takes to
-// the maintainer.
+// words of a refusal's reason: those are the code's, and the maintainer,
+// who decided on 2026-11-18 that they stay as they are (#320), is their
+// source.
 
 ///|
 /// What `smock serve <argv>`, with the variables `env`, makes of its
@@ -324,7 +325,8 @@ test "values: a plain or TLS port that is the admin port's default is refused, a
   // The same rule as above: the admin port is "separate from the plain and
   // TLS ports", 9090 by default (docs/running.md, Settings). Which of the
   // two ports the refusal names, here the admin port that the user did not
-  // set, is the code's, which #320 takes to the maintainer.
+  // set, comes from the maintainer, who decided on 2026-11-18 that today's
+  // refusal stays (#320).
   let ports = (settings : @settings.ServeSettings) => {
     "\{settings.port} \{settings.tls_port} \{settings.admin_port}"
   }
@@ -401,9 +403,11 @@ test "values: --tls-mock-certs, by its flag or SMOCK_TLS_MOCK_CERTS, takes a JSO
 
 ///|
 test "values: --tls-mock-certs refuses an entry with a member beside its two files" {
-  // docs/running.md, Certificates for single Mocks, names the two members of
-  // an entry, `certFile` and `keyFile`, and says nothing of a third. That
-  // the code refuses one is a finding, which #320 takes to the maintainer.
+  // docs/running.md, Certificates for single Mocks, after "an entry without
+  // both files, exits with status 2": "So does an entry with a member
+  // beside `certFile` and `keyFile`, such as a `ca`: an entry holds the two
+  // files and nothing else", as the maintainer decided on 2026-11-18
+  // (#320).
   inspect(
     by_flag_and_variable(
       "--tls-mock-certs", "SMOCK_TLS_MOCK_CERTS", "{\"users\":{\"certFile\":\"u.crt\",\"keyFile\":\"u.key\",\"ca\":\"ca.crt\"}}",

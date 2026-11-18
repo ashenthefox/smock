@@ -4,7 +4,8 @@
 // named alone in a refusal, and the argument by its name, in the forms
 // `InvalidSetting::message` documents. The documents say which values each
 // takes, but not the words of a refusal's reason: those are the code's,
-// which #320 takes to the maintainer.
+// and the maintainer, who decided on 2026-11-18 that they stay as they are
+// (#320), is their source.
 
 ///|
 /// What `smock import-openapi <argv>` makes of its settings, after the
