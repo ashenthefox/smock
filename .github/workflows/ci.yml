@@ -143,7 +143,8 @@ jobs:
       # The branch checks run on a push to a branch other than main, in
       # branch-checks.yml and not here, so that keep never waits for them.
       # This checks when that workflow runs and what it runs, and tests the
-      # weakening report it writes, on small git histories.
+      # weakening report it writes and its changed-lines job, on small git
+      # histories, the job with a fake mutation runner.
       - name: Check the branch checks workflow
         if: ${{ !cancelled() }}
         run: scripts/check-branch-checks-workflow.sh
@@ -155,6 +156,10 @@ jobs:
       - name: Test the weakening report
         if: ${{ !cancelled() }}
         run: scripts/test-weakening-report.sh
+
+      - name: Test the changed-lines job
+        if: ${{ !cancelled() }}
+        run: scripts/test-changed-lines.sh
 
       # The mutation canary is replayed only by hand (mutation-canary.yml),
       # with the toolchain its commit pins. This checks when that workflow

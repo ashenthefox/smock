@@ -1,7 +1,7 @@
 # The branch checks: what the maintainer reads before merging a branch
-# into main (CONTRIBUTING.md, "The weakening report"). They run on each
-# push to a branch other than main, against the branch's merge base with
-# main.
+# into main (CONTRIBUTING.md, "The weakening report" and "The
+# changed-lines job"). They run on each push to a branch other than main,
+# against the branch's merge base with main.
 #
 # - Not on main, whose commits are what the branches are compared with.
 # - Not on a push to a dependabot/** branch, nor on a pull request: this
@@ -12,6 +12,10 @@
 # - Not in ci.yml, so that CI's job keep, which keeps main's binaries,
 #   never waits for them and is never skipped on main.
 # - A newer push to a branch cancels the run of the older one.
+# - Also when started by hand on a branch, for a diff with more mutants on
+#   its changed lines than a push's shards run:
+#   `gh workflow run branch-checks.yml --ref <branch>`, with
+#   `-f shards=<n>` for another number of shards than 20.
 #
 # The job weakening lists what the branch weakens: tests deleted,
 # assertions removed or changed in tests that stay, snapshot lines changed,
@@ -20,6 +24,22 @@
 # whatever it finds, writes the report to the job summary, and keeps it as
 # the artifact weakening-report.
 #
+# The changed-lines jobs run every mutant of the pinned set on the
+# non-test lines that the branch changes in the pure packages
+# (scripts/changed-lines.py), with the mutation runner's rules: the
+# package's own tests, then its importers' for the survivors, the
+# compiler-output comparison, kill confirmation, the native verdict where
+# a site uses an unchecked array access, and the exclusion list.
+# changed-lines-plan counts them and plans the shards: on a push, a shard
+# for each 50 mutants and at most 3, and none when they are more than 600,
+# a diff that the report gives as not covered; when started by hand, as
+# many shards as asked. changed-lines runs each shard on amd64, where the
+# native verdict decides. changed-lines-report lists the survivors in the
+# job summary and keeps the report as the artifact changed-lines, which
+# says whether the run covered the whole diff, and which the merge check
+# reads. They only report too: they pass whatever survives, and fail only
+# when the mutants cannot run or the report cannot be written.
+#
 # scripts/check-branch-checks-workflow.sh checks when this workflow runs
 # and what it runs.
 name: Branch checks
@@ -27,6 +47,12 @@ name: Branch checks
 on:
   push:
     branches-ignore: ["main", "dependabot/**"]
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: "How many shards run the mutants on the changed lines, from 1 to 20"
+        type: number
+        default: 20
 
 permissions:
   contents: read
@@ -63,4 +89,114 @@ jobs:
         with:
           name: weakening-report
           path: weakening-report.md
+          retention-days: 90
+
+  changed-lines-plan:
+    name: Count the mutants on the changed lines
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      # The whole history, so that the plan finds the merge base with main.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The site finder reads the pinned compiler's parse tree.
+      - name: Install MoonBit (pinned)
+        run: scripts/install-moonbit.sh pinned
+
+      # The shards' numbers, as a JSON list, go to the step's output; an
+      # empty list runs no shard.
+      - id: plan
+        name: Count the mutants on the changed lines against the merge base with main, and plan the shards
+        env:
+          BY_HAND: ${{ inputs.shards }}
+        run: python3 scripts/changed-lines.py plan --by-hand "$BY_HAND" --out changed-lines-plan >>"$GITHUB_OUTPUT"
+
+      - name: Keep the plan for the shards and the report
+        uses: actions/upload-artifact@v7
+        with:
+          name: changed-lines-plan
+          path: changed-lines-plan
+          retention-days: 7
+
+  changed-lines:
+    name: Mutants on the changed lines (shard ${{ matrix.shard }})
+    needs: changed-lines-plan
+    if: needs.changed-lines-plan.outputs.shards != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.changed-lines-plan.outputs.shards) }}
+    # amd64, where the native verdict decides (CONTRIBUTING.md, "Native
+    # verdicts").
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      # The whole history, where the plan's merge base is.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The runner check, OpenSSL, MoonBit and moon update.
+      - uses: ./.github/actions/native-setup
+        with:
+          machine: x86_64
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: changed-lines-plan
+          path: changed-lines-plan
+
+      - name: Run the shard's mutants on the changed lines
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: python3 scripts/changed-lines.py shard --plan changed-lines-plan --shard "$SHARD" --out changed-lines-shard
+
+      - name: Keep the shard's records for the report
+        uses: actions/upload-artifact@v7
+        with:
+          name: changed-lines-shard-${{ matrix.shard }}
+          path: changed-lines-shard
+          retention-days: 7
+
+  changed-lines-report:
+    name: Report the mutants on the changed lines
+    needs: [changed-lines-plan, changed-lines]
+    # Also when no shard ran, but not when a shard failed or was cancelled.
+    if: ${{ !cancelled() && needs.changed-lines-plan.result == 'success' && (needs.changed-lines.result == 'success' || needs.changed-lines.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: changed-lines-plan
+          path: changed-lines-plan
+
+      - uses: actions/download-artifact@v8
+        if: needs.changed-lines-plan.outputs.shards != '[]'
+        with:
+          pattern: changed-lines-shard-*
+          path: changed-lines-shards
+
+      # A job summary holds at most 1 MiB; a larger report is only in the
+      # artifact.
+      - name: Write the report of the mutants on the changed lines
+        run: |
+          python3 scripts/changed-lines.py report --plan changed-lines-plan --shards changed-lines-shards --out changed-lines
+          if [ "$(wc -c <changed-lines/report.md)" -le 1000000 ]; then
+            cat changed-lines/report.md >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "The report of the mutants on the changed lines is larger than a job summary holds: it is in the artifact changed-lines." >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Keep the report
+        uses: actions/upload-artifact@v7
+        with:
+          name: changed-lines
+          path: changed-lines
           retention-days: 90
