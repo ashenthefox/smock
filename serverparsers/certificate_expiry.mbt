@@ -40,29 +40,67 @@ pub fn certificate_expiry(pem : Bytes) -> Int64? {
 /// leaf of the TLS port's chain (`PEM_read_bio_X509_AUX`): one labelled
 /// `CERTIFICATE`, the old `X509 CERTIFICATE` or OpenSSL's
 /// `TRUSTED CERTIFICATE`. Blocks of other labels are skipped, as OpenSSL
-/// skips them, an `ATTRIBUTE CERTIFICATE` included. A UTF-8 byte order mark
-/// at the start of `pem` is dropped, as OpenSSL drops it.
+/// skips them, an `ATTRIBUTE CERTIFICATE` included.
+///
+/// OpenSSL reads one block at a time, until it reads a certificate, and
+/// each read drops a UTF-8 byte order mark from the first line it takes
+/// (`get_name` and `sanitize_line` in its `crypto/pem/pem_lib.c`): the
+/// first line of `pem`, and the line right after the END line of a block it
+/// skips. So does this reading. On any other line the mark stays, and the
+/// line is no BEGIN line.
 fn first_certificate_der(pem : Bytes) -> BytesView? {
   let base64 = StringBuilder()
-  let mut inside = false
-  for line in @utf8.decode_lossy(pem, ignore_bom=true).split("\n") {
-    let line = line.trim(chars=" \t\r")
-    if inside {
-      if line.has_prefix("-----END ") {
-        let der = @base64.decode(base64.to_string(), ignore_whitespace=true) catch {
-          _ => return None
+  let mut place = Start
+  for line in @utf8.decode_lossy(pem).split("\n") {
+    match place {
+      Start | Between => {
+        let line = match (place, line.strip_prefix("\u{FEFF}")) {
+          (Start, Some(rest)) => rest
+          _ => line
         }
-        return Some(der[:])
+        let line = line.trim(chars=" \t\r")
+        place = if line
+          is ("-----BEGIN CERTIFICATE-----"
+          | "-----BEGIN X509 CERTIFICATE-----"
+          | "-----BEGIN TRUSTED CERTIFICATE-----") {
+          Certificate
+        } else if line.has_prefix("-----BEGIN ") && line.has_suffix("-----") {
+          Skipped
+        } else {
+          Between
+        }
       }
-      base64.write_string(line.to_owned())
-    } else if line
-      is ("-----BEGIN CERTIFICATE-----"
-      | "-----BEGIN X509 CERTIFICATE-----"
-      | "-----BEGIN TRUSTED CERTIFICATE-----") {
-      inside = true
+      Skipped =>
+        if line.trim(chars=" \t\r").has_prefix("-----END ") {
+          place = Start
+        }
+      Certificate => {
+        let line = line.trim(chars=" \t\r")
+        if line.has_prefix("-----END ") {
+          let der = @base64.decode(base64.to_string(), ignore_whitespace=true) catch {
+            _ => return None
+          }
+          return Some(der[:])
+        }
+        base64.write_string(line.to_owned())
+      }
     }
   }
   None
+}
+
+///|
+/// Where `first_certificate_der` is in a PEM, line by line, as OpenSSL
+/// reads it.
+priv enum Place {
+  /// Between blocks, at the first line of one of OpenSSL's reads.
+  Start
+  /// Between blocks, past that first line.
+  Between
+  /// In a block of another label, which OpenSSL skips.
+  Skipped
+  /// In the block of the certificate.
+  Certificate
 }
 
 ///|
