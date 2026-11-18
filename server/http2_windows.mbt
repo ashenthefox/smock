@@ -302,6 +302,11 @@ fn[S : @io.Writer + ReadOutput] H2Connection::write_slowly(
 /// write timeout's does when a window stays at zero (`watch_windows`).
 /// While it writes, the reset leaves it be (`H2Writer::write_for`), and it
 /// ends as soon as the write is done.
+///
+/// `begun` is false for an event (`send_events`), whose stream never waits
+/// from when its response was queued (`begin_wait`): the task then does
+/// not look for such a wait, so an event that fits the windows costs no
+/// lookup.
 async fn[S : @io.Writer + ReadOutput] H2Connection::trickle(
   self : H2Connection,
   stream : Int32,
@@ -309,14 +314,19 @@ async fn[S : @io.Writer + ReadOutput] H2Connection::trickle(
   entry : @engine.JournalEntry?,
   out : WatchedStream[S],
   end~ : Bool = true,
+  begun~ : Bool = true,
 ) -> Bool {
   let ports = self.ports
   let mut entry = entry
   defer ports.commit(entry)
-  // The stream's wait for window: the one `begin_wait` made, or else made
-  // when the task first waits, so that an event that fits the windows costs
-  // none; kept for the task's later waits.
-  let mut held : WindowWait? = self.blocked.get(stream)
+  // The stream's wait for window: the one `begin_wait` made, when `begun`,
+  // or else made when the task first waits, so that an event that fits the
+  // windows costs none; kept for the task's later waits.
+  let mut held : WindowWait? = if begun {
+    self.blocked.get(stream)
+  } else {
+    None
+  }
   // Whether the stream waits in `blocked`, until its task takes what it is
   // woken for.
   let mut waits = held is Some(_)

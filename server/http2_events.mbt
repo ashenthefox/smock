@@ -171,7 +171,9 @@ async fn[S : @io.Writer + ReadOutput] H2Connection::send_events(
       ports.commit(entry)
       entry = None
     }
-    guard self.trickle(stream, data, None, out, end=ends) else { return false }
+    guard self.trickle(stream, data, None, out, end=ends, begun=false) else {
+      return false
+    }
     if i == last {
       return true
     }

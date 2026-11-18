@@ -171,7 +171,7 @@
 {"file":"server/http2_defences.mbt","definition":"H2Connection::defended","text":"928134143e4e4b67","pinned":{"BODY":1,"IFC":1,"DEL":2,"STR":3},"full":{"BODY":1,"IFC":1,"DEL":2,"STR":6}}
 {"file":"server/http2_events.mbt","definition":"H2Connection::start_events","text":"345e8941796017da","pinned":{"BODY":1,"IFC":1,"NOT":1,"DEL":3,"BOOL":1},"full":{"BODY":1,"IFC":2,"NOT":1,"DEL":3,"BOOL":1}}
 {"file":"server/http2_events.mbt","definition":"H2Connection::open_events","text":"8086d3dbc4e02edf","pinned":{"BODY":1,"IFC":2,"LCR":2,"NOT":1,"DEL":2,"BOOL":4,"AOR":1,"INT":4},"full":{"BODY":1,"IFC":4,"LCR":2,"NOT":1,"DEL":2,"BOOL":4,"AOR":1,"INT":7}}
-{"file":"server/http2_events.mbt","definition":"H2Connection::send_events","text":"ab6d65d53ab8d14b","pinned":{"BODY":1,"ROR":1,"IFC":7,"LCR":1,"NOT":1,"DEL":3,"BOOL":5,"AOR":2,"INT":5},"full":{"BODY":1,"ROR":1,"IFC":14,"LCR":1,"NOT":1,"DEL":3,"BOOL":5,"AOR":2,"INT":9}}
+{"file":"server/http2_events.mbt","definition":"H2Connection::send_events","text":"6d5d8b839e16f1b0","pinned":{"BODY":1,"ROR":1,"IFC":7,"LCR":1,"NOT":1,"DEL":3,"BOOL":6,"AOR":2,"INT":5},"full":{"BODY":1,"ROR":1,"IFC":14,"LCR":1,"NOT":1,"DEL":3,"BOOL":6,"AOR":2,"INT":9}}
 {"file":"server/http2_faults.mbt","definition":"H2Connection::close_by_fault","text":"71268ef712250f63","pinned":{"BODY":1,"IFC":1,"DEL":4},"full":{"BODY":1,"IFC":2,"DEL":4}}
 {"file":"server/http2_frames.mbt","definition":"max_frame_size","text":"d3830d1a34d4f452","pinned":{"INT":1},"full":{"INT":3}}
 {"file":"server/http2_frames.mbt","definition":"encoding_table_size","text":"8f5c01db4521e850","pinned":{"INT":1},"full":{"INT":3}}
@@ -246,7 +246,7 @@
 {"file":"server/http2_windows.mbt","definition":"H2Connection::begin_wait","text":"88cbb8269e61030a","pinned":{"BODY":1,"BOOL":1,"INT":1},"full":{"BODY":1,"BOOL":1,"INT":2}}
 {"file":"server/http2_windows.mbt","definition":"H2Connection::unblock","text":"9fd579828fdbc81d","pinned":{"BODY":1,"IFC":1,"DEL":4,"BOOL":1,"AOR":1,"INT":1},"full":{"BODY":1,"IFC":3,"DEL":4,"BOOL":1,"AOR":1,"INT":2}}
 {"file":"server/http2_windows.mbt","definition":"H2Connection::write_slowly","text":"fa7d0490b77d99bd","pinned":{"BODY":1,"IFC":1,"LCR":1,"NOT":1,"DEL":3,"BOOL":1},"full":{"BODY":1,"IFC":1,"LCR":1,"NOT":1,"DEL":3,"BOOL":1}}
-{"file":"server/http2_windows.mbt","definition":"H2Connection::trickle","text":"05e20e86121d5006","pinned":{"BODY":1,"ROR":7,"IFC":14,"LCR":1,"NOT":1,"DEL":18,"BOOL":9,"AOR":4,"INT":12},"full":{"BODY":1,"ROR":7,"IFC":27,"LCR":1,"NOT":1,"DEL":18,"BOOL":9,"AOR":4,"INT":18}}
+{"file":"server/http2_windows.mbt","definition":"H2Connection::trickle","text":"6cf8b3b54cbfe38a","pinned":{"BODY":1,"ROR":7,"IFC":15,"LCR":1,"NOT":1,"DEL":18,"BOOL":10,"AOR":4,"INT":12},"full":{"BODY":1,"ROR":7,"IFC":29,"LCR":1,"NOT":1,"DEL":18,"BOOL":10,"AOR":4,"INT":18}}
 {"file":"server/journal.mbt","definition":"JournalMetrics::register","text":"09b4b0482e73976e","pinned":{"DEL":1,"INT":2,"STR":6},"full":{"DEL":1,"INT":4,"STR":12}}
 {"file":"server/journal.mbt","definition":"JournalMetrics::update","text":"e64f6817815d09d6","pinned":{"BODY":1,"ROR":1,"IFC":1,"DEL":4,"AOR":1},"full":{"BODY":1,"ROR":1,"IFC":2,"DEL":4,"AOR":1}}
 {"file":"server/journal.mbt","definition":"query_journal","text":"2b45aefbab918404","pinned":{"INT":2,"STR":4},"full":{"IFC":1,"INT":6,"STR":8}}
