@@ -421,14 +421,13 @@ async test "a stream that has sent what the connection window gave it waits agai
 ///|
 async test "a stream's write timeout for its own window runs from once what it sent before has gone out: a client that reads that DATA slowly, for longer than the write timeout, then widens the window, gets the rest (#391)" {
   // #391: the write timeout of a wait for window "starts as on main, once
-  // the stream's DATA is written". docs/http2.md, Timeouts: "For this
-  // timeout, a body waits once what smock queued before it has gone out.
-  // A stream that waits for window while its last DATA is still being
-  // written ... has the write timeout of that write until then, so a
-  // client that reads that DATA slowly but steadily, and widens the window
-  // once it has read it, is not cut for it." The test widens the window
-  // 200 ms after it has read the DATA, well within the write timeout of
-  // 1000 ms, and reads the DATA for about 1.7 s, well past it.
+  // the stream's DATA is written". docs/http2.md, Timeouts: "A stream
+  // that begins to wait while its DATA is still being written ... counts
+  // for this timeout only once that DATA has gone out ... So the time a
+  // client takes to read that DATA, slowly but steadily, does not count
+  // toward that stream's wait." The test widens the window 200 ms after it
+  // has read the DATA, well within the write timeout of 1000 ms, and reads
+  // the DATA for about 1.7 s, well past it.
   with_pipe_client(flow_ports(["--write-timeout-ms", "1000"]), client => {
     let out = []
     // Stream windows of 500 octets, with the connection window open: stream

@@ -803,11 +803,11 @@ connection.
     `CANCEL`, and the connection's other streams go on. Its request is in
     the Journal, as a request whose client goes away is.
 
-  For this timeout, a body waits once what smock queued before it has gone
-  out. A stream that waits for window while its last DATA is still being
-  written ([Streams that wait](#streams-that-wait)) has the write timeout
-  of that write until then, so a client that reads that DATA slowly but
-  steadily, and widens the window once it has read it, is not cut for it.
+  A stream that begins to wait while its DATA is still being written
+  ([Streams that wait](#streams-that-wait)) counts for this timeout only
+  once that DATA has gone out: until then, the write timeout of that write
+  runs instead. So the time a client takes to read that DATA, slowly but
+  steadily, does not count toward that stream's wait.
 
   So a client that widens its windows slowly but steadily, a few octets at
   a time, gets its whole response, however long it takes in all. A
