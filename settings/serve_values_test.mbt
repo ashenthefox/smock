@@ -401,9 +401,11 @@ test "values: --tls-mock-certs, by its flag or SMOCK_TLS_MOCK_CERTS, takes a JSO
 
 ///|
 test "values: --tls-mock-certs refuses an entry with a member beside its two files" {
-  // docs/running.md, Certificates for single Mocks, names the two members of
-  // an entry, `certFile` and `keyFile`, and says nothing of a third. That
-  // the code refuses one is a finding, which #320 takes to the maintainer.
+  // docs/running.md, Certificates for single Mocks, after "an entry without
+  // both files, exits with status 2": "So does an entry with a member
+  // beside `certFile` and `keyFile`, such as a `ca`: an entry holds the two
+  // files and nothing else", as the maintainer decided on 2026-11-18
+  // (#320).
   inspect(
     by_flag_and_variable(
       "--tls-mock-certs", "SMOCK_TLS_MOCK_CERTS", "{\"users\":{\"certFile\":\"u.crt\",\"keyFile\":\"u.key\",\"ca\":\"ca.crt\"}}",
