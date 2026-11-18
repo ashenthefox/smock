@@ -5,7 +5,8 @@ Bug reports and proposals are welcome as
 that changes code, open an issue and talk the approach over there, so that
 the work fits where smock is going. Before merging a contributor's pull
 request, the maintainer pushes its branch here, so that the
-[weakening report](#the-weakening-report) runs on it. Report a
+[weakening report](#the-weakening-report) and the
+[changed-lines job](#the-changed-lines-job) run on it. Report a
 vulnerability privately, as [SECURITY.md](SECURITY.md) says.
 
 This document is for people who work on smock itself. It describes the
@@ -359,6 +360,8 @@ scripts/test-check-branch-checks-workflow.sh   # that check, on copies of the wo
 python3 scripts/weakening-report.py --base origin/main   # what this branch weakens, against its merge base with main (needs git)
 scripts/test-weakening-report.sh     # the weakening report, on small git histories (needs python3 and git)
 scripts/test-changed-lines.sh        # the changed-lines job of the branch checks, with a fake mutation runner on small git histories (needs python3, git and jq)
+python3 scripts/check-merge.py <branch>   # whether the branch checks on the branch's head let it be merged into main, and its weakening report (needs git and gh)
+scripts/test-check-merge.sh          # the merge check, with a fake gh and canned runs on a small git history (needs python3, git and jq)
 scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs only by hand, and installs its commit's toolchain before the replay (needs yq and jq)
 scripts/test-check-mutation-canary-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
@@ -998,6 +1001,9 @@ A package climbs four levels:
   changes.
 - **L4, per package**: no unexplained survivor over the pinned set. The
   weekly run executes exactly this set, so it verifies L4.
+  `mutation/l4-packages.txt` lists the packages at L4. It started empty,
+  and a package joins it only with the maintainer's approval, in the
+  ticket that takes it to L4.
 
 All 19 pure packages go to L4, in two stages: first `yaml`, `http1`,
 `xml`, `re2`, `grpc`, `cookies`, `settings`, `metrics`, `usage` and
@@ -1382,13 +1388,14 @@ report lists every entry whose reviewer changed.
   same way: before merging it, the maintainer pushes its branch here. The
   stop is in the merge procedure. It reports only, at first; once a
   package reaches L4, an unexplained survivor on lines of that package
-  that the branch changes stops the merge into `main`. A script reads the
-  report of the run on the branch head, as the release checks that CI
-  passed on a tag's commit, and the
-  [checklist before merging into main](docs/merging-into-main.md) gains
-  it when the script exists. A diff too large for the changed-lines job
-  is reported as not covered, and runs whole in a run started by hand;
-  the merge check reads whichever run covered the whole diff.
+  that the branch changes stops the merge into `main`. The merge check,
+  `scripts/check-merge.py`, reads the report of the run on the branch
+  head, as the release checks that CI passed on a tag's commit, and the
+  [checklist before merging into main](docs/merging-into-main.md) runs it
+  ([The changed-lines job](#the-changed-lines-job)). A diff too large for
+  the changed-lines job is reported as not covered, and runs whole in a
+  run started by hand; the merge check reads whichever run covered the
+  whole diff.
 - **Releases.** For the packages at L4, the latest weekly run over the
   pinned set must also show no unexplained survivor before a release, on
   the tag's commit or on an ancestor whose later changes the changed-lines
@@ -2430,6 +2437,24 @@ cancels an older push's run.
 with a fake runner on small git histories, and
 `scripts/check-branch-checks-workflow.sh` checks the jobs' commands,
 conditions, runner and artifacts.
+
+**The merge check.** Before merging a branch into `main`, the maintainer
+runs `python3 scripts/check-merge.py <branch>`, as the
+[checklist](docs/merging-into-main.md) says. It asks GitHub, with `gh`,
+for the runs of the branch checks on the branch's head, and reads the
+report that the latest run that passed and covered the whole diff kept.
+It refuses the merge, and says why with the run's link, when no run is on
+the head, none passed, none covered the whole diff, the run compared the
+head with another base than `main` or from another merge base than the
+head's with `main` now, or its report shows an unexplained survivor on
+the changed lines of a package at L4: one that `mutation/l4-packages.txt`
+names, on `main` or on the branch. The list starts empty, so at first the
+check only reports. It prints the unexplained survivors in the other
+packages, and each stale-covered survivor with the id of its stale entry,
+which does not block either: the stale entries are re-triaged in a batch.
+Last, it prints the branch's weakening report, which the same run kept,
+for the maintainer to read and acknowledge. `scripts/test-check-merge.sh`,
+in CI's scripts job, tests it with a fake `gh` and canned runs.
 
 ## Test costs on CI's runners
 

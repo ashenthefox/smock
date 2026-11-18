@@ -161,6 +161,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-changed-lines.sh
 
+      # The maintainer runs the merge check before merging a branch into
+      # main: it reads the branch checks' reports on the branch's head.
+      # This tests it with a fake gh and canned runs.
+      - name: Test the merge check
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-merge.sh
+
       # The mutation canary is replayed only by hand (mutation-canary.yml),
       # with the toolchain its commit pins. This checks when that workflow
       # runs and how it installs that toolchain before the replay.

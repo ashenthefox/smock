@@ -1,0 +1,16 @@
+# The packages at L4 (#312, CONTRIBUTING.md, "The ladder"): no unexplained
+# survivor over the pinned set. Before merging a branch into main, the
+# maintainer runs the merge check (scripts/check-merge.py), which reads the
+# report of the mutants on the branch's changed lines (CONTRIBUTING.md,
+# "The changed-lines job"). It refuses the merge when that report shows an
+# unexplained survivor in a package that this list names, on main or on
+# the branch. A survivor in another package is reported, and does not
+# block.
+#
+# One package a line, by its directory, as mutation/site-counts/ names it:
+#
+#   <package>
+#
+# A package joins the list only with the maintainer's approval, in the
+# ticket that takes it to L4. The weakening report shows every change to
+# the list. It starts empty, so at first the merge check only reports.
