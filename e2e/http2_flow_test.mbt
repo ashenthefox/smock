@@ -264,8 +264,8 @@ async test "h2c: streams waiting on the connection window get it in the order th
       // one widening gives to both: their tasks may send in either order,
       // which is not checked here. The next test checks which of the two
       // waits first, as the maintainer decided on 2026-11-18: a stream
-      // begins to wait when its response is queued without all of its body
-      // (#381).
+      // begins to wait as soon as the windows hold back part of its body
+      // (#381, #391).
       out.push("--- the connection window widened by 149505")
       raw.send([WindowUpdate(stream_id=0, increment=149_505)])
       let rest = raw.runs_until(data_total(149_505)).split("\n").collect()
@@ -331,10 +331,11 @@ async test "h2c: a response queued without all of its body waits for the connect
       // the order they began to wait, and a stream that has sent what it was
       // given waits behind the others" (docs/http2.md, Streams that wait).
       // Stream 3 has waited longest, so the 83,965 octets left of its body
-      // go to it. "A stream begins to wait as soon as smock queues its
-      // response without all of its body" (the same section, #381): stream
-      // 5 began to wait before stream 1 sent its 500 octets, so the next 5
-      // octets go to stream 5, and stream 1 gets the rest after it.
+      // go to it. "A stream begins to wait as soon as the windows hold back
+      // part of its body" (the same section, #381, #391): stream 5 began to
+      // wait as its response was queued, with no room for its body, before
+      // stream 1 sent its 500 octets, so the next 5 octets go to stream 5,
+      // and stream 1 gets the rest after it.
       out.push("--- the connection window widened by 83965")
       raw.send([WindowUpdate(stream_id=0, increment=83_965)])
       out.push(raw.runs_until(data_total(83_965)))

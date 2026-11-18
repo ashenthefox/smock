@@ -485,10 +485,15 @@ small windows still gets the whole body, and the other streams of the
 connection go on meanwhile. When several streams wait for the connection
 window, they get it in the order they began to wait, and a stream that has
 sent what it was given waits behind the others. A stream begins to wait as
-soon as smock queues its response without all of its body, or an event
-without all of its data. So a response queued while another stream is
-about to send what it was given waits ahead of that stream. Priority
-signals are accepted and ignored.
+soon as the windows hold back part of its body or of an event: when smock
+queues what they allow, and more is left, before that has gone out. So a
+response queued while another stream is about to send what it was given
+waits ahead of that stream, and one queued while that stream's DATA goes
+out waits behind it. A body that only [the output
+bound](#the-output-bound) holds back does not wait for window: it sends
+more once what it queued has gone out, and a response queued meanwhile can
+take the rest of the connection window first. Priority signals are
+accepted and ignored.
 
 A client that keeps a window at zero does not hold a body for good: the
 write timeout runs while the body waits ([Timeouts](#timeouts)). Nor does a

@@ -1425,8 +1425,8 @@ fn[S : @io.Writer + ReadOutput] H2Connection::answered(
 /// A body that does not fit gets its HEADERS and as much of the body as the
 /// windows allow; `queue` then returns the rest, which the caller sends in
 /// the stream's task as the windows widen (`trickle`), with the entry still
-/// to commit. The stream waits for window from then on (`begin_wait`).
-/// Otherwise it returns nothing.
+/// to commit. When the windows held the rest back, the stream waits for
+/// window from then on (`begin_wait`). Otherwise it returns nothing.
 ///
 /// With a partial Fault, the HEADERS carry the length of the whole `body`,
 /// and the DATA half of it, rounded down, which does not end the stream:
