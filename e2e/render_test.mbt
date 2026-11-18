@@ -700,9 +700,26 @@ async test "smock render --help names its argument, its inputs and the settings 
 }
 
 ///|
-/// A Mock `market` with a Stub of two weighted responses and a Stub with
-/// `response`, each with its own seed, so that every rendering of them is
-/// the same.
+/// A Stub `hundred` of the Mock `market` with 100 responses, the most that
+/// `responses` holds (docs/definition-files/responses.md), each a JSON body
+/// that names its index, and a seed of its own.
+fn hundred_responses() -> String {
+  let responses = []
+  for i in 0..<100 {
+    responses.push("{ \"status\": 200, \"json\": { \"response\": \{i} } }")
+  }
+  (
+    $|{ "stubs": [
+    $|    { "id": "hundred", "mock": "market", "request": { "path": "/hundred" },
+    $|      "responses": [\{responses.join(", ")}],
+    $|      "fault": { "seed": 5 } } ] }
+  )
+}
+
+///|
+/// A Mock `market` with a Stub of two weighted responses, a Stub with
+/// `response`, and a Stub of 100 responses (`hundred_responses`), each with
+/// its own seed, so that every rendering of them is the same.
 let weighted_definitions : Array[(String, String)] = [
   (
     "prices.json",
@@ -719,6 +736,7 @@ let weighted_definitions : Array[(String, String)] = [
       #|      "response": { "status": 204 }, "fault": { "seed": 3 } } ] }
     ),
   ),
+  ("hundred.json", hundred_responses()),
   ("samples/get.json", "{ \"path\": \"/prices\" }"),
 ]
 
@@ -735,7 +753,7 @@ fn picked(json : Json) -> String {
 }
 
 ///|
-async test "smock render --response and the Admin render operation's response parameter render the same given response, and refuse an index the Stub does not have" {
+async test "smock render --response and the Admin render operation's response parameter render the same given response, the one at index 99 of a Stub with 100 too, and refuse an index the Stub does not have" {
   with_definitions(weighted_definitions, dir => {
     let sample = "\{dir}/samples/get.json"
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
@@ -747,6 +765,9 @@ async test "smock render --response and the Admin render operation's response pa
           ("get-prices", Some("1")),
           ("plain", None),
           ("plain", Some("0")),
+          // 99, the largest index (docs/definition-files/templates.md,
+          // Rendering a template), of a Stub that has it.
+          ("hundred", Some("99")),
         ] {
         let (id, index) = case
         let (args, query) = match index {
@@ -794,6 +815,8 @@ async test "smock render --response and the Admin render operation's response pa
           #|  {"seed":3,"responseIndex":null,"response":{"status":204,"headers":[],"body":{"encoding":"utf-8","data":"","size":0,"truncated":false},"events":null}}
           #|plain --response=0: render 0, admin 200, same: true
           #|  {"seed":3,"responseIndex":null,"response":{"status":204,"headers":[],"body":{"encoding":"utf-8","data":"","size":0,"truncated":false},"events":null}}
+          #|hundred --response=99: render 0, admin 200, same: true
+          #|  {"seed":5,"responseIndex":99,"response":{"status":200,"headers":[{"name":"Content-Type","value":"application/json"}],"body":{"encoding":"utf-8","data":"{\"response\":99}","size":15,"truncated":false},"events":null}}
           #|status 1
           #|stderr:
           #|smock render: the Stub "get-prices" has no response 2: its responses run from 0 to 1
