@@ -734,6 +734,19 @@ of each GitHub release include its section
   after the first `-` indents the nested sequence. smock read it as a
   nested sequence, and in an OpenAPI document `-<tab>-` read as `[[null]]`
   ([smock#367](https://github.com/hirunefu/smock/issues/367)).
+- A poll that reads the files at once, with no quiet period, no longer
+  reloads what it reads. File times are coarse, so the polls of the 2 s
+  after a change read the Definition files and the certificate and key
+  files, also right after startup when the files were written just
+  before, and so do the polls while a problem reading the definitions
+  directory lasts. A file rewritten in place just as such a read began
+  was read half written, and reloaded: smock logged a failed reload, such
+  as "TLS certificate reload failed" with "no PEM certificate found", or
+  served a half-written set, such as a body file read empty, for about a
+  second, until the next poll. Two files written 100 ms apart could be
+  read apart the same way. When such a read finds the files changed,
+  smock now waits for them to settle, as for any change, and then reloads
+  them once ([smock#384](https://github.com/hirunefu/smock/issues/384)).
 
 ## [0.4.0] - 2026-11-01
 

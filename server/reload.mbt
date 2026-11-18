@@ -44,7 +44,7 @@ fn register_reload_metric(metrics : @metrics.Registry) -> @metrics.Counter {
 /// passed.
 async fn Reloader::run(self : Reloader, watch : @watch.Watch) -> Unit {
   let check = async fn(check : @watch.Check) {
-    let read_whole = self.check(check) catch {
+    let read_whole = self.check(check, watch) catch {
       err => {
         self.logger.error("definitions reload failed", fields={
           "error": Json::string(err.to_string()),
@@ -68,24 +68,37 @@ async fn Reloader::run(self : Reloader, watch : @watch.Watch) -> Unit {
 }
 
 ///|
-/// Reads the definitions directory and reloads the engine from it. Tells
-/// whether it read the directory without problems.
+/// Reads the definitions directory and reloads the engine from it, on a
+/// check of `watch`. Tells whether it read the directory without problems.
 ///
-/// An `Unsure` check reloads only when the set read differs from the one
-/// read last: its stamp noted nothing new, so that a set that stays the
-/// same, valid or not, does not log a reload at each poll while the stamp
-/// is too new to be trusted or a problem reading the directory lasts. A
-/// `Changed` check, whose stamp noted a change, always reloads, so that a
-/// file written again with the same bytes logs a reload that finds the set
-/// unchanged.
-async fn Reloader::check(self : Reloader, check : @watch.Check) -> Bool {
+/// An `Unsure` check reloads nothing. Its read comes at the poll, with no
+/// quiet period, so it may find a file half written, as one rewritten in
+/// place right after the poll's stamp. When the set it reads differs from
+/// the one read last, it tells `watch`, which lets the change settle and
+/// checks again, `Changed`, once it has; it tells that it read the
+/// directory without problems then, so that the watch keeps the stamp
+/// that the quiet period compares with. When the set is the same, valid or
+/// not, nothing is logged, so that no reload is logged at each poll while
+/// the stamp is too new to be trusted or a problem reading the directory
+/// lasts. A `Changed` check, whose stamp noted a change, always reloads,
+/// so that a file written again with the same bytes logs a reload that
+/// finds the set unchanged.
+async fn Reloader::check(
+  self : Reloader,
+  check : @watch.Check,
+  watch : @watch.Watch,
+) -> Bool {
   let (set, problems) = @defdir.read(self.dir, body_file_dir=self.body_file_dir)
   // Requests go on being served from the set served now while the new one
   // is hashed, and the swap below happens in one step.
   let digest = @defdir.digest(set)
   let read = (digest, problems)
-  if check is Unsure && read == self.last_read {
-    return problems.is_empty()
+  if check is Unsure {
+    if read == self.last_read {
+      return problems.is_empty()
+    }
+    watch.found_change()
+    return true
   }
   self.last_read = read
   // The engine takes the digest computed here, so the set is hashed once.

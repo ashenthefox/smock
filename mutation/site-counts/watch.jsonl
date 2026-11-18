@@ -22,3 +22,4 @@
 {"file":"watch/watch.mbt","definition":"Watch::glance_will_do","text":"d7b8b997365ac9d3","pinned":{"BODY":1,"ROR":1,"LCR":2,"DEL":1,"BOOL":1,"AOR":1},"full":{"BODY":1,"ROR":1,"IFC":1,"LCR":2,"DEL":1,"BOOL":1,"AOR":1}}
 {"file":"watch/watch.mbt","definition":"Watch::run","text":"af7ddb0f1759d268","pinned":{"BODY":1,"ROR":1,"IFC":3,"DEL":4,"AOR":1,"INT":2},"full":{"BODY":1,"ROR":1,"IFC":4,"DEL":4,"AOR":1,"INT":2}}
 {"file":"watch/watch.mbt","definition":"Watch::forget","text":"25172b5050583484","pinned":{"BODY":1},"full":{"BODY":1}}
+{"file":"watch/watch.mbt","definition":"Watch::found_change","text":"04b1285fcba2e24e","pinned":{"BODY":1,"IFC":1,"DEL":1},"full":{"BODY":1,"IFC":1,"DEL":1}}

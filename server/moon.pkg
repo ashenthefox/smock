@@ -40,6 +40,7 @@ import {
 supported_targets = "native"
 
 import {
+  "smock/smock/testcerts",
   "moonbitlang/core/string",
 } for "wbtest"
 

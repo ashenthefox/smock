@@ -34,9 +34,9 @@
 {"file":"server/certificates.mbt","definition":"Certificates::select","text":"2e043ee8992b6a7b","pinned":{"IFC":1,"NOT":1},"full":{"IFC":1,"NOT":1}}
 {"file":"server/certificates.mbt","definition":"Certificates::after_swap","text":"3fc9a19ae13c3d9d","pinned":{"BODY":1,"IFC":1,"DEL":2},"full":{"BODY":1,"IFC":1,"DEL":2}}
 {"file":"server/certificates.mbt","definition":"Certificates::warn_undeclared","text":"98b785eaa9e292ff","pinned":{"BODY":1,"IFC":2,"NOT":1,"DEL":3,"STR":1},"full":{"BODY":1,"IFC":4,"NOT":1,"DEL":3,"STR":2}}
-{"file":"server/certificates.mbt","definition":"Certificates::run","text":"5c6183d8cb40b70e","pinned":{"BODY":1,"IFC":1,"NOT":1,"DEL":2,"STR":3},"full":{"BODY":1,"IFC":2,"NOT":1,"DEL":2,"STR":6}}
-{"file":"server/certificates.mbt","definition":"Certificates::check","text":"d5092ad66b954ec5","pinned":{"BODY":1,"LCR":1,"DEL":3,"BOOL":2,"STR":2},"full":{"BODY":1,"LCR":1,"DEL":3,"BOOL":2,"STR":4}}
-{"file":"server/certificates.mbt","definition":"Certificates::check_pair","text":"ac2d1c5c16acc6ab","pinned":{"BODY":1,"IFC":1,"DEL":5,"STR":4},"full":{"BODY":1,"IFC":2,"DEL":5,"STR":8}}
+{"file":"server/certificates.mbt","definition":"Certificates::run","text":"a71b9ca00be4b6b3","pinned":{"BODY":1,"IFC":1,"NOT":1,"DEL":2,"STR":3},"full":{"BODY":1,"IFC":2,"NOT":1,"DEL":2,"STR":6}}
+{"file":"server/certificates.mbt","definition":"Certificates::check","text":"0c9fbc21fac9d48d","pinned":{"BODY":1,"IFC":2,"LCR":1,"DEL":6,"BOOL":3,"STR":2},"full":{"BODY":1,"IFC":4,"LCR":1,"DEL":6,"BOOL":3,"STR":4}}
+{"file":"server/certificates.mbt","definition":"Certificates::load_changed","text":"658d5baeb7e39940","pinned":{"BODY":1,"DEL":5,"STR":4},"full":{"BODY":1,"DEL":5,"STR":8}}
 {"file":"server/connections.mbt","definition":"Connections::new","text":"e8e2e3cf07dbcd29","pinned":{"INT":1},"full":{"INT":2}}
 {"file":"server/connections.mbt","definition":"Connections::serve","text":"890c2f785e8b059e","pinned":{"BODY":1,"DEL":4,"BOOL":2,"AOR":1,"INT":1},"full":{"BODY":1,"DEL":4,"BOOL":2,"AOR":1,"INT":2}}
 {"file":"server/connections.mbt","definition":"Connections::drain","text":"563c9180dc2072b5","pinned":{"BODY":1,"IFC":2,"DEL":1},"full":{"BODY":1,"IFC":2,"DEL":1}}
@@ -279,8 +279,8 @@
 {"file":"server/process_metrics.mbt","definition":"advance","text":"1fb116f1bb070368","pinned":{"BODY":1,"IFC":1,"DEL":1,"AOR":1},"full":{"BODY":1,"IFC":1,"DEL":1,"AOR":1}}
 {"file":"server/process_metrics.mbt","definition":"read_text","text":"126c9ebc4f5b6e20","pinned":{"BODY":1},"full":{"BODY":1}}
 {"file":"server/reload.mbt","definition":"register_reload_metric","text":"6925c4cfcf82b95b","pinned":{"DEL":1,"INT":1,"STR":3},"full":{"DEL":1,"INT":2,"STR":6}}
-{"file":"server/reload.mbt","definition":"Reloader::run","text":"c4542f3e4b36c55e","pinned":{"BODY":1,"IFC":1,"NOT":1,"DEL":3,"BOOL":1,"STR":5},"full":{"BODY":1,"IFC":2,"NOT":1,"DEL":3,"BOOL":1,"STR":10}}
-{"file":"server/reload.mbt","definition":"Reloader::check","text":"35b707a73fee1ea2","pinned":{"BODY":1,"IFC":2,"LCR":1,"DEL":4,"STR":10},"full":{"BODY":1,"IFC":4,"LCR":1,"DEL":4,"STR":20}}
+{"file":"server/reload.mbt","definition":"Reloader::run","text":"fa2986dba61be2f5","pinned":{"BODY":1,"IFC":1,"NOT":1,"DEL":3,"BOOL":1,"STR":5},"full":{"BODY":1,"IFC":2,"NOT":1,"DEL":3,"BOOL":1,"STR":10}}
+{"file":"server/reload.mbt","definition":"Reloader::check","text":"6022d56fea9410b8","pinned":{"BODY":1,"IFC":3,"DEL":5,"BOOL":1,"STR":10},"full":{"BODY":1,"IFC":6,"DEL":5,"BOOL":1,"STR":20}}
 {"file":"server/reload.mbt","definition":"diagnostics_json","text":"bfa28142c195846c","pinned":{"BODY":1,"STR":3},"full":{"BODY":1,"STR":6}}
 {"file":"server/replica.mbt","definition":"replica_name","text":"7e1fe01c6dda04cd","pinned":{"BODY":1,"INT":1,"STR":7},"full":{"BODY":1,"INT":2,"STR":12}}
 {"file":"server/requests.mbt","definition":"header_text","text":"7e8d0e5afd3ccedd","pinned":{"BODY":1},"full":{"BODY":1}}

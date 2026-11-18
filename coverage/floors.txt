@@ -19,7 +19,7 @@
 buildinfo 5
 cmd/smock 288
 cookies 0
-defdir 42
+defdir 29
 definitions 41
 engine 78
 grpc 0
@@ -33,7 +33,7 @@ prng 0
 protobuf 113
 protobuf-conformance 52
 re2 5
-server 3282
+server 3180
 serverparsers 0
 settings 168
 template 62

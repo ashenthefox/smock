@@ -103,16 +103,25 @@ fn World::glance(self : World, now : Int64) -> Stamp {
 }
 
 ///|
+/// A read of the thing, as a caller's check makes it, right after the
+/// stamp that called for the check: returns its value, and shows it.
+fn World::read(self : World) -> String {
+  self.look(self.looked_at)
+  self.show("read \{self.value}")
+  self.value
+}
+
+///|
 /// Runs a watch of the thing, which starts at 0, the way `run` does, but on
 /// a clock that jumps to each deadline, until the deadline is past `until`.
-/// Calls `on_check` with the watch at each check. Lists what each stamp and
-/// glance saw, a line for each time the watch looked: the time, what the
-/// stamps were due for, what the glance and then the full stamp saw, and
-/// the check, if any.
+/// Calls `on_check` with the watch and the check at each check. Lists what
+/// each stamp and glance saw, a line for each time the watch looked: the
+/// time, what the stamps were due for, what the glance and then the full
+/// stamp saw, and the check, if any.
 async fn World::watch(
   self : World,
   until~ : Int64,
-  on_check~ : (Watch) -> Unit = _ => (),
+  on_check~ : (Watch, Check) -> Unit = (_, _) => (),
 ) -> String {
   self.lines.push("0")
   let watch = Watch::start(
@@ -127,7 +136,7 @@ async fn World::watch(
     self.lines.push("\{now} \{@debug.to_string(due)}")
     if watch.restamp(due, now) is Some(check) {
       self.lines[self.lines.length() - 1] += ": \{@debug.to_string(check)}"
-      on_check(watch)
+      on_check(watch, check)
     }
   }
   self.lines.join("\n")
@@ -237,7 +246,7 @@ async test "after a check whose read failed, the next poll takes no glance and c
   let failed = Ref(false)
   let change = { at: 500, after: 0, value: "B", changed: Some(-5000), }
   inspect(
-    World([change]).watch(until=3250, on_check=watch => {
+    World([change]).watch(until=3250, on_check=(watch, _) => {
       // The first read fails, the next one works.
       if !failed.val {
         failed.val = true
@@ -250,6 +259,55 @@ async test "after a check whose read failed, the next poll takes no glance and c
       #|1250 Quiet stamp B: Changed
       #|2250 Poll stamp B: Unsure
       #|3250 Poll glance B
+    ),
+  )
+}
+
+///|
+async test "a change that only the read of an Unsure check finds, such as a file rewritten in place right after the poll's stamp, settles as one a stamp notes: the caller acts on nothing that read found, and the watch checks Changed once a stamp notes the same 250 ms after the one before it" {
+  // As in #384: the files were written 0.5 s before the watch started, so
+  // the polls of the 2 s after it check Unsure, at once. One file is
+  // rewritten in place right after the glance and the stamp of the poll at
+  // 1 s, so the read finds it half written (B); the other is written 100 ms
+  // later (C). The documents say that smock reads changed files once they
+  // have stayed the same for 250 ms, so that "a change made of several
+  // writes ... gives one reload of them all" (docs/definition-files.md,
+  // Reloading), and that "a certificate and its key written less than 250
+  // ms apart are loaded together" (docs/running.md, Rotating
+  // certificates). So the caller acts only on what a Changed check reads,
+  // and tells the watch when an Unsure check read something new.
+  let changes : Array[Change] = [
+    written(-500, "A"),
+    { at: 1000, after: 2, value: "B", changed: Some(1000), },
+    written(1100, "C"),
+  ]
+  let world = World(changes)
+  // What the caller acted on last: the files as it read them at startup.
+  let acted = Ref("A")
+  let lines = world.watch(until=4500, on_check=(watch, check) => {
+    let read = world.read()
+    match check {
+      Changed => {
+        acted.val = read
+        world.show("acts")
+      }
+      Unsure if read != acted.val => {
+        watch.found_change()
+        world.show("differs")
+      }
+      Unsure => ()
+    }
+  })
+  inspect(
+    lines,
+    content=(
+      #|0 stamp A
+      #|1000 Poll glance A stamp A: Unsure read B differs
+      #|1250 Quiet stamp C
+      #|1500 Quiet stamp C: Changed read C acts
+      #|2500 Poll glance C stamp C: Unsure read C
+      #|3500 Poll glance C stamp C: Unsure read C
+      #|4500 Poll glance C
     ),
   )
 }
