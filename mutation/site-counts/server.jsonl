@@ -121,7 +121,7 @@
 {"file":"server/grpc_reflection.mbt","definition":"header_value","text":"da375f6bb6513bfa","pinned":{"BODY":1,"IFC":1,"STR":1},"full":{"BODY":1,"IFC":2,"STR":1}}
 {"file":"server/http2.mbt","definition":"h2_settings","text":"f18e086314f03cf1","pinned":{"BOOL":1,"INT":2},"full":{"BOOL":1,"INT":6}}
 {"file":"server/http2.mbt","definition":"header_list_bound","text":"b37e130d4078dd3d","pinned":{"BODY":1,"ROR":1,"IFC":1,"AOR":1,"INT":4},"full":{"BODY":1,"ROR":1,"IFC":2,"AOR":1,"INT":9}}
-{"file":"server/http2.mbt","definition":"MockPorts::serve_http2","text":"8e533fe5f8b72dc4","pinned":{"BODY":1,"IFC":3,"NOT":1,"DEL":8,"BOOL":7,"AOR":1,"INT":9},"full":{"BODY":1,"IFC":5,"NOT":1,"DEL":8,"BOOL":7,"AOR":1,"INT":19}}
+{"file":"server/http2.mbt","definition":"MockPorts::serve_http2","text":"6a26c80de3af8885","pinned":{"BODY":1,"IFC":3,"NOT":1,"DEL":8,"BOOL":7,"AOR":1,"INT":10},"full":{"BODY":1,"IFC":5,"NOT":1,"DEL":8,"BOOL":7,"AOR":1,"INT":21}}
 {"file":"server/http2.mbt","definition":"H2Connection::serve","text":"92f49ed1a41a4a1b","pinned":{"BODY":1,"IFC":6,"LCR":1,"NOT":3,"DEL":11,"AOR":2},"full":{"BODY":1,"IFC":12,"LCR":1,"NOT":3,"DEL":11,"AOR":2}}
 {"file":"server/http2.mbt","definition":"H2Connection::judge","text":"6bc6cb5e8e5e4016","pinned":{"BODY":1,"IFC":3,"LCR":1,"NOT":2,"DEL":4,"BOOL":3,"AOR":1,"STR":1},"full":{"BODY":1,"IFC":5,"LCR":1,"NOT":2,"DEL":4,"BOOL":3,"AOR":1,"STR":2}}
 {"file":"server/http2.mbt","definition":"H2Connection::hand","text":"b9e25493c56cef16","pinned":{"BODY":1,"ROR":5,"IFC":38,"LCR":7,"NOT":1,"DEL":41,"BOOL":12,"AOR":2,"INT":31,"STR":1},"full":{"BODY":1,"ROR":5,"IFC":69,"LCR":7,"NOT":1,"DEL":41,"BOOL":12,"AOR":2,"INT":53,"STR":2}}
@@ -239,14 +239,14 @@
 {"file":"server/http2_streams.mbt","definition":"StreamRecord::remember","text":"b8e88f2aaf136911","pinned":{"BODY":1,"ROR":1,"IFC":1,"DEL":2,"AOR":1,"INT":1},"full":{"BODY":1,"ROR":1,"IFC":2,"DEL":2,"AOR":1,"INT":2}}
 {"file":"server/http2_windows.mbt","definition":"H2Connection::window_updated","text":"0c502d5b714087a2","pinned":{"BODY":1,"IFC":1,"DEL":2,"INT":2},"full":{"BODY":1,"IFC":2,"DEL":2,"INT":2}}
 {"file":"server/http2_windows.mbt","definition":"H2Connection::settings_received","text":"b1c3802709bad2dd","pinned":{"BODY":1,"ROR":1,"IFC":1,"DEL":3,"INT":1},"full":{"BODY":1,"ROR":1,"IFC":2,"DEL":3,"INT":2}}
-{"file":"server/http2_windows.mbt","definition":"H2Connection::watch_windows","text":"ef71c8336a639849","pinned":{"BODY":1,"ROR":3,"IFC":6,"LCR":1,"DEL":5,"AOR":2,"INT":6},"full":{"BODY":1,"ROR":3,"IFC":12,"LCR":1,"DEL":5,"AOR":2,"INT":8}}
+{"file":"server/http2_windows.mbt","definition":"H2Connection::watch_windows","text":"afa829a1033decac","pinned":{"BODY":1,"ROR":3,"IFC":6,"LCR":2,"NOT":1,"DEL":5,"AOR":2,"INT":8},"full":{"BODY":1,"ROR":3,"IFC":12,"LCR":2,"NOT":1,"DEL":5,"AOR":2,"INT":10}}
 {"file":"server/http2_windows.mbt","definition":"H2Connection::room","text":"bdc27735e75ce7bd","pinned":{"BODY":1,"ROR":3,"IFC":3,"AOR":2,"INT":7},"full":{"BODY":1,"ROR":3,"IFC":6,"AOR":2,"INT":10}}
 {"file":"server/http2_windows.mbt","definition":"H2Connection::widened","text":"3f370af35aa38820","pinned":{"BODY":1,"ROR":1,"IFC":4,"DEL":2,"AOR":2,"INT":5},"full":{"BODY":1,"ROR":1,"IFC":7,"DEL":2,"AOR":2,"INT":6}}
 {"file":"server/http2_windows.mbt","definition":"H2Connection::wake","text":"689c9184f486a657","pinned":{"BODY":1,"ROR":3,"IFC":4,"DEL":6,"BOOL":1,"AOR":1,"INT":4},"full":{"BODY":1,"ROR":3,"IFC":8,"DEL":6,"BOOL":1,"AOR":1,"INT":6}}
-{"file":"server/http2_windows.mbt","definition":"H2Connection::begin_wait","text":"88cbb8269e61030a","pinned":{"BODY":1,"BOOL":1,"INT":1},"full":{"BODY":1,"BOOL":1,"INT":2}}
-{"file":"server/http2_windows.mbt","definition":"H2Connection::unblock","text":"9fd579828fdbc81d","pinned":{"BODY":1,"IFC":1,"DEL":4,"BOOL":1,"AOR":1,"INT":1},"full":{"BODY":1,"IFC":3,"DEL":4,"BOOL":1,"AOR":1,"INT":2}}
+{"file":"server/http2_windows.mbt","definition":"H2Connection::begin_wait","text":"62c01446c0ab3360","pinned":{"BODY":1,"BOOL":2,"INT":1},"full":{"BODY":1,"BOOL":2,"INT":2}}
+{"file":"server/http2_windows.mbt","definition":"H2Connection::unblock","text":"cf004331eb020ff7","pinned":{"BODY":1,"IFC":2,"DEL":6,"BOOL":2,"AOR":2,"INT":2},"full":{"BODY":1,"IFC":5,"DEL":6,"BOOL":2,"AOR":2,"INT":4}}
 {"file":"server/http2_windows.mbt","definition":"H2Connection::write_slowly","text":"fa7d0490b77d99bd","pinned":{"BODY":1,"IFC":1,"LCR":1,"NOT":1,"DEL":3,"BOOL":1},"full":{"BODY":1,"IFC":1,"LCR":1,"NOT":1,"DEL":3,"BOOL":1}}
-{"file":"server/http2_windows.mbt","definition":"H2Connection::trickle","text":"6cf8b3b54cbfe38a","pinned":{"BODY":1,"ROR":7,"IFC":15,"LCR":1,"NOT":1,"DEL":18,"BOOL":10,"AOR":4,"INT":12},"full":{"BODY":1,"ROR":7,"IFC":29,"LCR":1,"NOT":1,"DEL":18,"BOOL":10,"AOR":4,"INT":18}}
+{"file":"server/http2_windows.mbt","definition":"H2Connection::trickle","text":"aeec34cfef34831b","pinned":{"BODY":1,"ROR":7,"IFC":15,"LCR":1,"NOT":1,"DEL":22,"BOOL":13,"AOR":6,"INT":14},"full":{"BODY":1,"ROR":7,"IFC":29,"LCR":1,"NOT":1,"DEL":22,"BOOL":13,"AOR":6,"INT":22}}
 {"file":"server/journal.mbt","definition":"JournalMetrics::register","text":"09b4b0482e73976e","pinned":{"DEL":1,"INT":2,"STR":6},"full":{"DEL":1,"INT":4,"STR":12}}
 {"file":"server/journal.mbt","definition":"JournalMetrics::update","text":"e64f6817815d09d6","pinned":{"BODY":1,"ROR":1,"IFC":1,"DEL":4,"AOR":1},"full":{"BODY":1,"ROR":1,"IFC":2,"DEL":4,"AOR":1}}
 {"file":"server/journal.mbt","definition":"query_journal","text":"2b45aefbab918404","pinned":{"INT":2,"STR":4},"full":{"IFC":1,"INT":6,"STR":8}}

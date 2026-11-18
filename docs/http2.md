@@ -803,6 +803,12 @@ connection.
     `CANCEL`, and the connection's other streams go on. Its request is in
     the Journal, as a request whose client goes away is.
 
+  For this timeout, a body waits once what smock queued before it has gone
+  out. A stream that waits for window while its last DATA is still being
+  written ([Streams that wait](#streams-that-wait)) has the write timeout
+  of that write until then, so a client that reads that DATA slowly but
+  steadily, and widens the window once it has read it, is not cut for it.
+
   So a client that widens its windows slowly but steadily, a few octets at
   a time, gets its whole response, however long it takes in all. A
   WINDOW_UPDATE for one stream does not start the connection's write

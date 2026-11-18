@@ -167,6 +167,7 @@ async fn[S : @io.Reader + @io.Writer + ReadOutput] MockPorts::serve_http2(
       past_deadline: Map([]),
       deadline_ended: [],
       blocked: Map([]),
+      watched: 0,
       claimed: 0,
       window_deadline: forever,
       initial_window: 65535,
@@ -309,6 +310,10 @@ priv struct H2Connection {
   /// the windows allow of a body is queued and more is left
   /// (`begin_wait`), until the stream's task takes what it is woken for.
   blocked : Map[Int32, WindowWait]
+  /// How many of the waits in `blocked` the write timeout watches
+  /// (`WindowWait::watched`): while none, no write timeout of a wait for
+  /// window runs.
+  mut watched : Int32
   /// The octets of the connection window that the slow writes woken from
   /// `blocked` are still to send: set aside when each is woken, until its
   /// task has sent them, so that no other stream takes them meanwhile.

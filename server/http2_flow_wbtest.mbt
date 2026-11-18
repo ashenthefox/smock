@@ -137,9 +137,14 @@ async fn with_pipe_client(
     sent: @async.CondVar::Cond(),
   }
   let connection : Connection = { idle: true, drain: None, task: None, }
+  // Once the steps are over, the client closes its end, and a write of
+  // smock's still going on fails, as on a socket that the client closed.
+  let mut over = false
   @async.with_task_group(group => {
     group.spawn_bg(no_wait=true, () => {
-      let _ = ports.serve_http2(smock, connection, b"")
+      let _ = ports.serve_http2(smock, connection, b"") catch {
+        error => if over { false } else { raise error }
+      }
     })
     group.spawn_bg(no_wait=true, () => {
       for ;; {
@@ -150,6 +155,7 @@ async fn with_pipe_client(
       }
     })
     steps(client)
+    over = true
     client.to_smock.close()
     client.from_smock.close()
   })
@@ -172,7 +178,10 @@ fn PipeClient::send(self : PipeClient, frames : Array[@http2.Frame]) -> Unit {
 /// write, once it begins.
 async fn PipeClient::read_some(self : PipeClient, max : Int32) -> Unit {
   let buf = FixedArray::make(max, b'\x00')
-  let n = self.from_smock.read(buf)
+  guard @async.with_timeout_opt(patience_ms, () => self.from_smock.read(buf))
+    is Some(n) else {
+    fail("smock wrote nothing")
+  }
   guard n > 0 else { fail("smock ended the connection") }
   self.received = self.received +
     buf.unsafe_reinterpret_as_bytes()[:n].to_owned()
@@ -404,6 +413,77 @@ async test "a stream that has sent what the connection window gave it waits agai
         #|HEADERS 3
         #|--- the connection window widened by 5
         #|DATA 1: 1 frames, 5 octets
+      ),
+    )
+  })
+}
+
+///|
+async test "a stream's write timeout for its own window runs from once what it sent before has gone out: a client that reads that DATA slowly, for longer than the write timeout, then widens the window, gets the rest (#391)" {
+  // #391: the write timeout of a wait for window "starts as on main, once
+  // the stream's DATA is written". docs/http2.md, Timeouts: "For this
+  // timeout, a body waits once what smock queued before it has gone out.
+  // A stream that waits for window while its last DATA is still being
+  // written ... has the write timeout of that write until then, so a
+  // client that reads that DATA slowly but steadily, and widens the window
+  // once it has read it, is not cut for it." The test widens the window
+  // 200 ms after it has read the DATA, well within the write timeout of
+  // 500 ms, and reads the DATA for about a second, well past it.
+  with_pipe_client(flow_ports(["--write-timeout-ms", "500"]), client => {
+    let out = []
+    // Stream windows of 500 octets, with the connection window open: stream
+    // 1's body waits for its own window.
+    client.send([
+      Settings(params=[(@http2.settings_initial_window_size, 500)], ack=false),
+      get_request(1, "/big"),
+    ])
+    out.push(client.runs_until(data_total(500)))
+    // The task of stream 1 begins to write the next 500 octets, which the
+    // client does not read yet, and a PING meanwhile has smock's reader look
+    // at the waits for window, as it does before each read.
+    out.push(
+      "--- stream 1's window widened by 500, and a PING while its DATA goes out",
+    )
+    let writes = client.smock.writes
+    client.send([WindowUpdate(stream_id=1, increment=500)])
+    client.smock.writes_past(writes)
+    let reads = client.smock.reads
+    client.send([Ping(payload=b"\x00\x00\x00\x00\x00\x00\x00\x01", ack=false)])
+    client.smock.reads_past(reads)
+    // The client reads that DATA and the PING's acknowledgement 50 octets
+    // every 100 ms: about a second, twice the write timeout, while the write
+    // goes on at each read.
+    out.push(
+      client.runs_until(
+        frame => frame is Ping(ack=true, ..),
+        max=50,
+        pause_ms=100,
+      ),
+    )
+    // Then it widens the window 200 ms after it has read them: within the
+    // write timeout of the wait, from when the DATA has gone out.
+    @async.sleep(200)
+    out.push("--- stream 1's window widened by 149000, 200 ms later")
+    client.send([WindowUpdate(stream_id=1, increment=149_000)])
+    out.push(
+      client.runs_until(frame => {
+        frame is (Data(stream_id=1, ..) | RstStream(stream_id=1, ..))
+      }),
+    )
+    // docs/http2.md, The output bound: "at most 16 KiB at a time, its DATA
+    // frame's header included", so 16,384 - 9 octets.
+    inspect(
+      out.join("\n"),
+      content=(
+        #|SETTINGS
+        #|SETTINGS ACK
+        #|HEADERS 1
+        #|DATA 1: 1 frames, 500 octets
+        #|--- stream 1's window widened by 500, and a PING while its DATA goes out
+        #|DATA 1: 1 frames, 500 octets
+        #|PING ACK
+        #|--- stream 1's window widened by 149000, 200 ms later
+        #|DATA 1: 1 frames, 16375 octets
       ),
     )
   })
