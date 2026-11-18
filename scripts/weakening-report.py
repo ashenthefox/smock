@@ -28,12 +28,21 @@ What it lists, each under a heading, or "Nothing to report.":
       function, fail, abort or panic; a guard; an if whose block fails;
       and a line that compares two values (==, !=, <, <=, > or >=).
       Lines are compared without their indentation. Lines added inside
-      an assertion are not listed, as extending a test adds them.
+      an assertion are not listed here, as extending a test adds them.
   Snapshot lines changed
       the lines a test removes from, changes in or adds to a snapshot:
       the content= of a call of inspect, debug_inspect or json_inspect,
       or a constant or a variable that a content= names; and each file
       in a __snapshot__ directory that the head changes or deletes.
+  Other lines changed in tests that stay
+      in the same items, every other line of code that the head removes,
+      changes or adds: such as a wait, or a condition that a test
+      computes before it asserts the result, and the lines added inside
+      an assertion. So each item whose code changed is in the report.
+      Each changed line is in one section only: a hunk of lines that
+      touches a snapshot is under the snapshots, else one that touches
+      an assertion under the assertions. A hunk of comments and blank
+      lines alone is not listed.
   Skip attributes and target settings added
       each #skip or #cfg attribute that a test gains, a package whose
       supported targets no longer let its tests run on wasm-gc, and a
@@ -376,35 +385,70 @@ def snapshot_spans(item, names):
     return spans
 
 
-def weakened(before, after, names):
-    """The hunks in which after removes or changes a snapshot or an
-    assertion of before, or adds lines inside a snapshot: those of
-    snapshots, and those of other assertions. Lines added inside another
-    assertion, such as a case added to the value an inspect shows, are not
-    listed: they change its snapshot when they change what it shows. Lines
-    are compared without their indentation, so that a block moved deeper
-    changes nothing."""
+def is_comment(line):
+    """Whether a line holds no code: blank, or a comment alone."""
+    stripped = line.strip()
+    return not stripped or stripped.startswith("//")
+
+
+def compared(item):
+    """An item's lines as the report compares them: without their
+    indentation, and a test's header without the test's name, which the
+    section on tests moved or renamed shows."""
+    lines = [line.strip() for line in item.lines]
+    if item.kind == "test" and lines and (match := TEST_HEADER.match(lines[0])) and match.group(1):
+        lines[0] = lines[0][: match.start(1)] + lines[0][match.end(1) :]
+    return lines
+
+
+@dataclass
+class Changes:
+    """What the head changed in an item that stays, as hunks by section:
+    those of snapshots, those of other assertions, and every other hunk;
+    and the hunks of comments and blank lines alone, which are not
+    listed."""
+
+    snapshot: list
+    assertion: list
+    other: list
+    comment: list
+
+    def listed(self):
+        """Whether any of its hunks is listed."""
+        return bool(self.snapshot or self.assertion or self.other)
+
+
+def changes(before, after, names):
+    """The hunks in which after changes before, each in one section: those
+    that remove or change a snapshot's lines, or add lines inside one; of
+    the rest, those that remove or change an assertion; and every other
+    hunk that changes code, such as a wait or a condition computed before
+    it is asserted, or lines added inside an assertion, as extending a
+    test adds them. Lines are compared without their indentation, so that
+    a block moved deeper changes nothing."""
     snapshots = snapshot_spans(before, names)
     assertions = assertion_spans(before.lines)
-    matcher = difflib.SequenceMatcher(
-        None,
-        [line.strip() for line in before.lines],
-        [line.strip() for line in after.lines],
-        autojunk=False,
-    )
-    found = {"snapshot": [], "assertion": []}
+    matcher = difflib.SequenceMatcher(None, compared(before), compared(after), autojunk=False)
+    found = Changes([], [], [], [])
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
         hunk = Hunk(before.line + i1, before.lines[i1:i2], after.line + j1, after.lines[j1:j2])
         if i1 == i2:
-            if i1 > 0 and inside(snapshots, i1 - 1, i1):
-                found["snapshot"].append(hunk)
-        elif touches(snapshots, i1, i2 - 1):
-            found["snapshot"].append(hunk)
-        elif touches(assertions, i1, i2 - 1):
-            found["assertion"].append(hunk)
-    return found["snapshot"], found["assertion"]
+            snapshot = i1 > 0 and inside(snapshots, i1 - 1, i1)
+            assertion = False
+        else:
+            snapshot = touches(snapshots, i1, i2 - 1)
+            assertion = touches(assertions, i1, i2 - 1)
+        if snapshot:
+            found.snapshot.append(hunk)
+        elif assertion:
+            found.assertion.append(hunk)
+        elif all(is_comment(line) for line in hunk.base + hunk.head):
+            found.comment.append(hunk)
+        else:
+            found.other.append(hunk)
+    return found
 
 
 def package_items(repo, rev, package):
@@ -779,7 +823,7 @@ def report(repo, base_ref, head_ref):
         for line in git(repo, "diff", "--name-status", "--no-renames", base, head).splitlines()
     ]
 
-    deleted, assertions, snapshots, skips = [], [], [], []
+    deleted, assertions, snapshots, others, skips = [], [], [], [], []
     packages = sorted({posixpath.dirname(path) for _, path in changed if is_moonbit(path)})
     for package in packages:
         base_items = package_items(repo, base, package)
@@ -794,11 +838,13 @@ def report(repo, base_ref, head_ref):
             )
             if before is None:
                 continue
-            in_snapshots, in_assertions = weakened(before, after, names)
-            if in_snapshots:
-                snapshots.append(changed_item(before, after, in_snapshots))
-            if in_assertions:
-                assertions.append(changed_item(before, after, in_assertions))
+            found = changes(before, after, names)
+            if found.snapshot:
+                snapshots.append(changed_item(before, after, found.snapshot))
+            if found.assertion:
+                assertions.append(changed_item(before, after, found.assertion))
+            if found.other:
+                others.append(changed_item(before, after, found.other))
     for status, path in changed:
         if "__snapshot__" in path.split("/") and status in ("M", "D"):
             snapshots.append(changed_file(repo, base, head, path))
@@ -824,6 +870,7 @@ def report(repo, base_ref, head_ref):
     for title, entries in (
         ("Assertions removed or changed in tests that stay", assertions),
         ("Snapshot lines changed", snapshots),
+        ("Other lines changed in tests that stay", others),
     ):
         if entries:
             out += [f"## {title}", ""]
@@ -837,7 +884,7 @@ def report(repo, base_ref, head_ref):
     reviewed = reviewer_changes(repo, base, head, changed)
     if reviewed:
         out += ["## Exclusion entries whose reviewer changed", "", *reviewed, ""]
-    if not (deleted or assertions or snapshots or skips or verdicts or reviewed):
+    if not (deleted or assertions or snapshots or others or skips or verdicts or reviewed):
         out += ["Nothing to report.", ""]
     return out
 

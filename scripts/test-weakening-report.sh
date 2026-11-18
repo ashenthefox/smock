@@ -101,6 +101,38 @@ lacks() {
   fi
 }
 
+# section <name> <heading>: the lines of the report <name> under the
+# heading "## <heading>", up to the next heading of its level.
+section() {
+  awk -v heading="## $2" '
+    $0 == heading { inside = 1; next }
+    /^## / { inside = 0 }
+    inside
+  ' "$tmp/$1.out"
+}
+
+# mentions_in <name> <heading> <text>: the report <name> holds <text> in a
+# line under the heading "## <heading>".
+mentions_in() {
+  if section "$1" "$2" | grep -qF -- "$3"; then
+    pass "$1: mentions $3 under $2"
+  else
+    fail "$1: does not mention $3 under $2"
+    sed 's/^/     /' "$tmp/$1.out"
+  fi
+}
+
+# lacks_in <name> <heading> <text>: the report <name> holds <text> in no
+# line under the heading "## <heading>".
+lacks_in() {
+  if section "$1" "$2" | grep -qF -- "$3"; then
+    fail "$1: mentions $3 under $2"
+    sed 's/^/     /' "$tmp/$1.out"
+  else
+    pass "$1: does not mention $3 under $2"
+  fi
+}
+
 # empty <name>: the report <name> lists nothing.
 empty() {
   if grep -qxF -- "Nothing to report." "$tmp/$1.out" && ! grep -q '^## ' "$tmp/$1.out"; then
@@ -110,6 +142,9 @@ empty() {
     sed 's/^/     /' "$tmp/$1.out"
   fi
 }
+
+# The headings of the report's sections that a test reads by name.
+other="Other lines changed in tests that stay"
 
 # A package with two tests and the function they test.
 package() {
@@ -312,7 +347,9 @@ mentions helper '`add/timed_test.mbt:15`: fn check_short'
 mentions helper '-    fail("too long: \{text}")'
 
 # Assertions added to a test that stays, a changed line that asserts
-# nothing, and the same test indented in a block of its own weaken nothing.
+# nothing, and the same test indented in a block of its own remove or
+# change no assertion. The added and changed lines show among the other
+# lines (#395), and the deeper indentation nowhere.
 tree
 package
 timed
@@ -342,20 +379,28 @@ fn check_short(text : String) -> Unit raise {
 }
 MBT
 report extended
-empty extended
+lacks extended "## Assertions removed or changed in tests that stay"
+lacks extended "## Snapshot lines changed"
+mentions_in extended "$other" '-  let took = 120L'
+mentions_in extended "$other" '+  let took = 121L'
+mentions_in extended "$other" '+    inspect(took > 0L, content="true")'
+lacks extended '+    guard took < 250L'
 
-# A case added inside an assertion, as extending a test adds one, weakens
-# nothing.
+# A case added inside an assertion, as extending a test adds one, removes
+# or changes no assertion: it shows among the other lines (#395).
 tree
 package
 timed
 branch
 sed -i 's/^    @add.add(took.to_int(), 1),$/    @add.add(took.to_int(), 1),\n    @add.add(1, 1),/' "$repo/add/timed_test.mbt"
 report case-added
-empty case-added
+lacks case-added "## Assertions removed or changed in tests that stay"
+lacks case-added "## Snapshot lines changed"
+mentions_in case-added "$other" '+    @add.add(1, 1),'
 
-# A test whose name is extended, with a case added, stays; one whose name
-# changes with an assertion is listed under its new name.
+# A test whose name is extended, with a case added, stays: its added case
+# is among the other lines (#395), and no assertion of it is listed. One
+# whose name changes with an assertion is listed under its new name.
 tree
 package
 timed
@@ -364,7 +409,11 @@ sed -i 's/test "answers in time"/test "answers in time, under 250 ms"/; s/^  ins
 sed -i 's/test "adds two numbers"/test "adds two positive numbers"/; s/assert_eq(@add.add(2, 3), 5)/assert_eq(@add.add(2, 3), 6)/' "$repo/add/add_test.mbt"
 report renamed
 lacks renamed "## Tests deleted"
-lacks renamed 'answers in time'
+lacks_in renamed "Assertions removed or changed in tests that stay" 'answers in time'
+lacks renamed "## Snapshot lines changed"
+mentions_in renamed "$other" '### `add/timed_test.mbt:2`: test "answers in time"'
+mentions_in renamed "$other" 'Now `add/timed_test.mbt:2`: test "answers in time, under 250 ms".'
+mentions_in renamed "$other" '+  inspect(took > 100L, content="true")'
 mentions renamed '### `add/add_test.mbt:2`: test "adds two numbers"'
 mentions renamed 'Now `add/add_test.mbt:2`: test "adds two positive numbers".'
 mentions renamed '-  assert_eq(@add.add(2, 3), 5)'
@@ -466,7 +515,9 @@ mentions snapshot-file '+6'
 mentions snapshot-file '`add/__snapshot__/difference.txt`'
 lacks snapshot-file 'zero.txt'
 
-# The test's input changed, and a new snapshot added, weaken nothing.
+# The test's input changed, and a new snapshot added, change no snapshot
+# or assertion: the input's new line shows among the other lines (#395),
+# and the new test nowhere.
 tree
 package
 snapshots
@@ -485,7 +536,88 @@ test "writes one line" {
 }
 MBT
 report input
-empty input
+lacks input "## Snapshot lines changed"
+lacks input "## Assertions removed or changed in tests that stay"
+mentions_in input "$other" '+    #|c: 3'
+lacks input 'writes one line'
+
+# --- Other lines changed in tests that stay ---------------------------------------
+
+# A test that computes its result first and asserts it later, as the SSE
+# test of a client that closes the connection mid-stream does (#395): the
+# wait and the condition that decide what it shows are lines that assert
+# nothing, so its snapshot can stay while they loosen it.
+waited() {
+  file add/waited_test.mbt <<'MBT'
+///|
+test "ends soon after the close" {
+  let start = 0L
+  // The stream ends at smock's next write.
+  let ended = wait_for(3000)
+  let ended_ms = 120L - start
+  let out = [
+    if ended {
+      "ended"
+    } else {
+      "still runs 3 s after the close"
+    },
+  ]
+  inspect(out.join("\n"), content="ended")
+}
+
+///|
+/// Whether the stream ended within the wait.
+fn wait_for(ms : Int) -> Bool {
+  let waited = ms
+  waited > 0
+}
+MBT
+}
+
+# The wait raised, and the condition changed: issue #395's first example.
+# A line added that asserts nothing shows too.
+tree
+package
+waited
+branch
+sed -i 's/wait_for(3000)/wait_for(20000)/; s/^    if ended {$/    if ended \&\& ended_ms < 10000L {/' "$repo/add/waited_test.mbt"
+sed -i 's/^  let ended_ms = 120L - start$/  let ended_ms = 120L - start\n  let _ = ended_ms + 1L/' "$repo/add/waited_test.mbt"
+report other
+mentions other "## $other"
+mentions_in other "$other" '### `add/waited_test.mbt:2`: test "ends soon after the close"'
+mentions_in other "$other" '-  let ended = wait_for(3000)'
+mentions_in other "$other" '+  let ended = wait_for(20000)'
+mentions_in other "$other" '-    if ended {'
+mentions_in other "$other" '+    if ended && ended_ms < 10000L {'
+mentions_in other "$other" '+  let _ = ended_ms + 1L'
+lacks other "## Assertions removed or changed in tests that stay"
+lacks other "## Snapshot lines changed"
+lacks other "## Tests deleted"
+
+# A comment changed and a blank line added change no code: nothing shows.
+tree
+package
+waited
+branch
+sed -i "s|^  // The stream ends at smock's next write.\$|  // smock notices at its next write (the documents' words).\n|" "$repo/add/waited_test.mbt"
+report comment
+empty comment
+
+# The other lines of a helper of a test file show too, since a helper's
+# wait loosens every test that calls it; a changed comparison in it stays
+# with the assertions.
+tree
+package
+waited
+branch
+sed -i 's/^  waited > 0$/  waited >= 0/' "$repo/add/waited_test.mbt"
+sed -i 's/^fn wait_for(ms : Int) -> Bool {$/fn wait_for(ms : Int, patience? : Int = 20000) -> Bool {/' "$repo/add/waited_test.mbt"
+report other-helper
+mentions_in other-helper "$other" '### `add/waited_test.mbt:19`: fn wait_for'
+mentions_in other-helper "$other" '-fn wait_for(ms : Int) -> Bool {'
+mentions_in other-helper "$other" '+fn wait_for(ms : Int, patience? : Int = 20000) -> Bool {'
+mentions_in other-helper "Assertions removed or changed in tests that stay" '-  waited > 0'
+lacks_in other-helper "$other" '-  waited > 0'
 
 # --- Skip attributes and settings that keep tests off wasm-gc ---------------------
 
