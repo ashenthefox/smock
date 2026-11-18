@@ -758,6 +758,13 @@ of each GitHub release include its section
   read apart the same way. When such a read finds the files changed,
   smock now waits for them to settle, as for any change, and then reloads
   them once ([smock#384](https://github.com/hirunefu/smock/issues/384)).
+- After a rotation to a certificate whose notAfter smock cannot read, the
+  certificate expiry metric now gives 0 for it, as at startup. It kept the
+  notAfter of the certificate before, which the TLS port no longer
+  presented, so an alert on the metric watched a certificate that was no
+  longer served. A failed reload still keeps the series of the certificate
+  that smock keeps presenting
+  ([smock#385](https://github.com/hirunefu/smock/issues/385)).
 
 ## [0.4.0] - 2026-11-01
 

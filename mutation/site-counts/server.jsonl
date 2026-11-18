@@ -29,7 +29,7 @@
 {"file":"server/certificates.mbt","definition":"Pair::load","text":"1328c81809cfc1b1","pinned":{"BODY":1,"DEL":3,"STR":2},"full":{"BODY":1,"DEL":3,"STR":4}}
 {"file":"server/certificates.mbt","definition":"pair_fields","text":"133f439892a618d4","pinned":{"BODY":1,"DEL":1,"STR":1},"full":{"BODY":1,"DEL":1,"STR":2}}
 {"file":"server/certificates.mbt","definition":"add_file_fields","text":"cef383c667d5cec1","pinned":{"BODY":1,"DEL":2,"STR":2},"full":{"BODY":1,"DEL":2,"STR":4}}
-{"file":"server/certificates.mbt","definition":"Pair::set_expiry","text":"dda490bf679f8d4f","pinned":{"BODY":1,"IFC":1,"DEL":1,"AOR":1},"full":{"BODY":1,"IFC":1,"DEL":1,"AOR":1}}
+{"file":"server/certificates.mbt","definition":"Pair::set_expiry","text":"1d58ab9aa2d50ba1","pinned":{"BODY":1,"IFC":1,"DEL":1,"AOR":1,"INT":1},"full":{"BODY":1,"IFC":1,"DEL":1,"AOR":1,"INT":2}}
 {"file":"server/certificates.mbt","definition":"stamp_pairs","text":"1eddfa4c3c5cdde5","pinned":{"BODY":1,"DEL":2},"full":{"BODY":1,"DEL":2}}
 {"file":"server/certificates.mbt","definition":"Certificates::select","text":"2e043ee8992b6a7b","pinned":{"IFC":1,"NOT":1},"full":{"IFC":1,"NOT":1}}
 {"file":"server/certificates.mbt","definition":"Certificates::after_swap","text":"3fc9a19ae13c3d9d","pinned":{"BODY":1,"IFC":1,"DEL":2},"full":{"BODY":1,"IFC":1,"DEL":2}}
