@@ -55,7 +55,7 @@ sentence states several limits, each found by
 held by no row before. On 5bf509f1, 49 of them are tested on both sides,
 19 partly and 1 open. A row that #375 added names the tests that exist,
 and the ticket that adds what is missing: the L4 ticket of its package, or
-gap G5 for `server`.
+#383, gap G5, for `server`.
 
 ## Changes since the survey
 

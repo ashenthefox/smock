@@ -34,9 +34,10 @@ REPO = HERE.parent.parent
 FIXTURE = HERE / "fixture"
 SITES = HERE / "sites.py"
 RUN = HERE / "run.py"
-# The machine whose native verdict decides: amd64 (#307: arm64's builds may
-# behave otherwise on undefined behaviour, so their verdict is not used),
-# as Python names it there.
+# The machine whose native verdict decides: amd64, as Python names it
+# there. #307, and the maintainer's decision of 2026-11-18 (#275): native
+# verdicts are taken on CI's amd64 runner, one machine, so that they can be
+# reproduced; arm64's native verdict is recorded and not used.
 AMD64 = ("x86_64", "AMD64")
 # The machine the tests run on, as Python names it, and whether its native
 # verdict decides.

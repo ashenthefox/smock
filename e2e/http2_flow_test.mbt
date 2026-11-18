@@ -263,7 +263,9 @@ async test "h2c: streams waiting on the connection window get it in the order th
       // Then the 149,505 octets left of the bodies of streams 1 and 5, which
       // one widening gives to both: their tasks may send in either order,
       // which is not checked here. The next test checks which of the two
-      // waits first.
+      // waits first, as the maintainer decided on 2026-11-18: a stream
+      // begins to wait when its response is queued without all of its body
+      // (#381).
       out.push("--- the connection window widened by 149505")
       raw.send([WindowUpdate(stream_id=0, increment=149_505)])
       let rest = raw.runs_until(data_total(149_505)).split("\n").collect()

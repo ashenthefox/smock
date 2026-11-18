@@ -93,6 +93,10 @@ VERDICTS = ("killed", "timed out", "survived", "unviable")
 VERDICT_OF = {"killed": "killed", "timed out": "killed", "survived": "survived", "equivalent": "survived",
               "unviable": "unviable", "unconfirmed": "unconfirmed"}
 REPLAYED = ("killed", "survived", "unviable", "unconfirmed")
+# What may explain a difference: #308's flaky test, time limit and site
+# finder, and importers' tests that the replay ran and the recorded verdict
+# did not, which the maintainer accepted as a category on 2026-11-18
+# (#275). A bug in the runner is fixed, never listed.
 CATEGORIES = ("flaky test", "time limit", "site finder", "importers' tests")
 EXPLANATION = {"mutant": str, "recorded": str, "replayed": str, "category": str, "reason": str, "accepted": str}
 # What a replay that stops says, besides the runner's own reason.

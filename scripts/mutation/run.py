@@ -143,9 +143,11 @@ unchecked array access (unchecked_access), whose tests ran, runs again
 natively, the same way, with the same tests (native.py): wasm-gc traps
 on an access out of bounds where the native binary reads on. Its record
 gives both verdicts (verdicts), and the native verdict decides on amd64
-alone. A package that builds only natively runs wholly natively, with
-its own tests, and its compiler output is not compared. Before the first
-native build, the runner unsets moon's variables for another C compiler
+alone: native verdicts are taken on CI's amd64 runner, one machine, so
+that they can be reproduced, and one taken off CI is for information. A
+package that builds only natively runs wholly natively, with its own
+tests, and its compiler output is not compared. Before the first native
+build, the runner unsets moon's variables for another C compiler
 (MOON_CC, MOON_AR, MOON_CC_WRAPPER), and native runs dump no core.
 summary.json and report.md give, per package, what ran natively, where,
 and the mutants whose verdicts differ between the backends (native).
