@@ -503,7 +503,9 @@ It sends what a gRPC server sends:
   and its `grpc.trailers`, its trailing metadata. They end the stream.
 
 A reply larger than the client's flow-control windows goes out as the
-client widens them, and the trailers follow it.
+client widens them, and the trailers follow it. It waits for window as a
+response body does, in the same order as the connection's other streams
+([Streams that wait](../http2.md#streams-that-wait)).
 
 ## proto2 types
 
