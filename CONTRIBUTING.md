@@ -5,14 +5,15 @@ Bug reports and proposals are welcome as
 that changes code, open an issue and talk the approach over there, so that
 the work fits where smock is going. Before merging a contributor's pull
 request, the maintainer pushes its branch here, so that the
-[weakening report](#the-weakening-report) runs on it. Report a
+[weakening report](#the-weakening-report) and the
+[changed-lines job](#the-changed-lines-job) run on it. Report a
 vulnerability privately, as [SECURITY.md](SECURITY.md) says.
 
 This document is for people who work on smock itself. It describes the
 repository's layout, the pinned MoonBit toolchain, how to build and test
 smock, how its tests are judged, the mutation runner, the weakening
-report, how to measure the tests' costs on CI's runners, and the
-release benchmark, and says where making a release is described. The
+report, the changed-lines job, how to measure the tests' costs on CI's
+runners, and the release benchmark, and says where making a release is described. The
 [Contributing to smock](docs/README.md#contributing-to-smock) list in
 docs/README.md names the other documents for contributors: the
 architecture decisions (ADRs), the glossary and the maintainer's
@@ -26,6 +27,7 @@ checklists.
 - [How tests are judged](#how-tests-are-judged)
 - [Mutation runner](#mutation-runner)
 - [The weakening report](#the-weakening-report)
+- [The changed-lines job](#the-changed-lines-job)
 - [Test costs on CI's runners](#test-costs-on-cis-runners)
 - [Benchmark](#benchmark)
 - [Making a release](#making-a-release)
@@ -256,6 +258,11 @@ it (see [Test costs on CI's runners](#test-costs-on-cis-runners)).
 many times on one runner, to show that a timing test holds on CI's
 runners (see [Build and test](#build-and-test)).
 
+`.github/workflows/mutation-runs.yml` runs the mutation runner's bulk
+runs in shards on GitHub's runners and merges them into one report: the
+weekly and the monthly runs on a schedule, the others when started by
+hand (see [Bulk runs on Actions](#bulk-runs-on-actions)).
+
 `scripts/h2spec/` holds the Definition file that CI serves to h2spec, the
 HTTP/2 conformance tool, and the lists of h2spec's cases that do not pass on
 the plain port and on the TLS port, each with its reason (see
@@ -357,8 +364,13 @@ scripts/check-branch-checks-workflow.sh   # the branch checks workflow writes th
 scripts/test-check-branch-checks-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 python3 scripts/weakening-report.py --base origin/main   # what this branch weakens, against its merge base with main (needs git)
 scripts/test-weakening-report.sh     # the weakening report, on small git histories (needs python3 and git)
+scripts/test-changed-lines.sh        # the changed-lines job of the branch checks, with a fake mutation runner on small git histories (needs python3, git and jq)
+python3 scripts/check-merge.py <branch>   # whether the branch checks on the branch's head let it be merged into main, and its weakening report (needs git and gh)
+scripts/test-check-merge.sh          # the merge check, with a fake gh and canned runs on a small git history (needs python3, git and jq)
 scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs only by hand, and installs its commit's toolchain before the replay (needs yq and jq)
 scripts/test-check-mutation-canary-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
+scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only by hand, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
+scripts/test-check-mutation-runs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
 scripts/test-yaml-test-suite-verdict.sh   # how a run of yaml-test-suite is judged against its lists of cases
@@ -389,7 +401,7 @@ scripts/check-conformance.sh         # protobuf's conformance suite against smoc
 scripts/fetch-yaml-test-suite.sh     # the pinned release of the YAML test suite, into _build/yaml-test-suite
 scripts/check-yaml-test-suite.sh     # the YAML test suite against smock/yaml in both modes, judged by yaml-test-suite/safe.txt and openapi.txt (fetches the suite first)
 scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, read smock's LLM responses (needs python3 and PyPI)
-python3 -m unittest discover -s scripts/mutation -v   # the mutation runner and its site finder, on a module whose mutants are known, and the exclusion list (needs git, moon and moonc)
+python3 -m unittest discover -s scripts/mutation -v   # the mutation runner and its site finder, on a module whose mutants are known, the exclusion list and the bulk runs' steps (needs git, moon and moonc)
 python3 scripts/mutation/exclusions.py check   # each entry of the exclusion list has a category and what it needs, and the stale ones are listed (needs moonc)
 python3 scripts/mutation/exclusions.py review --base origin/main   # the entries this branch adds or changes, and those the maintainer reads (--seed draws one in five)
 python3 scripts/check-e2e-helpers.py   # no e2e test file uses what another test file defines (needs moon and moonc)
@@ -935,7 +947,9 @@ Step 3's close checks the ledgers against the documents once more
 
 Each package has a floor: the most uncovered points its in-process tests
 may leave, as `scripts/coverage.sh` counts them. `coverage/floors.txt`
-holds them; they were first taken from the report at d88929b2. CI's job
+holds them. They start at the counts committed there, first taken from
+the report at d88929b2, as the maintainer decided on 2026-11-18, and
+each change since lowers or raises them by the rules below. CI's job
 `coverage` runs `scripts/coverage.sh` on every push and pull request, then
 `scripts/coverage-ratchet.py check` on its bisect report, against the
 merge base with `main`:
@@ -994,6 +1008,9 @@ A package climbs four levels:
   changes.
 - **L4, per package**: no unexplained survivor over the pinned set. The
   weekly run executes exactly this set, so it verifies L4.
+  `mutation/l4-packages.txt` lists the packages at L4. It started empty,
+  and a package joins it only with the maintainer's approval, in the
+  ticket that takes it to L4.
 
 All 19 pure packages go to L4, in two stages: first `yaml`, `http1`,
 `xml`, `re2`, `grpc`, `cookies`, `settings`, `metrics`, `usage` and
@@ -1170,9 +1187,10 @@ covering test for every mutant.
 credit.
 
 **Backend.** The verdicts for pure packages are taken on wasm-gc. A site
-that uses an unchecked array access is also judged natively on amd64,
-because wasm-gc traps where the native binary does not, and for such a
-site the native verdict decides.
+that uses an unchecked array access is also judged natively, because
+wasm-gc traps where the native binary does not, and for such a site the
+native verdict taken on CI's amd64 runner decides (the runner's "Native
+verdicts", in [Mutation runner](#mutation-runner)).
 
 The runner never passes `-u` to `moon test`.
 
@@ -1341,7 +1359,9 @@ report lists every entry whose reviewer changed.
   review.
 - **Seeds.** Each property runs with a fixed seed committed beside it: on
   every push, in mutation runs and in kill confirmations. Each week a
-  separate job writes a random seed into a working copy, the way the
+  separate job of the weekly mutation run
+  ([Bulk runs on Actions](#bulk-runs-on-actions)) writes a random seed
+  into a working copy, the way the
   runner applies a mutant, and prints it; a failure is rerun by
   committing that seed. No test reads the environment for a seed, so
   `scripts/check-no-io.sh` stays as it is.
@@ -1377,13 +1397,14 @@ report lists every entry whose reviewer changed.
   same way: before merging it, the maintainer pushes its branch here. The
   stop is in the merge procedure. It reports only, at first; once a
   package reaches L4, an unexplained survivor on lines of that package
-  that the branch changes stops the merge into `main`. A script reads the
-  report of the run on the branch head, as the release checks that CI
-  passed on a tag's commit, and the
-  [checklist before merging into main](docs/merging-into-main.md) gains
-  it when the script exists. A diff too large for the changed-lines job
-  is reported as not covered, and runs whole in a run started by hand;
-  the merge check reads whichever run covered the whole diff.
+  that the branch changes stops the merge into `main`. The merge check,
+  `scripts/check-merge.py`, reads the report of the run on the branch
+  head, as the release checks that CI passed on a tag's commit, and the
+  [checklist before merging into main](docs/merging-into-main.md) runs it
+  ([The changed-lines job](#the-changed-lines-job)). A diff too large for
+  the changed-lines job is reported as not covered, and runs whole in a
+  run started by hand; the merge check reads whichever run covered the
+  whole diff.
 - **Releases.** For the packages at L4, the latest weekly run over the
   pinned set must also show no unexplained survivor before a release, on
   the tag's commit or on an ancestor whose later changes the changed-lines
@@ -1660,10 +1681,10 @@ gives no kill credit, until enough later runs without a flaky result have
 pushed its flaky ones out of the latest. Each run writes `flakes.json`
 beside its report: the latest runs' records, this one included, and the
 rate of each test that had a flaky result among them. The next run reads
-it with `--flakes <file>`. The records live in the report artifact of the
-latest weekly run on GitHub Actions, which the next weekly run downloads
-and passes to the runner; the weekly workflow
-([#314](https://github.com/hirunefu/smock/issues/314)) does both. A run
+it with `--flakes <file>`. The records live in the artifact
+`mutation-flakes` of the latest weekly run on GitHub Actions, which the
+next weekly run downloads and passes to the runner
+([Bulk runs on Actions](#bulk-runs-on-actions)). A run
 made of shards, as the weekly run is, keeps one file: its shards each
 read the same records, and
 `python3 scripts/mutation/confirm.py merge <flakes.json>...` sums their
@@ -1718,8 +1739,11 @@ of each outcome and the runs without a mutant with the tests that failed
 in them,
 the same counts with the package's own tests alone, and its importers:
 those on wasm-gc and those left out, the survivors their tests ran again
-and how many the tests of each importer killed; `report.md`, the same
-counts, the time-outs, the unconfirmed mutants, each survivor's diff with
+and how many the tests of each importer killed, and, when BODY mutants
+ran, the **pseudo-tested functions**: those whose BODY mutant survived,
+each with its status after the exclusion list; `report.md`, the same
+counts, the time-outs, the unconfirmed mutants, the pseudo-tested
+functions, each survivor's diff with
 its whole enclosing definition, and the flaky tests, which the runner
 also prints; and `flakes.json`, the flake records. A run of the full set counts
 the mutants at the pinned alternatives and at the other alternatives
@@ -1729,9 +1753,15 @@ mutants a run would make (`chosen.jsonl`). `--work` and `--out` choose
 other directories.
 
 **Shards, samples and listed sets.** Bulk runs choose among the mutants
-with three more options, which `scripts/mutation/choice.py` implements.
+with four more options, which `scripts/mutation/choice.py` implements.
 Each summary says what chose its mutants (`selection`): the set, the
-packages, the ids, the list's SHA-256, the sample and the shard.
+packages, the ids, the operators, the list's SHA-256, the sample and the
+shard.
+
+- `--operator OP`, once or more, runs only the set's mutants that those
+  operators of v1 make, in the run's order. `--operator BODY` is a
+  **BODY pass**: the BODY mutant of every function, which L2 reads. It
+  takes no `--list`, which chooses its own mutants.
 
 - `--shard k/n` runs the k-th of n parts of the mutants, in the run's
   order (the packages as given, then each package's sites), and the
@@ -1794,9 +1824,9 @@ packages, the ids, the list's SHA-256, the sample and the shard.
   name mutants, and from its work directory the workers' builds, which
   hold the last mutants. It takes no shard.
 
-Without `--mutant`, `--list`, `--sample` or `--changed`, every package
-given runs, as before; with one of them, only the packages that hold one
-of the mutants.
+Without `--mutant`, `--operator`, `--list`, `--sample` or `--changed`,
+every package given runs, as before; with one of them, only the packages
+that hold one of the mutants.
 
 **Mutants on the changed lines.** Before you push a branch, run the
 mutants on the lines it changes. It is the one run larger than a single
@@ -1826,7 +1856,9 @@ Package directories given limit the run to them. With `--sites-only`, it
 counts the mutants on the changed lines and runs none, and with `--shard`
 the shards merge as above. A change of 460 such lines, about the 75th
 percentile of merges into `main`, had 174 mutants, which ran in 3.5
-minutes on wasm-gc on an arm64 laptop with 8 cores.
+minutes on wasm-gc on an arm64 laptop with 8 cores. On each push, the
+branch checks run the same mutants on GitHub's runners
+([The changed-lines job](#the-changed-lines-job)).
 
 **The compiler's output.** Before a mutant's tests run, the runner
 compares the compiler's output for the mutated package with the output
@@ -1911,15 +1943,24 @@ of the importers whose tests ran it on wasm-gc, with kill confirmation.
 Its record gives both verdicts under `verdicts`: `wasm-gc` and `native`,
 each with its outcome, the tests that killed it, its timings and its
 confirmation, and the machine that took the native one. `backend` names
-the verdict that counts. **The native verdict decides on amd64**: a
-mutant killed on wasm-gc that survives natively is then a survivor, with
-its diff, until a test kills it natively or an exclusion covers it
-(UB-NATIVE). On arm64, whose builds may behave otherwise on undefined
-behaviour, the native verdict is recorded and the wasm-gc verdict
-counts. Each package's summary (`native`) gives the machine, whether its
-verdict decides, the marked mutants, how many ran natively, their native
-outcomes and how many verdicts differ, and the report lists the mutants
-whose verdicts differ between the backends.
+the verdict that counts. **Native verdicts are taken on CI's amd64
+runner** (`ubuntu-24.04`): a mutant killed on wasm-gc that survives
+natively there is a survivor, with its diff, until a test kills it
+natively or an exclusion covers it (UB-NATIVE). One machine is the
+reference so that anyone can reproduce a verdict: natively, an access
+out of bounds is undefined behaviour, and what it does can change with
+the machine and with the C compiler that built the test program. That
+machine is CI's amd64 runner because native builds there are about six
+times faster than on arm64
+([Test costs on CI's runners](#test-costs-on-cis-runners)). A native
+verdict taken anywhere else, as on a laptop, is for information. The
+runner lets the native verdict decide on any amd64 machine, so that a
+laptop's records read as CI's would; on arm64 it records the native
+verdict and counts the wasm-gc one. Each package's summary (`native`)
+gives the machine, whether its verdict decides, the marked mutants, how
+many ran natively, their native outcomes and how many verdicts differ,
+and the report lists the mutants whose verdicts differ between the
+backends.
 
 A package that builds only natively, which moon refuses to test on
 wasm-gc, runs wholly natively: the two runs without a mutant, the
@@ -1947,8 +1988,8 @@ and runs, the 693 marked mutants of the pinned set take at most about
 would save at most the rebuilds, about half of that, and would need a
 read of an environment variable inside the pure packages, which do no
 I/O, and a type check of each mutant before it enters. On arm64 the same
-rebuild took 41.1 s, so the native verdicts are taken on amd64 runners in
-CI. A laptop can still run one marked mutant natively, with `--mutant`.
+rebuild took 41.1 s. A laptop can still run one marked mutant natively,
+with `--mutant`, and its verdict is for information.
 
 To see the sites of a package, and to run one mutant, or the few mutants
 of a small package (they need python3, git, moon and moonc):
@@ -1962,9 +2003,9 @@ python3 scripts/mutation/run.py usage
 ```
 
 Run only that much on a laptop, besides the mutants on your changed
-lines (above). Bulk runs, over many packages or the weekly and monthly sets, go
-to GitHub Actions, through the workflows that later steps of the review
-add.
+lines (above). Bulk runs, over many packages or the weekly and monthly
+sets, go to GitHub Actions
+([Bulk runs on Actions](#bulk-runs-on-actions)).
 
 The tests (`python3 -m unittest discover -s scripts/mutation -v`) run the
 finder and the runner on `scripts/mutation/fixture`, a module that is not
@@ -2259,7 +2300,7 @@ recorded verdicts.
 
 The whole replay is a bulk run, so it runs on GitHub Actions, in
 `.github/workflows/mutation-canary.yml`, started by hand
-(`gh workflow run mutation-canary.yml`); the weekly mutation run repeats
+(`gh workflow run mutation-canary.yml`), and the weekly mutation run calls
 it. The workflow keeps the output as the artifact `mutation-canary`. On a
 laptop, check the sites, or replay a few mutants by name:
 
@@ -2275,6 +2316,213 @@ compares the merged one. The tests (`scripts/mutation/test_canary.py`)
 check the committed data against d953f320, so they need the history down
 to that commit, and run the replay, its toolchain check and the install
 on a canary of the fixture's mutants in a git history of its own.
+
+### Bulk runs on Actions
+
+Bulk runs go to GitHub Actions, never to a laptop, but for the two named
+exceptions: step 1's replay of the 250 sampled mutants and the held-out
+runs on the maintainer's machine. `.github/workflows/mutation-runs.yml`
+runs them, only when started by hand, from the Actions tab or with `gh`.
+It also runs on two schedules, the weekly run and the monthly run
+(below). GitHub runs a workflow on a schedule, or starts it by hand, only
+once it is on the default branch; `--ref` picks the commit a run by hand
+runs on:
+
+```sh
+gh workflow run mutation-runs.yml -f mode=sample -f size=1000 -f seed=<seed>
+gh workflow run mutation-runs.yml -f mode=body
+gh workflow run mutation-runs.yml -f mode=packages -f set=full -f packages='yaml http1'
+gh workflow run mutation-runs.yml -f mode=matrix -f packages=usage
+gh workflow run mutation-runs.yml -f mode=list -f list=<a file in the repository>
+gh workflow run mutation-runs.yml -f mode=timing -f size=50 -f seed=<seed>
+gh workflow run mutation-runs.yml --ref main -f mode=monthly
+```
+
+Its inputs:
+
+- `mode`, what the run runs, with the runner's options above:
+  - `sample`: a seeded sample of `size` mutants of the set, stratified by
+    package (`--sample`);
+  - `body`: a BODY pass (`--operator BODY`);
+  - `packages`: every mutant of the set;
+  - `list`: the mutants that `list`, a file in the repository, lists
+    (`--list`), in place of a set;
+  - `matrix`: a kill matrix (`--matrix`), for a snapshot audit or a
+    removal batch;
+  - `timing`: one shard, a seeded sample of `size` mutants, run three
+    times, each on a runner of its own, with 1, 2 and 4 mutants built and
+    tested at once (`--workers`);
+  - `weekly` and `monthly`: the weekly run and the monthly run, below, by
+    hand.
+- `packages`: package directories, separated by spaces. Without them, a
+  run takes the pure packages that have sites: the 19 and `serverparsers`
+  ([Terms](#terms)); `testcerts` is data and has none. With a list, the
+  packages of its files.
+- `set`: `pinned`, the default, or `full`.
+- `seed` and `size`: a sample's, 0 and 1,000 unless given.
+- `width`: how many shards run at once, from 1 to 20, the default.
+- `workers`: how many mutants each shard builds and tests at once, 1
+  unless given.
+
+A run runs the runner as any run does: each package's own tests, then
+its importers' tests for the survivors, kill confirmation, the comparison
+of the compiler's output, the self-test and the exclusion list. It has
+three jobs, and `scripts/mutation/bulk.py` holds the steps they take:
+
+- **plan** runs `run.py --sites-only` on the mode's selection, which runs
+  no mutant, and cuts the mutants into shards: as many as the width, or
+  more when a shard would not end within a job's time. A job on GitHub's
+  runners stops after 6 hours; a shard's mutants may take 5 of them, at
+  20 s a mutant (`bulk.py plan --seconds-per-mutant`). That is the
+  costliest package's mutant on a runner with its kill confirmed:
+  `engine`'s tests took about 3 s a mutant on wasm-gc on a laptop, a
+  runner is about 1.7 times slower, and a kill is built and run three
+  times. More shards than the width run in waves, as jobs come free, so
+  their count is then a multiple of the width, which fills each wave. A
+  run never has more shards than mutants, and one that would need more
+  than the 256 jobs a matrix makes is refused. The job's summary
+  gives the run's mutants per package, and how many of them are at an
+  unchecked access, and the plan is kept as the artifact `mutation-plan`.
+- **shard** runs each shard (`bulk.py shard`), at most the width at once,
+  on an amd64 runner (`ubuntu-24.04`) with the native setup. Verdicts of
+  a pure package are taken on wasm-gc, which any runner gives alike, but a
+  mutant at an unchecked access also runs natively, and its native
+  verdict decides only on amd64 ([Native verdicts](#mutation-runner)). A
+  shard stops after 6 hours. Its output, with `bulk.json`, which says how
+  long its run took, is kept as the artifact `mutation-shard-<shard>` for
+  7 days, also when it fails.
+- **finish** merges the shards with `merge.py` (`bulk.py finish`) and
+  starts the report with the run: its link, what it ran, its shards, its
+  wall time, from the first job's start to the last job's end, and its
+  runner time, the jobs' times added up, both read from GitHub's API, and
+  how long the longest shard took. Then a line per package: mutants,
+  killed, timed out, survived, unexplained and stale-covered survivors,
+  unviable, unconfirmed, the kill rate, the pseudo-tested functions among
+  the BODY mutants that ran, and the sites skipped. Then the merged report,
+  with each package's sites skipped by rule, its survivors and its
+  pseudo-tested functions. The kill rate is reported, never gated. The
+  report is kept as the artifact `mutation-report` for 90 days, and shown
+  in the job's summary when it fits. A shard that failed makes the merge
+  fail; its own artifact holds what it wrote.
+
+To read a run's report:
+
+```sh
+gh run download <run id> --name mutation-report --dir mutation-report
+```
+
+**The weekly run**, every Friday at 20:23 UTC, runs the pinned set over
+the pure packages, the set over which L4 is defined, so it verifies L4.
+Its shards run as any run does: each package's runs without a mutant
+and its self-test first, then its own tests and its importers' tests, kill confirmation, the comparison of
+the compiler's output, the exclusion list, and the native verdicts of the
+mutants at an unchecked access. They run the properties with their
+committed seeds, and read the flake records of the latest weekly run,
+which the plan downloads. Beside them:
+
+- the plan checks the site counts (`ratchet.py check`) and lists the
+  stale entries of the exclusion list (`bulk.py stale`);
+- the job `canary` calls `.github/workflows/mutation-canary.yml`, which
+  replays [the canary](#the-canary) with the toolchain its commit pins;
+- the job `seeds` runs the properties with random seeds
+  (`bulk.py seeds`), in a working copy of its own that no shard reads: it
+  writes a random seed into each seed constant
+  (`scripts/random-seeds.py`), runs each test file that holds one, and
+  reports each seed, and each failure with its seed and the command that
+  runs it again ([Rules for the work](#rules-for-the-work), "Seeds"); its
+  report is in its job's summary and in the artifact `mutation-seeds`;
+- the job `stale-entries`, when the plan lists stale entries, opens an
+  issue for their re-triage in a batch, "Stale entries of the exclusion
+  list to triage again", or comments on the one already open. It is the
+  workflow's one job that writes, and only issues, as the weekly run with
+  the latest MoonBit reports its failures, and it runs nothing of the
+  repository's.
+
+Its report counts, per package, the unexplained survivors, those that a
+DEFERRED entry covers included, and the stale-covered ones, which count
+as unexplained, as L4 counts them; each stale-covered survivor's section
+names its stale entry. A failed canary, self-test or property seed fails
+the run, and the report starts with the jobs that did not succeed. The
+report keeps this run's flake records as the artifact `mutation-flakes`
+for 90 days, which the next weekly run reads.
+
+**The monthly run**, on the 1st of each month at 22:43 UTC, and by hand
+before a release, runs the full set over the pure packages. It reports
+only: its report gives, per package, the unexplained survivors at the
+pinned alternatives and at the other alternatives apart, and its
+survivors at the other alternatives stop no merge and no release and do
+not count towards L4 (decision 7). Step 5 adds `server` and `cmd/smock`
+through e2e to it, in a job of its own
+([#346](https://github.com/hirunefu/smock/issues/346)), and the small
+native-only packages, which the runner runs wholly natively (`bulk.py`'s
+`MONTHLY_NATIVE_ONLY`).
+
+**When they run.** Both run at the full width, at a quiet hour: in the
+evening UTC, when the repository has seen the fewest commits, and days
+away from the weekly run with the latest MoonBit, on Mondays at 03:17
+UTC. When the 1st is a Friday, the monthly run starts two hours and
+twenty minutes after the weekly one, which takes about one to one and a
+half hours (*estimate*). A push during either waits for free jobs.
+`bulk.py`'s `SCHEDULES` maps each schedule to its run, and the workflow's
+check pins both.
+
+**Stage 1's triage tickets.** A package with more than about 40
+survivors in the weekly run gets triage tickets of at most about 40
+survivors each, never splitting a source file that holds fewer. From the
+first weekly run's report:
+
+```sh
+gh run download <run id> --name mutation-report --dir mutation-report
+mkdir -p bodies
+for n in 323 324 325 326 327 328 329; do
+  gh issue view "$n" -R hirunefu/smock --json body --jq .body >"bodies/$n.md"
+done
+python3 scripts/mutation/bulk.py triage --report mutation-report --bodies bodies --out tickets \
+  --run-url <run link>
+```
+
+For each of stage 1's closing tickets whose packages have more than 40
+unexplained survivors together, stale-covered ones included, it writes a
+body per ticket into `tickets/`: its survivors' ids, the closing ticket's
+criteria Triage, Kills, Exclusions, Code and No weakening for those
+survivors only, the time the agent spent, and its blockers, #314 and
+#315, and #320 for settings. `tickets.json` gives each ticket's title,
+label, blockers and the closing ticket it blocks; `tickets.md` the count
+per closing ticket. The tickets become sub-issues of the closing ticket
+they block, which gains each as a native blocker; the spec's issue holds
+as many sub-issues as GitHub allows.
+
+**The account's jobs.** GitHub runs at most 20 of the repository's jobs at
+once. A run at the full width holds them all while its shards run, and a
+push meanwhile waits for free jobs: CI's jobs on that push start as
+shards end. A run started by hand while others are pushing takes a
+smaller width, such as 10. It then has fewer shards, each longer, and
+leaves the other jobs to CI.
+
+**The baseline** of step 2 is a sample of 1,000 mutants of the pinned set
+over the pure packages, whose survivor rate applies to positions as step
+3's triage budget does, and a BODY pass over every pure function:
+`-f mode=sample -f size=1000 -f seed=<seed>` and `-f mode=body`. The
+mode `timing` times one shard of it, 50 mutants, with 1, 2 and 4 mutants
+at once, and its report gives the time per mutant for each; the default
+of `workers` is set from it. The runs' reports, with their links and their
+wall and runner times, are posted on
+[#275](https://github.com/hirunefu/smock/issues/275).
+
+The tests (`scripts/mutation/test_bulk.py`) plan a run of each mode on
+the fixture module and on smock's packages, run a plan's two shards and
+its finish on the fixture's package `log`, whose report ends with the
+report of the run without shards, and time a sample of `log`'s mutants
+with 1, 2 and 4 at once. They run a weekly run of `log` that reads an
+earlier run's flake records and a monthly run of it, list the fixture's
+stale entry, run the properties with random seeds on a small module with
+a moon that fails one, and cut made-up survivors into triage tickets.
+`scripts/check-mutation-runs-workflow.sh`, in CI's job `scripts` with its
+test, checks when the workflow runs, that it passes each input to the
+plan, that its shards take their matrix and their width from the plan and
+run on amd64 within a job's time, the weekly run's other jobs, that only
+the job of the stale entries writes, and only issues, and that it keeps
+the merged report.
 
 ## The weakening report
 
@@ -2344,6 +2592,94 @@ own branches: before merging it, the maintainer pushes its branch to a
 branch here, so that the branch checks run on it. Dependabot's pull
 requests keep their own path
 ([Before merging into main](docs/merging-into-main.md)).
+
+## The changed-lines job
+
+On each push to a branch other than `main` and Dependabot's, the branch
+checks workflow (`.github/workflows/branch-checks.yml`) also runs every
+mutant of the pinned set on the non-test lines that the branch changes in
+the [pure packages](#terms), against its merge base with `main`, as
+`python3 scripts/mutation/run.py --changed` does on a laptop
+([Mutation runner](#mutation-runner)). The runner's rules all apply: the
+package's own tests first, then, for the survivors, the tests of every
+package that imports it and builds on wasm-gc; the compiler-output
+comparison; kill confirmation; the native verdict for a site whose
+definition uses an unchecked array access, which decides there, since the
+mutants run on amd64; and the exclusion list. The job only reports, for
+now: it passes whatever survives, and fails only when the mutants cannot
+run or the report cannot be written. Once a package reaches L4, the merge
+check makes an unexplained survivor on its changed lines stop the merge
+into `main` ([Rules for the work](#rules-for-the-work), "Where the checks
+run"). The job is not part of `ci.yml`, so neither CI's wall time nor
+`keep` waits for it.
+
+`scripts/changed-lines.py` runs it in three jobs:
+
+- **The plan** (`changed-lines-plan`) counts the mutants on the changed
+  lines (`run.py --changed --sites-only`) and plans the shards. On a push,
+  a shard runs for each 50 mutants, and at most 3 run, so that a run
+  leaves room among the account's 20 concurrent jobs beside CI's own. A
+  diff with more than 600 mutants, as the merge of an integration branch
+  can have, is not covered: no shard runs, and the report says so.
+- **The shards** (`changed-lines`), one job each, run their parts of the
+  mutants on amd64 (`run.py --changed --shard k/n`), against the plan's
+  merge base, so that every shard runs on the plan's lines.
+- **The report** (`changed-lines-report`) reads the shards' records,
+  writes the report to the job summary, and keeps it as the artifact
+  `changed-lines` for 90 days, with the plan and each shard's output. The
+  report names the head, the base and the merge base, says whether the
+  run was on a push or started by hand and whether it covered the whole
+  diff, and counts each package's mutants, their outcomes, and the
+  survivors that the exclusion list leaves unexplained, finds
+  stale-covered and accepts. It lists each unexplained survivor, with its
+  package, its enclosing definition and its diff, and each stale-covered
+  one, with the id of its stale entry. `report.json` gives the same to
+  the merge check.
+
+The numbers are estimates from #275's cost model: the 75th-percentile
+change to `main`, about 190 mutants, takes about 8.5 minutes of runner
+time, about 2.7 s a mutant. So a shard of 50 mutants takes about as long
+as its setup (the checkout, MoonBit and the runs without a mutant), and a
+full shard of 200 about 9 minutes. The job reads no flake records yet, so
+only each shard's own runs without a mutant take kill credit from a
+flaky test.
+
+**A run started by hand** runs the whole diff, however large, on 20
+shards unless another number from 1 to 20 is given:
+
+```sh
+gh workflow run branch-checks.yml --ref <branch>
+gh workflow run branch-checks.yml --ref <branch> -f shards=<n>
+```
+
+It writes the weakening report too, and its report says that it was
+started by hand. The merge check reads whichever run on the branch head
+covered the whole diff. As for any workflow, GitHub starts it by hand only
+once `main` holds it, and a newer push to the branch cancels it, as it
+cancels an older push's run.
+
+`scripts/test-changed-lines.sh`, in CI's scripts job, runs the three steps
+with a fake runner on small git histories, and
+`scripts/check-branch-checks-workflow.sh` checks the jobs' commands,
+conditions, runner and artifacts.
+
+**The merge check.** Before merging a branch into `main`, the maintainer
+runs `python3 scripts/check-merge.py <branch>`, as the
+[checklist](docs/merging-into-main.md) says. It asks GitHub, with `gh`,
+for the runs of the branch checks on the branch's head, and reads the
+report that the latest run that passed and covered the whole diff kept.
+It refuses the merge, and says why with the run's link, when no run is on
+the head, none passed, none covered the whole diff, the run compared the
+head with another base than `main` or from another merge base than the
+head's with `main` now, or its report shows an unexplained survivor on
+the changed lines of a package at L4: one that `mutation/l4-packages.txt`
+names, on `main` or on the branch. The list starts empty, so at first the
+check only reports. It prints the unexplained survivors in the other
+packages, and each stale-covered survivor with the id of its stale entry,
+which does not block either: the stale entries are re-triaged in a batch.
+Last, it prints the branch's weakening report, which the same run kept,
+for the maintainer to read and acknowledge. `scripts/test-check-merge.sh`,
+in CI's scripts job, tests it with a fake `gh` and canned runs.
 
 ## Test costs on CI's runners
 

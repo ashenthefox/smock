@@ -699,6 +699,20 @@ class RunnerTest(unittest.TestCase):
         self.assertLess(report.index("`calc/calc.mbt,halve_until,INT,2,3,0`\n"),
                         report.index("`calc/calc.mbt,is_blank,BOOL,true,false,0`\n"))
 
+    def test_the_summary_and_the_report_list_the_pseudo_tested_functions(self):
+        # #275, "Terms": "A function whose BODY mutant survives is
+        # pseudo-tested"; #313's baseline gives them per package. Of calc's
+        # four BODY mutants, only halve_until's survives (CALC).
+        package = json.loads((self.out / "summary.json").read_text())["packages"][0]
+        self.assertEqual(package["body_mutants"], 4)
+        self.assertEqual(package["pseudo_tested"], [
+            {"definition": "halve_until", "file": "calc/calc.mbt",
+             "mutant": "calc/calc.mbt,halve_until,BODY,{…},{ 0 },0", "status": "unexplained"}])
+        report = (self.out / "report.md").read_text()
+        self.assertIn("### Pseudo-tested functions (1 of 4 BODY mutants)\n\n"
+                      "Each function's BODY mutant survived; L2 needs it killed or excluded.\n\n"
+                      "- `halve_until` (calc/calc.mbt): Unexplained.\n", report)
+
     def test_the_runner_never_passes_u(self):
         # in_range's first mutant is killed by a snapshot alone, which -u
         # would rewrite: it would then survive.

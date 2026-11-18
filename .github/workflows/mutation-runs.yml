@@ -1,0 +1,359 @@
+# Bulk runs of the mutation runner (CONTRIBUTING.md, "Mutation runner",
+# "Bulk runs on Actions"): runs too large for a laptop, cut into shards
+# that run side by side on GitHub's runners, whose outputs merge into one
+# report. A run's mode says what it runs: a seeded sample, a BODY pass,
+# chosen packages in the pinned or the full set, a listed set, a kill
+# matrix, the timing of one shard with 1, 2 and 4 mutants built and tested
+# at once, the weekly run or the monthly run. Without packages, a run takes
+# the pure packages that have sites.
+#
+# - The weekly run, on Fridays, is the pinned set over the pure packages,
+#   which L4 is defined over, so it verifies L4. Beside it run the canary
+#   (mutation-canary.yml) and the properties with random seeds, each in a
+#   job of its own; its plan checks the site counts and lists the stale
+#   entries of the exclusion list, and the job stale-entries opens an
+#   issue for their re-triage, or comments on the one open. Its shards
+#   read the flake records of the latest weekly run, and its report keeps
+#   this run's as the artifact mutation-flakes.
+# - The monthly run, on the 1st, and by hand before a release, is the full
+#   set over the pure packages, report-only: its survivors at the other
+#   alternatives stop no merge and no release, and do not count towards
+#   L4. Step 5 (#346) adds server and cmd/smock through e2e, in a job of
+#   its own, and the small native-only packages (bulk.py's
+#   MONTHLY_NATIVE_ONLY).
+# - Both run at a quiet hour, in the evening UTC, when the repository has
+#   seen the fewest commits, and away from the weekly run with the latest
+#   MoonBit (Mondays, 03:17 UTC), at the full width.
+#
+# - The job plan runs the runner's --sites-only on the mode's selection
+#   and cuts the mutants into shards (scripts/mutation/bulk.py plan): as
+#   many as the width, or more where a shard would not end within 5 of a
+#   job's 6 hours. The account runs 20 jobs at once, so a run at the full
+#   width of 20 holds them all, and a push meanwhile waits for free jobs;
+#   while others push, take a smaller width.
+# - Each shard runs on an amd64 runner. Its verdicts are taken on wasm-gc,
+#   which any runner gives alike, but a mutant at an unchecked array
+#   access also runs natively, and its native verdict decides only on
+#   amd64 (CONTRIBUTING.md, "Native verdicts").
+# - The job finish merges the shards (bulk.py finish), and keeps the
+#   report as the artifact mutation-report, with the run's times read
+#   from GitHub's API.
+#
+# It runs on its two schedules, and when started by hand, from the Actions
+# tab or with `gh workflow run mutation-runs.yml -f mode=sample -f
+# seed=<seed>`; scripts/check-mutation-runs-workflow.sh checks when it runs
+# and what it runs.
+name: Mutation runs
+
+on:
+  # scripts/mutation/bulk.py's SCHEDULES gives the run each one starts.
+  schedule:
+    - cron: "23 20 * * 5" # the weekly run: Fridays, 20:23 UTC
+    - cron: "43 22 1 * *" # the monthly run: the 1st, 22:43 UTC
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to run: sample, body (a BODY pass), packages, list, matrix (a kill matrix), timing, weekly or monthly"
+        type: choice
+        options: [sample, body, packages, list, matrix, timing, weekly, monthly]
+        default: sample
+      packages:
+        description: "Package directories, by spaces; none for the pure packages that have sites (with a list, its own)"
+        type: string
+        default: ""
+      set:
+        description: "The pinned or the full set (not for a list)"
+        type: choice
+        options: [pinned, full]
+        default: pinned
+      seed:
+        description: "The seed of a sample, and of timing's"
+        type: string
+        default: "0"
+      size:
+        description: "The size of a sample, and of timing's"
+        type: number
+        default: 1000
+      list:
+        description: "With mode list, the file in the repository that lists the mutants"
+        type: string
+        default: ""
+      width:
+        description: "How many shards run at once, from 1 to 20; a run at 20 holds every job of the account"
+        type: number
+        default: 20
+      workers:
+        description: "How many mutants each shard builds and tests at once"
+        type: number
+        default: 1
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan the run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read # the flake records of the latest weekly run
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      width: ${{ steps.plan.outputs.width }}
+      mode: ${{ steps.plan.outputs.mode }}
+      stale: ${{ steps.stale.outputs.stale }}
+    steps:
+      # The whole history: a list by offset names the commit its offsets
+      # hold on.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The site finder reads the compiler's parse tree.
+      - name: Install MoonBit (pinned)
+        run: scripts/install-moonbit.sh pinned
+
+      # The artifact mutation-flakes of the latest weekly run on main that
+      # kept one; the plan of a weekly run takes it, and of any other run
+      # leaves it. The first weekly run finds none.
+      - name: Download the flake records of the latest weekly run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          run=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?name=mutation-flakes" \
+            --jq '.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == "main")
+                  | {created_at, run: .workflow_run.id}' |
+            jq -rs 'sort_by(.created_at) | last | .run // empty')
+          if [ -n "$run" ]; then
+            gh run download "$run" --name mutation-flakes --dir "$RUNNER_TEMP/flakes"
+          else
+            echo "No weekly run has kept flake records yet."
+          fi
+
+      - id: plan
+        name: Choose the mutants and cut them into shards
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          MODE: ${{ inputs.mode }}
+          PACKAGES: ${{ inputs.packages }}
+          SET: ${{ inputs.set }}
+          SEED: ${{ inputs.seed }}
+          SIZE: ${{ inputs.size }}
+          LIST: ${{ inputs.list }}
+          WIDTH: ${{ inputs.width }}
+          WORKERS: ${{ inputs.workers }}
+        run: |
+          python3 scripts/mutation/bulk.py plan --out "$RUNNER_TEMP/plan" --schedule "$SCHEDULE" --mode "$MODE" \
+            --packages "$PACKAGES" --set "$SET" --seed "$SEED" --size "$SIZE" ${LIST:+--list "$LIST"} \
+            --width "$WIDTH" --workers "$WORKERS" --flakes "$RUNNER_TEMP/flakes/flakes.json" >>"$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/plan/plan.md" >>"$GITHUB_STEP_SUMMARY"
+
+      # The site counts must be what the site finder gives on this commit;
+      # with the merge base, which on main is the commit itself.
+      - name: Check the site counts (weekly)
+        if: steps.plan.outputs.mode == 'weekly'
+        run: python3 scripts/mutation/ratchet.py check --base origin/main
+
+      - id: stale
+        name: List the stale entries of the exclusion list (weekly)
+        if: steps.plan.outputs.mode == 'weekly'
+        run: python3 scripts/mutation/bulk.py stale --out "$RUNNER_TEMP/plan/stale.md" >>"$GITHUB_OUTPUT"
+
+      - name: Keep the plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-plan
+          path: ${{ runner.temp }}/plan
+          retention-days: 90
+
+  shard:
+    name: shard ${{ matrix.name }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.plan.outputs.width) }}
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The runner check, OpenSSL, the pinned MoonBit and moon update: the
+      # native runs of the mutants at an unchecked access need them.
+      - uses: ./.github/actions/native-setup
+        with:
+          machine: x86_64
+
+      - run: moon version --all
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: mutation-plan
+          path: ${{ runner.temp }}/plan
+
+      - name: Run the shard
+        env:
+          NAME: ${{ matrix.name }}
+        run: >-
+          python3 scripts/mutation/bulk.py shard --plan "$RUNNER_TEMP/plan/plan.json" --name "$NAME"
+          --out "$RUNNER_TEMP/shard"
+
+      - name: Keep the shard's output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-shard-${{ matrix.name }}
+          path: ${{ runner.temp }}/shard
+          retention-days: 7
+          if-no-files-found: warn
+
+  # The canary, in the weekly run: the 250 mutants of the prototype's
+  # sample, replayed on their commit with the toolchain it pins, which is
+  # why it is a workflow and a job of its own.
+  canary:
+    name: Canary (weekly)
+    needs: plan
+    if: needs.plan.outputs.mode == 'weekly'
+    uses: ./.github/workflows/mutation-canary.yml
+
+  # The properties with random seeds, in the weekly run: a job of its own,
+  # whose working copy no shard reads, so that the shards and their kill
+  # confirmations run the properties with their committed seeds.
+  seeds:
+    name: Properties with random seeds (weekly)
+    needs: plan
+    if: needs.plan.outputs.mode == 'weekly'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/native-setup
+        with:
+          machine: x86_64
+
+      - name: Run each property with a random seed
+        run: |
+          status=0
+          python3 scripts/mutation/bulk.py seeds --out "$RUNNER_TEMP/seeds" >/dev/null || status=$?
+          cat "$RUNNER_TEMP/seeds/report.md" >>"$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Keep the seeds and the results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-seeds
+          path: ${{ runner.temp }}/seeds
+          retention-days: 90
+          if-no-files-found: warn
+
+  # Runs once every shard has ended, also when one failed, so that the
+  # run's times are read; the merge then fails on the missing shard.
+  finish:
+    name: Merge the shards into one report
+    needs: [plan, shard, canary, seeds]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read # the run's jobs, for its times
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: mutation-plan
+          path: ${{ runner.temp }}/plan
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: mutation-shard-*
+          path: ${{ runner.temp }}/shards
+
+      - name: Read the run's jobs and their times
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api --paginate
+          "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs"
+          --jq '.jobs[] | {name, started_at, completed_at, conclusion}' >"$RUNNER_TEMP/jobs.jsonl"
+
+      # The report says so when the shards do not merge, and the step
+      # fails then. A job summary holds at most 1 MiB; a larger report is
+      # only in the artifact.
+      - name: Merge the shards' outputs into one report
+        run: |
+          status=0
+          python3 scripts/mutation/bulk.py finish --plan "$RUNNER_TEMP/plan/plan.json" \
+            --out "$RUNNER_TEMP/report" --jobs "$RUNNER_TEMP/jobs.jsonl" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            "$RUNNER_TEMP"/shards/* >/dev/null || status=$?
+          report=$RUNNER_TEMP/report/report.md
+          if [ ! -f "$report" ]; then
+            echo "The finish wrote no report." >>"$GITHUB_STEP_SUMMARY"
+          elif [ "$(wc -c <"$report")" -le 1000000 ]; then
+            cat "$report" >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "The report is larger than a job summary holds: it is in the artifact mutation-report." >>"$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
+      - name: Keep the report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-report
+          path: ${{ runner.temp }}/report
+          retention-days: 90
+          if-no-files-found: warn
+
+      # The next weekly run reads them.
+      - name: Keep the flake records (weekly)
+        if: needs.plan.outputs.mode == 'weekly'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-flakes
+          path: ${{ runner.temp }}/report/flakes.json
+          retention-days: 90
+          if-no-files-found: error
+
+  # The one job that writes: in a weekly run that lists stale entries, it
+  # opens an issue for their re-triage in a batch, or comments on the one
+  # already open, as the weekly run with the latest MoonBit reports its
+  # failures. It runs nothing of the repository's.
+  stale-entries:
+    name: Open or update the issue of the stale entries (weekly)
+    needs: plan
+    if: needs.plan.outputs.mode == 'weekly' && needs.plan.outputs.stale != '0' && needs.plan.outputs.stale != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: mutation-plan
+          path: ${{ runner.temp }}/plan
+
+      - name: Open or update the issue
+        run: |
+          title="Stale entries of the exclusion list to triage again"
+          body=$(printf 'The weekly mutation run %s lists them.\n\n%s\n' "$RUN_URL" "$(cat "$RUNNER_TEMP/plan/stale.md")")
+          number=$(gh issue list --state open --search "\"$title\" in:title" \
+            --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

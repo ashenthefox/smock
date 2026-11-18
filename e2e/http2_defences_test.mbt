@@ -289,6 +289,71 @@ async test "h2c: with the default windows, a client that sends a PING after each
 }
 
 ///|
+async test "h2c: smock saves up at most 100 PING passes: after it has sent 120 HEADERS and DATA frames, and over a second after the client's SETTINGS, 200 PINGs at once are answered, 100 that pass and the 100 that the bound then allows, and one more gets GOAWAY ENHANCE_YOUR_CALM" {
+  // docs/http2.md, Frames that do no work: a PING counts "beyond one for
+  // each HEADERS or DATA frame smock has sent on the connection. smock
+  // saves up at most 100 of these", and more than 100 counted frames in any
+  // one second get GOAWAY ENHANCE_YOUR_CALM.
+  with_definitions([("faults.json", faults)], dir => {
+    let stopped = with_smock(["--dir", dir, "--port", "0"], smock => {
+      let raw = smock.raw_h2()
+      defer raw.close()
+      // Sixty answers of a HEADERS and a DATA frame each: 120 passes
+      // earned, more than the 100 that smock saves up.
+      let gets = []
+      for i in 0..<60 {
+        gets.push(raw.get(2 * i + 1, "/fast"))
+      }
+      raw.send(gets)
+      let mut ended = 0
+      let answers = raw.frames_until(@async.now(), frame => {
+        if frame is Data(end_stream=true, ..) {
+          ended += 1
+        }
+        ended == 60
+      })
+      // The client's SETTINGS counted when the connection opened. Once a
+      // second has passed since, it is no longer among the frames of any
+      // one second that the PINGs to come fall in, however long the
+      // answers took.
+      @async.sleep(1100)
+      let answered = raw.pings(200)
+      raw.send([ping])
+      inspect(
+        [
+          "60 streams answered:",
+          tally(answers.shown),
+          "200 PINGs:",
+          runs(answered.shown),
+          "one more PING:",
+          raw.runs_until_closed(),
+          smock.fresh(),
+        ].join("\n"),
+        content=(
+          #|60 streams answered:
+          #|SETTINGS [MAX_CONCURRENT_STREAMS=100, MAX_HEADER_LIST_SIZE=32768]
+          #|SETTINGS ACK
+          #|HEADERS n END_HEADERS [:status: 200, smock-mock: m; via=default, date: <now>, content-length: 4] x60
+          #|DATA n END_STREAM 4 octets x60
+          #|200 PINGs:
+          #|PING ACK x200
+          #|one more PING:
+          #|GOAWAY last=119 ENHANCE_YOUR_CALM
+          #|then a FIN
+          #|then a fresh connection: 200 fast
+        ),
+      )
+    })
+    inspect(
+      defence_entries(stopped.logs),
+      content=(
+        #|{"level":"warn","msg":"HTTP/2 connection closed by a defence","pattern":"frames that do no work","frame":"PING"}
+      ),
+    )
+  })
+}
+
+///|
 async test "h2c: floods of PRIORITY frames, frames of unknown types, PING acknowledgements and SETTINGS acknowledgements past those smock is owed each get GOAWAY ENHANCE_YOUR_CALM and one log line, and a fresh connection is served" {
   with_definitions([("faults.json", faults)], dir => {
     let stopped = with_smock(["--dir", dir, "--port", "0"], smock => {

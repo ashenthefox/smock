@@ -5,7 +5,8 @@ it, and writes one record per mutant, a summary per package and a report
 (CONTRIBUTING.md, "Mutation runner").
 
 usage: python3 scripts/mutation/run.py [--root <dir>] [--work <dir>] [--out <dir>]
-           [--set pinned|full] [--mutant <id>]... [--sites-only] [--workers <n>]
+           [--set pinned|full] [--mutant <id>]... [--operator <operator>]...
+           [--sites-only] [--workers <n>]
            [--list <file> [--totals-only]] [--sample <n> [--seed <s>]] [--shard <k>/<n>]
            [--changed [--base <ref>]] [--self-test-only] [--matrix]
            [--flakes <file>] [--moon <moon>] [--finder <command>]
@@ -21,7 +22,11 @@ in a comparison or an index, the alternative chosen by the rule of
 operator set v1. --set full makes one of each site of the full set: every
 alternative of every operator at every position. --mutant runs only the
 mutant with that id, which must be in the set, and may be given more than
-once; a package given that holds none of the ids is not run.
+once; a package given that holds none of the ids is not run. --operator
+runs only the set's mutants that an operator of operator set v1 makes,
+and may be given more than once: --operator BODY is a BODY pass, the
+BODY mutant of every function; a package given that holds none is not
+run.
 --sites-only runs no mutant: it writes the counts of sites, positions and
 skipped sites of each package, in both sets, and the mutants a run would
 make, in chosen.jsonl. --self-test-only runs each package's self-test,
@@ -61,8 +66,8 @@ says how), and one for a contributor's branch (changed.py says how):
                    nothing and says so. The summary gives the lines
                    (changed).
 
-Without --mutant, --list, --sample or --changed, every package given
-runs, one that has no mutant at all in the first shard; with one of them,
+Without --mutant, --operator, --list, --sample or --changed, every
+package given runs, one that has no mutant at all in the first shard; with one of them,
 only the packages that hold one of the shard's mutants run.
 
 For each worker, the runner copies <root> into <work>/tree-<n>, the files
@@ -143,9 +148,11 @@ unchecked array access (unchecked_access), whose tests ran, runs again
 natively, the same way, with the same tests (native.py): wasm-gc traps
 on an access out of bounds where the native binary reads on. Its record
 gives both verdicts (verdicts), and the native verdict decides on amd64
-alone. A package that builds only natively runs wholly natively, with
-its own tests, and its compiler output is not compared. Before the first
-native build, the runner unsets moon's variables for another C compiler
+alone: native verdicts are taken on CI's amd64 runner, one machine, so
+that they can be reproduced, and one taken off CI is for information. A
+package that builds only natively runs wholly natively, with its own
+tests, and its compiler output is not compared. Before the first native
+build, the runner unsets moon's variables for another C compiler
 (MOON_CC, MOON_AR, MOON_CC_WRAPPER), and native runs dump no core.
 summary.json and report.md give, per package, what ran natively, where,
 and the mutants whose verdicts differ between the backends (native).
@@ -192,13 +199,17 @@ It writes into <out> (<work>/out unless it is given):
                  how many of its tests failed; and its survivors after the
                  exclusion list (exclusions): how many are unexplained,
                  stale-covered and accepted, and the categories of those
-                 accepted;
+                 accepted; and, when BODY mutants ran, how many
+                 (body_mutants) and the functions whose BODY mutant
+                 survived, the pseudo-tested functions (pseudo_tested),
+                 each with its status after the exclusion list;
   report.md      the operator set's version and the set, the summaries,
                  the counts with the package's own tests alone, its
                  importers and what their tests killed, the sites each
                  rule skipped, the tests that failed without a mutant,
                  the time-outs, the unconfirmed mutants, the survivors
-                 after the exclusion list, and each survivor's status and
+                 after the exclusion list, the pseudo-tested functions,
+                 and each survivor's status and
                  diff with its whole enclosing definition, the unexplained
                  first, then the stale-covered, then the accepted (for the full
                  set, the survivors at the pinned alternatives and those
@@ -254,6 +265,7 @@ import exclusions
 import importers
 import matrix
 import native
+import operators
 import selftest
 
 HERE = Path(__file__).resolve().parent
@@ -522,6 +534,38 @@ def choose(found, chosen_set, ids, directories):
     return sites, {d: [s for s in mine if s["id"] in ids] for d, mine in sites.items()}
 
 
+def pseudo_tested(records):
+    """The functions whose BODY mutant survived among records, for a
+    summary: how many BODY mutants there are, and each survivor's
+    definition with its status after the exclusion list. A function whose
+    BODY mutant survives is pseudo-tested, and L2 needs each such mutant
+    killed or excluded. Nothing when no BODY mutant is among them."""
+    body = [r for r in records if r["operator"] == "BODY"]
+    if not body:
+        return {}
+    return {"body_mutants": len(body),
+            "pseudo_tested": [{"definition": r["definition"], "file": r["file"], "mutant": r["id"],
+                               "status": r.get("exclusion", {}).get("status", "unexplained")}
+                              for r in exclusions.ordered([r for r in body if r["outcome"] == "survived"])]}
+
+
+def pseudo_tested_lines(summary, records):
+    """The report's list of a package's pseudo-tested functions, when its
+    BODY mutants ran."""
+    if "pseudo_tested" not in summary:
+        return []
+    found = summary["pseudo_tested"]
+    out = [f"### Pseudo-tested functions ({len(found)} of {summary['body_mutants']} BODY mutants)", ""]
+    if not found:
+        return out + ["None: no BODY mutant survived.", ""]
+    out += ["Each function's BODY mutant survived; L2 needs it killed or excluded.", ""]
+    by_id = {r["id"]: r for r in records}
+    for function in found:
+        status = exclusions.status_line(by_id[function["mutant"]]) if function["mutant"] in by_id else None
+        out += [f"- `{function['definition']}` ({function['file']}): {status or function['status']}"]
+    return out + [""]
+
+
 def alternative_counts(records):
     """A full set's counts at the pinned alternatives and at the others,
     apart: L4 reads only the former."""
@@ -783,6 +827,7 @@ def report(operator_set, chosen, summaries, records):
         after = exclusions.summary_line(summary)
         if after:
             out += [after, ""]
+        out += pseudo_tested_lines(summary, mine)
         out += compare.report(mine)
         out += importers.report_lines(summary)
         out += matrix.report_lines(summary)
@@ -842,6 +887,8 @@ def main():
     parser.add_argument("--set", default="pinned", choices=("pinned", "full"),
                         help="the pinned set (the default) or the full set")
     parser.add_argument("--mutant", action="append", help="run only the mutant with this id")
+    parser.add_argument("--operator", action="append", choices=operators.OPERATORS,
+                        help="run only the mutants that this operator makes (BODY: a BODY pass)")
     parser.add_argument("--sites-only", action="store_true",
                         help="count the sites of each package in both sets, and run no mutant")
     parser.add_argument("--list", metavar="FILE",
@@ -876,6 +923,8 @@ def main():
         parser.error("--sample takes a number from 1, and no --mutant or --list")
     if args.list and args.mutant:
         parser.error("--list and --mutant choose the mutants each: give one of them")
+    if args.list and args.operator:
+        parser.error("--list chooses the mutants: give no --operator with it")
     if not args.packages and not args.list and not args.changed:
         parser.error("give at least one package directory")
     if args.changed and (args.list or args.mutant):
@@ -884,10 +933,10 @@ def main():
         parser.error("--base goes with --changed")
     if args.totals_only and (not args.list or args.sites_only or args.shard):
         parser.error("--totals-only takes --list, and neither --sites-only nor --shard")
-    if args.self_test_only and (args.mutant or args.list or args.sample is not None or args.changed
-                                or args.sites_only):
-        parser.error("--self-test-only runs no mutant, so it takes no --mutant, --list, --sample, --changed"
-                     " or --sites-only")
+    if args.self_test_only and (args.mutant or args.operator or args.list or args.sample is not None
+                                or args.changed or args.sites_only):
+        parser.error("--self-test-only runs no mutant, so it takes no --mutant, --operator, --list, --sample,"
+                     " --changed or --sites-only")
     if args.matrix and (args.totals_only or args.self_test_only):
         parser.error("--matrix takes no --totals-only or --self-test-only")
     root = Path(args.root).resolve()
@@ -915,6 +964,8 @@ def main():
             raise RunnerError(f"the packages' sites name several operator sets: {sorted(versions)}")
         operator_set = versions.pop() if versions else None
         sites, chosen = choose(found, args.set, args.mutant, args.packages)
+        if args.operator:
+            chosen = choice.of_operators(chosen, args.packages, args.operator)
         if args.self_test_only:
             chosen = {directory: [] for directory in args.packages}
         unapplied = {directory: [] for directory in args.packages}
@@ -930,7 +981,8 @@ def main():
             chosen = choice.sample(chosen, args.packages, args.sample, args.seed)
         # The run's mutants, and the shard's.
         whole, chosen = chosen, choice.shard(chosen, args.packages, *args.shard) if args.shard else chosen
-        selected = bool(args.mutant) or args.sample is not None or entries is not None or changes is not None
+        selected = (bool(args.mutant) or bool(args.operator) or args.sample is not None or entries is not None
+                    or changes is not None)
         run_set = "listed" if entries is not None else args.set
         runs = choice.running(args.packages, whole, chosen, selected, args.shard and args.shard[0])
         records, summaries = [], []
@@ -961,7 +1013,9 @@ def main():
         if records:
             exclusions.annotate(root, records)
             for summary in summaries:
-                summary.update(exclusions.counts([r for r in records if r["package"] == summary["package"]]))
+                mine = [r for r in records if r["package"] == summary["package"]]
+                summary.update(exclusions.counts(mine))
+                summary.update(pseudo_tested(mine))
     except (RunnerError, choice.ChoiceError, changed.ChangedError, exclusions.ExclusionError) as error:
         print(choice.HIDDEN if args.totals_only else f"run: {error}", file=sys.stderr)
         sys.exit(1)

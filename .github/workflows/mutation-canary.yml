@@ -6,16 +6,18 @@
 # the runner's output and the canary's report (canary.md) as the artifact
 # mutation-canary, also when the replay fails.
 #
-# It runs only when started by hand from the Actions tab or with
-# `gh workflow run mutation-canary.yml`, never on a schedule, on pull
+# It runs when started by hand from the Actions tab or with
+# `gh workflow run mutation-canary.yml`, and when the weekly mutation run
+# (mutation-runs.yml) calls it, never on a schedule of its own, on pull
 # requests or on pushes (scripts/check-mutation-canary-workflow.sh checks
-# that); the weekly mutation run repeats the canary. It installs the
+# that). It installs the
 # toolchain that the canary's commit pins, which may not be this commit's,
 # so it is a job of its own. Its verdicts are taken on wasm-gc, which needs
 # no C compiler, so any runner will do.
 name: Mutation canary
 
 on:
+  workflow_call:
   workflow_dispatch:
 
 permissions:

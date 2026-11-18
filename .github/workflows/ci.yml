@@ -143,7 +143,8 @@ jobs:
       # The branch checks run on a push to a branch other than main, in
       # branch-checks.yml and not here, so that keep never waits for them.
       # This checks when that workflow runs and what it runs, and tests the
-      # weakening report it writes, on small git histories.
+      # weakening report it writes and its changed-lines job, on small git
+      # histories, the job with a fake mutation runner.
       - name: Check the branch checks workflow
         if: ${{ !cancelled() }}
         run: scripts/check-branch-checks-workflow.sh
@@ -156,6 +157,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-weakening-report.sh
 
+      - name: Test the changed-lines job
+        if: ${{ !cancelled() }}
+        run: scripts/test-changed-lines.sh
+
+      # The maintainer runs the merge check before merging a branch into
+      # main: it reads the branch checks' reports on the branch's head.
+      # This tests it with a fake gh and canned runs.
+      - name: Test the merge check
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-merge.sh
+
       # The mutation canary is replayed only by hand (mutation-canary.yml),
       # with the toolchain its commit pins. This checks when that workflow
       # runs and how it installs that toolchain before the replay.
@@ -166,6 +178,19 @@ jobs:
       - name: Test the check of the mutation canary workflow
         if: ${{ !cancelled() }}
         run: scripts/test-check-mutation-canary-workflow.sh
+
+      # The bulk mutation runs run only by hand (mutation-runs.yml), in
+      # shards. This checks when that workflow runs, that its shards fit
+      # the width and a job's time on amd64 runners, and that it keeps the
+      # merged report. bulk.py's own tests need moonc, so they run in
+      # build-test.yml with the runner's.
+      - name: Check the mutation runs workflow
+        if: ${{ !cancelled() }}
+        run: scripts/check-mutation-runs-workflow.sh
+
+      - name: Test the check of the mutation runs workflow
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-mutation-runs-workflow.sh
 
       # --- The scripts that build-test.yml runs --------------------------------
 

@@ -211,13 +211,13 @@ test "comments run from a # after white space to the end of the line" {
   )
   // "Comments must be separated from other tokens by white space
   // characters" (YAML 1.2.2, section 6.6). A `#` right after a quoted
-  // scalar, a flow collection or a flow indicator starts no comment, so the
-  // text is refused: yaml-test-suite marks the first three inputs, SU5Z,
-  // 9JBA and CVW2, as errors. Each refusal comes with the message the
-  // parser gives for what it finds there instead: text after a value, a
-  // plain value that starts with an indicator, as the tests above assert for
-  // `a: [1, 2]]` and `a: @x`, and the two flow messages #280's acceptance
-  // criteria name. The nearest inputs that stay valid follow: a `#` after a
+  // scalar, a flow collection, a flow indicator or a block scalar's header
+  // starts no comment, so the text is refused: yaml-test-suite marks the
+  // first three inputs, SU5Z, 9JBA and CVW2, as errors. `parse` documents
+  // the message: "anywhere else, such as right after a quoted value or a
+  // flow collection, it is rejected with 'a comment needs a space before
+  // its #'". The pointer is the deepest node reached, as `ParseError`
+  // documents. The nearest inputs that stay valid follow: a `#` after a
   // space or a tab, which section 6.6 allows, and a `#` inside a plain
   // scalar, which section 7.3.3 allows after a character that is not white
   // space ("An ns-char preceding").
@@ -225,22 +225,27 @@ test "comments run from a # after white space to the end of the line" {
     each([
       "key: \"value\"# invalid comment", "---\n[ a, b, c, ]#invalid\n", "---\n[ a, b, c,#invalid\n]\n",
       "a: 'x'#c", "a: {b: 1}#c", "[a, \"b\"#c\n]", "{a: \"b\"#c\n}", "[#c\n a]",
-      "key: \"value\" # c", "key: \"value\"\t# c", "a: [x]\t# c", "{a: \"b\" # c\n}",
+      "a: |#c\n  x\n", "a: >-#c\n  x\n", "a: 1\n\"b\"#c: 2", "key: \"value\" # c",
+      "key: \"value\"\t# c", "a: [x]\t# c", "{a: \"b\" # c\n}", "a: | # c\n  x\n",
       "key: value# c", "[a#b, c]",
     ]),
     content=(
-      #|"key: \"value\"# invalid comment" -> error /key: unexpected text after the value
-      #|"---\n[ a, b, c, ]#invalid\n" -> error /2: unexpected text after the value
-      #|"---\n[ a, b, c,#invalid\n]\n" -> error /3: a plain value cannot start with #; quote this value
-      #|"a: 'x'#c" -> error /a: unexpected text after the value
-      #|"a: {b: 1}#c" -> error /a/b: unexpected text after the value
-      #|"[a, \"b\"#c\n]" -> error /1: expected , or ] in a flow sequence
-      #|"{a: \"b\"#c\n}" -> error /a: expected , or } in a flow mapping
-      #|"[#c\n a]" -> error /0: a plain value cannot start with #; quote this value
+      #|"key: \"value\"# invalid comment" -> error /key: a comment needs a space before its #
+      #|"---\n[ a, b, c, ]#invalid\n" -> error /2: a comment needs a space before its #
+      #|"---\n[ a, b, c,#invalid\n]\n" -> error /2: a comment needs a space before its #
+      #|"a: 'x'#c" -> error /a: a comment needs a space before its #
+      #|"a: {b: 1}#c" -> error /a/b: a comment needs a space before its #
+      #|"[a, \"b\"#c\n]" -> error /1: a comment needs a space before its #
+      #|"{a: \"b\"#c\n}" -> error /a: a comment needs a space before its #
+      #|"[#c\n a]" -> error : a comment needs a space before its #
+      #|"a: |#c\n  x\n" -> error /a: a comment needs a space before its #
+      #|"a: >-#c\n  x\n" -> error /a: a comment needs a space before its #
+      #|"a: 1\n\"b\"#c: 2" -> error /a: a comment needs a space before its #
       #|"key: \"value\" # c" -> {"key":"value"}
       #|"key: \"value\"\t# c" -> {"key":"value"}
       #|"a: [x]\t# c" -> {"a":["x"]}
       #|"{a: \"b\" # c\n}" -> {"a":"b"}
+      #|"a: | # c\n  x\n" -> {"a":"x\n"}
       #|"key: value# c" -> {"key":"value# c"}
       #|"[a#b, c]" -> ["a#b","c"]
     ),
@@ -304,6 +309,48 @@ test "a literal block scalar keeps its lines; chomping decides the final line br
     ),
     content=(
       #|{"literal":"line 1\n  indented # not a comment\nline 3\n","clip":"a\n\nb\n","strip":"a","keep":"a\n\n\n","empty":"","list":["item\n","item"],"last":"no line break at the end"}
+    ),
+  )
+  // "A block scalar whose last line ends the text without a line break
+  // gets no line break added, as YAML 1.2.2 says (section 8.1.1.2), with
+  // each chomping indicator" (`parse`): the last line break of a clipped or
+  // kept scalar may be the end of the input (`b-chomped-last`, production
+  // 165). Each input comes without and then with a final line break, which
+  // a clipped or kept scalar keeps (Example 8.4). The first pair holds a
+  // last line of one space, after the indentation; the last, a tab there,
+  // which is text. yaml-test-suite reads a line break at the end of the
+  // first input, L24T/01, which its lists keep as a known difference.
+  inspect(
+    each([
+      "foo: |\n  x\n   ", "foo: |\n  x\n   \n", "a: |\n  x", "a: |\n  x\n", "a: |-\n  x",
+      "a: |-\n  x\n", "a: |+\n  x", "a: |+\n  x\n", "a: >\n  x\n  y", "a: >\n  x\n  y\n",
+      "a: |\n \t", "a: |\n \t\n",
+    ]),
+    content=(
+      #|"foo: |\n  x\n   " -> {"foo":"x\n "}
+      #|"foo: |\n  x\n   \n" -> {"foo":"x\n \n"}
+      #|"a: |\n  x" -> {"a":"x"}
+      #|"a: |\n  x\n" -> {"a":"x\n"}
+      #|"a: |-\n  x" -> {"a":"x"}
+      #|"a: |-\n  x\n" -> {"a":"x"}
+      #|"a: |+\n  x" -> {"a":"x"}
+      #|"a: |+\n  x\n" -> {"a":"x\n"}
+      #|"a: >\n  x\n  y" -> {"a":"x y"}
+      #|"a: >\n  x\n  y\n" -> {"a":"x y\n"}
+      #|"a: |\n \t" -> {"a":"\t"}
+      #|"a: |\n \t\n" -> {"a":"\t\n"}
+    ),
+  )
+  // The same rule for a scalar of empty lines only, kept: with no line
+  // break after its last line of spaces, that line is no empty line
+  // (`l-empty` ends with a line break, section 6.4), so the scalar is
+  // empty. yaml-test-suite reads a line break for the first input, JEF9/02,
+  // which its lists keep as a known difference.
+  inspect(
+    each(["- |+\n   ", "- |+\n   \n"]),
+    content=(
+      #|"- |+\n   " -> [""]
+      #|"- |+\n   \n" -> ["\n"]
     ),
   )
 }
@@ -700,6 +747,73 @@ test "tabs in indentation give an error; tabs elsewhere are white space" {
       #|"- -\t- x" -> error /0/0: tabs are not allowed in indentation
       #|"-\t-1\n" -> [-1]
       #|"-\tbaz" -> ["baz"]
+    ),
+  )
+  // The same holds for a compact mapping that starts on its sequence's `-`
+  // line: "The compact notation may be used when the entry is itself a
+  // nested block collection. In this case, both the "-" indicator and the
+  // following spaces are considered to be part of the indentation of the
+  // nested collection" (YAML 1.2.2, section 8.2.1), so a tab there is a tab
+  // in indentation (section 6.1), with the message above, whatever the
+  // key's style and however deep the sequence. No case of yaml-test-suite
+  // has it (#382). The nearest inputs that stay valid follow: a tab
+  // between `-` and a scalar, a flow collection or a block scalar, which
+  // separates them (`s-l+block-node`, section 8.2.3; "such white space may
+  // safely include tab characters", section 6.2), spaces before a compact
+  // mapping, and a tab after a key's `:`.
+  inspect(
+    each([
+      "-\ta: 1", "- \ta: 1", "stubs:\n-\tid: a\n  mock: m", "-\t\"a\": 1", "- -\ta: 1",
+      "-\tx", "-\t[a, b]", "-\t|\n  x\n", "-  a: 1", "stubs:\n-   id: a\n    mock: m",
+      "- a:\tb",
+    ]),
+    content=(
+      #|"-\ta: 1" -> error /0: tabs are not allowed in indentation
+      #|"- \ta: 1" -> error /0: tabs are not allowed in indentation
+      #|"stubs:\n-\tid: a\n  mock: m" -> error /stubs/0: tabs are not allowed in indentation
+      #|"-\t\"a\": 1" -> error /0: tabs are not allowed in indentation
+      #|"- -\ta: 1" -> error /0/0: tabs are not allowed in indentation
+      #|"-\tx" -> ["x"]
+      #|"-\t[a, b]" -> [["a","b"]]
+      #|"-\t|\n  x\n" -> ["x\n"]
+      #|"-  a: 1" -> [{"a":1}]
+      #|"stubs:\n-   id: a\n    mock: m" -> {"stubs":[{"id":"a","mock":"m"}]}
+      #|"- a:\tb" -> [{"a":"b"}]
+    ),
+  )
+  // In a block scalar, only spaces indent. "The content indentation level
+  // is equal to the number of leading spaces on the first non-empty line"
+  // (YAML 1.2.2, section 8.1.1.1), and a line of text is that many spaces
+  // and then any characters (`s-indent(n) nb-char+`, section 8.1.2), so a
+  // tab after them is text, as the last item of Example 8.2 shows. An empty
+  // line is spaces, as many as the indentation or fewer, and then the line
+  // break (`l-empty`, section 6.4). A tab after fewer spaces than the
+  // indentation is in neither, so when the document goes on after that
+  // line, `parse` rejects the tab as a tab in indentation, with the message
+  // above. yaml-test-suite reads the first input, Y79Y/001, as
+  // {"foo": "\t\n", "bar": 1}, and marks the second, Y79Y/000, as an
+  // error. "It is an error for any of the leading empty lines to contain
+  // more spaces than the first non-empty line" (section 8.1.1.1): the
+  // message is the one the test above gives for that. The nearest inputs
+  // that stay valid follow: a tab after the indentation once it is known,
+  // and a line of fewer spaces with no tab, which is an empty line.
+  inspect(
+    each([
+      "foo: |\n \t\nbar: 1", "foo: |\n\t\nbar: 1", "- >\n \t\n detected\n", "a: |\n  \t\n  x\n",
+      "a: |\n \n  \t\n", "a: |\n   \n \t\n", "a: |\n  x\n \t\n  y\n", "a: |\n  x\n\t\nb: 1",
+      "a: |\n  x\n  \t\n", "a: |\n  x\n \n  y\n",
+    ]),
+    content=(
+      #|"foo: |\n \t\nbar: 1" -> {"foo":"\t\n","bar":1}
+      #|"foo: |\n\t\nbar: 1" -> error /foo: tabs are not allowed in indentation
+      #|"- >\n \t\n detected\n" -> ["\t\ndetected\n"]
+      #|"a: |\n  \t\n  x\n" -> {"a":"\t\nx\n"}
+      #|"a: |\n \n  \t\n" -> {"a":"\n\t\n"}
+      #|"a: |\n   \n \t\n" -> error /a: a leading empty line of a block scalar has more spaces than its first line
+      #|"a: |\n  x\n \t\n  y\n" -> error /a: tabs are not allowed in indentation
+      #|"a: |\n  x\n\t\nb: 1" -> error /a: tabs are not allowed in indentation
+      #|"a: |\n  x\n  \t\n" -> {"a":"x\n\t\n"}
+      #|"a: |\n  x\n \n  y\n" -> {"a":"x\n\ny\n"}
     ),
   )
 }

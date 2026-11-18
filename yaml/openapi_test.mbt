@@ -330,6 +330,23 @@ test "in the OpenAPI mode, indentation indicators set a block scalar's indentati
       #|"a: |2\n  x\n y\n" -> error /a: bad indentation
     ),
   )
+  // Example 8.2 of YAML 1.2.2, section 8.1.1.1, which yaml-test-suite has
+  // as R4YG: in its last item, a tab follows the one space of the
+  // indentation, so it is text. With an indicator, a tab after as many
+  // spaces as it gives is text too, and a tab after fewer is in no empty
+  // line, which holds spaces only (`l-empty`, section 6.4): the document
+  // goes on after it, so it is a tab in indentation.
+  inspect(
+    openapi_each([
+      "- |\n detected\n- >\n \n  \n  # detected\n- |1\n  explicit\n- >\n \t\n detected\n",
+      "a: |1\n \t\n", "a: |2\n \t\n  x\n",
+    ]),
+    content=(
+      #|"- |\n detected\n- >\n \n  \n  # detected\n- |1\n  explicit\n- >\n \t\n detected\n" -> ["detected\n","\n\n# detected\n"," explicit\n","\t\ndetected\n"]
+      #|"a: |1\n \t\n" -> {"a":"\t\n"}
+      #|"a: |2\n \t\n  x\n" -> error /a: tabs are not allowed in indentation
+    ),
+  )
 }
 
 ///|
@@ -463,23 +480,29 @@ test "malformed text gives the same error in both modes" {
   )
   // A `#` with no white space before it starts no comment: "Comments must
   // be separated from other tokens by white space characters" (YAML 1.2.2,
-  // section 6.6). yaml-test-suite marks these three, SU5Z, 9JBA and CVW2,
-  // as errors, and both modes refuse them, with the messages yaml_test.mbt's
-  // comment test gives.
+  // section 6.6). yaml-test-suite marks the first three, SU5Z, 9JBA and
+  // CVW2, as errors, and both modes refuse them with the message `parse`
+  // documents for such a `#` "in both modes", as yaml_test.mbt's comment
+  // test does. The last has the `#` right after an indentation indicator,
+  // which only the mode for OpenAPI documents reads.
   inspect(
     both([
       "key: \"value\"# invalid comment", "---\n[ a, b, c, ]#invalid\n", "---\n[ a, b, c,#invalid\n]\n",
+      "a: |2#c\n  x\n",
     ]),
     content=(
       #|"key: \"value\"# invalid comment"
-      #|  safe: error /key: unexpected text after the value
-      #|  openapi: error /key: unexpected text after the value
+      #|  safe: error /key: a comment needs a space before its #
+      #|  openapi: error /key: a comment needs a space before its #
       #|"---\n[ a, b, c, ]#invalid\n"
-      #|  safe: error /2: unexpected text after the value
-      #|  openapi: error /2: unexpected text after the value
+      #|  safe: error /2: a comment needs a space before its #
+      #|  openapi: error /2: a comment needs a space before its #
       #|"---\n[ a, b, c,#invalid\n]\n"
-      #|  safe: error /3: a plain value cannot start with #; quote this value
-      #|  openapi: error /3: a plain value cannot start with #; quote this value
+      #|  safe: error /2: a comment needs a space before its #
+      #|  openapi: error /2: a comment needs a space before its #
+      #|"a: |2#c\n  x\n"
+      #|  safe: error /a: block scalar indentation indicators are not supported
+      #|  openapi: error /a: a comment needs a space before its #
     ),
   )
   // A tab between two `-` indicators on one line is in the indentation of
@@ -501,6 +524,43 @@ test "malformed text gives the same error in both modes" {
       #|"-\t- x"
       #|  safe: error /0: tabs are not allowed in indentation
       #|  openapi: error /0: tabs are not allowed in indentation
+    ),
+  )
+  // So is a tab between `-` and a compact mapping on its line, by the same
+  // sections (#382), in both modes; a tab before a scalar separates.
+  inspect(
+    both([
+      "-\ta: 1", "paths:\n  /pets:\n    parameters:\n    -\tname: id\n      in: path",
+      "-\tx",
+    ]),
+    content=(
+      #|"-\ta: 1"
+      #|  safe: error /0: tabs are not allowed in indentation
+      #|  openapi: error /0: tabs are not allowed in indentation
+      #|"paths:\n  /pets:\n    parameters:\n    -\tname: id\n      in: path"
+      #|  safe: error /paths/~1pets/parameters/0: tabs are not allowed in indentation
+      #|  openapi: error /paths/~1pets/parameters/0: tabs are not allowed in indentation
+      #|"-\tx"
+      #|  safe: ["x"]
+      #|  openapi: ["x"]
+    ),
+  )
+  // In a block scalar, a tab after fewer spaces than the indentation is in
+  // no empty line, which holds spaces only (YAML 1.2.2, section 6.4), and in
+  // no line of text, which starts with the indentation's spaces (section
+  // 8.1.2). yaml-test-suite marks the first, Y79Y/000, as an error. Both
+  // modes refuse it as a tab in indentation, which
+  // docs/openapi/references-and-yaml.md lists among the errors "at its
+  // pointer, with a message that names it".
+  inspect(
+    both(["foo: |\n\t\nbar: 1", "a: |\n  x\n \t\n  y\n"]),
+    content=(
+      #|"foo: |\n\t\nbar: 1"
+      #|  safe: error /foo: tabs are not allowed in indentation
+      #|  openapi: error /foo: tabs are not allowed in indentation
+      #|"a: |\n  x\n \t\n  y\n"
+      #|  safe: error /a: tabs are not allowed in indentation
+      #|  openapi: error /a: tabs are not allowed in indentation
     ),
   )
 }

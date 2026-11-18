@@ -468,8 +468,14 @@ of each GitHub release include its section
     health service too, from the descriptor smock embeds unless the set
     defines `grpc.health.v1`. It answers one request per call, once the
     request's message is whole, then resets the stream with NO_ERROR if
-    the client still sends. A Mock with reflection on keeps its set's
-    files as encoded, beside the set's model. See
+    the client still sends. It reads the request as protobuf's parsers
+    read a message. A field it knows that comes with another wire type
+    than its type's, such as `file_by_filename` sent as a varint, is
+    skipped, as an unknown field is. `file_containing_extension` records
+    in a row merge, as the records of a message field do, so the
+    containing type can come in one record and the extension number in
+    the next. A Mock with reflection on keeps its set's files as encoded,
+    beside the set's model. See
     [Reflection](docs/grpc/services-and-connections.md#reflection).
   - **Health.** With `grpc: { health: true }`, a Mock answers gRPC's
     `grpc.health.v1.Health` as gRPC's health servers do: `Check` says
@@ -706,17 +712,6 @@ of each GitHub release include its section
   file that started with an `ATTRIBUTE CERTIFICATE` got a metric of 0 and
   an `expiry` of null, and one that started with an `X.509 CERTIFICATE`,
   which OpenSSL skips, got that block's notAfter.
-- gRPC reflection no longer refuses a request in which a field it knows
-  comes with another wire type than its type's, such as
-  `file_by_filename` sent as a varint. It answered INTERNAL, "the request
-  message cannot be decoded". It now skips such a field, as protobuf's
-  parsers and smock's message decoder do, and answers the rest of the
-  request.
-- gRPC reflection now merges a request's `file_containing_extension`
-  records, as protobuf's parsers merge the records of a message field. It
-  kept only the last, so a request that gave the containing type in one
-  record and the extension number in the next got NOT_FOUND. No known
-  client sends a request that way.
 - A YAML Definition file or OpenAPI document that starts with two `---`
   markers with nothing but comments between them is now rejected as
   multiple documents, as the documents say: the first `---` starts an empty
@@ -726,14 +721,30 @@ of each GitHub release include its section
 - In YAML, a `#` with no space or tab before it no longer starts a
   comment, as YAML says. After a quoted value or a flow collection, such
   as `key: "value"# note` or `[a, b]#note`, smock dropped the rest of the
-  line as a comment; it now rejects the text. Inside a plain value, as in
-  `path: /a#b`, the `#` is part of the value, as before
+  line as a comment; it now rejects the text, with "a comment needs a
+  space before its #". Inside a plain value, as in `path: /a#b`, the `#`
+  is part of the value, as before
   ([smock#366](https://github.com/hirunefu/smock/issues/366)).
 - In YAML, a tab between two `-` on one line, as in `-<tab>- x`, is now
   rejected as a tab in indentation, as the documents say: the white space
   after the first `-` indents the nested sequence. smock read it as a
   nested sequence, and in an OpenAPI document `-<tab>-` read as `[[null]]`
   ([smock#367](https://github.com/hirunefu/smock/issues/367)).
+- In a YAML block scalar, a tab after the spaces of the indentation is now
+  text, as YAML says, also on a line that holds nothing else. smock read
+  such a line as an empty line and dropped the tab: `foo: |`, then a line
+  of one space and a tab, then `bar: 1`, read `foo` as `""`, and now reads
+  it as `"\t\n"`. On a line of white space, a tab after fewer spaces than
+  the indentation is now rejected as a tab in indentation; smock read that
+  line as an empty line too
+  ([smock#369](https://github.com/hirunefu/smock/issues/369)).
+- In YAML, a tab between a `-` and a mapping that starts on its line, as
+  in `-<tab>id: a`, is now rejected as a tab in indentation, as YAML says:
+  the white space after the `-` indents the mapping. smock read it as the
+  mapping, so a Definition file or an OpenAPI document written that way
+  loaded, and is now rejected. A tab between a `-` and a scalar still
+  separates them
+  ([smock#382](https://github.com/hirunefu/smock/issues/382)).
 - A poll that reads the files at once, with no quiet period, no longer
   reloads what it reads. File times are coarse, so the polls of the 2 s
   after a change read the Definition files and the certificate and key

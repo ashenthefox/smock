@@ -100,7 +100,7 @@ async test "over the authenticated Admin API, a test sets a Variable for its Ses
 }
 
 ///|
-async test "Admin API errors on Variables: an unknown Mock, a name that is not a Variable name, a body that is not JSON, is missing or takes more than 1 MiB, an unset Variable, and a method a path does not take" {
+async test "Admin API errors on Variables: an unknown Mock, a name that is not a Variable name, such as one of 129 characters while one of 128 is set and listed, a body that is not JSON, is missing or takes more than 1 MiB, an unset Variable, and a method a path does not take" {
   with_definitions([("shop.yaml", who_logged_in)], dir => {
     let _ = with_smock(["--dir", dir, "--port", "0"], smock => {
       ignore(
@@ -112,7 +112,12 @@ async test "Admin API errors on Variables: an unknown Mock, a name that is not a
         ),
       )
       let user = "/v1/mocks/shop/variables/user"
+      // A name is 1 to 128 ASCII letters, digits, _ and -
+      // (docs/definition-files/variables.md, Through the Admin API): `long`,
+      // 129 characters, shown as x...x, is refused, and `longest`, 128,
+      // shown as y...y, is set, then listed with the no-Session space.
       let long = "x".repeat(129)
+      let longest = "y".repeat(128)
       // A string 1 byte above 1 MiB of compact JSON.
       let above = "\"\{String::make(1024 * 1024 - 1, 'a')}\""
       let calls : Array[(String, String, String?, String?)] = [
@@ -122,6 +127,7 @@ async test "Admin API errors on Variables: an unknown Mock, a name that is not a
         ("PUT", "/v1/mocks/shop/variables/a.b", None, Some("1")),
         ("PUT", "/v1/mocks/shop/variables/a%20b", None, Some("1")),
         ("PUT", "/v1/mocks/shop/variables/\{long}", None, Some("1")),
+        ("PUT", "/v1/mocks/shop/variables/\{longest}", None, Some("1")),
         ("DELETE", "/v1/mocks/shop/variables/a.b", None, None),
         ("PUT", user, None, Some("{\"name\":")),
         ("PUT", user, None, Some("ann")),
@@ -146,17 +152,22 @@ async test "Admin API errors on Variables: an unknown Mock, a name that is not a
           Some(allow) => " (Allow: \{allow})"
           None => ""
         }
-        let path = path.replace_all(old=long, new="x...x")
+        let path = path
+          .replace_all(old=long, new="x...x")
+          .replace_all(old=longest, new="y...y")
         let as_session = match session {
           Some(session) => " as \{session}"
           None => ""
         }
         out.push(
-          "\{meth} \{path}\{as_session}: \{response.status}\{allow} \{response.body.replace_all(old=long, new="x...x")}",
+          "\{meth} \{path}\{as_session}: \{response.status}\{allow} \{response.body.replace_all(old=long, new="x...x").replace_all(old=longest, new="y...y")}",
         )
       }
       out.push(
         "test-b lists: \{smock.call("GET", "/v1/mocks/shop/variables", session="test-b")}",
+      )
+      out.push(
+        "no Session lists: \{smock.call("GET", "/v1/mocks/shop/variables").replace_all(old=longest, new="y...y")}",
       )
       inspect(
         out.join("\n"),
@@ -167,6 +178,7 @@ async test "Admin API errors on Variables: an unknown Mock, a name that is not a
           #|PUT /v1/mocks/shop/variables/a.b: 400 {"error":"invalid_request","message":"\"a.b\" is not a Variable name: 1 to 128 ASCII letters, digits, _ and -","warnings":[]}
           #|PUT /v1/mocks/shop/variables/a%20b: 400 {"error":"invalid_request","message":"\"a b\" is not a Variable name: 1 to 128 ASCII letters, digits, _ and -","warnings":[]}
           #|PUT /v1/mocks/shop/variables/x...x: 400 {"error":"invalid_request","message":"\"x...x\" is not a Variable name: 1 to 128 ASCII letters, digits, _ and -","warnings":[]}
+          #|PUT /v1/mocks/shop/variables/y...y: 200 {"name":"y...y","value":1,"warnings":[]}
           #|DELETE /v1/mocks/shop/variables/a.b: 400 {"error":"invalid_request","message":"\"a.b\" is not a Variable name: 1 to 128 ASCII letters, digits, _ and -","warnings":[]}
           #|PUT /v1/mocks/shop/variables/user: 400 {"error":"malformed_json","message":"the body is not valid JSON: Unexpected end of file","warnings":[]}
           #|PUT /v1/mocks/shop/variables/user: 400 {"error":"malformed_json","message":"the body is not valid JSON: Invalid character 'a' at line 1, column 0","warnings":[]}
@@ -178,6 +190,7 @@ async test "Admin API errors on Variables: an unknown Mock, a name that is not a
           #|GET /v1/mocks/shop/variables/user: 405 (Allow: PUT, DELETE) {"error":"method_not_allowed","message":"/v1/mocks/shop/variables/user takes PUT, DELETE, not GET","warnings":[]}
           #|DELETE /v1/mocks/shop/variables: 405 (Allow: GET, HEAD) {"error":"method_not_allowed","message":"/v1/mocks/shop/variables takes GET, HEAD, not DELETE","warnings":[]}
           #|test-b lists: 200 {"variables":{"user":"bob"},"warnings":[]}
+          #|no Session lists: 200 {"variables":{"y...y":1},"warnings":[]}
         ),
       )
     })
