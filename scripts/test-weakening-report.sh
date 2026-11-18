@@ -418,6 +418,197 @@ mentions renamed '### `add/add_test.mbt:2`: test "adds two numbers"'
 mentions renamed 'Now `add/add_test.mbt:2`: test "adds two positive numbers".'
 mentions renamed '-  assert_eq(@add.add(2, 3), 5)'
 mentions renamed '+  assert_eq(@add.add(2, 3), 6)'
+mentions_in renamed "Tests moved or renamed" '- `add/timed_test.mbt:2`: test "answers in time", now `add/timed_test.mbt:2`, test "answers in time, under 250 ms": its body changed, as listed below.'
+mentions_in renamed "Tests moved or renamed" '- `add/add_test.mbt:2`: test "adds two numbers", now `add/add_test.mbt:2`, test "adds two positive numbers": its body changed, as listed below.'
+
+# A test renamed and nothing else: the pairing shows, so that a reader
+# sees which new test stands for the old one.
+tree
+package
+branch
+sed -i 's/test "adds two numbers"/test "adds two numbers, 2 and 3"/' "$repo/add/add_test.mbt"
+report renamed-only
+mentions_in renamed-only "Tests moved or renamed" '- `add/add_test.mbt:2`: test "adds two numbers", now `add/add_test.mbt:2`, test "adds two numbers, 2 and 3": its body is unchanged.'
+lacks renamed-only "## $other"
+lacks renamed-only "## Tests deleted"
+lacks renamed-only "Nothing to report."
+
+# --- Tests moved or renamed -------------------------------------------------------
+
+# A test file of three tests and their helper, which a branch moves to
+# another package, as #317 moved the ClientHello tests from server to
+# serverparsers.
+reader() {
+  file add/reader_test.mbt <<'MBT'
+///|
+test "reads a name" {
+  let name = read("a.example")
+  inspect(name, content="Some(\"a.example\")")
+}
+
+///|
+test "reads no name" {
+  let name = read("")
+  inspect(name, content="None")
+}
+
+///|
+test "reads a name split in two" {
+  let name = read("b.example")
+  inspect(name, content="Some(\"b.example\")")
+}
+
+///|
+/// What the reader reads from the text.
+fn read(text : String) -> String? {
+  let name = text
+  if name.is_empty() {
+    None
+  } else {
+    Some(name)
+  }
+}
+MBT
+}
+
+# The file moved to another package and renamed: a test moved as it was,
+# one moved with a line added, and one deleted; the helper moved with a
+# changed line. In the package, a test moved to another file. A test is
+# deleted only when no test of its name is left (#395).
+tree
+package
+reader
+branch
+mkdir -p "$repo/parse"
+git -C "$repo" mv add/reader_test.mbt parse/parse_test.mbt
+sed -i 's/^  let name = read("")$/  let name = read("")\n  let _ = read("x")/; s/^  let name = text$/  let name = text.trim()/' "$repo/parse/parse_test.mbt"
+sed -i '/^test "reads a name split in two" {$/,/^}$/d' "$repo/parse/parse_test.mbt"
+file add/sum_test.mbt <<'MBT'
+///|
+test "adds two numbers" {
+  assert_eq(@add.add(2, 3), 5)
+}
+MBT
+file add/add_test.mbt <<'MBT'
+///|
+test "adds a negative number" {
+  inspect(@add.add(2, -3), content="-1")
+}
+MBT
+report moved
+moved="Tests moved or renamed"
+mentions moved "## $moved"
+mentions_in moved "$moved" '- `add/reader_test.mbt:2`: test "reads a name", now `parse/parse_test.mbt:2`: its body is unchanged.'
+mentions_in moved "$moved" '- `add/reader_test.mbt:8`: test "reads no name", now `parse/parse_test.mbt:8`: its body changed, as listed below.'
+mentions_in moved "$moved" '- `add/add_test.mbt:2`: test "adds two numbers", now `add/sum_test.mbt:2`: its body is unchanged.'
+lacks_in moved "$moved" 'split in two'
+lacks_in moved "$moved" 'fn read'
+mentions_in moved "Tests deleted" '- `add/reader_test.mbt:14`: test "reads a name split in two"'
+lacks_in moved "Tests deleted" 'test "reads a name"'
+lacks_in moved "Tests deleted" 'test "reads no name"'
+lacks_in moved "Tests deleted" 'test "adds two numbers"'
+mentions_in moved "$other" '### `add/reader_test.mbt:8`: test "reads no name"'
+mentions_in moved "$other" 'Now `parse/parse_test.mbt:8`: test "reads no name".'
+mentions_in moved "$other" '+  let _ = read("x")'
+mentions_in moved "$other" '### `add/reader_test.mbt:21`: fn read'
+mentions_in moved "$other" 'Now `parse/parse_test.mbt:18`: fn read.'
+mentions_in moved "$other" '+  let name = text.trim()'
+lacks_in moved "$other" 'test "reads a name"'
+
+# Moved to another package and renamed, its body kept: followed there, as
+# a rename in its package is. A test whose name is left in another
+# package has moved there, even when its own package gains a new test
+# with its body. A moved test whose comments alone changed says so.
+tree
+package
+reader
+branch
+mkdir -p "$repo/parse"
+git -C "$repo" mv add/reader_test.mbt parse/parse_test.mbt
+sed -i 's/^test "reads a name" {$/test "reads the name it asks for" {/' "$repo/parse/parse_test.mbt"
+sed -i 's/^  let name = read("b.example")$/  \/\/ Split as a client may split it.\n  let name = read("b.example")/' "$repo/parse/parse_test.mbt"
+file add/again_test.mbt <<'MBT'
+///|
+test "reads no name, again" {
+  let name = read("")
+  inspect(name, content="None")
+}
+MBT
+report moved-renamed
+mentions_in moved-renamed "$moved" '- `add/reader_test.mbt:2`: test "reads a name", now `parse/parse_test.mbt:2`, test "reads the name it asks for": its body is unchanged.'
+mentions_in moved-renamed "$moved" '- `add/reader_test.mbt:8`: test "reads no name", now `parse/parse_test.mbt:8`: its body is unchanged.'
+mentions_in moved-renamed "$moved" '- `add/reader_test.mbt:14`: test "reads a name split in two", now `parse/parse_test.mbt:14`: only comments or blank lines changed in its body.'
+lacks moved-renamed 'reads no name, again'
+lacks moved-renamed "## Tests deleted"
+lacks moved-renamed "## $other"
+
+# A test whose name is gone, alike a new test of its package and a new
+# test of another whose name is even more like its own: its package's
+# comes first.
+tree
+package
+reader
+branch
+sed -i 's/^test "reads a name" {$/test "reads the name it asks for" {/' "$repo/add/reader_test.mbt"
+file parse/parse_test.mbt <<'MBT'
+///|
+test "reads a name." {
+  let name = read("a.example")
+  inspect(name, content="Some(\"a.example\")")
+}
+MBT
+report renamed-here
+mentions_in renamed-here "$moved" '- `add/reader_test.mbt:2`: test "reads a name", now `add/reader_test.mbt:2`, test "reads the name it asks for": its body is unchanged.'
+lacks renamed-here 'reads a name.'
+
+# Two packages with a test and a helper of the same names, and a second
+# helper in the first. The branch deletes the first package's file, and
+# the second package gains a helper of the second's name. The first
+# package's test is deleted, since the test of its name that is left is
+# the second package's own, and its helpers are followed nowhere: its
+# tests moved nowhere.
+works() {
+  file "$1" <<'MBT'
+///|
+test "works" {
+  assert_true(check())
+}
+
+///|
+/// Whether it works.
+fn check() -> Bool {
+  true
+}
+MBT
+}
+tree
+package
+works add/works_test.mbt
+cat >>"$repo/add/works_test.mbt" <<'MBT'
+
+///|
+/// What it reads.
+fn read() -> Bool {
+  true
+}
+MBT
+works sub/works_test.mbt
+branch
+remove add/works_test.mbt
+cat >>"$repo/sub/works_test.mbt" <<'MBT'
+
+///|
+/// What it reads.
+fn read() -> Bool {
+  false
+}
+MBT
+report same-names
+mentions_in same-names "Tests deleted" '- `add/works_test.mbt:2`: test "works"'
+lacks_in same-names "Tests deleted" 'sub/works_test.mbt'
+lacks same-names "## $moved"
+lacks same-names "## $other"
+lacks same-names "## Assertions removed or changed in tests that stay"
 
 # --- Snapshot lines changed ------------------------------------------------------
 
