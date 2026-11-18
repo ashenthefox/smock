@@ -54,9 +54,10 @@ pub impl Show for ParseError with fn output(self, logger) {
 /// Rejected, each with a message naming it: anchors, aliases, tags, merge
 /// keys (`<<`), duplicate keys, multiple documents, directives, explicit
 /// keys (`?`), block scalar indentation indicators, empty values (YAML
-/// reads them as null; write `null`), tabs in indentation, control
-/// characters, and nesting deeper than 1024 collections, the limit of
-/// `@json.parse`.
+/// reads them as null; write `null`), tabs in indentation (the white space
+/// between a `-` and a mapping or a sequence that starts on its line is
+/// indentation too), control characters, and nesting deeper than 1024
+/// collections, the limit of `@json.parse`.
 ///
 /// Rejected too, on purpose, though YAML allows them: a text with no
 /// document, such as an empty one or one of comments only; a key that is a
@@ -103,6 +104,15 @@ pub impl Show for ParseError with fn output(self, logger) {
 ///   "duplicate key". Keys are compared as the strings they read as, so
 ///   `a:` and `"a":` repeat each other.
 /// - The members of a mapping are read in the order they are written.
+/// - A `#` starts a comment only at the start of a line or after a space
+///   or a tab (YAML 1.2.2, section 6.6). Right after other text of a plain
+///   scalar, it is part of the scalar, as in `path: /a#b`; anywhere else,
+///   such as right after a quoted value or a flow collection, it is
+///   rejected with "a comment needs a space before its #".
+/// - A block scalar whose last line ends the text without a line break
+///   gets no line break added, as YAML 1.2.2 says (section 8.1.1.2), with
+///   each chomping indicator: a text that ends with `a: |` and then `  x`,
+///   with no line break after it, reads `a` as `"x"`.
 /// - In the mode for OpenAPI documents, a plain scalar that JSON cannot
 ///   hold, such as `.inf`, `.NaN` or a hexadecimal or octal integer above
 ///   2^53 - 1, is rejected with a message that ends in "quote this value".

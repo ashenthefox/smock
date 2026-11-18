@@ -726,14 +726,30 @@ of each GitHub release include its section
 - In YAML, a `#` with no space or tab before it no longer starts a
   comment, as YAML says. After a quoted value or a flow collection, such
   as `key: "value"# note` or `[a, b]#note`, smock dropped the rest of the
-  line as a comment; it now rejects the text. Inside a plain value, as in
-  `path: /a#b`, the `#` is part of the value, as before
+  line as a comment; it now rejects the text, with "a comment needs a
+  space before its #". Inside a plain value, as in `path: /a#b`, the `#`
+  is part of the value, as before
   ([smock#366](https://github.com/hirunefu/smock/issues/366)).
 - In YAML, a tab between two `-` on one line, as in `-<tab>- x`, is now
   rejected as a tab in indentation, as the documents say: the white space
   after the first `-` indents the nested sequence. smock read it as a
   nested sequence, and in an OpenAPI document `-<tab>-` read as `[[null]]`
   ([smock#367](https://github.com/hirunefu/smock/issues/367)).
+- In a YAML block scalar, a tab after the spaces of the indentation is now
+  text, as YAML says, also on a line that holds nothing else. smock read
+  such a line as an empty line and dropped the tab: `foo: |`, then a line
+  of one space and a tab, then `bar: 1`, read `foo` as `""`, and now reads
+  it as `"\t\n"`. On a line of white space, a tab after fewer spaces than
+  the indentation is now rejected as a tab in indentation; smock read that
+  line as an empty line too
+  ([smock#369](https://github.com/hirunefu/smock/issues/369)).
+- In YAML, a tab between a `-` and a mapping that starts on its line, as
+  in `-<tab>id: a`, is now rejected as a tab in indentation, as YAML says:
+  the white space after the `-` indents the mapping. smock read it as the
+  mapping, so a Definition file or an OpenAPI document written that way
+  loaded, and is now rejected. A tab between a `-` and a scalar still
+  separates them
+  ([smock#382](https://github.com/hirunefu/smock/issues/382)).
 
 ## [0.4.0] - 2026-11-01
 

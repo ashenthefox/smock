@@ -624,8 +624,11 @@ only a safe subset of YAML (`yaml/`):
   would type, such as `yes`, `on`, `~`, `True`, `0x1F`, `007`, `1_000`,
   `.inf` or `2001-12-14`, is rejected with "quote this value". Every other
   plain scalar is a string.
-- Anchors, aliases, tags, merge keys, duplicate keys and multiple documents
-  are rejected.
+- Anchors, aliases, tags, merge keys, duplicate keys, multiple documents
+  and tabs in indentation are rejected. A mapping or a sequence that
+  starts on the line of a `-` is indented by the `-` and the white space
+  after it, so a tab there is rejected too. Before a scalar or a flow
+  collection, a tab after `-` only separates them.
 - Some valid YAML is rejected too, on purpose: a file with no document,
   such as an empty file or one of comments only; a key that is a
   collection, such as `[a, b]: 1`; a `key: value` pair in a flow sequence
@@ -646,6 +649,15 @@ The YAML parser also holds to these rules:
 - A key that repeats in a mapping is rejected at the later key, with
   "duplicate key". `id:` and `"id":` are the same key.
 - The members of a mapping are read in the order they are written.
+- A `#` starts a comment only at the start of a line or after a space or
+  a tab, as YAML says. Right after other text of a plain value, it is part
+  of the value, as in `path: /a#b`; anywhere else, such as right after a
+  quoted value or a flow collection, as in `body: "x"# note`, it is
+  rejected with "a comment needs a space before its #".
+- A block scalar whose last line ends the file without a line break gets
+  no line break added, as YAML 1.2.2 says (section 8.1.1.2), with each
+  chomping indicator: a file that ends with `body: |` and then `  hello`,
+  with no line break after it, reads `body` as `"hello"`.
 
 Every problem is reported with the file and the JSON Pointer of the value,
 such as `users.yaml: /stubs/0/request/method: "on" may be read as a boolean;
