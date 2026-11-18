@@ -177,7 +177,7 @@ fn relabel(text : String, from : String, to : String) -> String {
 let bom : String = "\u{FEFF}"
 
 ///|
-test "the expiry is read from the first block that OpenSSL loads as the TLS port's leaf, one labelled CERTIFICATE, X509 CERTIFICATE or TRUSTED CERTIFICATE: after explanatory text and blocks of other labels, an ATTRIBUTE CERTIFICATE and an X.509 CERTIFICATE included, with lines ended by CRLF or by blanks, in a chain the leaf's, which comes first; a byte order mark is dropped where OpenSSL drops one, at the start of the input and right after the END line of a block it skips, and a BEGIN line with white space before it begins no block, as for OpenSSL (RFC 7468, sections 2, 3, 5.1, 5.2, 7, 10 and 12; docs/running.md, HTTPS and Certificate expiry; OpenSSL's PEM_read_bio_X509_AUX)" {
+test "the expiry is read from the first block that OpenSSL loads as the TLS port's leaf, one labelled CERTIFICATE, X509 CERTIFICATE or TRUSTED CERTIFICATE: after explanatory text and blocks of other labels, an ATTRIBUTE CERTIFICATE and an X.509 CERTIFICATE included, with lines ended by CRLF or by blanks and blanks inside lines of base64, in a chain the leaf's, which comes first; a byte order mark is dropped where OpenSSL drops one, at the start of the input and right after the END line of a block it skips, and a BEGIN line with white space before it begins no block, as for OpenSSL (RFC 7468, sections 2, 3, 5.1, 5.2, 7, 10 and 12; docs/running.md, HTTPS and Certificate expiry; OpenSSL's PEM_read_bio_X509_AUX)" {
   let figure_16_relabelled = relabel(
     figure_16, "X509 CERTIFICATE", "CERTIFICATE",
   )
@@ -208,6 +208,11 @@ test "the expiry is read from the first block that OpenSSL loads as the TLS port
       "CRLF: \{expiry(pem(figure_6.replace_all(old="\n", new="\r\n")))}",
       // Section 3, Figure 1: blanks (WSP) may end each line.
       "blanks at the ends of lines: \{expiry(pem(figure_6.replace_all(old="\n", new=" \t\n")))}",
+      // Section 3: "parsers SHOULD ignore whitespace", and OpenSSL's base64
+      // decoder skips it (EVP_DecodeUpdate): with blanks inside a line of
+      // base64, OpenSSL 4.1.0 presents the certificate, "notAfter Dec 22
+      // 07:41:51 2012 GMT".
+      "blanks inside a line of base64: \{expiry(pem(figure_6.replace(old="MIICLDCC", new="MIIC \tLDCC")))}",
       // Sections 7 and 10: a CERTIFICATE REQUEST and a PRIVATE KEY are other
       // types of data.
       "a key and a request first: \{expiry(pem(figure_12 + figure_9 + figure_6))}",
@@ -264,6 +269,7 @@ test "the expiry is read from the first block that OpenSSL loads as the TLS port
       #|explanatory text before: 1373339437000
       #|CRLF: 1356162111000
       #|blanks at the ends of lines: 1356162111000
+      #|blanks inside a line of base64: 1356162111000
       #|a key and a request first: 1356162111000
       #|leaf of 2012, then 2024: 1356162111000
       #|leaf of 2024, then 2012: 1726294550000
