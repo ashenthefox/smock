@@ -64,15 +64,70 @@ async fn blind_watch() -> @watch.Watch {
 }
 
 ///|
+/// Changes made to files right after a watch's stamps, as by a program that
+/// writes them one after the other while the watch polls them, and what
+/// each stamp noted, until something is logged.
+priv struct StampScript {
+  /// The changes to make, with what they are called: the first right after
+  /// the first poll's stamp, and each other one right after the next stamp.
+  changes : Array[(String, async () -> Unit)]
+  /// The log, which ends the script: no change is made and no stamp shown
+  /// once something is logged.
+  lines : Array[String]
+  /// The stamps taken so far, the watch's first one included.
+  mut taken : Int32
+  /// The stamp taken last.
+  mut last : @watch.Stamp?
+  /// A line for each stamp from the first poll's on: what it noted,
+  /// compared with the stamp before it, and the change made right after it.
+  shown : Array[String]
+}
+
+///|
+/// Starts a watch whose stamps `stamp` notes, as smock's do, with the
+/// script's changes made right after them, and has it forget its first
+/// stamp, as after a check that met a problem reading the files: the first
+/// poll then checks `Unsure`, whatever its stamp notes.
+async fn StampScript::watch(
+  self : StampScript,
+  stamp : async (@watch.Stamp) -> Unit,
+) -> @watch.Watch {
+  let watch = @watch.Watch(stamp=next => {
+    stamp(next)
+    let before = self.last
+    self.last = Some(next)
+    self.taken += 1
+    guard self.taken > 1 && self.lines.is_empty() else { return }
+    let noted = match before {
+      _ if self.taken == 2 => "the first poll's stamp"
+      Some(before) if next.notes_same(before) =>
+        "a stamp that notes the same as the one before it"
+      _ => "a stamp that notes a change"
+    }
+    match self.changes.get(self.taken - 2) {
+      Some((name, change)) => {
+        change()
+        self.shown.push("\{noted}, then \{name}")
+      }
+      None => self.shown.push(noted)
+    }
+  })
+  watch.forget()
+  watch
+}
+
+///|
 /// Runs `run`, a caller's loop over the checks of a watch, until something
-/// is logged into `lines`, or for 2 s, then stops it.
+/// is logged into `lines`, or for `within` milliseconds, 2 s unless given,
+/// then stops it.
 async fn run_until_logged(
   lines : Array[String],
   run : async () -> Unit,
+  within~ : Int32 = 2000,
 ) -> Unit {
   @async.with_task_group(group => {
     group.spawn_bg(no_wait=true, run)
-    let _ = @async.with_timeout_opt(2000, () => {
+    let _ = @async.with_timeout_opt(within, () => {
       while lines.is_empty() {
         @async.sleep(10)
       }
@@ -157,7 +212,7 @@ async test "an Unsure check of the definitions reloads nothing, though it reads 
   // leads outside the body-file subdirectory, which "is a problem"
   // (docs/definition-files.md), so each reload reports the set as invalid
   // and logs every error. While it lasts, "each poll reads again"
-  // (Reloading): a check that reads it tells that it did not read the
+  // (Reloading): a check that meets it tells that it did not read the
   // directory without problems, as Reloader::check's documentation has it.
   // An Unsure check whose read differs tells that it did, so that the watch
   // keeps the stamp that the quiet period compares with (the same
@@ -174,6 +229,44 @@ async test "an Unsure check of the definitions reloads nothing, though it reads 
   out.push(
     (
       $|mocks.json written again, the watch's next check: serves \{served()}
+      $|\{entries(lines)}
+    ),
+  )
+  lines.clear()
+  // With stamps of the files themselves, as smock takes them, while the
+  // problem lasts: a change of several files whose first write comes right
+  // after a poll's stamp, and each other one right after the next stamp,
+  // so less than 250 ms after the one before it. The poll's Unsure check
+  // reads the first; the watch then "looks again every 250 ms, and reads
+  // them once they have stayed the same for 250 ms", so that the change
+  // "still gives one reload" of them all (Reloading), which reports the
+  // lasting problem alone. The writes come right after stamps, not at set
+  // times, so what each stamp notes does not depend on how fast the
+  // machine is.
+  let script : StampScript = {
+    changes: [
+      ("mocks.json emptied", () => @fs.write_file("\{dir}/mocks.json", "")),
+      (
+        "mocks.json written, the Mock named m again",
+        () => @fs.write_file("\{dir}/mocks.json", mocks),
+      ),
+      (
+        "users.json written, its Stub for m again",
+        () => @fs.write_file("\{dir}/users.json", users),
+      ),
+    ],
+    lines,
+    taken: 0,
+    last: None,
+    shown: [],
+  }
+  let polled = script.watch(stamp => {
+    @defdir.stamp(stamp, dir, body_file_dir="files")
+  })
+  run_until_logged(lines, within=10_000, () => reloader.run(polled))
+  out.push(
+    (
+      $|\{script.shown.join("\n")}
       $|\{entries(lines)}
     ),
   )
@@ -196,6 +289,13 @@ async test "an Unsure check of the definitions reloads nothing, though it reads 
       #|Unsure, mocks.json empty, the problem lasting: read whole true, serves another set
       #|
       #|mocks.json written again, the watch's next check: serves another set
+      #|definitions reload failed: failed
+      #|  files/leak.txt: leads outside the body-file subdirectory files, which body files must stay inside
+      #|the first poll's stamp, then mocks.json emptied
+      #|a stamp that notes a change, then mocks.json written, the Mock named m again
+      #|a stamp that notes a change, then users.json written, its Stub for m again
+      #|a stamp that notes a change
+      #|a stamp that notes the same as the one before it
       #|definitions reload failed: failed
       #|  files/leak.txt: leads outside the body-file subdirectory files, which body files must stay inside
     ),
@@ -341,6 +441,45 @@ async test "an Unsure check of the certificates loads nothing, though a pair's f
       $|\{entries(lines)}
     ),
   )
+  lines.clear()
+  // With stamps of the files themselves, as smock takes them, while the
+  // problem lasts: the users certificate truncated right after a poll's
+  // stamp and written right after the next stamp, and its key right after
+  // the one after that, each write less than 250 ms after the one before
+  // it. The poll's Unsure check
+  // reads the first; the watch then reads the files "once they have stayed
+  // the same for 250 ms, so a certificate and its key written less than 250
+  // ms apart are loaded together" (Rotating certificates). The writes come
+  // right after stamps, not at set times, so what each stamp notes does not
+  // depend on how fast the machine is.
+  let script : StampScript = {
+    changes: [
+      (
+        "the users certificate emptied",
+        () => @fs.write_file(users_files.cert_file, ""),
+      ),
+      (
+        "the users certificate written",
+        () => @fs.write_file(users_files.cert_file, @testcerts.rsa_chain + "\n"),
+      ),
+      (
+        "its key written",
+        () => @fs.write_file(users_files.key_file, @testcerts.rsa_key + "\n"),
+      ),
+    ],
+    lines,
+    taken: 0,
+    last: None,
+    shown: [],
+  }
+  let polled = script.watch(stamp => stamp_pairs(stamp, [files, users_files]))
+  run_until_logged(lines, within=10_000, () => certificates.run(polled))
+  out.push(
+    (
+      $|\{script.shown.join("\n")}
+      $|\{entries(lines)}
+    ),
+  )
   inspect(
     out.join("\n"),
     content=(
@@ -361,6 +500,12 @@ async test "an Unsure check of the certificates loads nothing, though a pair's f
       #|Unsure, the users certificate written, its key not yet, the problem lasting: read all true, presents another pair, and for users the first pair
       #|
       #|both written, the watch's next check: presents another pair, and for users another pair
+      #|TLS certificate reloaded (users)
+      #|the first poll's stamp, then the users certificate emptied
+      #|a stamp that notes a change, then the users certificate written
+      #|a stamp that notes a change, then its key written
+      #|a stamp that notes a change
+      #|a stamp that notes the same as the one before it
       #|TLS certificate reloaded (users)
     ),
   )
