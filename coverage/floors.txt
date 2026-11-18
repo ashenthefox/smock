@@ -19,7 +19,7 @@
 buildinfo 5
 cmd/smock 288
 cookies 0
-defdir 29
+defdir 23
 definitions 41
 engine 78
 grpc 0
