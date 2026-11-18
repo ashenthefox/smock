@@ -23,7 +23,9 @@
 /// change, the watch stamps again every 250 ms, and checks once a stamp
 /// notes the same as the one before it, so that files written one after
 /// the other give one check, of them all. Changes that never pause are
-/// checked 10 s after the first was seen.
+/// checked 10 s after the first was seen. A change that only the read of
+/// an `Unsure` check finds settles the same way once the caller tells the
+/// watch (`found_change`).
 ///
 /// It uses no file-system events: the async runtime's file watcher can
 /// abort the process (moonbitlang/async#725), so a watch polls alone until
@@ -69,7 +71,10 @@ pub(all) enum Check {
   /// A poll's stamp notes the same as the one before it, but cannot tell
   /// whether anything changed: that one was taken too soon after a change
   /// to be trusted, or there is none, after `forget`. Only reading what the
-  /// caller reads can tell. It comes at the poll, with no quiet period.
+  /// caller reads can tell. It comes at the poll, with no quiet period, so
+  /// a file may be read while it is being written: the caller acts on
+  /// nothing it reads, and calls `Watch::found_change` when the read
+  /// differs from the one before it, so that the change settles first.
   Unsure
 }
 
@@ -212,4 +217,19 @@ pub async fn Watch::run(
 /// the one after it compares its glance with the glance taken last.
 pub fn Watch::forget(self : Watch) -> Unit {
   self.last = None
+}
+
+///|
+/// Tells the watch that the `Unsure` check it called for read something
+/// other than the caller read before, though the poll's stamp noted no
+/// change: a file may have been rewritten in place right after that stamp,
+/// and read half written. The caller acts on nothing that check read. The
+/// watch lets the change settle as if the poll's stamp had noted it: it
+/// stamps again every 250 ms from that poll, and checks again, `Changed`,
+/// once a stamp notes the same as the one before it, or 10 s after that
+/// poll. After `forget`, it does nothing: the next poll checks anyway.
+pub fn Watch::found_change(self : Watch) -> Unit {
+  if self.last is Some(polled) {
+    ignore(self.schedule.noted(Poll, polled.taken_at, Differs))
+  }
 }

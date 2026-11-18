@@ -303,17 +303,20 @@ change, without a restart:
   pair, and for a directory of a thousand body files about 1,500, which
   keep 1% to 2% of an Apple M1 core busy while smock is idle. While a
   change settles, it compares every 250 ms. File times are coarse, so the
-  polls of the 2 s after a change compare and read the files too, but
-  reload only when they differ from those read last. After a read that
-  met a problem reading the directory, such as a file that cannot be
-  read, each poll reads again while the problem lasts: smock reads and
-  hashes every file each second until it is fixed. Those reads come at
-  the poll, without waiting for the files to settle, so a change of
-  several files made while the problem lasts can be read apart. A file
-  time ahead of the clock is logged as a warning, once. A modification
-  time ahead, as from an archive made on a host whose clock ran ahead,
-  changes nothing else; a change time ahead, which only a clock set back
-  gives, makes each poll read the files until the clock passes it.
+  polls of the 2 s after a change compare and read the files too, also
+  right after startup when the files were written less than 2 s before.
+  After a read that met a problem reading the directory, such as a file
+  that cannot be read, each poll reads again while the problem lasts:
+  smock reads and hashes every file each second until it is fixed. These
+  reads come at the poll, with no quiet period, so they reload nothing.
+  When the files differ from those read last, perhaps because one was
+  read half written, smock waits for them to settle, as when a poll finds
+  a change, and reloads them then. So a change of several files made just
+  as such a read begins still gives one reload. A file time ahead of the
+  clock is logged as a warning, once. A modification time ahead, as from
+  an archive made on a host whose clock ran ahead, changes nothing else;
+  a change time ahead, which only a clock set back gives, makes each poll
+  read the files until the clock passes it.
 - A reload reads and validates every file, builds a whole new definition
   set and swaps it in at once, so no request sees half of a reload.
   Requests already being handled finish with the set they started with,
