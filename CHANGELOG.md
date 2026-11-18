@@ -775,6 +775,16 @@ of each GitHub release include its section
   longer served. A failed reload still keeps the series of the certificate
   that smock keeps presenting
   ([smock#385](https://github.com/hirunefu/smock/issues/385)).
+- A TLS client that sends its ClientHello slowly, in many small records,
+  no longer costs smock seconds of CPU before the handshake. smock reads
+  the name the client asks for by SNI again each time more octets arrive,
+  and copied what it had of the ClientHello once for every record, so a
+  client that sent a record of one octet every few milliseconds cost
+  about 5 s of CPU on an Apple M1, and a dozen such clients stalled every
+  port until the idle timeout cut them. A reading now walks each record
+  once and copies the ClientHello at most once, when it is whole: such a
+  client costs about 0.2 s, and a ClientHello in one record costs less
+  than before ([smock#388](https://github.com/hirunefu/smock/issues/388)).
 
 ## [0.4.0] - 2026-11-01
 
