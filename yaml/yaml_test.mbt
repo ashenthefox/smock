@@ -216,8 +216,8 @@ test "comments run from a # after white space to the end of the line" {
   // first three inputs, SU5Z, 9JBA and CVW2, as errors. `parse` documents
   // the message: "anywhere else, such as right after a quoted value or a
   // flow collection, it is rejected with 'a comment needs a space before
-  // its #'". The pointer is the deepest node reached, as `ParseError`
-  // documents. The nearest inputs that stay valid follow: a `#` after a
+  // its #'", words that the maintainer approved on 2026-11-18 (#366). The
+  // pointer is the deepest node reached, as `ParseError` documents. The nearest inputs that stay valid follow: a `#` after a
   // space or a tab, which section 6.6 allows, and a `#` inside a plain
   // scalar, which section 7.3.3 allows after a character that is not white
   // space ("An ns-char preceding").
