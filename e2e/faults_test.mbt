@@ -10,22 +10,27 @@ async test "a delay holds back the status line, while smock keeps answering othe
       let start = @async.now()
       slow.write("GET /slow HTTP/1.1\r\nHost: localhost\r\n\r\n")
       // The slow response is read beside the fast one, keeping when its
-      // first byte, the status line's, came. A delay makes smock "wait
-      // before it writes the status line. Meanwhile it keeps serving other
-      // connections" (docs/definition-files/faults.md, Delays): so nothing
-      // of the slow response comes before its delay is over, and the fast
+      // first byte came, timed from before its request was sent. A delay
+      // makes smock "wait before it writes the status line. Meanwhile it
+      // keeps serving other connections" (docs/definition-files/faults.md,
+      // Delays): so no byte of the slow response, not even the first of its
+      // status line, comes before its delay of 1500 ms is over, and the fast
       // response is in before any byte of it.
       let (fast, fast_ms, slow_response, slow_first_ms, slow_ms) = @async.with_task_group(group => {
           let slow_reply = group.spawn(() => {
-            let status = @async.with_timeout_opt(patience_ms, () => {
-              slow.read_until("\r\n")
+            let first = @async.with_timeout_opt(patience_ms, () => {
+              slow.read_exactly(1)
             })
-            guard status is Some(Some(status)) else {
-              fail("no status line in time")
+            guard first is Some(first) else {
+              fail("no byte of the slow response in time")
             }
             let first_ms = @async.now() - start
             let rest = read_response(slow)
-            ("\{status}\n\{rest}", first_ms, @async.now() - start)
+            (
+              "\{@utf8.decode_lossy(first)}\{rest}",
+              first_ms,
+              @async.now() - start,
+            )
           })
           let fast = smock.send("GET", "/fast")
           let fast_ms = @async.now() - start
@@ -36,7 +41,7 @@ async test "a delay holds back the status line, while smock keeps answering othe
       inspect(
         [
           "fast answered before any byte of the slow response: \{fast_ms < slow_first_ms}",
-          "slow sent nothing before its delay was over: \{slow_first_ms >= 1500}",
+          "no byte of the slow response within its delay, 1500 ms from before its request: \{slow_first_ms >= 1500}",
           "slow answered after at least 1500 ms: \{slow_ms >= 1500}",
           "---",
           fast,
@@ -45,7 +50,7 @@ async test "a delay holds back the status line, while smock keeps answering othe
         ].join("\n"),
         content=(
           #|fast answered before any byte of the slow response: true
-          #|slow sent nothing before its delay was over: true
+          #|no byte of the slow response within its delay, 1500 ms from before its request: true
           #|slow answered after at least 1500 ms: true
           #|---
           #|HTTP/1.1 200 OK
