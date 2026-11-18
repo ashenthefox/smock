@@ -551,14 +551,26 @@ test "malformed text gives the same error in both modes" {
   // 8.1.2). yaml-test-suite marks the first, Y79Y/000, as an error. Both
   // modes refuse it as a tab in indentation, which
   // docs/openapi/references-and-yaml.md lists among the errors "at its
-  // pointer, with a message that names it".
+  // pointer, with a message that names it". At the end of the text, as in
+  // the third, YAML 1.2.2 reads such a line as a comment line after the
+  // document (production 211), but both modes refuse it there too: the
+  // same document lists "a line of white space whose tab comes before a
+  // block scalar's indentation, with nothing after it but empty lines,
+  // comments and the `...` that may end the document" among the valid YAML
+  // that is "an error too, on purpose" (the maintainer's decision of
+  // 2026-11-18, #369).
   inspect(
-    both(["foo: |\n\t\nbar: 1", "a: |\n  x\n \t\n  y\n"]),
+    both([
+      "foo: |\n\t\nbar: 1", "a: |\n  x\n \t\n  y\n", "a: |\n  x\n \t\n# end\n",
+    ]),
     content=(
       #|"foo: |\n\t\nbar: 1"
       #|  safe: error /foo: tabs are not allowed in indentation
       #|  openapi: error /foo: tabs are not allowed in indentation
       #|"a: |\n  x\n \t\n  y\n"
+      #|  safe: error /a: tabs are not allowed in indentation
+      #|  openapi: error /a: tabs are not allowed in indentation
+      #|"a: |\n  x\n \t\n# end\n"
       #|  safe: error /a: tabs are not allowed in indentation
       #|  openapi: error /a: tabs are not allowed in indentation
     ),

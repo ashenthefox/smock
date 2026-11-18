@@ -64,9 +64,14 @@ pub impl Show for ParseError with fn output(self, logger) {
 /// collection, such as `[a, b]: 1`; a `key: value` pair in a flow sequence
 /// without braces (a single pair mapping), such as `[a: 1]`; a key of a
 /// flow mapping written over several lines, such as a plain key whose `:`
-/// is on the next line; and a tab in the white space at the start of a
-/// line, even where YAML reads it as separation rather than as
-/// indentation.
+/// is on the next line; a tab in the white space at the start of a line,
+/// even where YAML reads it as separation rather than as indentation; and
+/// a line of white space whose tab comes before a block scalar's
+/// indentation, with nothing after it but empty lines, comments and the
+/// `...` that may end the document, as when `a: |` and `  x` are followed
+/// by a last line of a space and a tab. YAML 1.2.2 reads that line as a
+/// comment line after the document (`l-yaml-stream`, production 211);
+/// `parse` rejects it as a tab in indentation, as libyaml and PyYAML do.
 ///
 /// With `openapi=true`, `parse` reads the text as OpenAPI asks YAML to be
 /// read: by the YAML 1.2 core schema, with every key a string. This mode is

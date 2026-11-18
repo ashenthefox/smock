@@ -99,6 +99,13 @@ and the reason:
   YAML 1.2.2's grammar says, where the suite reads one; the documents
   state it among the rules the parser holds to, and the maintainer kept
   it on 2026-11-18 (#368). Each entry quotes and cites the sentence.
+  The documents list one more refusal that no case of the suite has, so
+  that no entry names it: a line of white space whose tab comes before a
+  block scalar's indentation, with nothing after it but empty lines,
+  comments and the `...` that may end the document. YAML 1.2.2 reads that
+  line as a comment line after the document (production 211), and smock
+  refuses it as a tab in indentation, as libyaml and PyYAML do; the
+  maintainer decided so on 2026-11-18 (#369), and yaml's own tests pin it.
 - `skipped`: the testee skips the case.
 - `#<issue>`: a bug, which fails until the issue is done.
 

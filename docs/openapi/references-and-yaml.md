@@ -290,5 +290,10 @@ Some valid YAML is an error too, on purpose, as it is in Definition files
 YAML](../definition-files.md#writing-definition-files-in-yaml)): a file
 with no document, a key that is a collection, a `key: value` pair in a
 flow sequence without braces, a key of a flow mapping written over
-several lines, and a tab in the white space at the start of a line, even
-where YAML would read it as a separator rather than as indentation.
+several lines, a tab in the white space at the start of a line, even
+where YAML would read it as a separator rather than as indentation, and
+a line of white space whose tab comes before a block scalar's
+indentation, with nothing after it but empty lines, comments and the
+`...` that may end the document. YAML reads that line as a comment after
+the document; smock gives the error for a tab in indentation, as libyaml
+and PyYAML do.
