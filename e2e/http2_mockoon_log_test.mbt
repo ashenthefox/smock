@@ -52,6 +52,25 @@ async test "h2c and h2: with SMOCK_LOG_FORMAT=mockoon, each request a Mock handl
 }
 
 ///|
+/// When smock received the request for `path`, by the `receivedAt` of the
+/// one entry its Journal holds for that path: in milliseconds since the Unix
+/// epoch, as `@async.now()` and a log line's `timestamp` give times.
+async fn Smock::received_at(self : Smock, path : String) -> Int64 {
+  let query = "{ \"filter\": { \"path\": \"\{path}\" } }"
+  guard self.journal(query~)
+    is (
+      200,
+      Object(
+        { "entries": Array([Object({ "receivedAt": String(at), .. })]), .. }
+      ),
+    ) &&
+    @log.parse_time(at) is Some(at) else {
+    fail("not exactly one Journal entry for \{path}")
+  }
+  at
+}
+
+///|
 async test "h2c: a delayed response logs after its delay, while a fast stream on the connection logs at once, and a Server-Sent Event stream logs once, after its last event" {
   with_definitions([("slow.json", slow)], dir => {
     let env = { "SMOCK_LOG_FORMAT": "mockoon" }
@@ -70,10 +89,14 @@ async test "h2c: a delayed response logs after its delay, while a fast stream on
       out.push(mask_timestamp(line))
       out.push("written after the delay: \{written_at(line) - start >= 1000}")
       // A response that waits "holds up no other stream's line"
-      // (docs/http2.md, Logs): the fast stream's line was written before the
-      // delayed one's, by smock's own clock.
+      // (docs/http2.md, Logs): the fast stream's line is written during the
+      // delayed stream's delay, by smock's own clock. That delay of 1000 ms
+      // began no sooner than smock received the delayed request, at the
+      // `receivedAt` of its Journal entry, so it was not over before 1000 ms
+      // after that.
+      let received = smock.received_at("/delayed")
       out.push(
-        "the fast stream's line written before it: \{written_at(quick_line) < written_at(line)}",
+        "the fast stream's line written during the delay, before the delayed request's receivedAt plus 1000 ms: \{written_at(quick_line) < received + 1000}",
       )
       let start = @async.now()
       let stream = client.send("GET", "/stream", authority="localhost")
@@ -105,7 +128,7 @@ async test "h2c: a delayed response logs after its delay, while a fast stream on
           #|/delayed answers: 200
           #|{"app":"smock","environmentName":"slow","level":"info","message":"Transaction recorded","requestMethod":"GET","requestPath":"/delayed","requestProxied":false,"responseStatus":200,"timestamp":"<timestamp>"}
           #|written after the delay: true
-          #|the fast stream's line written before it: true
+          #|the fast stream's line written during the delay, before the delayed request's receivedAt plus 1000 ms: true
           #|after the first event: 0 lines
           #|/stream ends: end
           #|{"app":"smock","environmentName":"slow","level":"info","message":"Transaction recorded","requestMethod":"GET","requestPath":"/stream","requestProxied":false,"responseStatus":200,"timestamp":"<timestamp>"}
