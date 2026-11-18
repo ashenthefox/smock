@@ -40,11 +40,12 @@ pub fn certificate_expiry(pem : Bytes) -> Int64? {
 /// leaf of the TLS port's chain (`PEM_read_bio_X509_AUX`): one labelled
 /// `CERTIFICATE`, the old `X509 CERTIFICATE` or OpenSSL's
 /// `TRUSTED CERTIFICATE`. Blocks of other labels are skipped, as OpenSSL
-/// skips them, an `ATTRIBUTE CERTIFICATE` included.
+/// skips them, an `ATTRIBUTE CERTIFICATE` included. A UTF-8 byte order mark
+/// at the start of `pem` is dropped, as OpenSSL drops it.
 fn first_certificate_der(pem : Bytes) -> BytesView? {
   let base64 = StringBuilder()
   let mut inside = false
-  for line in @utf8.decode_lossy(pem).split("\n") {
+  for line in @utf8.decode_lossy(pem, ignore_bom=true).split("\n") {
     let line = line.trim(chars=" \t\r")
     if inside {
       if line.has_prefix("-----END ") {

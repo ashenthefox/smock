@@ -172,7 +172,12 @@ fn relabel(text : String, from : String, to : String) -> String {
 }
 
 ///|
-test "the expiry is read from the first block that OpenSSL loads as the TLS port's leaf, one labelled CERTIFICATE, X509 CERTIFICATE or TRUSTED CERTIFICATE: after explanatory text and blocks of other labels, an ATTRIBUTE CERTIFICATE and an X.509 CERTIFICATE included, with lines ended by CRLF or by blanks, in a chain the leaf's, which comes first (RFC 7468, sections 2, 3, 5.1, 5.2, 7, 10 and 12; docs/running.md, HTTPS and Certificate expiry; OpenSSL's PEM_read_bio_X509_AUX)" {
+/// A UTF-8 byte order mark, U+FEFF, as Windows PowerShell 5.1's
+/// `Out-File -Encoding utf8` writes it before the text of a file.
+let bom : String = "\u{FEFF}"
+
+///|
+test "the expiry is read from the first block that OpenSSL loads as the TLS port's leaf, one labelled CERTIFICATE, X509 CERTIFICATE or TRUSTED CERTIFICATE: after explanatory text and blocks of other labels, an ATTRIBUTE CERTIFICATE and an X.509 CERTIFICATE included, with lines ended by CRLF or by blanks, in a chain the leaf's, which comes first; a byte order mark is dropped where OpenSSL drops one, at the start of the input (RFC 7468, sections 2, 3, 5.1, 5.2, 7, 10 and 12; docs/running.md, HTTPS and Certificate expiry; OpenSSL's PEM_read_bio_X509_AUX)" {
   let figure_16_relabelled = relabel(
     figure_16, "X509 CERTIFICATE", "CERTIFICATE",
   )
@@ -210,6 +215,22 @@ test "the expiry is read from the first block that OpenSSL loads as the TLS port
       // certificate, then its intermediate certificates".
       "leaf of 2012, then 2024: \{expiry(pem(figure_6 + figure_16_relabelled))}",
       "leaf of 2024, then 2012: \{expiry(pem(figure_16_relabelled + figure_6))}",
+      // OpenSSL's PEM_read_bio_X509_AUX reads one block at a time, each with
+      // PEM_read_bio_ex, until it reads a certificate, and each such read
+      // drops a UTF-8 byte order mark from the first line it takes
+      // (crypto/pem/pem_lib.c, get_name and sanitize_line), the first line
+      // of the input among them. A program that calls it on each of the
+      // next two files prints with OpenSSL 4.1.0 the leaf of 2012,
+      // "notAfter Dec 22 07:41:51 2012 GMT": the TLS port presents it, so
+      // the metric reports it.
+      "a byte order mark first, in a chain: \{expiry(pem(bom + figure_6 + figure_16_relabelled))}",
+      "a byte order mark first, a certificate alone: \{expiry(pem(bom + figure_6))}",
+      // On any other line the mark stays, and a line that starts with it is
+      // not a BEGIN line: after explanatory text, or after a mark already
+      // dropped. OpenSSL 4.1.0 then skips the leaf and presents the
+      // certificate of 2024 after it, "notAfter Sep 14 06:15:50 2024 GMT".
+      "explanatory text, then a byte order mark: \{expiry(pem("Subject: x\n" + bom + figure_6 + figure_16_relabelled))}",
+      "two byte order marks first: \{expiry(pem(bom + bom + figure_6 + figure_16_relabelled))}",
     ].join("\n"),
     content=(
       #|X509 CERTIFICATE: 1726294550000
@@ -222,6 +243,10 @@ test "the expiry is read from the first block that OpenSSL loads as the TLS port
       #|a key and a request first: 1356162111000
       #|leaf of 2012, then 2024: 1356162111000
       #|leaf of 2024, then 2012: 1726294550000
+      #|a byte order mark first, in a chain: 1356162111000
+      #|a byte order mark first, a certificate alone: 1356162111000
+      #|explanatory text, then a byte order mark: 1726294550000
+      #|two byte order marks first: 1726294550000
     ),
   )
 }
