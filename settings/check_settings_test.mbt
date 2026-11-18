@@ -59,8 +59,9 @@ test "check: the definitions directory is its argument, and may not be empty" {
   // docs/commands.md, smock check: "smock check defs validates a definitions
   // directory". `InvalidSetting::message` documents the form of the
   // refusal: "invalid value \"\" for <dir>: ...". That the empty value is
-  // refused, and the words of its reason, are the code's, which #320 takes
-  // to the maintainer, as for smock serve's --dir.
+  // refused, and the words of its reason, are the code's, which the
+  // maintainer decided on 2026-11-18 to keep as they are (#320), as for
+  // smock serve's --dir.
   inspect(
     [
       check_shows(["defs"], settings => settings.dir),
