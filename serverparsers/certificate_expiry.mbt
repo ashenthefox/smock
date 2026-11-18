@@ -48,6 +48,16 @@ pub fn certificate_expiry(pem : Bytes) -> Int64? {
 /// first line of `pem`, and the line right after the END line of a block it
 /// skips. So does this reading. On any other line the mark stays, and the
 /// line is no BEGIN line.
+///
+/// OpenSSL takes a line for a BEGIN line only when it starts with
+/// `-----BEGIN ` and ends with `-----`, with blanks after it ignored, so
+/// white space before it makes it no BEGIN line, and the lines of the
+/// block after it are read as lines between blocks. So does this reading,
+/// and a skipped block ends, as for OpenSSL, at a line that starts with
+/// `-----END `. White space before the certificate's END line is ignored:
+/// OpenSSL takes such a line for one of base64, and its decoder stops at the
+/// first `-`, so it loads the same certificate when an END line of the
+/// label follows, and none otherwise.
 fn first_certificate_der(pem : Bytes) -> BytesView? {
   let base64 = StringBuilder()
   let mut place = Start
@@ -58,7 +68,7 @@ fn first_certificate_der(pem : Bytes) -> BytesView? {
           (Start, Some(rest)) => rest
           _ => line
         }
-        let line = line.trim(chars=" \t\r")
+        let line = line.trim_end(chars=" \t\r")
         place = if line
           is ("-----BEGIN CERTIFICATE-----"
           | "-----BEGIN X509 CERTIFICATE-----"
@@ -70,10 +80,7 @@ fn first_certificate_der(pem : Bytes) -> BytesView? {
           Between
         }
       }
-      Skipped =>
-        if line.trim(chars=" \t\r").has_prefix("-----END ") {
-          place = Start
-        }
+      Skipped => if line.has_prefix("-----END ") { place = Start }
       Certificate => {
         let line = line.trim(chars=" \t\r")
         if line.has_prefix("-----END ") {
