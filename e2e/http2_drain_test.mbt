@@ -12,7 +12,7 @@ fn is_ping(frame : @http2.Frame) -> Bool {
 }
 
 ///|
-async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY NO_ERROR naming 2^31-1 and a PING; then the final GOAWAY, naming the last stream received, once the client acknowledges the PING, or a second later when it does not; and a FIN a second after that, well before the drain timeout" {
+async test "h2c: on SIGTERM, a connection with no stream in progress gets GOAWAY NO_ERROR naming 2^31-1 and a PING; then the final GOAWAY, naming the last stream received, once the client acknowledges the PING, or a second later when it does not; and a FIN a second after that, before the drain timeout" {
   with_definitions([("m.json", drain_defs)], dir => {
     let stopped = with_smock(
       ["--dir", dir, "--port", "0", "--drain-timeout-ms", "10000"],
@@ -203,7 +203,7 @@ fn Frames::data_count(self : Frames) -> Int32 {
 }
 
 ///|
-async test "h2c: an event stream goes on through the drain until it ends, after both GOAWAYs, and its connection then closes with a FIN a second later, well before the drain timeout" {
+async test "h2c: an event stream goes on through the drain until it ends, after both GOAWAYs, and its connection then closes with a FIN a second later, before the drain timeout" {
   with_definitions([("m.json", drain_defs)], dir => {
     let stopped = with_smock(
       ["--dir", dir, "--port", "0", "--drain-timeout-ms", "10000"],
