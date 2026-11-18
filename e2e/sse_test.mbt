@@ -198,8 +198,8 @@ async test "a client that closes the connection mid-stream ends that stream, and
       conn.close()
       // smock notices "when it next writes an event"
       // (docs/definition-files/responses.md, Server-Sent Events), 50 ms
-      // later, and then closes its end of it: well before the stream's own
-      // end, 10 s after the request.
+      // later, and then closes its end of it. The test checks that this
+      // comes before the stream's own end, 10 s after the request.
       let ended = @async.with_timeout_opt(patience_ms, () => {
         while open_files(smock.pid) >= streaming {
           @async.sleep(20)
