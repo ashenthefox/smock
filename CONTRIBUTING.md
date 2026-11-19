@@ -498,6 +498,13 @@ definition and operator ([The site counts](#the-site-counts)). CI's job
 commit, so a change to a package's source, other than to its tests, runs
 `python3 scripts/mutation/ratchet.py write` and commits what it writes.
 
+`mutation/shard-times.jsonl` records the shards of earlier bulk mutation
+runs and how long each took, from which the bulk runs' planned time of a
+mutant comes ([Bulk runs on Actions](#bulk-runs-on-actions)). The bulk
+runs' tests fail when `SECONDS_PER_MUTANT` in `scripts/mutation/bulk.py`
+is not what the record gives, so a change that adds a slower run raises
+it too.
+
 [`docs/ledgers/`](docs/ledgers/use-cases.md) holds the use-case and
 boundary ledgers of the test review
 ([The four ledgers](#the-four-ledgers)): each documented feature, message
@@ -2363,7 +2370,13 @@ Its inputs:
 - `seed` and `size`: a sample's, 0 and 1,000 unless given.
 - `width`: how many shards run at once, from 1 to 20, the default.
 - `workers`: how many mutants each shard builds and tests at once, 1
-  unless given.
+  unless given. That is the baseline's measurement: in its timing
+  ([run 44422395058](https://github.com/hirunefu/smock/actions/runs/44422395058),
+  one shard of 50 mutants on `main`), 1, 2 and 4 at once took 6.9, 6.6
+  and 7.2 s a mutant, with the same outcome for each mutant. Two at once
+  gained 4% and four lost 5%, so bulk runs keep one at a time on each
+  runner. `bulk.py`'s `WORKERS` and the workflow's input say so, and the
+  workflow's check refuses another default.
 
 A run runs the runner as any run does: each package's own tests, then
 its importers' tests for the survivors, kill confirmation, the comparison
@@ -2374,16 +2387,16 @@ three jobs, and `scripts/mutation/bulk.py` holds the steps they take:
   no mutant, and cuts the mutants into shards: as many as the width, or
   more when a shard would not end within a job's time. A job on GitHub's
   runners stops after 6 hours; a shard's mutants may take 5 of them, at
-  20 s a mutant (`bulk.py plan --seconds-per-mutant`). That is the
-  costliest package's mutant on a runner with its kill confirmed:
-  `engine`'s tests took about 3 s a mutant on wasm-gc on a laptop, a
-  runner is about 1.7 times slower, and a kill is built and run three
-  times. More shards than the width run in waves, as jobs come free, so
-  their count is then a multiple of the width, which fills each wave. A
-  run never has more shards than mutants, and one that would need more
-  than the 256 jobs a matrix makes is refused. The job's summary
-  gives the run's mutants per package, and how many of them are at an
-  unchecked access, and the plan is kept as the artifact `mutation-plan`.
+  the planned time of a mutant, 16 s (below; `bulk.py plan
+  --seconds-per-mutant` overrides it), so a shard holds at most 1,125
+  mutants. The sixth hour is for the checkout and the setup, under a
+  minute in the baseline, and is room to spare. More shards than the
+  width run in waves, as jobs come free, so their count is then a
+  multiple of the width, which fills each wave. A run never has more
+  shards than mutants, and one that would need more than the 256 jobs a
+  matrix makes is refused. The job's summary gives the run's mutants per
+  package, and how many of them are at an unchecked access, and the plan
+  is kept as the artifact `mutation-plan`.
 - **shard** runs each shard (`bulk.py shard`), at most the width at once,
   on an amd64 runner (`ubuntu-24.04`) with the native setup. Verdicts of
   a pure package are taken on wasm-gc, which any runner gives alike, but a
@@ -2462,8 +2475,11 @@ native-only packages, which the runner runs wholly natively (`bulk.py`'s
 evening UTC, when the repository has seen the fewest commits, and days
 away from the weekly run with the latest MoonBit, on Mondays at 03:17
 UTC. When the 1st is a Friday, the monthly run starts two hours and
-twenty minutes after the weekly one, which takes about one to one and a
-half hours (*estimate*). A push during either waits for free jobs.
+twenty minutes after the weekly one, which takes about 2 hours 50
+minutes (*estimate*, above): two of the weekly run's shards, `engine`'s
+and `protobuf`'s, still hold their jobs then, so two of the monthly
+run's first 20 shards wait for them, up to about half an hour. A push
+during either waits for free jobs.
 `bulk.py`'s `SCHEDULES` maps each schedule to its run, and the workflow's
 check pins both.
 
@@ -2505,10 +2521,66 @@ over the pure packages, whose survivor rate applies to positions as step
 3's triage budget does, and a BODY pass over every pure function:
 `-f mode=sample -f size=1000 -f seed=<seed>` and `-f mode=body`. The
 mode `timing` times one shard of it, 50 mutants, with 1, 2 and 4 mutants
-at once, and its report gives the time per mutant for each; the default
-of `workers` is set from it. The runs' reports, with their links and their
-wall and runner times, are posted on
-[#275](https://github.com/hirunefu/smock/issues/275).
+at once, and its report gives the time per mutant for each. The baseline
+ran on `main` at 7eac627b: the sample in
+[run 44417735318](https://github.com/hirunefu/smock/actions/runs/44417735318)
+(20 shards of 50 mutants), the BODY pass in
+[run 44419874781](https://github.com/hirunefu/smock/actions/runs/44419874781)
+(20 shards of 67 or 68) and the timing in
+[run 44422395058](https://github.com/hirunefu/smock/actions/runs/44422395058).
+The runs' reports, with their links and their wall and runner times, are
+posted on [#275](https://github.com/hirunefu/smock/issues/275). They set
+the default of `workers` (above) and the planned time of a mutant.
+
+**The planned time of a mutant** comes from the times of earlier runs'
+shards, by a rule: the slowest shard that ran its mutants, by its run's
+time over its mutants, rounded up to a whole second.
+`mutation/shard-times.jsonl` records each shard of the runs it comes
+from, one JSON object per line: its run, its name, its mutants at once,
+the mutants it ran, how long its run took (`bulk.json`'s `wall_s`, which
+holds everything `run.py` does) and how it exited. A shard that stopped,
+or ran no mutant, says nothing of a mutant's time. The record holds the
+baseline's 43 shards and the 40 of the first weekly run
+([run 44423781036](https://github.com/hirunefu/smock/actions/runs/44423781036),
+the pinned set on `main` at 7eac627b, planned at 20 s a mutant). A
+mutant took 7.0 s of runner time on average over the baseline's sample,
+and 6.3 s over the weekly run, but the slowest shards took twice as long
+a mutant or more. In the baseline they were `engine`'s: the BODY pass's
+shard 5-of-20 took 16 min 10 s for 68 mutants, 14.27 s each. In the
+weekly run it was `protobuf`'s shard 20-of-40, whose 460 mutants, half of
+them at an unchecked access and so also run natively, took 1 h 56 min
+30 s, 15.19 s each. So bulk runs plan 16 s a mutant (`bulk.py`'s
+`SECONDS_PER_MUTANT`); before the baseline they planned 20 s, from #275's
+cost model. The rule takes the slowest shard, not the average, because a
+shard holds a stretch of the run's order, mostly one or two packages,
+and the costly stretches are not spread over the shards. At the
+average's 7 s, the monthly run's shards would hold 1,331 mutants each:
+5.6 hours at 15.19 s a mutant.
+
+At 16 s, on 7eac627b's tree, the weekly run's 18,403 mutants go in 20
+shards of 920 or 921, all at once, where 20 s cut them into 40 shards in
+two waves. At the slowest pace a shard would take 3.9 hours. Each of the
+20 holds exactly two of the first weekly run's 40 shards, whose times add
+up to between 39 minutes and 2 hours 46 minutes, so the run is expected
+to take about 2 hours 50 minutes, its `protobuf` shard the longest
+(*estimate*), where the first weekly run took 2 hours 9 minutes. The
+monthly run's 26,619 mutants go in 40 shards of 665 or 666, as at 20 s,
+in two waves of 20: at most 2.8 hours a shard at the slowest pace. With
+each mutant at the pace of the first weekly run's shard that held its
+stretch of its package, the run takes about 3 hours 15 minutes
+(*estimate*).
+
+To add a later run's shards to the record, and see the time it gives:
+
+```sh
+gh run download <run id> --pattern 'mutation-shard-*' --dir shards
+python3 scripts/mutation/bulk.py pace --run-url https://github.com/hirunefu/smock/actions/runs/<run id> shards/*
+```
+
+It prints the slowest shard of the record, then `slowest_s` and
+`seconds_per_mutant`. A run that gives more than `SECONDS_PER_MUTANT`
+raises it in the same change: the bulk runs' tests fail until the two
+agree. A shard's artifact is kept for 7 days.
 
 The tests (`scripts/mutation/test_bulk.py`) plan a run of each mode on
 the fixture module and on smock's packages, run a plan's two shards and
@@ -2518,12 +2590,16 @@ with 1, 2 and 4 at once. They run a weekly run of `log` that reads an
 earlier run's flake records and a monthly run of it, list the fixture's
 stale entry, run the properties with random seeds on a small module with
 a moon that fails one, and cut made-up survivors into triage tickets.
+They record made-up shards and check the planned time that the rule
+gives, check that `SECONDS_PER_MUTANT` is what the committed record
+gives, and that every shard of smock's weekly and monthly runs then ends
+within 5 hours at the pace of the slowest recorded shard.
 `scripts/check-mutation-runs-workflow.sh`, in CI's job `scripts` with its
 test, checks when the workflow runs, that it passes each input to the
-plan, that its shards take their matrix and their width from the plan and
-run on amd64 within a job's time, the weekly run's other jobs, that only
-the job of the stale entries writes, and only issues, and that it keeps
-the merged report.
+plan, that `workers` is 1 unless given, that its shards take their
+matrix and their width from the plan and run on amd64 within a job's
+time, the weekly run's other jobs, that only the job of the stale
+entries writes, and only issues, and that it keeps the merged report.
 
 ## The weakening report
 
