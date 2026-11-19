@@ -63,7 +63,7 @@ def run_runner(root, out, *args, work=None, moon="moon"):
 
 def read_lines(path):
     """The JSON objects of a file of JSON lines."""
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
 
 
 class ShardTest(unittest.TestCase):
@@ -142,6 +142,36 @@ class MergeTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_a_record_that_holds_a_line_separator_in_a_string_merges_whole(self):
+        # #314's first weekly run (44423781036): the names of the tests that
+        # killed some mutants of definitions and yaml hold U+2028 and U+2029,
+        # and a record is written with those characters as they are. A
+        # reader that cuts the file wherever Python sees the end of a line
+        # (str.splitlines: U+0085, U+2028 and U+2029 among them) cut such a
+        # record in two, and the merge failed. A file of JSON Lines ends each
+        # record with "\n" and nothing else (jsonlines.org, "Line
+        # Terminator is '\n'").
+        shards = [self.tmp / f"separators-{k}" for k in (1, 2, 3)]
+        for source, shard in zip(self.shards, shards):
+            shutil.copytree(source, shard)
+        name = "a line\u2028a paragraph\u2029a next line\u0085the end"
+        path = shards[0] / "mutants.jsonl"
+        records = [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
+        killed = next(r for r in records if r.get("killing_tests"))
+        killed["killing_tests"][0]["name"] = name
+        text = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records)
+        self.assertIn("\u2028", text)
+        path.write_text(text, encoding="utf-8")
+        merged = self.tmp / "merged-separators"
+        result = subprocess.run([sys.executable, str(MERGE), "--out", str(merged), *map(str, shards)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        written = (merged / "mutants.jsonl").read_text(encoding="utf-8")
+        names = [t["name"] for line in written.split("\n") if line.strip()
+                 for t in json.loads(line).get("killing_tests", [])]
+        self.assertIn(name, names)
+        self.assertEqual(len([line for line in written.split("\n") if line.strip()]), 8)
 
     def test_the_shards_reports_merge_into_the_report_of_the_run_without_shards(self):
         # #305: "Shard reports merge into one report equal to a run without

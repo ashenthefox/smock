@@ -190,7 +190,7 @@ def records_of(directory):
     path = directory / "mutants.jsonl"
     if not path.is_file():
         raise JobError(f"{directory} holds no mutants.jsonl")
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
 
 
 def status_of(record):

@@ -147,7 +147,7 @@ def selection(args):
 def read_list(path):
     """The entries of a list of mutants, each with the number of its line."""
     entries = []
-    for number, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+    for number, line in enumerate(Path(path).read_text(encoding="utf-8").split("\n"), 1):
         if not line.strip():
             continue
         try:

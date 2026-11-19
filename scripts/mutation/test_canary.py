@@ -38,7 +38,7 @@ COMMIT = "d953f320e0bb4fad15352224d01c365a02c0ab79"
 
 def read_lines(path):
     """The JSON objects of a file of JSON lines."""
-    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").split("\n") if line.strip()]
 
 
 def write_lines(path, objects):

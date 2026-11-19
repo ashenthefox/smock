@@ -52,7 +52,7 @@ def bulk(*args, cwd=None):
 
 def read_lines(path):
     """The JSON objects of a file of JSON lines."""
-    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").split("\n") if line.strip()]
 
 
 def outputs(text):
