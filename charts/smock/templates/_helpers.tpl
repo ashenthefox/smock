@@ -62,7 +62,7 @@ the Pods; new content for the same files still reaches smock by reload.
 {{- end }}
 {{- range $path, $_ := $cm.bodyFiles }}
 - key: {{ include "smock.bodyFileKey" $path }}
-  path: {{ printf "%s/%s" $.Values.definitions.bodyFileDir $path | quote }}
+  path: {{ printf "%s/%s" (include "smock.string" $.Values.definitions.bodyFileDir) $path | quote }}
 {{- end }}
 {{- end -}}
 {{- end -}}

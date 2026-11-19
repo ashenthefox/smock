@@ -305,6 +305,25 @@ render body-file-dir --values "$tmp/values-token.yaml" --values "$tmp/values-bod
 check body-file-dir "the body-file subdirectory follows definitions.bodyFileDir" \
   "$layout"' == {"users.json": "{\"stubs\":[]}", "bodies/users/1.json": "{\"id\":1}", "bodies/README.txt": "not a Definition file"}
    and env("SMOCK_BODY_FILE_DIR").value == "bodies"'
+# A subdirectory named with digits, such as a date, is a number to YAML; the
+# volume's items and smock's setting name it with the digits of the values
+# file (#396).
+printf 'definitions:\n  bodyFileDir: 20261119\n' >"$tmp/values-body-file-dir-digits.yaml"
+render body-file-dir-digits --values "$tmp/values-token.yaml" --values "$tmp/values-body-files.yaml" \
+  --values "$tmp/values-body-file-dir-digits.yaml"
+check_text body-file-dir-digits "a body-file subdirectory written as digits holds the body files, and smock reads them from it" \
+  "$layout"' == {"users.json": "{\"stubs\":[]}", "\($dir)/users/1.json": "{\"id\":1}", "\($dir)/README.txt": "not a Definition file"}
+   and env("SMOCK_BODY_FILE_DIR").value == $dir' \
+  --arg dir "$(yq '.definitions.bodyFileDir' "$tmp/values-body-file-dir-digits.yaml")"
+# The chart refuses an empty subdirectory, and a null one, which removes the
+# default, is empty too.
+refuse body-file-dir-empty "an empty body-file subdirectory" \
+  'definitions.bodyFileDir: "" is not a relative path inside the definitions directory' \
+  --values "$tmp/values-token.yaml" --set definitions.bodyFileDir=
+printf 'definitions:\n  bodyFileDir: null\n' >"$tmp/values-body-file-dir-null.yaml"
+refuse body-file-dir-null "a null body-file subdirectory" \
+  'definitions.bodyFileDir: "" is not a relative path inside the definitions directory' \
+  --values "$tmp/values-token.yaml" --values "$tmp/values-body-file-dir-null.yaml"
 
 # A file whose content in a values file is a number of a million or more,
 # such as a JSON body of 1000000, keeps the digits of the values file in

@@ -85,7 +85,9 @@ scripts/test-helm-chart.sh fails until it is. */ -}}
 {{- fail (printf "definitions.configMap.bodyFiles: %q is not a relative path inside the body-file subdirectory: it must not start with \"/\", and none of its parts may be empty or start with \".\"" $path) -}}
 {{- end -}}
 {{- end -}}
-{{- if not (regexMatch $relative (toString .Values.definitions.bodyFileDir)) -}}
-{{- fail (printf "definitions.bodyFileDir: %q is not a relative path inside the definitions directory: it must not be empty or start with \"/\", and none of its parts may be empty or start with \".\"" (toString .Values.definitions.bodyFileDir)) -}}
+{{- /* The subdirectory as the Deployment writes it. */ -}}
+{{- $bodyFileDir := include "smock.string" .Values.definitions.bodyFileDir -}}
+{{- if not (regexMatch $relative $bodyFileDir) -}}
+{{- fail (printf "definitions.bodyFileDir: %q is not a relative path inside the definitions directory: it must not be empty or start with \"/\", and none of its parts may be empty or start with \".\"" $bodyFileDir) -}}
 {{- end -}}
 {{- end -}}

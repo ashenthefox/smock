@@ -78,7 +78,7 @@ spec:
             - name: SMOCK_DIR
               value: {{ include "smock.definitionsDir" . | quote }}
             - name: SMOCK_BODY_FILE_DIR
-              value: {{ .Values.definitions.bodyFileDir | quote }}
+              value: {{ include "smock.string" .Values.definitions.bodyFileDir | quote }}
             - name: SMOCK_PORT
               value: {{ include "smock.string" .Values.ports.plain | quote }}
             - name: SMOCK_TLS_PORT
