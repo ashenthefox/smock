@@ -1,18 +1,67 @@
 #!/usr/bin/env python3
 """The release's check of the latest weekly mutation run (decision 7, ADR
 0006, "What L4 and a release read"; docs/releasing.md): whether a tag's
-commit may be released, by the latest weekly run over the pinned set.
+commit may be released, by the latest weekly run over the pinned set. The
+release workflow (.github/workflows/release.yml) runs it before it
+publishes, beside its check that CI passed on the tag's commit
+(scripts/check-ci-passed.sh).
 
 usage: python3 scripts/check-weekly-run.py [--repo <dir>] [--repository <owner/repo>] <commit sha>
 
 <commit sha> is the full id of the tag's commit; <dir> is the checkout,
-this one unless given; <owner/repo> is GITHUB_REPOSITORY unless given.
+with the whole history, this one unless given; <owner/repo> is
+GITHUB_REPOSITORY unless given.
 
 The packages at L4 are those that mutation/l4-packages.txt names on the
 tag's commit. With none, the check reads nothing and passes, and says so.
 
-It exits with 0 when the tag's commit may be released, and with 2 when
-<commit sha> is not the full id of a commit of the checkout.
+Otherwise it asks GitHub (with gh) for the runs of the bulk mutation runs
+(.github/workflows/mutation-runs.yml) on main, and takes the weekly runs,
+which that workflow names "Mutation runs: weekly", whether its schedule
+or a person started them. It reads no other run: the monthly run over the
+full set is reported, never gated. The latest weekly run that has ended
+decides; one still running is not a result yet. The check refuses the
+release, and says why with the run's link, when
+
+  - no weekly run on main has ended: there is none, or one is still
+    running;
+  - the latest that ended did not succeed (a failed canary, self-test or
+    property seed fails a weekly run, as a shard does);
+  - its report (the artifact mutation-report, summary.json) cannot be
+    read, is not of the pinned set, did not run a package at L4, or shows
+    an unexplained survivor in one: stale-covered survivors and those that
+    a DEFERRED entry covers count as unexplained, as the report counts
+    them;
+  - it does not cover the tag's commit.
+
+The run covers the tag's commit when it ran on it, or on a commit of the
+tag's commit's first-parent history, main's, whose later commits there,
+each a change to main, each meet one of two conditions:
+
+  - it touches no non-test source of a package at L4: no .mbt file in the
+    package's directory but a test file (*_test.mbt, *_wbtest.mbt) or a
+    generated one (the site finder's rules, scripts/mutation/sites.py) is
+    added, changed or deleted. A release commit, which changes only the
+    version and the changelog, meets it;
+  - or a run of the branch checks (.github/workflows/branch-checks.yml),
+    on a push or started by hand, on the branch the change merged (its
+    second parent; a change that is no merge, on itself) passed, and its
+    report of the mutants on the changed lines (the artifact
+    changed-lines, report.json, as scripts/changed-lines.py writes it)
+    covered the change whole and shows no unexplained or stale-covered
+    survivor in a package at L4. The latest run that passed and covered
+    it decides, as for the merge check (scripts/check-merge.py): its
+    report is of that head, against main, from the branch's merge base
+    with main before the merge, and covered the whole diff. A merge that
+    changes a source file of a package at L4 otherwise than its branch
+    did, as when it resolves a conflict, and a merge of several branches
+    at once, are not covered. A change pushed straight to main has no
+    such run.
+
+It exits with 0 when the tag's commit may be released, and with 1 when it
+may not, or when git or gh fails or an answer cannot be read, since a
+release must not go ahead on doubt. It exits with 2 when <commit sha> is
+not the full id of a commit of the checkout.
 """
 
 import argparse
@@ -317,6 +366,8 @@ def check(repo, sha, repository):
               " weekly run and waits for none")
         return True
     try:
+        if not REPOSITORY.fullmatch(repository):
+            raise Refused(f"cannot ask GitHub, since GITHUB_REPOSITORY is not owner/repository: '{repository}'")
         run = latest_weekly(repository)
         survivors_at_l4(repository, run, at_l4)
         changes = later_changes(repo, repository, run, sha)

@@ -1032,6 +1032,73 @@ weekly taken "$taken"
 exits taken 0
 says taken "check-weekly-run:   $(short "$taken") Fix add on a branch: the branch checks on $(short "$taken") covered it whole, with no unexplained survivor in a package at L4: $url/261"
 
+# --- What the check cannot read, and its arguments --------------------------------
+
+# An answer that cannot be read stops the release, as a failing gh does
+# (above), since a release must not go ahead on doubt.
+echo '<html>Unicorn!</html>' >"$tmp/mutation-runs.json"
+weekly runs-not-json "$at_run"
+exits runs-not-json 1
+says runs-not-json "check-weekly-run: $(short "$at_run") may not be released: the Actions API gave an answer that cannot be read"
+
+echo '{"message": "Not Found"}' >"$tmp/mutation-runs.json"
+weekly no-runs-list "$at_run"
+exits no-runs-list 1
+says no-runs-list "check-weekly-run: $(short "$at_run") may not be released: the Actions API gave an answer that cannot be read"
+
+mruns "$(mrun 231 "$at_run")"
+echo 'not json' >"$tmp/branch-checks/$taken.json"
+weekly branch-runs-not-json "$taken"
+exits branch-runs-not-json 1
+says branch-runs-not-json "check-weekly-run: $(short "$taken") may not be released: the Actions API gave an answer that cannot be read"
+
+# With a package at L4, it asks GitHub, so it needs the repository's name;
+# with none, it does not.
+status=0
+env -u GITHUB_REPOSITORY PATH="$tmp/runs-bin:$PATH" python3 scripts/check-weekly-run.py --repo "$repo" "$at_run" \
+  >"$tmp/no-repository-name.out" 2>&1 || status=$?
+echo "$status" >"$tmp/no-repository-name.status"
+exits no-repository-name 1
+says no-repository-name "check-weekly-run: $(short "$at_run") may not be released: cannot ask GitHub, since GITHUB_REPOSITORY is not owner/repository: ''"
+
+status=0
+GITHUB_REPOSITORY=hirunefu PATH="$tmp/runs-bin:$PATH" python3 scripts/check-weekly-run.py --repo "$repo" "$at_run" \
+  >"$tmp/repository-without-owner.out" 2>&1 || status=$?
+echo "$status" >"$tmp/repository-without-owner.status"
+exits repository-without-owner 1
+says repository-without-owner "check-weekly-run: $(short "$at_run") may not be released: cannot ask GitHub, since GITHUB_REPOSITORY is not owner/repository: 'hirunefu'"
+
+status=0
+env -u GITHUB_REPOSITORY PATH="$tmp/runs-bin:$PATH" python3 scripts/check-weekly-run.py --repo "$repo" "$listless" \
+  >"$tmp/no-repository-needed.out" 2>&1 || status=$?
+echo "$status" >"$tmp/no-repository-needed.status"
+exits no-repository-needed 0
+
+weekly given-repository "$at_run" --repository hirunefu/other
+exits given-repository 0
+if grep -q "^api repos/hirunefu/other/actions/workflows/mutation-runs.yml/runs" "$tmp/given-repository.args"; then
+  pass "given-repository: asks for the runs of the repository given"
+else
+  fail "given-repository: asks gh: $(cat "$tmp/given-repository.args")"
+fi
+
+weekly short-sha "$(short "$at_run")"
+exits short-sha 2
+says short-sha "check-weekly-run: '$(short "$at_run")' is not a commit's full SHA in lower case"
+
+weekly upper-case "$(echo "$at_run" | tr a-f A-F)"
+exits upper-case 2
+
+weekly not-a-commit 0123456789abcdef0123456789abcdef01234567
+exits not-a-commit 2
+mentions not-a-commit "check-weekly-run: 0123456789abcdef0123456789abcdef01234567 is not a commit of"
+
+status=0
+python3 scripts/check-weekly-run.py >"$tmp/no-argument.out" 2>&1 || status=$?
+echo "$status" >"$tmp/no-argument.status"
+exits no-argument 2
+mentions no-argument "usage: "
+
 echo
 echo "test-release-gates: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
