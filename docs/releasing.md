@@ -238,13 +238,16 @@ A release on `main`'s head after Friday's run waits for nothing more when
 each change since went through the branch checks or touches no source of
 a package at L4. The release commit touches none. Otherwise, start a
 weekly run on the release commit, and push the tag once it has passed.
-A weekly run of the pinned set holds the account's 20 jobs for about two
-hours. The first, started by hand on `main` on 2026-11-19
+A weekly run of the pinned set holds the account's 20 jobs for about
+three hours. The first, started by hand on `main` on 2026-11-19
 ([run 44423781036](https://github.com/hirunefu/smock/actions/runs/44423781036)),
 had 18,403 mutants in 40 shards, two waves of 20, and its report gives
 2 h 9 min from its first job's start to its last job's end, and 32 h
-44 min of runner time over its 44 jobs. A push meanwhile waits for free
-jobs.
+44 min of runner time over its 44 jobs. Bulk runs now plan 16 s a
+mutant, which puts those mutants in 20 shards at once, and such a run is
+expected to take about 2 hours 50 minutes (*estimate*,
+[Bulk runs on Actions](../CONTRIBUTING.md#bulk-runs-on-actions)). A push
+meanwhile waits for free jobs.
 
 ```sh
 gh workflow run mutation-runs.yml -R hirunefu/smock --ref main -f mode=weekly     # while main is at the release commit
@@ -280,7 +283,7 @@ of the release workflow needs plan, so none of them runs.
   source of a package at L4 and no branch's changed-lines report covers
   that change, as for a change pushed straight to `main`. A weekly run on
   the tag covers the commit with no later change. Start one, or wait for
-  the one still running, and once it has passed, about two hours later
+  the one still running, and once it has passed, about three hours later
   ([The weekly mutation run](#the-weekly-mutation-run)), re-run the tag's
   release run, which reads the weekly runs again.
 
