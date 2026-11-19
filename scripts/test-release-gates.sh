@@ -799,6 +799,239 @@ exits later-run 1
 says later-run "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main ran on $(short "$fixed"), which the tag's commit does not hold: $url/232"
 mruns "$(mrun 231 "$at_run")"
 
+# --- Which commit: a branch's changed-lines report ----------------------------------
+
+# brun <id> <commit> [<jq update>]: prints the run <id> of the branch
+# checks on <commit> as the Actions API lists it: by default one for a
+# push that succeeded, changed by the update.
+brun() {
+  jq -n --argjson id "$1" --arg sha "$2" '{
+    id: $id, name: "Branch checks", path: ".github/workflows/branch-checks.yml",
+    display_title: "Branch checks", head_branch: "integration/x", head_sha: $sha, event: "push",
+    status: "completed", conclusion: "success",
+    html_url: "https://github.com/hirunefu/smock/actions/runs/\($id)",
+    created_at: "2026-11-20T10:00:00Z", updated_at: "2026-11-20T10:30:00Z", run_attempt: 1
+  }' | jq "${3:-.}"
+}
+
+# bruns <commit> <run>...: writes the answer that lists the runs of the
+# branch checks on <commit>.
+bruns() {
+  sha=$1
+  shift
+  printf '%s\n' "$@" | jq -s '{total_count: length, workflow_runs: .}' >"$tmp/branch-checks/$sha.json"
+}
+
+# lines_report <id> <head> <merge base> [<jq update>]: writes the artifact
+# changed-lines of the run <id>, its report.json as
+# scripts/changed-lines.py writes it: by default of a push against
+# origin/main that covered the whole diff with no survivor, changed by the
+# update.
+lines_report() {
+  rm -rf "$tmp/artifacts/$1/changed-lines"
+  mkdir -p "$tmp/artifacts/$1/changed-lines"
+  jq -n --arg head "$2" --arg base "$3" '{
+    head: $head, base: "origin/main", merge_base: $base, event: "push",
+    lines: 3, packages: ["calc"], mutants: 6, covered: true, shards: 1, ran: 6,
+    counts: {}, survivors: []
+  }' | jq "${4:-.}" >"$tmp/artifacts/$1/changed-lines/report.json"
+}
+
+# survivor <id> <directory> <status>: prints a survivor as report.json lists
+# it.
+survivor() {
+  jq -n --arg id "$1" --arg dir "$2" --arg status "$3" '{
+    id: $id, package: "smock/smock/\($dir)", directory: $dir, file: "\($dir)/\($dir).mbt",
+    definition: "add", status: $status, entry: (if $status == "unexplained" then null else $id end)
+  }'
+}
+
+# branch <name> <file> <line> [<from>]: the branch <name>, from <from> or
+# the current commit, with one commit that adds <line> at the end of
+# <file>; sets $branch_head to it, and comes back.
+branch() {
+  here=$(git -C "$repo" symbolic-ref --short HEAD)
+  git -C "$repo" checkout --quiet -b "$1" "${4:-HEAD}"
+  printf '%s\n' "$3" >>"$repo/$2"
+  git -C "$repo" commit --quiet -am "Change $2 on $1"
+  branch_head=$(head)
+  git -C "$repo" checkout --quiet "$here"
+}
+
+# merge <name>: merges the branch <name> into the current one, --no-ff, as
+# docs/merging-into-main.md does.
+merge() {
+  git -C "$repo" merge --quiet --no-ff -m "Merge $1" "$1" >/dev/null
+}
+
+# A branch merged into main after the run, whose push run's report covered
+# its change to calc whole: the release goes ahead, with the release
+# commit after it.
+on merged
+branch feature/a calc/calc.mbt '// sub subtracts'
+a=$branch_head
+merge feature/a
+merge_a=$(head)
+release_commit
+bruns "$a" "$(brun 241 "$a")"
+lines_report 241 "$a" "$at_run"
+weekly merged-covered "$(head)"
+exits merged-covered 0
+says merged-covered "check-weekly-run: each of the 2 changes to main after it is covered:"
+says merged-covered "check-weekly-run:   $(short "$merge_a") Merge feature/a: the branch checks on $(short "$a") covered it whole, with no unexplained survivor in a package at L4: $url/241"
+mentions merged-covered " Make the version 0.5.0, and give it its CHANGELOG section: it touches no non-test source of a package at L4"
+if grep -qxF "api repos/hirunefu/smock/actions/workflows/branch-checks.yml/runs?head_sha=$a&per_page=100" \
+  "$tmp/merged-covered.args"; then
+  pass "merged-covered: asks for the runs of the branch checks on the branch's head"
+else
+  fail "merged-covered: asks gh: $(cat "$tmp/merged-covered.args")"
+fi
+merged=$(head)
+
+# merged_case <name> <jq update of the report> [<run>...]: the report of
+# run 241 changed by the update, and the runs on feature/a's head, 241 by
+# default; the check runs on the release after the merge.
+merged_case() {
+  name=$1 update=$2
+  shift 2
+  if [ "$#" -eq 0 ]; then
+    set -- "$(brun 241 "$a")"
+  fi
+  bruns "$a" "$@"
+  lines_report 241 "$a" "$at_run" "$update"
+  weekly "$name" "$merged"
+}
+what_a="$(short "$merge_a") (Merge feature/a), a change to main after the latest weekly run over the pinned set ($url/231), changes non-test source of calc, a package at L4, and"
+
+# Its report's survivors: an unexplained or stale-covered one in a package
+# at L4 stops the release; one in another package, or an accepted one,
+# does not.
+merged_case merged-unexplained ".survivors = [$(survivor 'calc/calc.mbt,add,ROR,<,<=,0' calc unexplained)]"
+exits merged-unexplained 1
+says merged-unexplained "check-weekly-run: $(short "$merged") may not be released: $what_a the branch checks on $(short "$a") show unexplained survivors in a package at L4: calc/calc.mbt,add,ROR,<,<=,0 (calc): $url/241"
+says merged-unexplained "$start_weekly"
+
+merged_case merged-stale-covered ".survivors = [$(survivor 'calc/calc.mbt,add,INT,1,2,0' calc stale-covered)]"
+exits merged-stale-covered 1
+mentions merged-stale-covered "the branch checks on $(short "$a") show unexplained survivors in a package at L4: calc/calc.mbt,add,INT,1,2,0 (calc), stale-covered: $url/241"
+
+merged_case merged-elsewhere ".survivors = [$(survivor 'grid/grid.mbt,width,INT,80,81,0' grid unexplained), $(survivor 'calc/calc.mbt,add,STR,a,_,0' calc accepted)]"
+exits merged-elsewhere 0
+mentions merged-elsewhere "Merge feature/a: the branch checks on $(short "$a") covered it whole"
+
+# Its report must cover the change whole: of the branch's head, against
+# main, from the merge base of the branch with main before the merge, and
+# the whole diff; a run started by hand that covered it decides.
+merged_case merged-not-covered '.covered = false | .shards = 0 | .ran = 0 | .mutants = 900'
+exits merged-not-covered 1
+says merged-not-covered "check-weekly-run: $(short "$merged") may not be released: $what_a the branch checks on $(short "$a") did not cover the whole diff (900 mutants on its changed lines): $url/241"
+
+bruns "$a" "$(brun 242 "$a" '.event = "workflow_dispatch" | .created_at = "2026-11-20T11:00:00Z"')" "$(brun 241 "$a")"
+lines_report 242 "$a" "$at_run" '.event = "workflow_dispatch" | .shards = 20'
+lines_report 241 "$a" "$at_run" '.covered = false | .shards = 0 | .ran = 0 | .mutants = 900'
+weekly merged-by-hand "$merged"
+exits merged-by-hand 0
+mentions merged-by-hand "Merge feature/a: the branch checks on $(short "$a") covered it whole, with no unexplained survivor in a package at L4: $url/242"
+
+merged_case merged-other-base '.base = "origin/integration/y"'
+exits merged-other-base 1
+mentions merged-other-base "$what_a the branch checks on $(short "$a") compared it with origin/integration/y, not main: $url/241"
+
+merged_case merged-other-merge-base '.merge_base = "fedcba9876543210fedcba9876543210fedcba98"'
+exits merged-other-merge-base 1
+mentions merged-other-merge-base "$what_a the branch checks on $(short "$a") took the merge base fedcba987654, not $(short "$at_run"), the branch's merge base with main before the merge: $url/241"
+
+merged_case merged-other-head '.head = "0123456789abcdef0123456789abcdef01234567"'
+exits merged-other-head 1
+mentions merged-other-head "$what_a the report of the branch checks on $(short "$a") is of another commit, 0123456789ab: $url/241"
+
+bruns "$a" "$(brun 243 "$a")"
+weekly merged-no-artifact "$merged"
+exits merged-no-artifact 1
+mentions merged-no-artifact "$what_a the report of the branch checks on $(short "$a") cannot be read: $url/243"
+
+# A run that did not pass, or that is not on a push or by hand, does not
+# count.
+merged_case merged-failed . "$(brun 241 "$a" '.conclusion = "failure"')"
+exits merged-failed 1
+mentions merged-failed "$what_a no run of the branch checks on $(short "$a") passed: the latest failed (failure): $url/241"
+
+merged_case merged-running . "$(brun 241 "$a" '.status = "in_progress" | .conclusion = null')"
+exits merged-running 1
+mentions merged-running "$what_a no run of the branch checks on $(short "$a") passed: the latest is still running: $url/241"
+
+merged_case merged-pull-request . "$(brun 241 "$a" '.event = "pull_request"')"
+exits merged-pull-request 1
+mentions merged-pull-request "$what_a no run of the branch checks is on $(short "$a"), the head of the branch it merged"
+
+rm "$tmp/branch-checks/$a.json"
+weekly merged-no-run "$merged"
+exits merged-no-run 1
+mentions merged-no-run "$what_a no run of the branch checks is on $(short "$a"), the head of the branch it merged"
+
+# A shell may keep an assignment before a function after the call.
+FAKE_GH=fail weekly merged-gh-fails "$merged"
+unset FAKE_GH
+exits merged-gh-fails 1
+mentions merged-gh-fails "may not be released: gh cannot list the runs of mutation-runs.yml"
+
+# Main moved after the branch began, on the same file, through another
+# merge that its own report covered: each report covers its own change.
+on moved
+branch feature/b calc/calc.mbt '// b' "$at_run"
+b=$branch_head
+git -C "$repo" checkout --quiet -b feature/c "$at_run"
+printf '// c\n' | cat - "$repo/calc/calc.mbt" >"$tmp/calc.mbt"
+cp "$tmp/calc.mbt" "$repo/calc/calc.mbt"
+git -C "$repo" commit --quiet -am "Change calc/calc.mbt on feature/c"
+c=$(head)
+git -C "$repo" checkout --quiet moved
+merge feature/b
+merge feature/c
+bruns "$b" "$(brun 251 "$b")"
+lines_report 251 "$b" "$at_run"
+bruns "$c" "$(brun 252 "$c")"
+lines_report 252 "$c" "$at_run"
+weekly main-moved "$(head)"
+exits main-moved 0
+mentions main-moved "Merge feature/b: the branch checks on $(short "$b") covered it whole"
+mentions main-moved "Merge feature/c: the branch checks on $(short "$c") covered it whole"
+
+# A merge that changes the source otherwise than its branch did, as when
+# it resolves a conflict, is not covered by the branch's report.
+on resolved
+branch feature/d calc/calc.mbt '// d' "$at_run"
+d=$branch_head
+git -C "$repo" merge --quiet --no-ff --no-commit feature/d >/dev/null 2>&1
+printf '// resolved\n' >>"$repo/calc/calc.mbt"
+git -C "$repo" commit --quiet -am "Merge feature/d"
+resolved=$(head)
+bruns "$d" "$(brun 253 "$d")"
+lines_report 253 "$d" "$at_run"
+weekly resolved "$resolved"
+exits resolved 1
+says resolved "check-weekly-run: $(short "$resolved") may not be released: $(short "$resolved") (Merge feature/d), a change to main after the latest weekly run over the pinned set ($url/231), changes non-test source of calc, a package at L4, and changes calc/calc.mbt otherwise than $(short "$d"), the head of the branch it merged, so no branch's report covers it whole"
+
+# A merge of two branches at once is no one branch's.
+on octopus
+branch feature/e calc/calc.mbt '// e' "$at_run"
+branch feature/f grid/grid.mbt '// f' "$at_run"
+git -C "$repo" merge --quiet --no-ff -m "Merge feature/e and feature/f" feature/e feature/f >/dev/null
+weekly octopus "$(head)"
+exits octopus 1
+mentions octopus "(Merge feature/e and feature/f), a change to main after the latest weekly run over the pinned set ($url/231), changes non-test source of calc, a package at L4, and merges more than one branch, which no one branch's report covers"
+
+# A commit that is no merge is covered by a run of the branch checks on
+# itself, from its parent: a branch's commit that main took as it was.
+on taken
+straight "Fix add on a branch" calc/calc.mbt '// add, checked'
+taken=$(head)
+bruns "$taken" "$(brun 261 "$taken")"
+lines_report 261 "$taken" "$at_run"
+weekly taken "$taken"
+exits taken 0
+says taken "check-weekly-run:   $(short "$taken") Fix add on a branch: the branch checks on $(short "$taken") covered it whole, with no unexplained survivor in a package at L4: $url/261"
+
 echo
 echo "test-release-gates: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

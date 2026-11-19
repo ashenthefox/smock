@@ -216,6 +216,60 @@ def source_touched(repo, change, at_l4):
     return [d for d in at_l4 if d in touched]
 
 
+def edits(repo, old, new, file):
+    """The lines that the diff from old to new removes and adds in a file,
+    sorted, each with its sign: what a change does to the file, wherever
+    its lines are."""
+    diff = git(repo, "diff", "--no-renames", "--no-color", "-U0", old, new, "--", file)
+    if diff is None:
+        raise Refused(f"git cannot tell what {new[:12]} changes in {file}")
+    return sorted(line for line in diff.splitlines()
+                  if line[:1] in "+-" and not line.startswith(("+++ ", "--- ")))
+
+
+def on_main(found):
+    """Whether a report of the branch checks compared its head with main."""
+    return found.get("base") in ("main", "origin/main")
+
+
+def branch_report(repository, runs, head, whose, merge_base):
+    """The run of the branch checks on head that decides, with its report:
+    the latest that passed and whose report covered the change whole; or
+    why none does, the latest's reason when none passed or covered it."""
+    if not runs:
+        return None, f"no run of the branch checks is on {whose}"
+    passed = [r for r in runs if r["status"] == "completed" and r["conclusion"] == "success"]
+    if not passed:
+        latest = runs[0]
+        state = "is still running" if latest["status"] != "completed" else f"failed ({latest['conclusion']})"
+        return None, f"no run of the branch checks on {head[:12]} passed: the latest {state}: {latest['html_url']}"
+    problems = []
+    for run in passed:
+        text = artifact(repository, run, "changed-lines", "report.json")
+        try:
+            found = json.loads(text) if text is not None else None
+        except ValueError:
+            found = None
+        if not isinstance(found, dict) or not isinstance(found.get("survivors"), list):
+            problems.append(f"the report of the branch checks on {head[:12]} cannot be read: {run['html_url']}")
+        elif found.get("head") != head:
+            problems.append(f"the report of the branch checks on {head[:12]} is of another commit,"
+                            f" {str(found.get('head'))[:12]}: {run['html_url']}")
+        elif not on_main(found):
+            problems.append(f"the branch checks on {head[:12]} compared it with {found.get('base')}, not main:"
+                            f" {run['html_url']}")
+        elif found.get("merge_base") != merge_base:
+            problems.append(f"the branch checks on {head[:12]} took the merge base {str(found.get('merge_base'))[:12]},"
+                            f" not {merge_base[:12]}, the branch's merge base with main before the merge:"
+                            f" {run['html_url']}")
+        elif found.get("covered") is not True:
+            problems.append(f"the branch checks on {head[:12]} did not cover the whole diff ({found.get('mutants')}"
+                            f" mutants on its changed lines): {run['html_url']}")
+        else:
+            return (run, found), None
+    return None, problems[0]
+
+
 def covered(repo, repository, run, change, at_l4):
     """How a change to main after the run is covered, or a refusal."""
     touched = source_touched(repo, change, at_l4)
@@ -223,8 +277,35 @@ def covered(repo, repository, run, change, at_l4):
         return "it touches no non-test source of a package at L4"
     what = (f"{change[:12]} ({subject(repo, change)}), a change to main after the latest weekly run over the pinned"
             f" set ({run['html_url']}), changes non-test source of {', '.join(touched)}, a package at L4, and")
-    raise Refused(f"{what} no run of the branch checks is on {change[:12]}, as none is on a change pushed straight to"
-                  " main", start_weekly(repository))
+    then = start_weekly(repository)
+    before, *merged = parents(repo, change)
+    if len(merged) > 1:
+        raise Refused(f"{what} merges more than one branch, which no one branch's report covers", then)
+    head = merged[0] if merged else change
+    whose = f"{head[:12]}, the head of the branch it merged" if merged else \
+        f"{change[:12]}, as none is on a change pushed straight to main"
+    merge_base = (git(repo, "merge-base", before, head) or "").strip()
+    names = (git(repo, "diff", "--no-renames", "--name-only", before, change) or "").splitlines()
+    for file in names:
+        if posixpath.dirname(file) in touched and is_source(repo, file, (before, change)) and \
+                edits(repo, before, change, file) != edits(repo, merge_base, head, file):
+            raise Refused(f"{what} changes {file} otherwise than {head[:12]}, the head of the branch it merged, so no"
+                          " branch's report covers it whole", then)
+    runs = runs_of(repository, f"branch-checks.yml/runs?head_sha={head}&per_page=100",
+                   lambda r: r["head_sha"] == head and r["event"] in ("push", "workflow_dispatch"))
+    decided, why = branch_report(repository, runs, head, whose, merge_base)
+    if decided is None:
+        raise Refused(f"{what} {why}", then)
+    checks, found = decided
+    blocking = [s for s in found["survivors"]
+                if s.get("status") in ("unexplained", "stale-covered") and s.get("directory") in at_l4]
+    if blocking:
+        listed = ", ".join(f"{s['id']} ({s['directory']})" + (", stale-covered" if s["status"] == "stale-covered"
+                                                               else "") for s in blocking)
+        raise Refused(f"{what} the branch checks on {head[:12]} show unexplained survivors in a package at L4: {listed}:"
+                      f" {checks['html_url']}", then)
+    return (f"the branch checks on {head[:12]} covered it whole, with no unexplained survivor in a package at L4:"
+            f" {checks['html_url']}")
 
 
 def check(repo, sha, repository):
