@@ -94,13 +94,13 @@ spec:
               value: {{ ternary "on" "off" $auth.enabled | quote }}
             {{- if $tokenFile }}
             - name: SMOCK_ADMIN_TOKEN_FILE
-              value: {{ printf "/etc/smock/admin/%s" $auth.tokenSecret.key | quote }}
+              value: {{ printf "/etc/smock/admin/%s" (include "smock.string" $auth.tokenSecret.key) | quote }}
             {{- else if $auth.enabled }}
             - name: SMOCK_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ $auth.tokenSecret.name | quote }}
-                  key: {{ $auth.tokenSecret.key | quote }}
+                  name: {{ include "smock.string" $auth.tokenSecret.name | quote }}
+                  key: {{ include "smock.string" $auth.tokenSecret.key | quote }}
             {{- end }}
             {{- if .Values.tls.secretName }}
             - name: SMOCK_TLS_CERT_FILE
@@ -221,7 +221,7 @@ spec:
         {{- if $tokenFile }}
         - name: admin-token
           secret:
-            secretName: {{ $auth.tokenSecret.name | quote }}
+            secretName: {{ include "smock.string" $auth.tokenSecret.name | quote }}
             defaultMode: 0440
         {{- end }}
         {{- if .Values.tls.secretName }}

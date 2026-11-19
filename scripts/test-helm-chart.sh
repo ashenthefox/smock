@@ -505,6 +505,34 @@ check token-env "the token can come from the Secret as the variable SMOCK_ADMIN_
   'env("SMOCK_ADMIN_TOKEN").valueFrom == {"secretKeyRef": {"name": "smock-admin-token", "key": "token"}}
    and env("SMOCK_ADMIN_TOKEN_FILE") == null
    and ([pod | .volumes[] | select(.name == "admin-token")] == [])'
+# A Secret's name and key may be digits alone, which YAML reads as numbers;
+# the token's file, its Secret volume, the variable's secretKeyRef and the
+# notes after an install name them with the digits of the values file
+# (#396). A million or more each, so that a number written as Go writes a
+# float (1.234567e+06) shows too.
+cat >"$tmp/values-token-digits.yaml" <<'YAML'
+adminAuth:
+  tokenSecret:
+    name: 7654321
+    key: 1234567
+YAML
+token_name=$(yq '.adminAuth.tokenSecret.name' "$tmp/values-token-digits.yaml")
+token_key=$(yq '.adminAuth.tokenSecret.key' "$tmp/values-token-digits.yaml")
+render token-digits --values "$tmp/values-token-digits.yaml"
+check_text token-digits "a token Secret and key written as digits are the volume's Secret and the file smock reads, with those digits" \
+  'volume("admin-token").secret.secretName == $name
+   and env("SMOCK_ADMIN_TOKEN_FILE").value == "/etc/smock/admin/\($key)"' \
+  --arg name "$token_name" --arg key "$token_key"
+render token-env-digits --values "$tmp/values-token-digits.yaml" --set adminAuth.tokenAs=env
+check_text token-env-digits "a token Secret and key written as digits are the variable's secretKeyRef, with those digits" \
+  'env("SMOCK_ADMIN_TOKEN").valueFrom == {"secretKeyRef": {"name": $name, "key": $key}}' \
+  --arg name "$token_name" --arg key "$token_key"
+notes token-digits --values "$tmp/values-token-digits.yaml"
+if grep -qF -- "the Admin API needs the token from the Secret $token_name:" "$tmp/token-digits.notes"; then
+  pass "token-digits: the notes after an install name that Secret with those digits"
+else
+  fail "token-digits: the notes after an install do not name the Secret $token_name: $(cat "$tmp/token-digits.notes")"
+fi
 refuse token-as "the token passed in a way smock does not read" \
   'adminAuth.tokenAs must be "file" or "env", not "header"' \
   --set adminAuth.tokenSecret.name=smock-admin-token --set adminAuth.tokenAs=header
