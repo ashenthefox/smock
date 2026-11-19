@@ -16,15 +16,20 @@ The packages at L4 are those that mutation/l4-packages.txt names on the
 tag's commit. With none, the check reads nothing and passes, and says so.
 
 Otherwise it asks GitHub (with gh) for the runs of the bulk mutation runs
-(.github/workflows/mutation-runs.yml) on main, and takes the weekly runs,
-which that workflow names "Mutation runs: weekly", whether its schedule
-or a person started them. It reads no other run: the monthly run over the
-full set is reported, never gated. The latest weekly run that has ended
-decides; one still running is not a result yet. The check refuses the
-release, and says why with the run's link, when
+(.github/workflows/mutation-runs.yml), and takes the weekly runs, which
+that workflow names "Mutation runs: weekly", whether its schedule or a
+person started them. It reads no other run: the monthly run over the full
+set is reported, never gated. The weekly runs that decide are those on
+the tag's commit or on an ancestor of it on main, its first-parent
+history, wherever they were started (on main, or by hand on the tag): a
+weekly run on later commits of main is about other code, and a tag can be
+neither moved nor deleted, so such a run does not decide, and the check
+says so. Of those, the latest that has ended decides; one still running
+is not a result yet. The check refuses the release, and says why with the
+run's link, when
 
-  - no weekly run on main has ended: there is none, or one is still
-    running;
+  - no weekly run on the tag's commit or an ancestor of it on main has
+    ended: there is none, or one is still running;
   - the latest that ended did not succeed (a failed canary, self-test or
     property seed fails a weekly run, as a shard does);
   - its report (the artifact mutation-report, summary.json) cannot be
@@ -34,9 +39,9 @@ release, and says why with the run's link, when
     them;
   - it does not cover the tag's commit.
 
-The run covers the tag's commit when it ran on it, or on a commit of the
-tag's commit's first-parent history, main's, whose later commits there,
-each a change to main, each meet one of two conditions:
+The run covers the tag's commit when it ran on it, or when the later
+commits of the tag's commit's first-parent history, each a change to
+main, each meet one of two conditions:
 
   - it touches no non-test source of a package at L4: no .mbt file in the
     package's directory but a test file (*_test.mbt, *_wbtest.mbt) or a
@@ -83,6 +88,8 @@ REPOSITORY = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
 # The bulk mutation runs' workflow, and the name it gives a weekly run.
 RUNS = "mutation-runs.yml"
 WEEKLY = "Mutation runs: weekly"
+# The commits whose weekly runs decide: on main's line up to the tag's.
+HELD = "the tag's commit or an ancestor of it on main"
 
 
 class Refused(Exception):
@@ -95,8 +102,9 @@ class Refused(Exception):
 
 def start_weekly(repository):
     """What to do when no weekly run that passed covers the commit."""
-    return (f"start a weekly run on main once it holds the tag's commit, and run the release workflow again once it"
-            f" has passed: gh workflow run {RUNS} -R {repository} --ref main -f mode=weekly")
+    return (f"start a weekly run on the tag's commit, and run the release workflow again once it has passed:"
+            f" gh workflow run {RUNS} -R {repository} --ref <the tag, or main while it is at the commit>"
+            " -f mode=weekly")
 
 
 class Unusable(Exception):
@@ -144,23 +152,30 @@ def runs_of(repository, query, keep):
     return kept
 
 
-def latest_weekly(repository):
-    """The latest weekly run on main that has ended, which must have passed;
-    it says when a later one is still running."""
-    weekly = runs_of(repository, f"{RUNS}/runs?branch=main&per_page=100",
-                     lambda r: r["display_title"] == WEEKLY and r["head_branch"] == "main")
-    ended = [r for r in weekly if r["status"] == "completed"]
+def latest_weekly(repo, repository, sha):
+    """The latest weekly run that has ended on the tag's commit or on an
+    ancestor of it on main (its first-parent history), wherever it was
+    started, which must have passed; it says when a later weekly run is
+    still running there, or ran elsewhere."""
+    weekly = runs_of(repository, f"{RUNS}/runs?per_page=100", lambda r: r["display_title"] == WEEKLY)
+    line = set((git(repo, "rev-list", "--first-parent", sha) or "").split())
+    held = [r for r in weekly if r["head_sha"] in line]
+    if not held:
+        latest = f"; the latest, {weekly[0]['html_url']}, ran on {weekly[0]['head_sha'][:12]}" if weekly else ""
+        raise Refused(f"no weekly run over the pinned set ran on {HELD}{latest}", start_weekly(repository))
+    ended = [r for r in held if r["status"] == "completed"]
     if not ended:
-        if weekly:
-            raise Refused(f"no weekly run over the pinned set on main has ended, and {weekly[0]['html_url']} is still"
-                          " running", "run the release workflow again once it has passed")
-        raise Refused("no weekly run over the pinned set on main has ended", start_weekly(repository))
+        raise Refused(f"no weekly run over the pinned set on {HELD} has ended, and {held[0]['html_url']} is still"
+                      " running", "run the release workflow again once it has passed")
     run = ended[0]
     if run["conclusion"] != "success":
-        raise Refused(f"the latest weekly run over the pinned set on main failed ({run['conclusion']}):"
+        raise Refused(f"the latest weekly run over the pinned set on {HELD} failed ({run['conclusion']}):"
                       f" {run['html_url']}", start_weekly(repository))
-    if weekly[0] is not run:
-        print(f"check-weekly-run: a later weekly run, {weekly[0]['html_url']}, is still running, and does not decide")
+    if held[0] is not run:
+        print(f"check-weekly-run: a later weekly run, {held[0]['html_url']}, is still running, and does not decide")
+    if weekly[0] is not held[0]:
+        print(f"check-weekly-run: a later weekly run, {weekly[0]['html_url']}, ran on {weekly[0]['head_sha'][:12]},"
+              f" which is not {HELD}, and does not decide")
     return run
 
 
@@ -188,19 +203,19 @@ def survivors_at_l4(repository, run, at_l4):
         packages = {p["directory"]: p for p in listed}
         counts = {d: unexplained(packages.get(d, {})) for d in at_l4}
     except (ValueError, KeyError, TypeError) as problem:
-        raise Refused("the report of the latest weekly run over the pinned set on main (the artifact mutation-report,"
+        raise Refused("the report of the latest weekly run over the pinned set (the artifact mutation-report,"
                       f" summary.json) cannot be read: {run['html_url']}") from problem
     if summary.get("set") != "pinned":
-        raise Refused(f"the report of the latest weekly run over the pinned set on main is of the {summary.get('set')}"
+        raise Refused(f"the report of the latest weekly run over the pinned set is of the {summary.get('set')}"
                       f" set, not the pinned set: {run['html_url']}")
     for directory in at_l4:
         if directory not in ran:
-            raise Refused(f"the latest weekly run over the pinned set on main did not run {directory}, a package at L4:"
+            raise Refused(f"the latest weekly run over the pinned set did not run {directory}, a package at L4:"
                           f" {run['html_url']}", start_weekly(repository))
     found = [f"{d} {n}" + (f" ({stale} stale-covered)" if stale else "")
              for d, (n, stale) in counts.items() if n]
     if found:
-        raise Refused("the latest weekly run over the pinned set on main shows unexplained survivors in a package at"
+        raise Refused("the latest weekly run over the pinned set shows unexplained survivors in a package at"
                       f" L4: {', '.join(found)}: {run['html_url']}",
                       f"its report lists them: gh run download {run['id']} -R {repository} --name mutation-report"
                       " --dir mutation-report")
@@ -216,21 +231,11 @@ def l4_packages(repo, sha):
     return found
 
 
-def later_changes(repo, repository, run, sha):
+def later_changes(repo, run, sha):
     """The commits of the tag's commit's first-parent history after the
-    run's commit, oldest first: main's changes since the run."""
-    ran = run["head_sha"]
-    if ran == sha:
-        return []
-    if git(repo, "merge-base", "--is-ancestor", ran, sha) is None:
-        raise Refused(f"the latest weekly run over the pinned set on main ran on {ran[:12]}, which the tag's commit"
-                      f" does not hold: {run['html_url']}", start_weekly(repository))
-    listed = (git(repo, "rev-list", "--first-parent", f"{ran}..{sha}") or "").split()
-    if not listed or parents(repo, listed[-1])[:1] != [ran]:
-        raise Refused(f"the latest weekly run over the pinned set on main ran on {ran[:12]}, which is not on the"
-                      f" first-parent history of the tag's commit, as main's commits are: {run['html_url']}",
-                      start_weekly(repository))
-    return listed[::-1]
+    run's commit, which is on it, oldest first: main's changes since the
+    run."""
+    return (git(repo, "rev-list", "--first-parent", f"{run['head_sha']}..{sha}") or "").split()[::-1]
 
 
 def parents(repo, commit):
@@ -368,9 +373,9 @@ def check(repo, sha, repository):
     try:
         if not REPOSITORY.fullmatch(repository):
             raise Refused(f"cannot ask GitHub, since GITHUB_REPOSITORY is not owner/repository: '{repository}'")
-        run = latest_weekly(repository)
+        run = latest_weekly(repo, repository, sha)
         survivors_at_l4(repository, run, at_l4)
-        changes = later_changes(repo, repository, run, sha)
+        changes = later_changes(repo, run, sha)
         lines = [f"{c[:12]} {subject(repo, c)}: {covered(repo, repository, run, c, at_l4)}" for c in changes]
         where = "the tag's commit" if not changes else f"{run['head_sha'][:12]}, an ancestor of the tag's commit"
         print(f"check-weekly-run: {named} may be released: the latest weekly run over the pinned set, on {where},"

@@ -331,10 +331,10 @@ mentions no-arguments "usage: "
 
 # The rules come from the ticket (#316) and ADR 0006 ("What L4 and a
 # release read"): the release reads the latest weekly run over the pinned
-# set on main, never the monthly run; for each package at L4 that run must
-# show no unexplained survivor, stale-covered ones counted as unexplained,
-# and it must be on the tag's commit or on an ancestor whose later changes
-# a branch's changed-lines report covers whole, with no unexplained
+# set, never the monthly run; for each package at L4 that run must show no
+# unexplained survivor, stale-covered ones counted as unexplained, and it
+# must be on the tag's commit or on an ancestor whose later changes a
+# branch's changed-lines report covers whole, with no unexplained
 # survivor in a package at L4, or touch no non-test source of a package at
 # L4. With no package at L4, the check passes.
 #
@@ -505,9 +505,9 @@ weekly_report 201
 weekly on-the-run "$at_run"
 exits on-the-run 0
 says on-the-run "check-weekly-run: $(short "$at_run") may be released: the latest weekly run over the pinned set, on the tag's commit, shows no unexplained survivor in the packages at L4 (calc): $url/201"
-if grep -qxF "api repos/hirunefu/smock/actions/workflows/mutation-runs.yml/runs?branch=main&per_page=100" \
+if grep -qxF "api repos/hirunefu/smock/actions/workflows/mutation-runs.yml/runs?per_page=100" \
   "$tmp/on-the-run.args"; then
-  pass "on-the-run: asks for the runs of the mutation runs' workflow on main"
+  pass "on-the-run: asks for the runs of the mutation runs' workflow"
 else
   fail "on-the-run: asks gh: $(cat "$tmp/on-the-run.args")"
 fi
@@ -529,9 +529,15 @@ downloads_not() {
   fi
 }
 
-# --- Which run: the latest weekly run on main that has ended ---------------------
+# --- Which run: the latest weekly run on the tag's commit that has ended --------
 
-start_weekly="check-weekly-run: start a weekly run on main once it holds the tag's commit, and run the release workflow again once it has passed: gh workflow run mutation-runs.yml -R hirunefu/smock --ref main -f mode=weekly"
+# The weekly runs that decide are those on the tag's commit or on an
+# ancestor of it on main's first-parent history, wherever they were
+# started: the latest of them that has ended decides. A later run on
+# commits that the tag's commit does not hold is about other code, and a
+# tag can be neither moved nor deleted, so such a run must not stop it for
+# good (#316, decided where the ticket was silent).
+start_weekly="check-weekly-run: start a weekly run on the tag's commit, and run the release workflow again once it has passed: gh workflow run mutation-runs.yml -R hirunefu/smock --ref <the tag, or main while it is at the commit> -f mode=weekly"
 
 # No weekly run: the runs of other modes, a run from before the workflow
 # named its runs, and the monthly run do not count.
@@ -543,7 +549,7 @@ weekly_report 212
 weekly_report 213
 weekly no-weekly-run "$at_run"
 exits no-weekly-run 1
-says no-weekly-run "check-weekly-run: $(short "$at_run") may not be released: no weekly run over the pinned set on main has ended"
+says no-weekly-run "check-weekly-run: $(short "$at_run") may not be released: no weekly run over the pinned set ran on the tag's commit or an ancestor of it on main"
 says no-weekly-run "$start_weekly"
 downloads_not no-weekly-run 211
 downloads_not no-weekly-run 212
@@ -552,21 +558,21 @@ downloads_not no-weekly-run 213
 mruns
 weekly no-run-at-all "$at_run"
 exits no-run-at-all 1
-says no-run-at-all "check-weekly-run: $(short "$at_run") may not be released: no weekly run over the pinned set on main has ended"
+says no-run-at-all "check-weekly-run: $(short "$at_run") may not be released: no weekly run over the pinned set ran on the tag's commit or an ancestor of it on main"
 
-# A weekly run on another branch does not count.
-mruns "$(mrun 214 "$at_run" '.head_branch = "integration/x" | .event = "workflow_dispatch"')"
+# A weekly run started by hand on the tag decides as one on main does.
+mruns "$(mrun 214 "$at_run" '.head_branch = "v0.5.0" | .event = "workflow_dispatch"')"
 weekly_report 214
-weekly other-branch "$at_run"
-exits other-branch 1
-says other-branch "check-weekly-run: $(short "$at_run") may not be released: no weekly run over the pinned set on main has ended"
+weekly on-the-tag "$at_run"
+exits on-the-tag 0
+mentions on-the-tag "may be released: the latest weekly run over the pinned set, on the tag's commit, shows no unexplained survivor in the packages at L4 (calc): $url/214"
 
 # One still running is not a result yet: with none ended, the release waits
 # for it; after one that ended, that one decides.
 mruns "$(mrun 215 "$at_run" '.status = "in_progress" | .conclusion = null')"
 weekly only-running "$at_run"
 exits only-running 1
-says only-running "check-weekly-run: $(short "$at_run") may not be released: no weekly run over the pinned set on main has ended, and $url/215 is still running"
+says only-running "check-weekly-run: $(short "$at_run") may not be released: no weekly run over the pinned set on the tag's commit or an ancestor of it on main has ended, and $url/215 is still running"
 says only-running "check-weekly-run: run the release workflow again once it has passed"
 
 mruns "$(mrun 216 "$at_run" '.status = "queued" | .conclusion = null | .created_at = "2026-11-27T20:30:00Z"')" \
@@ -583,14 +589,14 @@ mruns "$(mrun 201 "$at_run")" \
 weekly_report 217
 weekly failed "$at_run"
 exits failed 1
-says failed "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main failed (failure): $url/217"
+says failed "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on the tag's commit or an ancestor of it on main failed (failure): $url/217"
 says failed "$start_weekly"
 downloads_not failed 201
 
 mruns "$(mrun 218 "$at_run" '.conclusion = "cancelled" | .event = "workflow_dispatch"')"
 weekly cancelled "$at_run"
 exits cancelled 1
-says cancelled "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main failed (cancelled): $url/218"
+says cancelled "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on the tag's commit or an ancestor of it on main failed (cancelled): $url/218"
 
 # The monthly run over the full set is reported, never gated: a later one
 # that failed, with survivors in calc, is not read.
@@ -621,13 +627,13 @@ read_survivors="check-weekly-run: its report lists them: gh run download 221 -R 
 # among them, stops the release.
 report_case unexplained ".packages[0].survived = 3 | .packages[0].exclusions = $(exclusions 2 0 1)"
 exits unexplained 1
-says unexplained "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main shows unexplained survivors in a package at L4: calc 2: $url/221"
+says unexplained "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set shows unexplained survivors in a package at L4: calc 2: $url/221"
 says unexplained "$read_survivors"
 
 # A stale-covered survivor counts as unexplained (#316, "Which run").
 report_case stale-covered ".packages[0].survived = 1 | .packages[0].exclusions = $(exclusions 0 1 0)"
 exits stale-covered 1
-says stale-covered "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main shows unexplained survivors in a package at L4: calc 1 (1 stale-covered): $url/221"
+says stale-covered "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set shows unexplained survivors in a package at L4: calc 1 (1 stale-covered): $url/221"
 
 report_case both ".packages[0].survived = 4 | .packages[0].exclusions = $(exclusions 2 1 1)"
 exits both 1
@@ -652,18 +658,18 @@ mentions no-mutant "may be released"
 
 report_case not-run '.selection.packages = ["grid"] | del(.packages[0])'
 exits not-run 1
-says not-run "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main did not run calc, a package at L4: $url/221"
+says not-run "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set did not run calc, a package at L4: $url/221"
 says not-run "$start_weekly"
 
 # The report must be of the pinned set, and readable.
 report_case full-set '.set = "full" | .selection.set = "full"'
 exits full-set 1
-says full-set "check-weekly-run: $(short "$at_run") may not be released: the report of the latest weekly run over the pinned set on main is of the full set, not the pinned set: $url/221"
+says full-set "check-weekly-run: $(short "$at_run") may not be released: the report of the latest weekly run over the pinned set is of the full set, not the pinned set: $url/221"
 
 mruns "$(mrun 222 "$at_run")"
 weekly no-report "$at_run"
 exits no-report 1
-says no-report "check-weekly-run: $(short "$at_run") may not be released: the report of the latest weekly run over the pinned set on main (the artifact mutation-report, summary.json) cannot be read: $url/222"
+says no-report "check-weekly-run: $(short "$at_run") may not be released: the report of the latest weekly run over the pinned set (the artifact mutation-report, summary.json) cannot be read: $url/222"
 
 weekly_report 222
 echo 'not json' >"$tmp/artifacts/222/mutation-report/summary.json"
@@ -783,20 +789,28 @@ printf 'calc\n' >>"$repo/mutation/l4-packages.txt"
 git -C "$repo" commit --quiet -am "calc at L4, elsewhere"
 weekly not-held "$(head)"
 exits not-held 1
-says not-held "check-weekly-run: $(short "$(head)") may not be released: the latest weekly run over the pinned set on main ran on $(short "$at_run"), which the tag's commit does not hold: $url/231"
+says not-held "check-weekly-run: $(short "$(head)") may not be released: no weekly run over the pinned set ran on the tag's commit or an ancestor of it on main; the latest, $url/231, ran on $(short "$at_run")"
 says not-held "$start_weekly"
 
 git -C "$repo" merge --quiet --no-ff -m "Merge main" "$at_run"
 weekly through-a-merge "$(head)"
 exits through-a-merge 1
-says through-a-merge "check-weekly-run: $(short "$(head)") may not be released: the latest weekly run over the pinned set on main ran on $(short "$at_run"), which is not on the first-parent history of the tag's commit, as main's commits are: $url/231"
+says through-a-merge "check-weekly-run: $(short "$(head)") may not be released: no weekly run over the pinned set ran on the tag's commit or an ancestor of it on main; the latest, $url/231, ran on $(short "$at_run")"
 
-# A run on a later commit than the tag's does not cover it.
+# A run on a later commit than the tag's does not cover it, and does not
+# decide: the latest run on the tag's commit or before it on main does.
 mruns "$(mrun 232 "$fixed")"
 weekly_report 232
 weekly later-run "$at_run"
 exits later-run 1
-says later-run "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main ran on $(short "$fixed"), which the tag's commit does not hold: $url/232"
+says later-run "check-weekly-run: $(short "$at_run") may not be released: no weekly run over the pinned set ran on the tag's commit or an ancestor of it on main; the latest, $url/232, ran on $(short "$fixed")"
+
+mruns "$(mrun 232 "$fixed" '.conclusion = "failure" | .created_at = "2026-11-27T20:30:00Z"')" "$(mrun 231 "$at_run")"
+weekly later-run-elsewhere "$at_run"
+exits later-run-elsewhere 0
+says later-run-elsewhere "check-weekly-run: a later weekly run, $url/232, ran on $(short "$fixed"), which is not the tag's commit or an ancestor of it on main, and does not decide"
+mentions later-run-elsewhere "may be released: the latest weekly run over the pinned set, on the tag's commit, shows no unexplained survivor in the packages at L4 (calc): $url/231"
+downloads_not later-run-elsewhere 232
 mruns "$(mrun 231 "$at_run")"
 
 # --- Which commit: a branch's changed-lines report ----------------------------------

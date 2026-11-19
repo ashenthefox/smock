@@ -2455,8 +2455,9 @@ run, whether its schedule or a person started it, and "Mutation runs:
 monthly", "Mutation runs: sample" and so on for the others. The release
 workflow's check of the latest weekly run
 ([What a tag does](docs/releasing.md#what-a-tag-does)) finds the weekly
-runs on `main` by that name. A run from before the workflow named its runs
-is called "Mutation runs" alone, and the check does not read it.
+runs by that name, those on `main` and one started by hand on a tag alike.
+A run from before the workflow named its runs is called "Mutation runs"
+alone, and the check does not read it.
 
 **The monthly run**, on the 1st of each month at 22:43 UTC, and by hand
 before a release, runs the full set over the pure packages. It reports

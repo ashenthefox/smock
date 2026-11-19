@@ -218,8 +218,10 @@ public, so nothing else needs doing in their settings.
 
 The weekly run over the pinned set runs on `main` every Friday at 20:23
 UTC ([Bulk runs on Actions](../CONTRIBUTING.md#bulk-runs-on-actions)).
-The release's check of it (`scripts/check-weekly-run.py`) reads the
-latest weekly run on `main` that has ended. It needs:
+The release's check of it (`scripts/check-weekly-run.py`) reads only
+weekly runs on the tagged commit or on an ancestor of it on `main`,
+wherever they were started; of those, the latest that has ended decides.
+It needs:
 
 - that run's report, the artifact `mutation-report`, which GitHub keeps
   for 90 days;
@@ -235,8 +237,7 @@ latest weekly run on `main` that has ended. It needs:
 A release on `main`'s head after Friday's run waits for nothing more when
 each change since went through the branch checks or touches no source of
 a package at L4. The release commit touches none. Otherwise, start a
-weekly run on `main` while it is at the release commit, and push the tag
-once it has passed.
+weekly run on the release commit, and push the tag once it has passed.
 A weekly run of the pinned set holds the account's 20 jobs for about two
 hours. The first, started by hand on `main` on 2026-11-19
 ([run 44423781036](https://github.com/hirunefu/smock/actions/runs/44423781036)),
@@ -246,8 +247,9 @@ had 18,403 mutants in 40 shards, two waves of 20, and its report gives
 jobs.
 
 ```sh
-gh workflow run mutation-runs.yml -R hirunefu/smock --ref main -f mode=weekly   # while main is at the release commit
-gh run list -R hirunefu/smock --workflow mutation-runs.yml --branch main   # its name is "Mutation runs: weekly"
+gh workflow run mutation-runs.yml -R hirunefu/smock --ref main -f mode=weekly     # while main is at the release commit
+gh workflow run mutation-runs.yml -R hirunefu/smock --ref "$tag" -f mode=weekly   # once the tag is pushed
+gh run list -R hirunefu/smock --workflow mutation-runs.yml   # its name is "Mutation runs: weekly"
 ```
 
 ### When plan stops a release
@@ -273,20 +275,18 @@ of the release workflow needs plan, so none of them runs.
 
 - **No weekly run covers the tagged commit yet.** The job plan fails with
   `check-weekly-run: <commit> may not be released:` and the reason: no
-  weekly run on `main` has ended, or the latest one failed, or a change
-  to `main` after it changed non-test source of a package at L4 and no
-  branch's changed-lines report covers that change, as for a change pushed
-  straight to `main`. While `main` is at the tagged commit, a weekly run
-  on `main` covers it with no later change. Start one, or wait for the one
-  still running, and once it has passed, about two hours later
+  weekly run on the commit or an ancestor of it on `main` has ended, or
+  the latest one failed, or a change to `main` after it changed non-test
+  source of a package at L4 and no branch's changed-lines report covers
+  that change, as for a change pushed straight to `main`. A weekly run on
+  the tag covers the commit with no later change. Start one, or wait for
+  the one still running, and once it has passed, about two hours later
   ([The weekly mutation run](#the-weekly-mutation-run)), re-run the tag's
-  release run, which reads the weekly runs again. Once `main` has moved
-  past the tagged commit, a new weekly run there does not cover it:
-  release `main`'s head under the next version, as below.
+  release run, which reads the weekly runs again.
 
   ```sh
-  gh workflow run mutation-runs.yml -R hirunefu/smock --ref main -f mode=weekly
-  gh run list -R hirunefu/smock --workflow mutation-runs.yml --branch main   # wait until it has passed
+  gh workflow run mutation-runs.yml -R hirunefu/smock --ref "$tag" -f mode=weekly
+  gh run list -R hirunefu/smock --workflow mutation-runs.yml --branch "$tag"   # wait until it has passed
   gh run rerun <release run-id> -R hirunefu/smock
   ```
 
@@ -294,9 +294,8 @@ of the release workflow needs plan, so none of them runs.
   job plan fails with the packages and their counts, and the command that
   downloads the run's report, which lists the survivors. When the run is
   on an ancestor and later changes have since killed or excluded them, a
-  weekly run on `main` at the tagged commit shows none: start one, as
-  above. Otherwise they are in the tagged code, and a re-run fails the
-  same way, as below.
+  weekly run on the tag shows none: start one, as above. Otherwise they
+  are in the tagged code, and a re-run fails the same way, as below.
 
 - **The tag names another version than `moon.mod`, CHANGELOG.md has no
   section for a tag that is not a pre-release, CI fails on the tagged
