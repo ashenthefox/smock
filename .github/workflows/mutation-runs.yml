@@ -9,8 +9,9 @@
 #
 # - The weekly run, on Fridays, is the pinned set over the pure packages,
 #   which L4 is defined over, so it verifies L4. Beside it run the canary
-#   (mutation-canary.yml) and the properties with random seeds, each in a
-#   job of its own; its plan checks the site counts and lists the stale
+#   (mutation-canary.yml), the properties with random seeds, and the
+#   coverage from the e2e tests (coverage-e2e.yml), which reports only,
+#   each in a job of its own; its plan checks the site counts and lists the stale
 #   entries of the exclusion list, and the job stale-entries opens an
 #   issue for their re-triage, or comments on the one open. Its shards
 #   read the flake records of the latest weekly run, and its report keeps
@@ -252,6 +253,18 @@ jobs:
           path: ${{ runner.temp }}/seeds
           retention-days: 90
           if-no-files-found: warn
+
+  # Coverage from the e2e tests, in the weekly run, beside the shards:
+  # server's and cmd/smock's coverage from e2e and the in-process tests
+  # together, and the positions e2e covers, which step 5's run at operator
+  # level mutates (#342). A workflow of its own (coverage-e2e.yml), so that
+  # it can also be started alone by hand. It reports only, so the finish
+  # does not wait for it.
+  coverage-e2e:
+    name: Coverage from e2e (weekly)
+    needs: plan
+    if: needs.plan.outputs.mode == 'weekly'
+    uses: ./.github/workflows/coverage-e2e.yml
 
   # Runs once every shard has ended, also when one failed, so that the
   # run's times are read; the merge then fails on the missing shard.

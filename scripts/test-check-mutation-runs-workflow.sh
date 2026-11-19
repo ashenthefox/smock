@@ -242,6 +242,18 @@ refuses a-canary-in-every-run \
   'del(.jobs.canary.if)' \
   "it should replay the canary in the weekly run, in a job that calls ./.github/workflows/mutation-canary.yml with if: needs.plan.outputs.mode == 'weekly'"
 
+refuses no-coverage-from-e2e \
+  'del(.jobs."coverage-e2e")' \
+  "it should report the coverage from the e2e tests in the weekly run, in a job that calls ./.github/workflows/coverage-e2e.yml with if: needs.plan.outputs.mode == 'weekly'"
+
+refuses coverage-from-e2e-in-every-run \
+  'del(.jobs."coverage-e2e".if)' \
+  "it should report the coverage from the e2e tests in the weekly run, in a job that calls ./.github/workflows/coverage-e2e.yml with if: needs.plan.outputs.mode == 'weekly'"
+
+refuses coverage-from-e2e-without-the-plan \
+  'del(.jobs."coverage-e2e".needs)' \
+  "it should report the coverage from the e2e tests in the weekly run, in a job that calls ./.github/workflows/coverage-e2e.yml with if: needs.plan.outputs.mode == 'weekly'"
+
 refuses no-random-seeds \
   'del(.jobs.seeds)' \
   "it should run the properties with random seeds (scripts/mutation/bulk.py seeds) in one job, not in: nothing"
@@ -275,6 +287,10 @@ refuses no-flake-records-kept \
 refuses a-finish-without-the-weekly-jobs \
   '.jobs.finish.needs = ["plan", "shard"]' \
   "job finish should need the canary and the properties with random seeds, so that the report names a failure of theirs"
+
+refuses a-finish-that-waits-for-the-coverage-from-e2e \
+  '.jobs.finish.needs += ["coverage-e2e"]' \
+  "job finish should not wait for the coverage from the e2e tests, which reports only"
 
 refuses no-finish \
   'del(.jobs.finish)' \
