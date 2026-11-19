@@ -13,7 +13,7 @@ pub fn Server::new() -> Server {
 }
 
 ///|
-/// Answers a request for a path: 400 for no path, 404 for an empty one.
+/// Answers a request for a path: 400 for no path, 414 for a long one.
 pub fn Server::serve(self : Server, path : String) -> Int {
   guard path != "" else { return 400 }
   if path == "/" {
@@ -23,6 +23,7 @@ pub fn Server::serve(self : Server, path : String) -> Int {
   }
   match path.length() {
     0 => 404
+    n if n > 100 => 414
     n => self.hits + n
   }
 }

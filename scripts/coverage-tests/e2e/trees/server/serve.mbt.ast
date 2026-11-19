@@ -47,8 +47,8 @@
      ((block_line "")
       (comment
        (""
-        " Answers a request for a path: 400 for no path, 404 for an empty one."))
-      (loc 0:1-1:73)))
+        " Answers a request for a path: 400 for no path, 414 for a long one."))
+      (loc 0:1-1:71)))
     (loc_ 2:1-2:58))
    (Decl_body
     (Pexpr_guard
@@ -83,18 +83,24 @@
         (Pexpr_ident ((var_name path) (loc_ 9:9-9:13)) 9:9-9:13)
         ((label_name length) (loc_ 9:14-9:20)) () 9:9-9:22)
        (((Ppat_constant 0 10:5-10:6) (Pexpr_constant 404 10:10-10:13))
-        ((Ppat_var ((binder_name n) (loc_ 11:5-11:6)))
-         (Pexpr_infix ((var_name +) (loc_ 11:20-11:21))
+        ((pattern (Ppat_var ((binder_name n) (loc_ 11:5-11:6))))
+         (guard
+          ((Pexpr_infix ((var_name >) (loc_ 11:12-11:13))
+            (Pexpr_ident ((var_name n) (loc_ 11:10-11:11)) 11:10-11:11)
+            (Pexpr_constant 100 11:14-11:17) 11:10-11:17)))
+         (body (Pexpr_constant 414 11:21-11:24)))
+        ((Ppat_var ((binder_name n) (loc_ 12:5-12:6)))
+         (Pexpr_infix ((var_name +) (loc_ 12:20-12:21))
           (Pexpr_field
-           (Pexpr_ident ((var_name self) (loc_ 11:10-11:14)) 11:10-11:14)
-           (Label ((label_name hits) (loc_ 11:15-11:19))) 11:10-11:19)
-          (Pexpr_ident ((var_name n) (loc_ 11:22-11:23)) 11:22-11:23)
-          11:10-11:23)))
-       9:3-9:24 9:3-12:4)
-      4:3-12:4)
-     false 3:3-12:4))
-   2:1-13:2))
- (base_pos 30:1
+           (Pexpr_ident ((var_name self) (loc_ 12:10-12:14)) 12:10-12:14)
+           (Label ((label_name hits) (loc_ 12:15-12:19))) 12:10-12:19)
+          (Pexpr_ident ((var_name n) (loc_ 12:22-12:23)) 12:22-12:23)
+          12:10-12:23)))
+       9:3-9:24 9:3-13:4)
+      4:3-13:4)
+     false 3:3-13:4))
+   2:1-14:2))
+ (base_pos 31:1
   (Ptop_funcdef
    ((type_name (((name Server) (loc_ 2:8-2:14))))
     (name ((binder_name stop) (loc_ 2:16-2:20)))
@@ -143,7 +149,7 @@
       9:3-9:28)
      3:3-9:28))
    2:1-10:2))
- (base_pos 42:1
+ (base_pos 43:1
   (Ptop_funcdef
    ((type_name (((name Server) (loc_ 2:8-2:14))))
     (name ((binder_name unused) (loc_ 2:16-2:22)))
@@ -162,7 +168,7 @@
       (Label ((label_name hits) (loc_ 3:8-3:12))) 3:3-3:12)
      (Pexpr_constant 7 3:15-3:16) 3:3-3:16))
    2:1-4:2))
- (base_pos 48:1
+ (base_pos 49:1
   (Ptop_letdef ((binder_name limit) (loc_ 2:9-2:14))
    ((Ptype_name ((lid Int) (loc_ 2:17-2:20)) () 2:17-2:20))
    (Pexpr_constant 100 2:23-2:26) (Vis_pub () 2:1-2:4) 2:1-2:26

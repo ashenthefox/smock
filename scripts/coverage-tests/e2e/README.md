@@ -13,7 +13,8 @@ scripts/test-coverage-e2e.sh runs scripts/coverage-e2e.py on these files.
   needs no compiler.
 - `in-process.bisect` and `e2e.bisect` are bisect reports of format 4
   over that tree. Their points are where the compiler put them when the
-  tree was built with coverage; their counts are set by hand:
+  tree was built with coverage; their counts are set by hand. The test
+  makes a few variants of them, each said where it is made:
 
 | point | what starts there | in-process | e2e |
 |---|---|---:|---:|
@@ -26,11 +27,12 @@ scripts/test-coverage-e2e.sh runs scripts/coverage-e2e.py on these files.
 | `server/serve.mbt:24:9` | the value matched | 1 | 2 |
 | `server/serve.mbt:24:14` | the call of `length` | 1 | 2 |
 | `server/serve.mbt:25:10` | the arm `0` | 0 | 0 |
-| `server/serve.mbt:26:10` | the arm `n` | 1 | 2 |
-| `server/serve.mbt:33:3` | `Server::stop`'s body | 0 | 1 |
-| `server/serve.mbt:34:5` | the then of `force` | 0 | 0 |
-| `server/serve.mbt:37:5` | the body of the while loop | 0 | 0 |
-| `server/serve.mbt:45:3` | `Server::unused`'s body | 0 | 0 |
+| `server/serve.mbt:26:21` | the arm `n if n > 100` | 0 | 0 |
+| `server/serve.mbt:27:10` | the arm `n` | 1 | 2 |
+| `server/serve.mbt:34:3` | `Server::stop`'s body | 0 | 1 |
+| `server/serve.mbt:35:5` | the then of `force` | 0 | 0 |
+| `server/serve.mbt:38:5` | the body of the while loop | 0 | 0 |
+| `server/serve.mbt:46:3` | `Server::unused`'s body | 0 | 0 |
 | `watch/watch.mbt:4:3` | `changed`'s body | 1 | 2 |
 | `watch/watch.mbt:5:5` | its then | 0 | 0 |
 | `watch/watch.mbt:7:5` | its else | 1 | 2 |

@@ -80,11 +80,11 @@ says fixture "| package | points | in-process | e2e | either | unreached |"
 says fixture "| cmd/smock | 9 | 0 (0.0%) | 8 (88.9%) | 8 (88.9%) | 1 |"
 # prng: only e2e reaches it, the then of next not.
 says fixture "| prng | 3 | 0 (0.0%) | 2 (66.7%) | 2 (66.7%) | 1 |"
-# server: in-process reaches 7 of 14, e2e 8; the then at 20:5 only
-# in-process, the else at 22:5 and stop's body at 33:3 only e2e.
-says fixture "| server | 14 | 7 (50.0%) | 8 (57.1%) | 9 (64.3%) | 5 |"
+# server: in-process reaches 7 of 15, e2e 8; the then at 20:5 only
+# in-process, the else at 22:5 and stop's body at 34:3 only e2e.
+says fixture "| server | 15 | 7 (46.7%) | 8 (53.3%) | 9 (60.0%) | 6 |"
 says fixture "| watch | 3 | 2 (66.7%) | 2 (66.7%) | 2 (66.7%) | 1 |"
-says fixture "| all | 29 | 9 (31.0%) | 20 (69.0%) | 21 (72.4%) | 8 |"
+says fixture "| all | 30 | 9 (30.0%) | 20 (66.7%) | 21 (70.0%) | 9 |"
 
 # --- The positions e2e covers ---------------------------------------------------
 
@@ -123,12 +123,12 @@ positions fixture not-covered-by-e2e
 # The rule, as #342 states it.
 says fixture "A position counts as covered by e2e when the point that starts the innermost function, then, else or match-arm body around it has a count above zero in the e2e tests' report."
 says fixture "| package | positions | covered by e2e | not covered | mutants of the pinned set at covered positions |"
-# server: 31 positions, 32 mutants (INT in a comparison makes two at
-# 36:21); 9 positions not covered, listed below.
-says fixture "| server | 31 | 22 | 9 | 23 |"
+# server: 35 positions, 37 mutants (INT in a comparison makes two, at
+# 26:14 and 37:21); 10 positions not covered, listed below.
+says fixture "| server | 35 | 25 | 10 | 27 |"
 says fixture "| cmd/smock | 4 | 2 | 2 | 2 |"
-if [ "$(wc -l <"$tmp/fixture.covered-by-e2e")" = 25 ] && [ "$(wc -l <"$tmp/fixture.not-covered-by-e2e")" = 11 ]; then
-  pass "fixture: lists 25 mutants at covered positions and 11 at the others"
+if [ "$(wc -l <"$tmp/fixture.covered-by-e2e")" = 29 ] && [ "$(wc -l <"$tmp/fixture.not-covered-by-e2e")" = 12 ]; then
+  pass "fixture: lists 29 mutants at covered positions and 12 at the others"
 else
   fail "fixture: lists $(wc -l <"$tmp/fixture.covered-by-e2e") and $(wc -l <"$tmp/fixture.not-covered-by-e2e") mutants"
 fi
@@ -137,43 +137,71 @@ fi
 # starts at its brace.
 in_list fixture covered-by-e2e "server/serve.mbt:17:59 BODY"
 in_list fixture covered-by-e2e "server/serve.mbt:19:6 IFC"
-in_list fixture not-covered-by-e2e "server/serve.mbt:44:45 BODY"
-in_list fixture not-covered-by-e2e "server/serve.mbt:45:13 AOR"
+in_list fixture not-covered-by-e2e "server/serve.mbt:45:45 BODY"
+in_list fixture not-covered-by-e2e "server/serve.mbt:46:13 AOR"
 # A then that only the in-process tests ran, and an else that e2e ran.
 in_list fixture not-covered-by-e2e "server/serve.mbt:20:27 AOR"
 in_list fixture covered-by-e2e "server/serve.mbt:22:27 AOR"
 # A match arm that ran, and one that did not.
-in_list fixture covered-by-e2e "server/serve.mbt:26:20 AOR"
+in_list fixture covered-by-e2e "server/serve.mbt:27:20 AOR"
 in_list fixture not-covered-by-e2e "server/serve.mbt:25:10 INT"
+# An arm's guard runs before its body: its positions are in the body
+# around the match, which ran, though the guarded arm's body did not.
+in_list fixture covered-by-e2e "server/serve.mbt:26:10 IFC"
+in_list fixture covered-by-e2e "server/serve.mbt:26:12 ROR"
+in_list fixture covered-by-e2e "server/serve.mbt:26:14 INT"
+in_list fixture not-covered-by-e2e "server/serve.mbt:26:21 INT"
 # A guard's else is an else.
 in_list fixture not-covered-by-e2e "server/serve.mbt:18:34 INT"
-# After an if whose then-body did not run (34:5), the position is in
+# After an if whose then-body did not run (35:5), the position is in
 # stop's body, which ran.
-in_list fixture not-covered-by-e2e "server/serve.mbt:34:17 INT"
-in_list fixture covered-by-e2e "server/serve.mbt:39:25 AOR"
+in_list fixture not-covered-by-e2e "server/serve.mbt:35:17 INT"
+in_list fixture covered-by-e2e "server/serve.mbt:40:25 AOR"
 # A loop's body is none of the four: its position counts as stop's body,
-# though the loop's own point (37:5) is 0.
-in_list fixture covered-by-e2e "server/serve.mbt:37:27 AOR"
+# though the loop's own point (38:5) is 0.
+in_list fixture covered-by-e2e "server/serve.mbt:38:27 AOR"
 # A parameter's default value is in its function.
-in_list fixture covered-by-e2e "server/serve.mbt:32:52 BOOL"
+in_list fixture covered-by-e2e "server/serve.mbt:33:52 BOOL"
 # A top-level value, outside every function, counts with its package.
-in_list fixture covered-by-e2e "server/serve.mbt:50:23 INT"
+in_list fixture covered-by-e2e "server/serve.mbt:51:23 INT"
 # A closure is a function: main's body ran, the unused closure's did not.
 in_list fixture covered-by-e2e "cmd/smock/main.mbt:8:3 DEL"
 in_list fixture not-covered-by-e2e "cmd/smock/main.mbt:7:46 AOR"
 
 # A body that the compiler starts with no point counts as none: without
 # the point of the arm 0 (25:10), its position counts as serve's body.
-sed 's/ 632 645 / 645 /; s/ 14 1 1 0 1 1 0 1 1 0 1 0 0 0 0 / 13 1 1 0 1 1 0 1 1 1 0 0 0 0 /; s/^BISECT-COVERAGE-4 4 16 server\/serve.mbt 14 /BISECT-COVERAGE-4 4 16 server\/serve.mbt 13 /' \
+sed 's/ 610 630 654 / 610 654 /; s/ 15 1 1 0 1 1 0 1 1 0 0 1 0 0 0 0 / 14 1 1 0 1 1 0 1 1 0 1 0 0 0 0 /; s/^BISECT-COVERAGE-4 4 16 server\/serve.mbt 15 /BISECT-COVERAGE-4 4 16 server\/serve.mbt 14 /' \
   "$fixtures/in-process.bisect" >"$tmp/no-point-in-process.bisect"
-sed 's/ 632 645 / 645 /; s/ 14 1 2 0 2 0 2 2 2 0 2 1 0 0 0 / 13 1 2 0 2 0 2 2 2 2 1 0 0 0 /; s/^BISECT-COVERAGE-4 4 16 server\/serve.mbt 14 /BISECT-COVERAGE-4 4 16 server\/serve.mbt 13 /' \
+sed 's/ 610 630 654 / 610 654 /; s/ 15 1 2 0 2 0 2 2 2 0 0 2 1 0 0 0 / 14 1 2 0 2 0 2 2 2 0 2 1 0 0 0 /; s/^BISECT-COVERAGE-4 4 16 server\/serve.mbt 15 /BISECT-COVERAGE-4 4 16 server\/serve.mbt 14 /' \
   "$fixtures/e2e.bisect" >"$tmp/no-point-e2e.bisect"
 report no-point "$tmp/no-point-in-process.bisect" "$tmp/no-point-e2e.bisect"
 exits no-point 0
 positions no-point covered-by-e2e
 in_list no-point covered-by-e2e "server/serve.mbt:25:10 INT"
-says no-point "| server | 31 | 23 | 8 | 24 |"
+says no-point "| server | 35 | 26 | 9 | 28 |"
 says no-point "- \`server/serve.mbt:25:10\`, a match arm in \`Server::serve\`"
+
+# An else that did not run, in a function that did: with the else of
+# `path == "/"` (22:5) at 0 in the e2e tests' report, its positions are
+# not covered.
+sed 's/ 15 1 2 0 2 0 2 2 2 0 0 2 1 0 0 0 / 15 1 2 0 2 0 0 2 2 0 0 2 1 0 0 0 /' "$fixtures/e2e.bisect" \
+  >"$tmp/no-else-e2e.bisect"
+report no-else "$fixtures/in-process.bisect" "$tmp/no-else-e2e.bisect"
+exits no-else 0
+positions no-else not-covered-by-e2e
+in_list no-else not-covered-by-e2e "server/serve.mbt:22:27 AOR"
+in_list no-else not-covered-by-e2e "server/serve.mbt:22:29 INT"
+
+# A parameter's default value is in its function even where its package
+# has other points that e2e reaches: with stop's body (34:3) at 0 in the
+# e2e tests' report, its default value is not covered.
+sed 's/ 15 1 2 0 2 0 2 2 2 0 0 2 1 0 0 0 / 15 1 2 0 2 0 2 2 2 0 0 2 0 0 0 0 /' "$fixtures/e2e.bisect" \
+  >"$tmp/stopped-e2e.bisect"
+report stopped "$fixtures/in-process.bisect" "$tmp/stopped-e2e.bisect"
+exits stopped 0
+positions stopped not-covered-by-e2e
+in_list stopped not-covered-by-e2e "server/serve.mbt:33:52 BOOL"
+in_list stopped not-covered-by-e2e "server/serve.mbt:40:25 AOR"
 
 # --- The e2e run, and the times --------------------------------------------------
 
@@ -224,12 +252,13 @@ lacks() {
 
 # Those of server, cmd/smock, defdir, watch and openssl, by file and
 # definition: the points whose count is 0 in both reports.
-says fixture "### server: 5 of 14 points unreached"
+says fixture "### server: 6 of 15 points unreached"
 says fixture "- \`server/serve.mbt:18:27\` in \`Server::serve\`"
 says fixture "- \`server/serve.mbt:25:10\` in \`Server::serve\`"
-says fixture "- \`server/serve.mbt:34:5\` in \`Server::stop\`"
-says fixture "- \`server/serve.mbt:37:5\` in \`Server::stop\`"
-says fixture "- \`server/serve.mbt:45:3\` in \`Server::unused\`"
+says fixture "- \`server/serve.mbt:26:21\` in \`Server::serve\`"
+says fixture "- \`server/serve.mbt:35:5\` in \`Server::stop\`"
+says fixture "- \`server/serve.mbt:38:5\` in \`Server::stop\`"
+says fixture "- \`server/serve.mbt:46:3\` in \`Server::unused\`"
 says fixture "### cmd/smock: 1 of 9 points unreached"
 says fixture "- \`cmd/smock/main.mbt:7:41\` in \`main\`"
 says fixture "### watch: 1 of 3 points unreached"
@@ -245,12 +274,12 @@ if python3 - "$tmp/fixture/unreached.json" >"$tmp/unreached.out" 2>&1 <<'PY'; th
 import json, sys
 found = json.load(open(sys.argv[1], encoding="utf-8"))["packages"]
 assert sorted(found) == ["cmd/smock", "server", "watch"], sorted(found)
-assert found["server"]["points"] == 14
+assert found["server"]["points"] == 15
 assert [p["point"] for p in found["server"]["unreached"]] == [
-    "server/serve.mbt:18:27", "server/serve.mbt:25:10", "server/serve.mbt:34:5", "server/serve.mbt:37:5",
-    "server/serve.mbt:45:3"], found["server"]["unreached"]
-assert found["server"]["unreached"][2] == {"point": "server/serve.mbt:34:5", "file": "server/serve.mbt",
-                                           "line": 34, "column": 5, "definition": "Server::stop", "deferred": None}
+    "server/serve.mbt:18:27", "server/serve.mbt:25:10", "server/serve.mbt:26:21", "server/serve.mbt:35:5",
+    "server/serve.mbt:38:5", "server/serve.mbt:46:3"], found["server"]["unreached"]
+assert found["server"]["unreached"][3] == {"point": "server/serve.mbt:35:5", "file": "server/serve.mbt",
+                                           "line": 35, "column": 5, "definition": "Server::stop", "deferred": None}
 assert [p["point"] for p in found["cmd/smock"]["unreached"]] == ["cmd/smock/main.mbt:7:41"]
 assert found["server"]["accepted"] == []
 PY
@@ -265,10 +294,10 @@ fi
 if command -v moonc >/dev/null 2>&1; then
   cp -R "$fixtures/tree" "$tmp/listed-tree"
   {
-    python3 scripts/mutation/exclusions.py --root "$tmp/listed-tree" new server/serve.mbt:34:5 |
+    python3 scripts/mutation/exclusions.py --root "$tmp/listed-tree" new server/serve.mbt:35:5 |
       sed 's/^category = .*/category = "DEFERRED"/; s/^reason = .*/reason = "a test of a forced stop"/'
     echo 'issue = 9001'
-    python3 scripts/mutation/exclusions.py --root "$tmp/listed-tree" new server/serve.mbt:45:3 |
+    python3 scripts/mutation/exclusions.py --root "$tmp/listed-tree" new server/serve.mbt:46:3 |
       sed 's/^category = .*/category = "UNREACHABLE"/; s/^reason = .*/reason = "nothing calls it"/'
     echo 'argument = "no caller"'
   } >"$tmp/listed-tree/exclusions.toml"
@@ -278,11 +307,11 @@ if command -v moonc >/dev/null 2>&1; then
     >"$tmp/listed.out" 2>&1 || status=$?
   echo "$status" >"$tmp/listed.status"
   exits listed 0
-  says listed "### server: 4 of 14 points unreached"
-  says listed "- \`server/serve.mbt:34:5\` in \`Server::stop\` (DEFERRED to #9001)"
+  says listed "### server: 5 of 15 points unreached"
+  says listed "- \`server/serve.mbt:35:5\` in \`Server::stop\` (DEFERRED to #9001)"
   says listed "### server: 1 point accepted by the exclusion list"
-  says listed "- \`server/serve.mbt:45:3\` in \`Server::unused\`, UNREACHABLE"
-  says listed "| server | 14 | 7 (50.0%) | 8 (57.1%) | 9 (64.3%) | 4 |"
+  says listed "- \`server/serve.mbt:46:3\` in \`Server::unused\`, UNREACHABLE"
+  says listed "| server | 15 | 7 (46.7%) | 8 (53.3%) | 9 (60.0%) | 5 |"
 else
   echo "skip listed: moonc is not installed, and the exclusion list's definitions need it"
 fi
@@ -347,49 +376,51 @@ cat >"$tmp/bodies/343.md" <<'MD'
 - [ ] Request path: tests only.
 MD
 
-# Six points of server and cmd/smock unreached, no more than about 40: no
-# ticket; #343 triages them itself.
+# Seven points of server and cmd/smock unreached, no more than about 40:
+# no ticket; #343 triages them itself. Nor with at most 7 a ticket.
 triage few --bodies "$tmp/bodies"
 exits few 0
-holds few tickets.md "| #343 | server, cmd/smock | 6 | none: triaged in #343 |"
+holds few tickets.md "| #343 | server, cmd/smock | 7 | none: triaged in #343 |"
 tickets few ""
+triage at-most-7 --max 7
+holds at-most-7 tickets.md "| #343 | server, cmd/smock | 7 | none: triaged in #343 |"
+tickets at-most-7 ""
 
-# At most 5 a ticket: server/serve.mbt holds 5, so it is never split, and
+# At most 6 a ticket: server/serve.mbt holds 6, so it is never split, and
 # cmd/smock/main.mbt's point goes into a ticket of its own.
-triage at-most-5 --max 5 --bodies "$tmp/bodies" --run-url https://example.com/runs/1
-exits at-most-5 0
-holds at-most-5 tickets.md "| #343 | server, cmd/smock | 6 | 2 |"
-tickets at-most-5 "343-1.md server/serve.mbt:18:27 server/serve.mbt:25:10 server/serve.mbt:34:5 server/serve.mbt:37:5 server/serve.mbt:45:3 | Triage the points no test reaches in server/serve.mbt (1 of 2) | ready-for-agent | #342 #318 #319 | blocks #343
+triage at-most-6 --max 6 --bodies "$tmp/bodies" --run-url https://example.com/runs/1
+exits at-most-6 0
+holds at-most-6 tickets.md "| #343 | server, cmd/smock | 7 | 2 |"
+tickets at-most-6 "343-1.md server/serve.mbt:18:27 server/serve.mbt:25:10 server/serve.mbt:26:21 server/serve.mbt:35:5 server/serve.mbt:38:5 server/serve.mbt:46:3 | Triage the points no test reaches in server/serve.mbt (1 of 2) | ready-for-agent | #342 #318 #319 | blocks #343
 343-2.md cmd/smock/main.mbt:7:41 | Triage the points no test reaches in cmd/smock/main.mbt (2 of 2) | ready-for-agent | #342 #318 #319 | blocks #343"
-holds at-most-5 343-1.md "#343"
-holds at-most-5 343-1.md "Part 1 of 2 of the triage of what no test reaches in server and cmd/smock for #343, in step 5 of #275: the 5 points of [the e2e coverage report](https://example.com/runs/1) that no test reaches, in server/serve.mbt. A point that a DEFERRED entry of the exclusion list covers counts as unreached."
-holds at-most-5 343-1.md "- \`server/serve.mbt:34:5\` in \`Server::stop\`"
-holds at-most-5 343-1.md "For the 5 points above only."
-holds at-most-5 343-1.md "- [ ] Every point of server and cmd/smock that the merged report shows unreached has a class."
-holds at-most-5 343-1.md "- [ ] **Dead code** is deleted."
-holds at-most-5 343-1.md "- [ ] **Missing tests** go through e2e."
-holds at-most-5 343-1.md "- [ ] **Exclusions** go in the exclusion list."
-holds at-most-5 343-1.md "- [ ] **Points no dump can show.** A point that a test reaches only in a process that writes no dump is listed."
-holds at-most-5 343-1.md "- [ ] Request path: tests only."
-holds at-most-5 343-1.md "- #319"
-holds at-most-5 343-2.md "- \`cmd/smock/main.mbt:7:41\` in \`main\`"
-if grep -qF "After the triage" "$tmp/at-most-5/343-1.md"; then
-  fail "at-most-5: 343-1.md carries the criterion that checks the result after the triage"
+holds at-most-6 343-1.md "#343"
+holds at-most-6 343-1.md "Part 1 of 2 of the triage of what no test reaches in server and cmd/smock for #343, in step 5 of #275: the 6 points of [the e2e coverage report](https://example.com/runs/1) that no test reaches, in server/serve.mbt. A point that a DEFERRED entry of the exclusion list covers counts as unreached."
+holds at-most-6 343-1.md "- \`server/serve.mbt:35:5\` in \`Server::stop\`"
+holds at-most-6 343-1.md "For the 6 points above only."
+holds at-most-6 343-1.md "- [ ] Every point of server and cmd/smock that the merged report shows unreached has a class."
+holds at-most-6 343-1.md "- [ ] **Dead code** is deleted."
+holds at-most-6 343-1.md "- [ ] **Missing tests** go through e2e."
+holds at-most-6 343-1.md "- [ ] **Exclusions** go in the exclusion list."
+holds at-most-6 343-1.md "- [ ] **Points no dump can show.** A point that a test reaches only in a process that writes no dump is listed."
+holds at-most-6 343-1.md "- [ ] Request path: tests only."
+holds at-most-6 343-1.md "- #319"
+holds at-most-6 343-2.md "- \`cmd/smock/main.mbt:7:41\` in \`main\`"
+if grep -qF "After the triage" "$tmp/at-most-6/343-1.md"; then
+  fail "at-most-6: 343-1.md carries the criterion that checks the result after the triage"
 else
-  pass "at-most-5: 343-1.md leaves out the criterion that checks the result after the triage"
+  pass "at-most-6: 343-1.md leaves out the criterion that checks the result after the triage"
 fi
 
-# At most 2 a ticket: server/serve.mbt holds more, so it is cut into equal
-# parts, 2, 2 and 1. Without the closing ticket's body, a ticket names its
+# At most 4 a ticket: server/serve.mbt holds more, so it is cut into equal
+# parts, 3 and 3. Without the closing ticket's body, a ticket names its
 # criteria.
-triage at-most-2 --max 2
-exits at-most-2 0
-holds at-most-2 tickets.md "| #343 | server, cmd/smock | 6 | 4 |"
-tickets at-most-2 "343-1.md server/serve.mbt:18:27 server/serve.mbt:25:10 | Triage the points no test reaches in server/serve.mbt (1 of 4) | ready-for-agent | #342 #318 #319 | blocks #343
-343-2.md server/serve.mbt:34:5 server/serve.mbt:37:5 | Triage the points no test reaches in server/serve.mbt (2 of 4) | ready-for-agent | #342 #318 #319 | blocks #343
-343-3.md server/serve.mbt:45:3 | Triage the points no test reaches in server/serve.mbt (3 of 4) | ready-for-agent | #342 #318 #319 | blocks #343
-343-4.md cmd/smock/main.mbt:7:41 | Triage the points no test reaches in cmd/smock/main.mbt (4 of 4) | ready-for-agent | #342 #318 #319 | blocks #343"
-holds at-most-2 343-3.md "- [ ] #343's criteria on each point's class, dead code, missing tests, exclusions, the points no dump can show and the request path, as #343 states them."
+triage at-most-4 --max 4
+exits at-most-4 0
+holds at-most-4 tickets.md "| #343 | server, cmd/smock | 7 | 3 |"
+tickets at-most-4 "343-1.md server/serve.mbt:18:27 server/serve.mbt:25:10 server/serve.mbt:26:21 | Triage the points no test reaches in server/serve.mbt (1 of 3) | ready-for-agent | #342 #318 #319 | blocks #343
+343-2.md server/serve.mbt:35:5 server/serve.mbt:38:5 server/serve.mbt:46:3 | Triage the points no test reaches in server/serve.mbt (2 of 3) | ready-for-agent | #342 #318 #319 | blocks #343
+343-3.md cmd/smock/main.mbt:7:41 | Triage the points no test reaches in cmd/smock/main.mbt (3 of 3) | ready-for-agent | #342 #318 #319 | blocks #343"
+holds at-most-4 343-3.md "- [ ] #343's criteria on each point's class, dead code, missing tests, exclusions, the points no dump can show and the request path, as #343 states them."
 
 # Files that hold fewer than the most share a ticket, in order; a title
 # names one file, two, or the first and the last with their count, since
