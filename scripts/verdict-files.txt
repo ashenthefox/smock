@@ -36,6 +36,7 @@ scripts/coverage.sh                    the coverage wrapper, which runs the test
 scripts/coverage-report.py             the coverage report: the bisect parser, which reads the points and their counters (#296)
 scripts/coverage-tests/                the coverage report's committed reports and tree, which its test judges it by (#296)
 scripts/coverage-ratchet.py            the coverage ratchet, which holds each package's uncovered points to its floor and refuses a raised floor that no recorded raise covers (#297)
+scripts/coverage-e2e.*                 the coverage from the e2e tests: the run, and the report that decides which positions of server and cmd/smock e2e covers, which the run at operator level mutates (#346), and which points no test reaches, which #343 triages (#342)
 coverage/                              the coverage ledger's committed data: the floors and approved raises (#297), and the scope's list of generated files
 scripts/check-merge.*                  the merge check (#312)
 scripts/check-weekly-run.*             the release's check of the latest weekly run (#316)
