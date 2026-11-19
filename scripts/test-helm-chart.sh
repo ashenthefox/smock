@@ -415,6 +415,41 @@ check_text git-sync-large "a depth and a UID of a million or more from a values 
      and .securityContext.runAsUser == $uid and .securityContext.runAsGroup == $uid)' \
   --arg depth "$depth" --arg uid "$uid"
 
+# A ref written as digits, such as a short commit hash, and an image tag of
+# digits are numbers to YAML; git-sync gets them with the digits of the
+# values file (#396), as it gets every text the values give it: the
+# repository, the period and extra flags too. A million or more each, so
+# that a number written as Go writes a float (8.675309e+06) shows too.
+cat >"$tmp/values-git-sync-digits.yaml" <<'YAML'
+definitions:
+  gitSync:
+    repo: 4242424
+    ref: 8675309
+    period: 1000000
+    extraArgs:
+      - --max-failures
+      - 1000000
+    image:
+      repository: 1000001
+      tag: 20241231
+YAML
+render git-sync-digits --values "$tmp/values-token.yaml" --values "$tmp/values-git-sync.yaml" \
+  --values "$tmp/values-git-sync-digits.yaml"
+check_text git-sync-digits "a ref, an image, a repository, a period and extra flags written as digits reach both git-sync containers with those digits" \
+  '[container("git-sync", "git-sync-init")] as $c
+   | ($c | length) == 2
+   and all($c[]; .image == "\($repository):\($tag)@\($digest)"
+     and (.args | index("--repo=\($repo)") and index("--ref=\($ref)"))
+     and .args[-2:] == ["--max-failures", $failures])
+   and (container("git-sync").args | index("--period=\($period)"))' \
+  --arg repo "$(yq '.definitions.gitSync.repo' "$tmp/values-git-sync-digits.yaml")" \
+  --arg ref "$(yq '.definitions.gitSync.ref' "$tmp/values-git-sync-digits.yaml")" \
+  --arg period "$(yq '.definitions.gitSync.period' "$tmp/values-git-sync-digits.yaml")" \
+  --arg failures "$(yq '.definitions.gitSync.extraArgs[1]' "$tmp/values-git-sync-digits.yaml")" \
+  --arg repository "$(yq '.definitions.gitSync.image.repository' "$tmp/values-git-sync-digits.yaml")" \
+  --arg tag "$(yq '.definitions.gitSync.image.tag' "$tmp/values-git-sync-digits.yaml")" \
+  --arg digest "$(yq '.definitions.gitSync.image.digest' "$chart/values.yaml")"
+
 render git-sync-root --values "$tmp/values-token.yaml" --set definitions.source=gitSync --set definitions.gitSync.repo=https://example.com/m.git
 check git-sync-root "without a path, the Definition files are at the top of the repository" \
   'env("SMOCK_DIR").value == "/git/current"'

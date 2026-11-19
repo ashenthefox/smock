@@ -111,26 +111,27 @@ new one (e2e/reload_test.mbt has a test of that).
 {{/*
 A git-sync container that syncs the repository into the definitions volume:
 the init container, which syncs once so that smock starts with its files
-(oneTime), or the sidecar, which keeps syncing.
+(oneTime), or the sidecar, which keeps syncing. Each value it takes is
+text, as smock.string writes it, so a ref or a tag of digits keeps them.
 */}}
 {{- define "smock.gitSyncContainer" -}}
 {{- $g := .root.Values.definitions.gitSync -}}
 - name: {{ ternary "git-sync-init" "git-sync" .oneTime }}
-  image: {{ printf "%s:%s" $g.image.repository $g.image.tag }}{{ with $g.image.digest }}@{{ . }}{{ end }}
+  image: {{ printf "%s:%s" (include "smock.string" $g.image.repository) (include "smock.string" $g.image.tag) }}{{ with $g.image.digest }}@{{ . }}{{ end }}
   imagePullPolicy: {{ $g.image.pullPolicy }}
   args:
-    - {{ printf "--repo=%s" $g.repo | quote }}
-    - {{ printf "--ref=%s" $g.ref | quote }}
+    - {{ printf "--repo=%s" (include "smock.string" $g.repo) | quote }}
+    - {{ printf "--ref=%s" (include "smock.string" $g.ref) | quote }}
     - --root=/git
     - --link=current
     - {{ printf "--depth=%s" (include "smock.string" $g.depth) | quote }}
     {{- if .oneTime }}
     - --one-time
     {{- else }}
-    - {{ printf "--period=%s" $g.period | quote }}
+    - {{ printf "--period=%s" (include "smock.string" $g.period) | quote }}
     {{- end }}
     {{- range $g.extraArgs }}
-    - {{ . | quote }}
+    - {{ include "smock.string" . | quote }}
     {{- end }}
   {{- with $g.env }}
   env:
