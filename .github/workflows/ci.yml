@@ -53,12 +53,17 @@ jobs:
       - name: Check the release workflow
         run: scripts/check-release-workflow.sh
 
+      - name: Test the check of the release workflow
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-release-workflow.sh
+
       - name: Test the release notes
         if: ${{ !cancelled() }}
         run: scripts/test-release-notes.sh
 
       # The release workflow's checks of a pushed tag: that CI passed on its
-      # commit, and that it names the version in moon.mod.
+      # commit, that it names the version in moon.mod, and that the latest
+      # weekly mutation run is clean in the packages at L4 and covers it.
       - name: Test the release workflow's checks of a tag
         if: ${{ !cancelled() }}
         run: scripts/test-release-gates.sh

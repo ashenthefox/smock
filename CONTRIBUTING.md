@@ -343,9 +343,11 @@ scripts/test-check-grpcurl.sh dist/smock   # that check fails on each difference
 docker build --tag smock:dev .
 scripts/smoke-test-image.sh smock:dev 0.0.0-dev <commit> "moonc <version>"   # the container image
 scripts/test-helm-chart-on-kind.sh smock:dev   # the chart on a kind cluster (needs kind, kubectl and helm)
-scripts/check-release-workflow.sh    # the release workflow publishes only for tags (needs yq and jq)
+scripts/check-release-workflow.sh    # the release workflow publishes only for tags, and only after its checks of the tag (needs yq and jq)
+scripts/test-check-release-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-release-notes.sh        # the release notes, with CHANGELOG.md's links at the release's tag
-scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit and that the tag names moon.mod's version (needs jq)
+scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit, that the tag names moon.mod's version, and that the latest weekly mutation run is clean in the packages at L4, with fake gh runs on small git histories (needs python3, git and jq)
+python3 scripts/check-weekly-run.py <commit>   # whether the latest weekly mutation run lets the commit be released (needs git and gh)
 scripts/check-benchmark-workflow.sh  # the benchmark workflow runs only by hand (needs yq and jq)
 scripts/check-measure-costs-workflow.sh   # the workflow that measures the tests' costs runs only by hand, with no C flags (needs yq and jq)
 scripts/test-check-measure-costs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
@@ -1411,9 +1413,10 @@ report lists every entry whose reviewer changed.
   the tag's commit or on an ancestor whose later changes the changed-lines
   reports cover or touch no non-test source of a package at L4. The
   release checks it before it publishes, beside the check that CI passed
-  on the tag's commit
-  ([What a tag does](docs/releasing.md#what-a-tag-does)). So a release may
-  wait for one weekly run.
+  on the tag's commit (`scripts/check-weekly-run.py`,
+  [What a tag does](docs/releasing.md#what-a-tag-does)). So a release may
+  wait for one weekly run. While no package is at L4, the check reads no
+  run and passes.
 - **Bulk runs go to Actions**: the baseline of 1,000 mutants, the weekly
   and monthly runs, `server` through e2e, and the kill matrices. On a
   developer's machine, only single mutants and the diff mode run, which
