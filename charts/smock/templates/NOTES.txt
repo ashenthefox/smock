@@ -1,6 +1,6 @@
 smock {{ .Chart.AppVersion }} serves the Mocks of its Definition files ({{ .Values.definitions.source }}) through the Service {{ include "smock.fullname" . }} (ports {{ include "smock.string" .Values.service.plainPort }} and {{ include "smock.string" .Values.service.tlsPort }}).
 
-The Admin API, the probes and the metrics are on the Service {{ include "smock.adminServiceName" . }} (port {{ include "smock.string" .Values.adminService.port }}){{ if .Values.adminAuth.enabled }}; the Admin API needs the token from the Secret {{ .Values.adminAuth.tokenSecret.name }}{{ end }}:
+The Admin API, the probes and the metrics are on the Service {{ include "smock.adminServiceName" . }} (port {{ include "smock.string" .Values.adminService.port }}){{ if .Values.adminAuth.enabled }}; the Admin API needs the token from the Secret {{ include "smock.string" .Values.adminAuth.tokenSecret.name }}{{ end }}:
 
   kubectl --namespace {{ .Release.Namespace }} port-forward service/{{ include "smock.adminServiceName" . }} {{ include "smock.string" .Values.adminService.port }}
   curl {{ if .Values.adminAuth.enabled }}-H "Authorization: Bearer $TOKEN" {{ end }}localhost:{{ include "smock.string" .Values.adminService.port }}/v1/status

@@ -468,6 +468,23 @@ among them, and names the value to use instead.
 
 ## Values
 
+A values file is YAML, so a value of digits alone is a number, and Helm
+reads each number in it as a 64-bit floating-point number. The chart
+writes each value it uses as text, such as an image tag, a Git ref, a
+name or a key, with the number's digits: `image.tag: 20261119` runs the
+tag `20261119`. Some values change before the chart sees them, though:
+
+- An integer above 2^53 (9007199254740992) may lose its last digits:
+  `12345678901234567` becomes `12345678901234568`. This matters for a tag,
+  a ref, a name or a key of that many digits, and for a Definition file or
+  a body file in `definitions.configMap` given as a number.
+- YAML reads other forms as numbers or booleans of its own: `1.10` becomes
+  `1.1`, `0123` becomes `83`, `1_000` becomes `1000`, and `yes` and `on`
+  become `true`.
+
+Quote such a value in the values file (`tag: "1.10"`), or give it with
+`--set-string`. `--set` keeps these as written too.
+
 | Value | Default | Description |
 |---|---|---|
 | `replicas` | `1` | How many smock Pods to run; also smock's replica count for the Admin API warning. Stale under an autoscaler or `kubectl scale`. |

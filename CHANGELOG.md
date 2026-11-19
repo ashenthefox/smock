@@ -714,6 +714,20 @@ of each GitHub release include its section
   Kubernetes take an integer. The Services' ports, the replica count in
   the notes after an install, and Definition files or body files given as
   numbers were written the same way.
+- The Helm chart writes a tag, a ref, a name, a key or a path given as
+  digits with those digits. YAML reads such a value as a number, and the
+  chart wrote `image.tag: 2024` as the image
+  `ghcr.io/hirunefu/smock:%!s(float64=2024)`, and the same for
+  `definitions.gitSync.ref`, `definitions.gitSync.image.tag`,
+  `adminAuth.tokenSecret.key` and the body-file subdirectory's path in the
+  definitions volume. A Secret name or key of a million or more was
+  written as `1.234567e+06`, a definitions directory inside a repository
+  or an image failed to render, and the name of an existing ConfigMap went
+  into the Pod as a number, also when the values file quoted it. The
+  chart's README now says which values YAML and Helm change before the
+  chart sees them, such as an integer above 2^53, and that quotes or
+  `--set` keep them
+  ([smock#396](https://github.com/hirunefu/smock/issues/396)).
 - The certificate expiry metric, and the `expiry` of a reload's log entry,
   now give the notAfter of the certificate that the TLS port presents:
   the first block of the certificate file labelled `CERTIFICATE`,

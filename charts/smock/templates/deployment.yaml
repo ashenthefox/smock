@@ -78,7 +78,7 @@ spec:
             - name: SMOCK_DIR
               value: {{ include "smock.definitionsDir" . | quote }}
             - name: SMOCK_BODY_FILE_DIR
-              value: {{ .Values.definitions.bodyFileDir | quote }}
+              value: {{ include "smock.string" .Values.definitions.bodyFileDir | quote }}
             - name: SMOCK_PORT
               value: {{ include "smock.string" .Values.ports.plain | quote }}
             - name: SMOCK_TLS_PORT
@@ -94,13 +94,13 @@ spec:
               value: {{ ternary "on" "off" $auth.enabled | quote }}
             {{- if $tokenFile }}
             - name: SMOCK_ADMIN_TOKEN_FILE
-              value: {{ printf "/etc/smock/admin/%s" $auth.tokenSecret.key | quote }}
+              value: {{ printf "/etc/smock/admin/%s" (include "smock.string" $auth.tokenSecret.key) | quote }}
             {{- else if $auth.enabled }}
             - name: SMOCK_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ $auth.tokenSecret.name | quote }}
-                  key: {{ $auth.tokenSecret.key | quote }}
+                  name: {{ include "smock.string" $auth.tokenSecret.name | quote }}
+                  key: {{ include "smock.string" $auth.tokenSecret.key | quote }}
             {{- end }}
             {{- if .Values.tls.secretName }}
             - name: SMOCK_TLS_CERT_FILE
@@ -207,12 +207,13 @@ spec:
         */}}
         - name: definitions
           image:
-            reference: {{ .Values.definitions.image.reference | quote }}
+            reference: {{ include "smock.string" .Values.definitions.image.reference | quote }}
             pullPolicy: {{ .Values.definitions.image.pullPolicy }}
         {{- else }}
         - name: definitions
           configMap:
-            name: {{ include "smock.definitionsConfigMap" . }}
+            {{- /* toYaml quotes a name that YAML would read as a number, and only such a name. */}}
+            name: {{ include "smock.definitionsConfigMap" . | toYaml }}
             {{- with include "smock.definitionsItems" . }}
             items:
               {{- . | trim | nindent 14 }}
@@ -221,18 +222,18 @@ spec:
         {{- if $tokenFile }}
         - name: admin-token
           secret:
-            secretName: {{ $auth.tokenSecret.name | quote }}
+            secretName: {{ include "smock.string" $auth.tokenSecret.name | quote }}
             defaultMode: 0440
         {{- end }}
         {{- if .Values.tls.secretName }}
         - name: tls
           secret:
-            secretName: {{ .Values.tls.secretName | quote }}
+            secretName: {{ include "smock.string" .Values.tls.secretName | quote }}
             defaultMode: 0440
         {{- end }}
         {{- range $mock, $secret := .Values.tls.mockSecrets }}
         - name: {{ include "smock.tlsMockVolume" $mock }}
           secret:
-            secretName: {{ $secret | quote }}
+            secretName: {{ include "smock.string" $secret | quote }}
             defaultMode: 0440
         {{- end }}
