@@ -7,6 +7,7 @@ suites and then this report.
 
 usage: python3 scripts/coverage-e2e.py report --in-process <report> --e2e <report> --out <dir>
            [--root <dir>] [--trees <dir>] [--moonc <moonc>]
+           [--tests <file> --tests-status <n>] [--times <file>]
        python3 scripts/coverage-e2e.py triage --report <dir> --out <dir> [--max <n>]
            [--bodies <dir>] [--run-url <url>]
 
@@ -16,7 +17,13 @@ report  reads two bisect reports of moon_cove, the toolchain's coverage
         the e2e tests', of the counters that the smock processes of the
         e2e tests dumped. A point is reached when its count is above 0 in
         either. Their paths are relative to <root>, the current directory
-        unless given. It writes into <out>, and prints report.md:
+        unless given. --tests is what moon printed of the e2e run, and
+        --tests-status how it exited: the report starts with how many tests
+        ran and names those that failed. It reports only: a failed test
+        fails nothing, and the report says that the e2e tests' report may
+        then lack points. --times gives the time of each step of the run,
+        a line each, its seconds, a tab and what it is. It writes into
+        <out>, and prints report.md:
 
           report.md         per package, the points reached in-process, by
                             e2e and by either, and those that no test
@@ -61,6 +68,7 @@ import argparse
 import bisect
 import importlib.util
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -427,6 +435,39 @@ def unreached_section(found, exclusions):
     return lines
 
 
+# moon's lines of a failed test and of the summary of a run.
+FAILED = re.compile(r'^\[[^\]]*\] test (\S+:\d+) \("(.*)"\) failed')
+SUMMARY = re.compile(r"^Total tests: (\d+), passed: (\d+), failed: (\d+)\.$")
+
+
+def tests_section(path, status):
+    """The report's lines on the e2e run: how many tests ran, and those
+    that failed."""
+    text = Path(path).read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    summary = [match for line in lines if (match := SUMMARY.match(line.strip()))]
+    if not summary:
+        return [f"**moon printed no summary of the e2e tests, and exited with {status}**, so the e2e tests' report"
+                " may lack the points they reach.", ""]
+    total, passed, failed = (int(n) for n in summary[-1].groups())
+    out = [f"The e2e tests ran {total} tests with the instrumented binary: {passed} passed, {failed} failed.", ""]
+    if failed:
+        out += [f"**{failed} of the {total} e2e tests failed**, so the e2e tests' report may lack points they would"
+                " have reached after they failed. The report reports only, and fails nothing for it:", ""]
+        out += [f"- `{match.group(1)}` {match.group(2)}" for line in lines if (match := FAILED.match(line))]
+        out += [""]
+    return out
+
+
+def times_section(path):
+    """The report's lines on the time each step of the run took."""
+    rows = [line.split("\t", 1) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    out = ["| step | time |", "|---|---:|"]
+    out += [f"| {what} | {bulk.duration(int(seconds))} |" for seconds, what in rows]
+    out += [f"| all | {bulk.duration(sum(int(seconds) for seconds, _ in rows))} |", ""]
+    return out
+
+
 def read(path):
     """The files of a bisect report, or the error naming the report."""
     try:
@@ -454,7 +495,16 @@ def report(args):
     found = unreached(either)
     (out / "unreached.json").write_text(json.dumps({"packages": found}, indent=2, ensure_ascii=False) + "\n",
                                         encoding="utf-8")
-    lines = ["# Coverage from the e2e tests", "", *table(in_counts, e2e_counts, either), "",
+    lines = ["# Coverage from the e2e tests", ""]
+    if args.tests:
+        lines += tests_section(args.tests, args.tests_status)
+    if args.times:
+        lines += times_section(args.times)
+    lines += ["Per package, the points that the in-process tests reach, those that the e2e tests reach in the binary,"
+              " and those that either reaches; unreached counts the points that neither reaches, after the exclusion"
+              " list. The e2e tests' own process counts for nothing: the e2e package is built without coverage, so"
+              " only the counters of the smock processes it starts are read.", "",
+              *table(in_counts, e2e_counts, either), "",
              *positions_section(decided, pointless), *unreached_section(found, exclusions)]
     text = "\n".join(lines)
     (out / "report.md").write_text(text, encoding="utf-8")
@@ -551,6 +601,9 @@ def main():
     reporting.add_argument("--root", default=".", help="the directory the reports' paths are relative to")
     reporting.add_argument("--trees", help="the compiler's parse trees of the sources, as <path>.ast")
     reporting.add_argument("--moonc", default="moonc", help="the compiler, which writes the parse trees")
+    reporting.add_argument("--tests", help="what moon printed of the e2e run")
+    reporting.add_argument("--tests-status", type=int, default=0, help="how moon exited from the e2e run")
+    reporting.add_argument("--times", help="the time of each step of the run: seconds, a tab, what it is")
     triaging = steps.add_parser("triage", help="cut the points no test reaches into triage tickets")
     triaging.add_argument("--report", required=True, help="the report's output, which holds unreached.json")
     triaging.add_argument("--out", required=True, help="where the tickets go")

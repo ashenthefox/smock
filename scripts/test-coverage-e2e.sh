@@ -175,6 +175,42 @@ in_list no-point covered-by-e2e "server/serve.mbt:25:10 INT"
 says no-point "| server | 31 | 23 | 8 | 24 |"
 says no-point "- \`server/serve.mbt:25:10\`, a match arm in \`Server::serve\`"
 
+# --- The e2e run, and the times --------------------------------------------------
+
+# What moon printed of the e2e tests, and the times of the steps, as
+# scripts/coverage-e2e.sh gives them. moon names a failed test
+# `[<module>] test <file>:<line> ("<name>") failed`.
+printf '%s\n' "Total tests: 644, passed: 644, failed: 0." >"$tmp/passed.txt"
+printf '%s\t%s\n' 79 "the in-process tests with coverage, and the instrumented binary" \
+  95 "the e2e tests' build" 36 "the e2e tests, with the instrumented binary" >"$tmp/times.txt"
+report ran "$fixtures/in-process.bisect" "$fixtures/e2e.bisect" --tests "$tmp/passed.txt" --tests-status 0 \
+  --times "$tmp/times.txt"
+exits ran 0
+says ran "The e2e tests ran 644 tests with the instrumented binary: 644 passed, 0 failed."
+says ran "| the in-process tests with coverage, and the instrumented binary | 1 min 19 s |"
+says ran "| the e2e tests' build | 1 min 35 s |"
+says ran "| the e2e tests, with the instrumented binary | 36 s |"
+says ran "| all | 3 min 30 s |"
+
+# Failed tests are named; the report reports only, so it still exits 0.
+cat >"$tmp/failed.txt" <<'TXT'
+[smock/smock] test e2e/drain_test.mbt:12 ("the drain ends at once") failed: timed out
+[smock/smock] test e2e/tls_test.mbt:300 ("a rotation keeps the old certificate") failed
+Total tests: 644, passed: 642, failed: 2.
+TXT
+report failed "$fixtures/in-process.bisect" "$fixtures/e2e.bisect" --tests "$tmp/failed.txt" --tests-status 1
+exits failed 0
+says failed "**2 of the 644 e2e tests failed**, so the e2e tests' report may lack points they would have reached after they failed. The report reports only, and fails nothing for it:"
+says failed "- \`e2e/drain_test.mbt:12\` the drain ends at once"
+says failed "- \`e2e/tls_test.mbt:300\` a rotation keeps the old certificate"
+
+# A run that printed no summary, such as one whose build failed.
+printf '%s\n' "error: something went wrong" >"$tmp/no-summary.txt"
+report no-summary "$fixtures/in-process.bisect" "$fixtures/e2e.bisect" --tests "$tmp/no-summary.txt" \
+  --tests-status 2
+exits no-summary 0
+says no-summary "**moon printed no summary of the e2e tests, and exited with 2**, so the e2e tests' report may lack the points they reach."
+
 # --- The points no test reaches -------------------------------------------------
 
 # lacks <name> <text>: the report <name> printed no line that holds <text>.
