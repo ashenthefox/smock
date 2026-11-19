@@ -86,6 +86,95 @@ says fixture "| server | 14 | 7 (50.0%) | 8 (57.1%) | 9 (64.3%) | 5 |"
 says fixture "| watch | 3 | 2 (66.7%) | 2 (66.7%) | 2 (66.7%) | 1 |"
 says fixture "| all | 29 | 9 (31.0%) | 20 (69.0%) | 21 (72.4%) | 8 |"
 
+# --- The positions e2e covers ---------------------------------------------------
+
+# positions <name> <list>: the positions of the list <list>.jsonl that the
+# report <name> wrote, as "<file>:<line>:<column> <operator>", one a line,
+# into $tmp/<name>.<list>; the runner's own reader of lists
+# (scripts/mutation/choice.py) must read the list.
+positions() {
+  python3 - "$tmp/$1/$2.jsonl" >"$tmp/$1.$2" 2>"$tmp/$1.$2.err" <<'PY' ||
+import json, sys
+sys.path.insert(0, "scripts/mutation")
+import choice
+path = sys.argv[1]
+choice.read_list(path)
+for line in open(path, encoding="utf-8"):
+    entry = json.loads(line)
+    print(f"{entry['file']}:{entry['line']}:{entry['column']} {entry['operator']}")
+PY
+    fail "$1: the runner's reader of lists does not read $2.jsonl: $(cat "$tmp/$1.$2.err")"
+}
+
+# in_list <name> <list> <position>: the list holds the position, once for
+# each of its mutants.
+in_list() {
+  if grep -qxF -- "$3" "$tmp/$1.$2"; then
+    pass "$1: $2 holds $3"
+  else
+    fail "$1: $2 does not hold $3"
+    sed 's/^/     /' "$tmp/$1.$2"
+  fi
+}
+
+positions fixture covered-by-e2e
+positions fixture not-covered-by-e2e
+
+# The rule, as #342 states it.
+says fixture "A position counts as covered by e2e when the point that starts the innermost function, then, else or match-arm body around it has a count above zero in the e2e tests' report."
+says fixture "| package | positions | covered by e2e | not covered | mutants of the pinned set at covered positions |"
+# server: 31 positions, 32 mutants (INT in a comparison makes two at
+# 36:21); 9 positions not covered, listed below.
+says fixture "| server | 31 | 22 | 9 | 23 |"
+says fixture "| cmd/smock | 4 | 2 | 2 | 2 |"
+if [ "$(wc -l <"$tmp/fixture.covered-by-e2e")" = 25 ] && [ "$(wc -l <"$tmp/fixture.not-covered-by-e2e")" = 11 ]; then
+  pass "fixture: lists 25 mutants at covered positions and 11 at the others"
+else
+  fail "fixture: lists $(wc -l <"$tmp/fixture.covered-by-e2e") and $(wc -l <"$tmp/fixture.not-covered-by-e2e") mutants"
+fi
+
+# A function's body: serve's (e2e 2) and unused's (0), whose BODY site
+# starts at its brace.
+in_list fixture covered-by-e2e "server/serve.mbt:17:59 BODY"
+in_list fixture covered-by-e2e "server/serve.mbt:19:6 IFC"
+in_list fixture not-covered-by-e2e "server/serve.mbt:44:45 BODY"
+in_list fixture not-covered-by-e2e "server/serve.mbt:45:13 AOR"
+# A then that only the in-process tests ran, and an else that e2e ran.
+in_list fixture not-covered-by-e2e "server/serve.mbt:20:27 AOR"
+in_list fixture covered-by-e2e "server/serve.mbt:22:27 AOR"
+# A match arm that ran, and one that did not.
+in_list fixture covered-by-e2e "server/serve.mbt:26:20 AOR"
+in_list fixture not-covered-by-e2e "server/serve.mbt:25:10 INT"
+# A guard's else is an else.
+in_list fixture not-covered-by-e2e "server/serve.mbt:18:34 INT"
+# After an if whose then-body did not run (34:5), the position is in
+# stop's body, which ran.
+in_list fixture not-covered-by-e2e "server/serve.mbt:34:17 INT"
+in_list fixture covered-by-e2e "server/serve.mbt:39:25 AOR"
+# A loop's body is none of the four: its position counts as stop's body,
+# though the loop's own point (37:5) is 0.
+in_list fixture covered-by-e2e "server/serve.mbt:37:27 AOR"
+# A parameter's default value is in its function.
+in_list fixture covered-by-e2e "server/serve.mbt:32:52 BOOL"
+# A top-level value, outside every function, counts with its package.
+in_list fixture covered-by-e2e "server/serve.mbt:50:23 INT"
+# A closure is a function: main's body ran, the unused closure's did not.
+in_list fixture covered-by-e2e "cmd/smock/main.mbt:8:3 DEL"
+in_list fixture not-covered-by-e2e "cmd/smock/main.mbt:7:46 AOR"
+
+# A body that the compiler starts with no point counts as none: without
+# the point of the arm 0 (25:10), its position counts as serve's body.
+sed 's/ 632 645 / 645 /; s/ 14 1 1 0 1 1 0 1 1 0 1 0 0 0 0 / 13 1 1 0 1 1 0 1 1 1 0 0 0 0 /; s/^BISECT-COVERAGE-4 4 16 server\/serve.mbt 14 /BISECT-COVERAGE-4 4 16 server\/serve.mbt 13 /' \
+  "$fixtures/in-process.bisect" >"$tmp/no-point-in-process.bisect"
+sed 's/ 632 645 / 645 /; s/ 14 1 2 0 2 0 2 2 2 0 2 1 0 0 0 / 13 1 2 0 2 0 2 2 2 2 1 0 0 0 /; s/^BISECT-COVERAGE-4 4 16 server\/serve.mbt 14 /BISECT-COVERAGE-4 4 16 server\/serve.mbt 13 /' \
+  "$fixtures/e2e.bisect" >"$tmp/no-point-e2e.bisect"
+report no-point "$tmp/no-point-in-process.bisect" "$tmp/no-point-e2e.bisect"
+exits no-point 0
+positions no-point covered-by-e2e
+in_list no-point covered-by-e2e "server/serve.mbt:25:10 INT"
+says no-point "| server | 31 | 23 | 8 | 24 |"
+says no-point "- \`server/serve.mbt:25:10\`, a match arm in \`Server::serve\`"
+
 # --- Reports it cannot read together --------------------------------------------
 
 # broken <name> <in-process text> <e2e text> <message>: the report of the

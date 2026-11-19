@@ -6,7 +6,7 @@ binary, and which no test reaches. scripts/coverage-e2e.sh runs both
 suites and then this report.
 
 usage: python3 scripts/coverage-e2e.py report --in-process <report> --e2e <report> --out <dir>
-           [--root <dir>]
+           [--root <dir>] [--trees <dir>] [--moonc <moonc>]
 
 report  reads two bisect reports of moon_cove, the toolchain's coverage
         reader, made of the same trace sources (scripts/coverage-report.py
@@ -14,21 +14,67 @@ report  reads two bisect reports of moon_cove, the toolchain's coverage
         the e2e tests', of the counters that the smock processes of the
         e2e tests dumped. A point is reached when its count is above 0 in
         either. Their paths are relative to <root>, the current directory
-        unless given. It writes into <out> report.md, and prints it: per
-        package, the points reached in-process, by e2e and by either, and
-        those that no test reaches.
+        unless given. It writes into <out>, and prints report.md:
 
-It exits with 2, saying why, when it cannot read a report, or when the two
-reports do not hold the same points: they were made of other trace
-sources.
+          report.md         per package, the points reached in-process, by
+                            e2e and by either, and those that no test
+                            reaches; the rule that decides which positions
+                            e2e covers, and how many it covers in server and
+                            cmd/smock (POSITION_PACKAGES);
+          either.bisect     the two reports merged, each point's counts
+                            added up;
+          covered-by-e2e.jsonl, not-covered-by-e2e.jsonl
+                            the pinned set's mutants of server and cmd/smock
+                            at the positions e2e covers, and at the others,
+                            as lists of mutants by key, which the mutation
+                            runner reads (run.py --list); each line also
+                            gives the mutant's id, line and column, and the
+                            body and the point that decided its position.
+
+        The positions are the site finder's (scripts/mutation/sites.py),
+        on the compiler's parse tree of each file: moonc writes it, or
+        <trees>/<path>.ast when --trees is given, as the tests give it.
+        RULE says when e2e covers a position.
+
+It exits with 2, saying why, when it cannot read a report, when the two
+reports do not hold the same points, which were then made of other trace
+sources, or when a file does not parse.
 """
 
 import argparse
+import bisect
 import importlib.util
+import json
 import sys
+import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE / "mutation"))
+import sites as finder  # noqa: E402 (the site finder, beside the runner)
+
+# The packages whose positions the report decides: those that only the
+# binary runs, which the run at operator level mutates through e2e (#346).
+POSITION_PACKAGES = ("server", "cmd/smock")
+# The bodies whose point decides a position, as #342 names them, and how
+# the report names one.
+KINDS = {"function": "a function", "then": "a then", "else": "an else", "arm": "a match arm"}
+# When e2e covers a position, as the report states it: #342's rule, then
+# what it means where the ticket is silent.
+RULE = (
+    "A position counts as covered by e2e when the point that starts the innermost function, then, else or"
+    " match-arm body around it has a count above zero in the e2e tests' report.",
+    "A function is a top-level"
+    " function or method, `fn main` or `fn init`, a closure or a local function, and its parameters' default"
+    " values are in it; an else is an if's or a guard's; a match arm is an arm of a match, a loop, a catch or a"
+    " noraise. The point that starts a body is the first between what comes before the body (a function's"
+    " parameters, an if's condition, the then, a guard's condition, an arm's pattern or guard) and the body's"
+    " end. A loop's body is none of these, so a position in it counts as the body around the loop, and so"
+    " does a position in a body that the compiler started with no point. A position in no such body, in a"
+    " top-level value or a constant, counts as covered when a point of its package has a count above zero in"
+    " the e2e tests' report: the program initialises its values when it starts."
+)
 
 
 def load(name, path):
@@ -112,6 +158,194 @@ def table(in_process, e2e, either):
     return lines
 
 
+class Body(NamedTuple):
+    """A body whose point decides the positions in it: its kind (KINDS);
+    where its positions start, where its point is looked for and where it
+    ends, as offsets in characters; and where its own text starts, which
+    names it."""
+
+    kind: str
+    start: int
+    point_from: int
+    end: int
+    first: int
+
+
+def extent(item, node):
+    """The first and the last position of a node of the parse tree: those of
+    the locations anywhere in it, or None."""
+    found = [span for current in finder.walk(node) for atom in current if (span := item.loc(atom))]
+    if not found:
+        return None
+    return min(span[0] for span in found), max(span[1] for span in found)
+
+
+def arms(node):
+    """The arms of a match, a loop or a try (its catch's and its noraise's):
+    each a list of its pattern, its guard if it has one, and its body."""
+    lists = [node[2]] if len(node) > 2 else []
+    if finder.head_of(node) == "Pexpr_try" and len(node) > 4 and isinstance(node[4], list) and node[4]:
+        lists.append(node[4][0])
+    for cases in lists:
+        for case in cases if isinstance(cases, list) else []:
+            if isinstance(case, list) and len(case) >= 2 and isinstance(case[-1], list):
+                yield case
+
+
+def bodies(source, item):
+    """The bodies of a top-level definition, as Bodies."""
+    found = []
+
+    def add(kind, start, point_from, end, node):
+        span = extent(item, node)
+        if None not in (start, point_from, end) and span:
+            found.append(Body(kind, source.offset(*start), source.offset(*point_from), source.offset(*end),
+                              source.offset(*span[0])))
+
+    parts = item.function()
+    span = item.own_span()
+    if parts is not None and finder.head_of(parts[0]) == "Decl_body" and span:
+        ends = [item.loc(atom)[1] for node in finder.walk(parts[2]) for atom in node if item.loc(atom)]
+        add("function", span[0], max(ends), span[1], parts[0])
+    elif item.node[0] == "Ptop_expr" and span:
+        add("function", span[0], span[0], span[1], item.node)
+    for node in finder.walk(item.node):
+        head = finder.head_of(node)
+        if head is None and all(finder.child(node, key) for key in ("params_loc_", "body", "loc_")):
+            params, whole = item.loc(finder.child(node, "params_loc_")[1]), item.loc(finder.child(node, "loc_")[1])
+            if params and whole:
+                add("function", whole[0], params[1], whole[1], finder.child(node, "body")[1])
+        elif head == "Pexpr_if" and len(node) >= 5:
+            condition, then = extent(item, node[1]), extent(item, node[2])
+            if condition and then:
+                add("then", condition[1], condition[1], then[1], node[2])
+                if node[3] and (otherwise := extent(item, node[3][0])):
+                    add("else", then[1], then[1], otherwise[1], node[3][0])
+        elif head == "Pexpr_guard" and len(node) >= 4 and node[2]:
+            condition, otherwise = extent(item, node[1]), extent(item, node[2][0])
+            if condition and otherwise:
+                add("else", condition[1], condition[1], otherwise[1], node[2][0])
+        elif head in ("Pexpr_match", "Pexpr_loop", "Pexpr_try"):
+            for case in arms(node):
+                guards = [element for element in case if finder.head_of(element) == "guard"]
+                before, body = extent(item, guards[0] if guards else case[0]), extent(item, case[-1])
+                if before and body:
+                    add("arm", before[1], before[1], body[1], case[-1])
+    return found
+
+
+def character_offsets(data, points):
+    """A file's points, from their offsets in bytes to their offsets in
+    characters, as the parse tree counts them: (offset, count), sorted."""
+    found, at, characters = [], 0, 0
+    for offset, count in sorted(points.items()):
+        characters += len(data[at:offset].decode("utf-8"))
+        at = offset
+        found.append((characters, count))
+    return found
+
+
+def position(source, offset):
+    """An offset, as the report names a position: <file>:<line>:<column>."""
+    line, column = source.position(offset)
+    return f"{source.path.as_posix()}:{line}:{column}"
+
+
+def tree_of(args, workdir, index, path, text):
+    """The compiler's parse tree of a file: from --trees, or from moonc."""
+    if args.trees:
+        return (Path(args.trees) / f"{path.as_posix()}.ast").read_text(encoding="utf-8")
+    return finder.dump(args.moonc, "wasm-gc", workdir, index, path, text)
+
+
+def decide(args, root, e2e):
+    """The pinned set's mutants of POSITION_PACKAGES, each with whether e2e
+    covers its position by RULE, and the body and point that decided it;
+    and the bodies that the compiler started with no point."""
+    decided, pointless = [], []
+    reached = {}
+    for name, points in e2e.items():
+        package = package_of(name)
+        reached[package] = reached.get(package, False) or any(count > 0 for count in points.values())
+    with tempfile.TemporaryDirectory(prefix="smock-coverage-e2e-") as tmp:
+        index = 0
+        for package in POSITION_PACKAGES:
+            if not (root / package).is_dir():
+                continue
+            for path in finder.source_files(root, [package]):
+                text = (root / path).read_text(encoding="utf-8")
+                if finder.is_generated(text):
+                    continue
+                index += 1
+                source = finder.SourceFile(path, text)
+                tree = tree_of(args, Path(tmp), index, path, text)
+                points = character_offsets((root / path).read_bytes(), e2e.get(path.as_posix(), {}))
+                offsets = [offset for offset, _ in points]
+                found = []
+                for entry in finder.parse_tree(tree):
+                    item = finder.Item(source, entry[1], entry[2])
+                    if not item.is_test():
+                        found += [(item.name(), body) for body in bodies(source, item)]
+                started = {}
+                for name, body in found:
+                    at = bisect.bisect_left(offsets, body.point_from)
+                    if at < len(offsets) and offsets[at] < body.end:
+                        same = [count for offset, count in points if offset == offsets[at]]
+                        started[body] = (offsets[at], max(same))
+                    else:
+                        pointless.append((position(source, body.first), body.kind, name))
+                for site in finder.file_sites(source, tree):
+                    if not site.get("pinned") or "skipped" in site:
+                        continue
+                    offset = source.offset(site["line"], site["column"])
+                    around = [body for body in started if body.start <= offset < body.end]
+                    if around:
+                        body = max(around, key=lambda b: (b.start, -b.end))
+                        point, count = started[body]
+                        site = dict(site, body=body.kind, point=position(source, point), covered=count > 0)
+                    else:
+                        site = dict(site, body="top-level value", point=None, covered=reached.get(package, False))
+                    decided.append((package, site))
+    return decided, pointless
+
+
+# The fields of a mutant by key, in a list the runner reads (choice.py).
+KEY = ("file", "definition", "operator", "original", "replacement", "ordinal")
+
+
+def write_list(path, sites):
+    """Writes the sites as a list of mutants by key, one JSON object a line,
+    with their id, line, column, body and point."""
+    lines = [json.dumps({**{key: site[key] for key in KEY}, "id": site["id"], "line": site["line"],
+                         "column": site["column"], "body": site["body"], "point": site["point"]},
+                        ensure_ascii=False) for site in sites]
+    Path(path).write_text("".join(line + "\n" for line in lines), encoding="utf-8")
+
+
+def positions_section(decided, pointless):
+    """The report's lines on the positions e2e covers."""
+    lines = ["## The positions e2e covers", "", RULE[0], "", RULE[1], "",
+             "| package | positions | covered by e2e | not covered | mutants of the pinned set at covered positions |",
+             "|---|---:|---:|---:|---:|"]
+    for package in POSITION_PACKAGES:
+        mine = [site for name, site in decided if name == package]
+        if not mine:
+            continue
+        places = {(s["file"], s["operator"], s["line"], s["column"]): s["covered"] for s in mine}
+        covered = sum(1 for value in places.values() if value)
+        lines.append(f"| {package} | {len(places)} | {covered} | {len(places) - covered}"
+                     f" | {sum(1 for s in mine if s['covered'])} |")
+    lines += ["", "The pinned set's mutants at the positions e2e covers are in `covered-by-e2e.jsonl`, and those"
+              " at the others in `not-covered-by-e2e.jsonl`: lists of mutants by key, which the mutation runner"
+              " reads (`run.py --list`).", ""]
+    if pointless:
+        lines += [f"Bodies that the compiler started with no point ({len(pointless)}), which count as none:", ""]
+        lines += [f"- `{place}`, {KINDS[kind]} in `{name}`" for place, kind, name in pointless]
+    else:
+        lines += ["Every body of these kinds starts with a point."]
+    return lines + [""]
+
+
 def read(path):
     """The files of a bisect report, or the error naming the report."""
     try:
@@ -133,7 +367,11 @@ def report(args):
     write_bisect(out / "either.bisect", merged)
     exclusions = coverage_report.read_exclusions(root)
     either = coverage_report.read_packages(out / "either.bisect", root, exclusions)
-    lines = ["# Coverage from the e2e tests", "", *table(in_counts, e2e_counts, either), ""]
+    decided, pointless = decide(args, root, e2e_counts)
+    write_list(out / "covered-by-e2e.jsonl", [site for _, site in decided if site["covered"]])
+    write_list(out / "not-covered-by-e2e.jsonl", [site for _, site in decided if not site["covered"]])
+    lines = ["# Coverage from the e2e tests", "", *table(in_counts, e2e_counts, either), "",
+             *positions_section(decided, pointless)]
     text = "\n".join(lines)
     (out / "report.md").write_text(text, encoding="utf-8")
     return text
@@ -148,10 +386,11 @@ def main():
     reporting.add_argument("--out", required=True, help="where the report goes")
     reporting.add_argument("--root", default=".", help="the directory the reports' paths are relative to")
     reporting.add_argument("--trees", help="the compiler's parse trees of the sources, as <path>.ast")
+    reporting.add_argument("--moonc", default="moonc", help="the compiler, which writes the parse trees")
     args = parser.parse_args()
     try:
         print(report(args))
-    except ReportError as error:
+    except (ReportError, finder.FinderError) as error:
         print(f"coverage-e2e: {error}", file=sys.stderr)
         sys.exit(2)
 
