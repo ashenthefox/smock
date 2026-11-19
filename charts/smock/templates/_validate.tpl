@@ -45,7 +45,7 @@ scripts/test-helm-chart.sh fails until it is. */ -}}
 {{- fail "adminAuth.tokenSecret.name is empty, but Admin API authentication is on (adminAuth.enabled), and smock refuses to start without a token: name a Secret that holds the token under the key adminAuth.tokenSecret.key, or, for local use only, set adminAuth.enabled=false" -}}
 {{- end -}}
 {{- if not (has $auth.tokenAs (list "file" "env")) -}}
-{{- fail (printf "adminAuth.tokenAs must be \"file\" or \"env\", not %q" (toString $auth.tokenAs)) -}}
+{{- fail (printf "adminAuth.tokenAs must be \"file\" or \"env\", not %q" (include "smock.string" $auth.tokenAs)) -}}
 {{- end -}}
 {{- range $mock, $secret := .Values.tls.mockSecrets -}}
 {{- if not $secret -}}
@@ -54,7 +54,7 @@ scripts/test-helm-chart.sh fails until it is. */ -}}
 {{- end -}}
 {{- $d := .Values.definitions -}}
 {{- if not (has $d.source (list "configMap" "gitSync" "image")) -}}
-{{- fail (printf "definitions.source must be \"configMap\", \"gitSync\" or \"image\", not %q" (toString $d.source)) -}}
+{{- fail (printf "definitions.source must be \"configMap\", \"gitSync\" or \"image\", not %q" (include "smock.string" $d.source)) -}}
 {{- end -}}
 {{- if and (eq $d.source "gitSync") (not $d.gitSync.repo) -}}
 {{- fail "definitions.gitSync.repo is empty, but definitions.source is gitSync: give the URL of the Git repository that holds the Definition files" -}}

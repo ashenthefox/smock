@@ -498,6 +498,10 @@ refuse git-sync-no-repo "git-sync without a repository" \
 refuse unknown-source "a delivery mode the chart does not know" \
   'definitions.source must be "configMap", "gitSync" or "image", not "s3"' \
   --values "$tmp/values-token.yaml" --set definitions.source=s3
+printf 'definitions:\n  source: 1000000\n' >"$tmp/values-source-digits.yaml"
+refuse unknown-source-digits "a delivery mode written as digits, named with those digits" \
+  "definitions.source must be \"configMap\", \"gitSync\" or \"image\", not \"$(yq '.definitions.source' "$tmp/values-source-digits.yaml")\"" \
+  --values "$tmp/values-token.yaml" --values "$tmp/values-source-digits.yaml"
 
 # --- OCI image volume alternative ---------------------------------------------
 
@@ -591,6 +595,12 @@ fi
 refuse token-as "the token passed in a way smock does not read" \
   'adminAuth.tokenAs must be "file" or "env", not "header"' \
   --set adminAuth.tokenSecret.name=smock-admin-token --set adminAuth.tokenAs=header
+# A refused value that YAML read as a number is named with the digits of the
+# values file (#396).
+printf 'adminAuth:\n  tokenAs: 1000000\n' >"$tmp/values-token-as-digits.yaml"
+refuse token-as-digits "the token passed in a way written as digits, named with those digits" \
+  "adminAuth.tokenAs must be \"file\" or \"env\", not \"$(yq '.adminAuth.tokenAs' "$tmp/values-token-as-digits.yaml")\"" \
+  --values "$tmp/values-token.yaml" --values "$tmp/values-token-as-digits.yaml"
 
 render auth-off --set adminAuth.enabled=false
 check auth-off "a value turns authentication off through smock's setting, and no token is needed" \
