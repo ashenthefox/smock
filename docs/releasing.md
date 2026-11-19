@@ -33,10 +33,29 @@ the tag's version, without a pre-release suffix, is the `version` in
 `moon.mod` (`scripts/check-tag-version.sh`), and, for a pushed tag, that
 CI passed on the tagged commit (`scripts/check-ci-passed.sh`). CI does not
 run on tags, so the run it looks for is CI's run on a push of that commit
-to a branch, such as `main`. When either check fails, the workflow stops
-there and publishes nothing.
-[When plan stops a release](#when-plan-stops-a-release) says what to do
-then.
+to a branch, such as `main`.
+
+For a pushed tag, plan also checks the latest weekly mutation run over
+the pinned set (`scripts/check-weekly-run.py`; decision 7,
+[ADR 0006](adr/0006-tests-are-judged-by-four-ledgers.md#what-l4-and-a-release-read)).
+For each package that `mutation/l4-packages.txt` names on the tagged
+commit, that run must show no unexplained survivor, stale-covered ones
+included, and it must cover the commit. It covers it when it ran on the
+tagged commit, or on an ancestor of it on `main` and each later change
+to `main` meets one of two conditions. Either it touches no non-test
+source of a package at L4, as a release commit does, or it merged a
+branch whose changed-lines report covered its whole diff with no
+unexplained survivor in a package at L4
+([The changed-lines job](../CONTRIBUTING.md#the-changed-lines-job)). A
+source change of a package at L4 pushed straight to `main` has no such
+report. The monthly run over the full set is never read. While the list
+names no package, as now, the check reads no run and passes.
+[The weekly mutation run](#the-weekly-mutation-run) says what the check
+needs and how long a run takes.
+
+When any of these checks fails, the workflow stops there and publishes
+nothing. [When plan stops a release](#when-plan-stops-a-release) says
+what to do then.
 
 ## Smoke-testing the image locally
 
@@ -111,8 +130,9 @@ Work through these steps in order:
 The release commit, on `main`, gives the new version in `moon.mod` and
 the CHANGELOG section below. The tag names that commit, and the release
 workflow stops before it builds anything unless `moon.mod` gives the
-tag's version and CI's run on a push of that commit has passed
-([What a tag does](#what-a-tag-does)).
+tag's version, CI's run on a push of that commit has passed, and the
+latest weekly mutation run is clean in the packages at L4 and covers the
+commit ([What a tag does](#what-a-tag-does)).
 
 In [CHANGELOG.md](../CHANGELOG.md), move the entries under
 `## [Unreleased]` to a new section `## [<version>] - <date>` below it,
@@ -173,22 +193,64 @@ gh run list -R hirunefu/smock --workflow CI --event push --commit "$(git rev-par
 A pushed `v*` tag can be neither deleted nor moved (step 5 of
 [The first release](#the-first-release)), so run what the job plan of the
 release workflow checks on the release commit before you push one: that
-the tag names the version in `moon.mod`, that CI passed on the commit, and
-that the release notes can be written. The version of a tag is a SemVer
-2.0 version with no build metadata, so a number has no leading zero and a
-pre-release has no empty part: `0.5.0-rc.1`, not `0.5.0-rc.01`.
-`scripts/check-ci-passed.sh` needs jq, and gh logged in:
+the tag names the version in `moon.mod`, that CI passed on the commit,
+that the latest weekly mutation run covers it, and that the release notes
+can be written. The version of a tag is a SemVer 2.0 version with no
+build metadata, so a number has no leading zero and a pre-release has no
+empty part: `0.5.0-rc.1`, not `0.5.0-rc.01`.
+`scripts/check-ci-passed.sh` needs jq, and gh logged in;
+`scripts/check-weekly-run.py` needs gh logged in, and a clone with
+`main`'s history:
 
 ```sh
 tag=v0.5.0   # or a pre-release, such as v0.5.0-rc.1
 scripts/check-tag-version.sh "${tag#v}"
 GITHUB_REPOSITORY=hirunefu/smock scripts/check-ci-passed.sh "$(git rev-parse HEAD)"
+GITHUB_REPOSITORY=hirunefu/smock python3 scripts/check-weekly-run.py "$(git rev-parse HEAD)"
 scripts/release-notes.sh "${tag#v}" "$(git rev-parse --short=12 HEAD)" "moonc v$(cat .moonbit-version)" ghcr.io/hirunefu/smock >/dev/null
 ```
 
 Then push the tag on that commit. A pre-release tag, such as
 `v<version>-rc.1`, tries the publishing path first. The packages stay
 public, so nothing else needs doing in their settings.
+
+### The weekly mutation run
+
+The weekly run over the pinned set runs on `main` every Friday at 20:23
+UTC ([Bulk runs on Actions](../CONTRIBUTING.md#bulk-runs-on-actions)).
+The release's check of it (`scripts/check-weekly-run.py`) reads only
+weekly runs on the tagged commit or on an ancestor of it on `main`,
+wherever they were started; of those, the latest that has ended decides.
+It needs:
+
+- that run's report, the artifact `mutation-report`, which GitHub keeps
+  for 90 days;
+- for each change to `main` after the run that changes non-test source of
+  a package at L4, a run of the branch checks on the branch it merged,
+  whose artifact `changed-lines` is kept for 90 days too: the report that
+  [the merge check](merging-into-main.md) read before the merge;
+- the history of `main` from the run's commit to the tagged one: the job
+  plan checks out the whole history;
+- gh, with the workflow's token, which may read the Actions API, or, run
+  by hand, logged in.
+
+A release on `main`'s head after Friday's run waits for nothing more when
+each change since went through the branch checks or touches no source of
+a package at L4. The release commit touches none. Otherwise, start a
+weekly run on the release commit, and push the tag once it has passed.
+A weekly run of the pinned set holds the account's 20 jobs for about two
+hours. The first, started by hand on `main` on 2026-11-19
+([run 44423781036](https://github.com/hirunefu/smock/actions/runs/44423781036)),
+had 18,403 mutants in 40 shards, two waves of 20, and its report gives
+2 h 9 min from its first job's start to its last job's end, and 32 h
+44 min of runner time over its 44 jobs. A push meanwhile waits for free
+jobs.
+
+```sh
+gh workflow run mutation-runs.yml -R hirunefu/smock --ref main -f mode=weekly     # while main is at the release commit
+gh workflow run mutation-runs.yml -R hirunefu/smock --ref "$tag" -f mode=weekly   # once the tag is pushed
+gh run list -R hirunefu/smock --workflow mutation-runs.yml   # its name is "Mutation runs: weekly"
+```
 
 ### When plan stops a release
 
@@ -211,9 +273,34 @@ of the release workflow needs plan, so none of them runs.
   gh run rerun <release run-id> -R hirunefu/smock
   ```
 
+- **No weekly run covers the tagged commit yet.** The job plan fails with
+  `check-weekly-run: <commit> may not be released:` and the reason: no
+  weekly run on the commit or an ancestor of it on `main` has ended, or
+  the latest one failed, or a change to `main` after it changed non-test
+  source of a package at L4 and no branch's changed-lines report covers
+  that change, as for a change pushed straight to `main`. A weekly run on
+  the tag covers the commit with no later change. Start one, or wait for
+  the one still running, and once it has passed, about two hours later
+  ([The weekly mutation run](#the-weekly-mutation-run)), re-run the tag's
+  release run, which reads the weekly runs again.
+
+  ```sh
+  gh workflow run mutation-runs.yml -R hirunefu/smock --ref "$tag" -f mode=weekly
+  gh run list -R hirunefu/smock --workflow mutation-runs.yml --branch "$tag"   # wait until it has passed
+  gh run rerun <release run-id> -R hirunefu/smock
+  ```
+
+- **The weekly run shows unexplained survivors in a package at L4.** The
+  job plan fails with the packages and their counts, and the command that
+  downloads the run's report, which lists the survivors. When the run is
+  on an ancestor and later changes have since killed or excluded them, a
+  weekly run on the tag shows none: start one, as above. Otherwise they
+  are in the tagged code, and a re-run fails the same way, as below.
+
 - **The tag names another version than `moon.mod`, CHANGELOG.md has no
-  section for a tag that is not a pre-release, or CI fails on the tagged
-  commit for real.** A re-run checks the same commit, and fails the same
+  section for a tag that is not a pre-release, CI fails on the tagged
+  commit for real, or the weekly run shows unexplained survivors in the
+  tagged code.** A re-run checks the same commit, and fails the same
   way. The tag stays, without a release, since it can be neither deleted
   nor moved. Put the fix in a new commit, and release that under the next
   version: `v<version>-rc.2` after `v<version>-rc.1`, or, after

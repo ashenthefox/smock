@@ -100,6 +100,29 @@ refuses a-third-schedule \
   '.on.schedule += [{"cron": "0 12 * * 3"}]' \
   "its schedules should be the weekly run's, 23 20 * * 5, and the monthly run's, 43 22 1 * *, as scripts/mutation/bulk.py's SCHEDULES gives them, not: 23 20 * * 5, 43 22 1 * *, 0 12 * * 3"
 
+# --- A run's name says its mode ---------------------------------------------------
+
+# The release check (scripts/check-weekly-run.py, #316) finds the weekly
+# runs by their name, "Mutation runs: weekly", whether a schedule or a
+# person started them.
+run_name_message="it should name each run by its mode, as the release check finds the weekly runs by their names: run-name: \"Mutation runs: \${{ github.event.schedule == '23 20 * * 5' && 'weekly' || github.event.schedule == '43 22 1 * *' && 'monthly' || inputs.mode }}\""
+
+refuses no-run-name \
+  'del(."run-name")' \
+  "$run_name_message"
+
+refuses a-run-name-without-the-mode \
+  '."run-name" = "Mutation runs"' \
+  "$run_name_message"
+
+refuses a-run-name-of-another-schedule \
+  '."run-name" |= sub("23 20"; "17 3")' \
+  "$run_name_message"
+
+refuses a-run-name-that-swaps-the-modes \
+  '."run-name" |= sub("'"'"'weekly'"'"'"; "'"'"'monthly'"'"'")' \
+  "$run_name_message"
+
 # --- What a run takes ------------------------------------------------------------
 
 refuses a-mode-missing \

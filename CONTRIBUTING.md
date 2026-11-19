@@ -343,9 +343,11 @@ scripts/test-check-grpcurl.sh dist/smock   # that check fails on each difference
 docker build --tag smock:dev .
 scripts/smoke-test-image.sh smock:dev 0.0.0-dev <commit> "moonc <version>"   # the container image
 scripts/test-helm-chart-on-kind.sh smock:dev   # the chart on a kind cluster (needs kind, kubectl and helm)
-scripts/check-release-workflow.sh    # the release workflow publishes only for tags (needs yq and jq)
+scripts/check-release-workflow.sh    # the release workflow publishes only for tags, and only after its checks of the tag (needs yq and jq)
+scripts/test-check-release-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-release-notes.sh        # the release notes, with CHANGELOG.md's links at the release's tag
-scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit and that the tag names moon.mod's version (needs jq)
+scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit, that the tag names moon.mod's version, and that the latest weekly mutation run is clean in the packages at L4, with fake gh runs on small git histories (needs python3, git and jq)
+python3 scripts/check-weekly-run.py <commit>   # whether the latest weekly mutation run lets the commit be released (needs git and gh)
 scripts/check-benchmark-workflow.sh  # the benchmark workflow runs only by hand (needs yq and jq)
 scripts/check-measure-costs-workflow.sh   # the workflow that measures the tests' costs runs only by hand, with no C flags (needs yq and jq)
 scripts/test-check-measure-costs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
@@ -369,7 +371,7 @@ python3 scripts/check-merge.py <branch>   # whether the branch checks on the bra
 scripts/test-check-merge.sh          # the merge check, with a fake gh and canned runs on a small git history (needs python3, git and jq)
 scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs only by hand or when the weekly mutation run calls it, and installs its commit's toolchain before the replay (needs yq and jq)
 scripts/test-check-mutation-canary-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
-scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only on their weekly and monthly schedules and by hand, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
+scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only on their weekly and monthly schedules and by hand, named by their mode, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
 scripts/test-check-mutation-runs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
@@ -1418,9 +1420,10 @@ report lists every entry whose reviewer changed.
   the tag's commit or on an ancestor whose later changes the changed-lines
   reports cover or touch no non-test source of a package at L4. The
   release checks it before it publishes, beside the check that CI passed
-  on the tag's commit
-  ([What a tag does](docs/releasing.md#what-a-tag-does)). So a release may
-  wait for one weekly run.
+  on the tag's commit (`scripts/check-weekly-run.py`,
+  [What a tag does](docs/releasing.md#what-a-tag-does)). So a release may
+  wait for one weekly run. While no package is at L4, the check reads no
+  run and passes.
 - **Bulk runs go to Actions**: the baseline of 1,000 mutants, the weekly
   and monthly runs, `server` through e2e, and the kill matrices. On a
   developer's machine, only single mutants and the diff mode run, which
@@ -2460,6 +2463,15 @@ the run, and the report starts with the jobs that did not succeed. The
 report keeps this run's flake records as the artifact `mutation-flakes`
 for 90 days, which the next weekly run reads.
 
+Each run's name says its mode: "Mutation runs: weekly" for the weekly
+run, whether its schedule or a person started it, and "Mutation runs:
+monthly", "Mutation runs: sample" and so on for the others. The release
+workflow's check of the latest weekly run
+([What a tag does](docs/releasing.md#what-a-tag-does)) finds the weekly
+runs by that name, those on `main` and one started by hand on a tag alike.
+A run from before the workflow named its runs is called "Mutation runs"
+alone, and the check does not read it.
+
 **The monthly run**, on the 1st of each month at 22:43 UTC, and by hand
 before a release, runs the full set over the pure packages. It reports
 only: its report gives, per package, the unexplained survivors at the
@@ -2475,7 +2487,10 @@ native-only packages, which the runner runs wholly natively (`bulk.py`'s
 evening UTC, when the repository has seen the fewest commits, and days
 away from the weekly run with the latest MoonBit, on Mondays at 03:17
 UTC. When the 1st is a Friday, the monthly run starts two hours and
-twenty minutes after the weekly one, which takes about 2 hours 50
+twenty minutes after the weekly one. The weekly run took 2 h 9 min the
+first time, from its first job's start to its last job's end
+([run 44423781036](https://github.com/hirunefu/smock/actions/runs/44423781036)),
+in 40 shards; planned at 16 s a mutant, it takes about 2 hours 50
 minutes (*estimate*, above): two of the weekly run's shards, `engine`'s
 and `protobuf`'s, still hold their jobs then, so two of the monthly
 run's first 20 shards wait for them, up to about half an hour. A push
@@ -2595,11 +2610,12 @@ gives, check that `SECONDS_PER_MUTANT` is what the committed record
 gives, and that every shard of smock's weekly and monthly runs then ends
 within 5 hours at the pace of the slowest recorded shard.
 `scripts/check-mutation-runs-workflow.sh`, in CI's job `scripts` with its
-test, checks when the workflow runs, that it passes each input to the
-plan, that `workers` is 1 unless given, that its shards take their
-matrix and their width from the plan and run on amd64 within a job's
-time, the weekly run's other jobs, that only the job of the stale
-entries writes, and only issues, and that it keeps the merged report.
+test, checks when the workflow runs, that each run's name says its mode,
+that it passes each input to the plan, that `workers` is 1 unless given,
+that its shards take their matrix and their width from the plan and run
+on amd64 within a job's time, the weekly run's other jobs, that only the
+job of the stale entries writes, and only issues, and that it keeps the
+merged report.
 
 ## The weakening report
 
