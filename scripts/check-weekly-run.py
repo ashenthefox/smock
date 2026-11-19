@@ -30,11 +30,20 @@ REPOSITORY = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
 # The bulk mutation runs' workflow, and the name it gives a weekly run.
 RUNS = "mutation-runs.yml"
 WEEKLY = "Mutation runs: weekly"
-EVENTS = ("schedule", "workflow_dispatch")
 
 
 class Refused(Exception):
-    """Why the commit may not be released."""
+    """Why the commit may not be released, and what to do then."""
+
+    def __init__(self, why, then=None):
+        super().__init__(why)
+        self.then = then
+
+
+def start_weekly(repository):
+    """What to do when no weekly run that passed covers the commit."""
+    return (f"start a weekly run on main once it holds the tag's commit, and run the release workflow again once it"
+            f" has passed: gh workflow run {RUNS} -R {repository} --ref main -f mode=weekly")
 
 
 class Unusable(Exception):
@@ -82,13 +91,22 @@ def runs_of(repository, query, keep):
 
 
 def latest_weekly(repository):
-    """The latest weekly run on main that has ended."""
+    """The latest weekly run on main that has ended, which must have passed;
+    it says when a later one is still running."""
     weekly = runs_of(repository, f"{RUNS}/runs?branch=main&per_page=100",
-                     lambda r: r["display_title"] == WEEKLY and r["head_branch"] == "main" and r["event"] in EVENTS)
+                     lambda r: r["display_title"] == WEEKLY and r["head_branch"] == "main")
     ended = [r for r in weekly if r["status"] == "completed"]
+    if not ended:
+        if weekly:
+            raise Refused(f"no weekly run over the pinned set on main has ended, and {weekly[0]['html_url']} is still"
+                          " running", "run the release workflow again once it has passed")
+        raise Refused("no weekly run over the pinned set on main has ended", start_weekly(repository))
     run = ended[0]
     if run["conclusion"] != "success":
-        raise Refused(f"the latest weekly run failed ({run['conclusion']}): {run['html_url']}")
+        raise Refused(f"the latest weekly run over the pinned set on main failed ({run['conclusion']}):"
+                      f" {run['html_url']}", start_weekly(repository))
+    if weekly[0] is not run:
+        print(f"check-weekly-run: a later weekly run, {weekly[0]['html_url']}, is still running, and does not decide")
     return run
 
 
@@ -139,6 +157,8 @@ def check(repo, sha, repository):
         return True
     except Refused as why:
         print(f"check-weekly-run: {named} may not be released: {why}", file=sys.stderr)
+        if why.then:
+            print(f"check-weekly-run: {why.then}", file=sys.stderr)
         return False
 
 

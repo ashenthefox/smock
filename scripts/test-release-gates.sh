@@ -512,6 +512,97 @@ else
   fail "on-the-run: asks gh: $(cat "$tmp/on-the-run.args")"
 fi
 
+# downloads <name> <id>: the check <name> downloaded an artifact of the run
+# <id>; downloads_not: it did not.
+downloads() {
+  if grep -q "^run download $2 " "$tmp/$1.args"; then
+    pass "$1: reads the run $2"
+  else
+    fail "$1: does not read the run $2: $(cat "$tmp/$1.args")"
+  fi
+}
+downloads_not() {
+  if grep -q "^run download $2 " "$tmp/$1.args"; then
+    fail "$1: reads the run $2"
+  else
+    pass "$1: does not read the run $2"
+  fi
+}
+
+# --- Which run: the latest weekly run on main that has ended ---------------------
+
+start_weekly="check-weekly-run: start a weekly run on main once it holds the tag's commit, and run the release workflow again once it has passed: gh workflow run mutation-runs.yml -R hirunefu/smock --ref main -f mode=weekly"
+
+# No weekly run: the runs of other modes, a run from before the workflow
+# named its runs, and the monthly run do not count.
+mruns "$(mrun 211 "$at_run" '.display_title = "Mutation runs: sample" | .event = "workflow_dispatch"')" \
+  "$(mrun 212 "$at_run" '.display_title = "Mutation runs"')" \
+  "$(mrun 213 "$at_run" '.display_title = "Mutation runs: monthly"')"
+weekly_report 211
+weekly_report 212
+weekly_report 213
+weekly no-weekly-run "$at_run"
+exits no-weekly-run 1
+says no-weekly-run "check-weekly-run: $(short "$at_run") may not be released: no weekly run over the pinned set on main has ended"
+says no-weekly-run "$start_weekly"
+downloads_not no-weekly-run 211
+downloads_not no-weekly-run 212
+downloads_not no-weekly-run 213
+
+mruns
+weekly no-run-at-all "$at_run"
+exits no-run-at-all 1
+says no-run-at-all "check-weekly-run: $(short "$at_run") may not be released: no weekly run over the pinned set on main has ended"
+
+# A weekly run on another branch does not count.
+mruns "$(mrun 214 "$at_run" '.head_branch = "integration/x" | .event = "workflow_dispatch"')"
+weekly_report 214
+weekly other-branch "$at_run"
+exits other-branch 1
+says other-branch "check-weekly-run: $(short "$at_run") may not be released: no weekly run over the pinned set on main has ended"
+
+# One still running is not a result yet: with none ended, the release waits
+# for it; after one that ended, that one decides.
+mruns "$(mrun 215 "$at_run" '.status = "in_progress" | .conclusion = null')"
+weekly only-running "$at_run"
+exits only-running 1
+says only-running "check-weekly-run: $(short "$at_run") may not be released: no weekly run over the pinned set on main has ended, and $url/215 is still running"
+says only-running "check-weekly-run: run the release workflow again once it has passed"
+
+mruns "$(mrun 216 "$at_run" '.status = "queued" | .conclusion = null | .created_at = "2026-11-27T20:30:00Z"')" \
+  "$(mrun 201 "$at_run")"
+weekly running-after-one-that-passed "$at_run"
+exits running-after-one-that-passed 0
+mentions running-after-one-that-passed "may be released: the latest weekly run over the pinned set, on the tag's commit, shows no unexplained survivor in the packages at L4 (calc): $url/201"
+says running-after-one-that-passed "check-weekly-run: a later weekly run, $url/216, is still running, and does not decide"
+
+# The latest that ended decides, in whatever order the API lists them: when
+# it failed, an earlier one that passed does not let the release go ahead.
+mruns "$(mrun 201 "$at_run")" \
+  "$(mrun 217 "$at_run" '.conclusion = "failure" | .created_at = "2026-11-27T20:30:00Z"')"
+weekly_report 217
+weekly failed "$at_run"
+exits failed 1
+says failed "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main failed (failure): $url/217"
+says failed "$start_weekly"
+downloads_not failed 201
+
+mruns "$(mrun 218 "$at_run" '.conclusion = "cancelled" | .event = "workflow_dispatch"')"
+weekly cancelled "$at_run"
+exits cancelled 1
+says cancelled "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main failed (cancelled): $url/218"
+
+# The monthly run over the full set is reported, never gated: a later one
+# that failed, with survivors in calc, is not read.
+mruns "$(mrun 219 "$at_run" '.display_title = "Mutation runs: monthly" | .conclusion = "failure" | .created_at = "2026-12-01T22:50:00Z"')" \
+  "$(mrun 201 "$at_run")"
+weekly_report 219 '.set = "full" | .packages[0].survived = 5 | .packages[0].exclusions = {unexplained: 5, stale_covered: 0, accepted: 0, accepted_by_category: {}}'
+weekly monthly-not-read "$at_run"
+exits monthly-not-read 0
+mentions monthly-not-read "$url/201"
+downloads_not monthly-not-read 219
+downloads monthly-not-read 201
+
 echo
 echo "test-release-gates: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
