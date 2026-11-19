@@ -262,7 +262,7 @@ def source_touched(repo, change, at_l4):
         raise Refused(f"git cannot tell what {change[:12]} changes")
     touched = {posixpath.dirname(f) for f in names.splitlines()
                if posixpath.dirname(f) in at_l4 and is_source(repo, f, (before, change))}
-    return [d for d in at_l4 if d in touched]
+    return sorted(touched, key=at_l4.index)
 
 
 def edits(repo, old, new, file):
