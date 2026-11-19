@@ -502,6 +502,20 @@ class PaceTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("--run-url", result.stderr)
 
+    def test_a_record_whose_test_output_holds_a_line_separator_is_one_mutant(self):
+        # run.py writes each record on one line, with ensure_ascii=False:
+        # a test's output in its message may hold U+2028, U+2029 or U+0085
+        # unescaped, as yaml's is_printable mutants did in the first weekly
+        # run (#314, run 44423781036). JSON lines end at "\n" alone.
+        shard = made_up_shard(self.tmp / "1", "1-of-1", 0, 30.0)
+        (shard / "mutants.jsonl").write_text("".join(
+            json.dumps({"id": f"m{i}", "message": f"expected got {i}\x85"}, ensure_ascii=False) + "\n"
+            for i in range(3)), encoding="utf-8")
+        result = bulk("pace", "--record", self.record, "--run-url", "https://github.com/o/r/actions/runs/1", shard)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(outputs(result.stdout), {"slowest_s": "10.0", "seconds_per_mutant": "10"})
+        self.assertEqual(read_lines(self.record)[0]["mutants"], 3)
+
     def test_bulk_runs_are_planned_at_what_the_committed_record_gives(self):
         # CONTRIBUTING.md, "Bulk runs on Actions": the record holds the
         # shards of step 2's baseline, run on main (#275, "Step 2's

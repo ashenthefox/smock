@@ -264,9 +264,7 @@ def sites_only(root, options, out):
     if result.returncode != 0:
         raise BulkError(f"run.py --sites-only {shlex.join(options)} failed:\n{result.stderr.strip()}")
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
-    chosen = [json.loads(line) for line in (out / "chosen.jsonl").read_text(encoding="utf-8").splitlines()
-              if line.strip()]
-    return summary, chosen
+    return summary, json_lines(out / "chosen.jsonl")
 
 
 def shard_count(mutants, width, seconds_per_mutant):
@@ -497,12 +495,20 @@ def unexplained(record):
     return record.get("outcome") == "survived" and record.get("exclusion", {}).get("status") != "accepted"
 
 
+def json_lines(path):
+    """The JSON objects of a file of JSON lines. A line ends at "\n" alone:
+    run.py writes a record's strings unescaped (ensure_ascii=False), and a
+    test's output in a record's message may hold U+2028, U+2029 or U+0085,
+    which str.splitlines() would also split at."""
+    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").split("\n") if line.strip()]
+
+
 def read_records(path):
     """The records of a run's output."""
     path = Path(path)
     if not path.is_file():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return json_lines(path)
 
 
 def alternative_rows(summary, records):
@@ -520,7 +526,7 @@ def read_jobs(path):
     """The run's jobs, one JSON object per line."""
     if not path:
         return []
-    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    return json_lines(path)
 
 
 def link(url):
@@ -589,8 +595,7 @@ def finish_timing(plan, args, out):
     runs = []
     for shard in args.shards:
         done = json.loads((Path(shard) / "bulk.json").read_text(encoding="utf-8"))
-        records = [json.loads(line) for line in (Path(shard) / "mutants.jsonl").read_text(encoding="utf-8")
-                   .splitlines() if line.strip()]
+        records = json_lines(Path(shard) / "mutants.jsonl")
         runs.append((done, {r["id"]: r["outcome"] for r in records}))
     runs.sort(key=lambda r: r[0]["workers"])
     if [r[0]["workers"] for r in runs] != list(TIMING_WORKERS):
