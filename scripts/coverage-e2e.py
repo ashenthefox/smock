@@ -20,7 +20,10 @@ report  reads two bisect reports of moon_cove, the toolchain's coverage
                             e2e and by either, and those that no test
                             reaches; the rule that decides which positions
                             e2e covers, and how many it covers in server and
-                            cmd/smock (POSITION_PACKAGES);
+                            cmd/smock (POSITION_PACKAGES); and the points
+                            that no test reaches in LISTED, by file and
+                            definition;
+          unreached.json    those points, for the triage;
           either.bisect     the two reports merged, each point's counts
                             added up;
           covered-by-e2e.jsonl, not-covered-by-e2e.jsonl
@@ -57,6 +60,10 @@ import sites as finder  # noqa: E402 (the site finder, beside the runner)
 # The packages whose positions the report decides: those that only the
 # binary runs, which the run at operator level mutates through e2e (#346).
 POSITION_PACKAGES = ("server", "cmd/smock")
+# The packages whose points that no test reaches the report lists: those
+# that only the binary runs, and the small native-only packages that e2e
+# reaches too (#347).
+LISTED = ("server", "cmd/smock", "defdir", "watch", "openssl")
 # The bodies whose point decides a position, as #342 names them, and how
 # the report names one.
 KINDS = {"function": "a function", "then": "a then", "else": "an else", "arm": "a match arm"}
@@ -346,6 +353,55 @@ def positions_section(decided, pointless):
     return lines + [""]
 
 
+def point_of(file, line, column, definition, **more):
+    """A point, as unreached.json gives it."""
+    return {"point": f"{file}:{line}:{column}", "file": file, "line": line, "column": column,
+            "definition": definition, **more}
+
+
+def unreached(either):
+    """The points that no test reaches in LISTED, and those the exclusion
+    list accepts, per package, as unreached.json gives them."""
+    found = {}
+    for name in LISTED:
+        package = either.get(name)
+        if package is None:
+            continue
+        found[name] = {
+            "points": package.points,
+            "unreached": [point_of(*place, deferred=package.deferred.get(place[:3]))
+                          for place in package.uncovered],
+            "accepted": [point_of(*place[:4], category=place[4]) for place in package.accepted],
+        }
+    return found
+
+
+def unreached_section(found, exclusions):
+    """The report's lines on the points that no test reaches."""
+    lines = ["## The points no test reaches", "",
+             f"In {', '.join(LISTED[:-1])} and {LISTED[-1]}, by file and definition: the points whose count is 0 in"
+             " both reports. A point that a DEFERRED entry of the exclusion list covers is listed with its issue,"
+             " since it is not resolved yet; the points that the list's other entries accept are listed apart.", ""]
+    for name, package in found.items():
+        mine = package["unreached"]
+        if mine:
+            lines += [f"### {name}: {len(mine)} of {package['points']} points unreached", ""]
+            lines += [f"- `{p['point']}` in `{p['definition']}`"
+                      + (f" (DEFERRED to #{p['deferred']})" if p["deferred"] is not None else "") for p in mine]
+        else:
+            lines += [f"### {name}: every point reached"]
+        lines += [""]
+        accepted = package["accepted"]
+        if accepted:
+            lines += [f"### {name}: {len(accepted)} point{'' if len(accepted) == 1 else 's'} accepted by the"
+                      " exclusion list", ""]
+            lines += [f"- `{p['point']}` in `{p['definition']}`, {p['category']}" for p in accepted] + [""]
+    if exclusions is not None and exclusions.stale:
+        lines += ["Stale entries of the exclusion list, which accept nothing: "
+                  + ", ".join(entry.key for entry in exclusions.stale), ""]
+    return lines
+
+
 def read(path):
     """The files of a bisect report, or the error naming the report."""
     try:
@@ -370,8 +426,11 @@ def report(args):
     decided, pointless = decide(args, root, e2e_counts)
     write_list(out / "covered-by-e2e.jsonl", [site for _, site in decided if site["covered"]])
     write_list(out / "not-covered-by-e2e.jsonl", [site for _, site in decided if not site["covered"]])
+    found = unreached(either)
+    (out / "unreached.json").write_text(json.dumps({"packages": found}, indent=2, ensure_ascii=False) + "\n",
+                                        encoding="utf-8")
     lines = ["# Coverage from the e2e tests", "", *table(in_counts, e2e_counts, either), "",
-             *positions_section(decided, pointless)]
+             *positions_section(decided, pointless), *unreached_section(found, exclusions)]
     text = "\n".join(lines)
     (out / "report.md").write_text(text, encoding="utf-8")
     return text

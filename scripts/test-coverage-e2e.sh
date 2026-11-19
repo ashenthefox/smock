@@ -175,6 +175,82 @@ in_list no-point covered-by-e2e "server/serve.mbt:25:10 INT"
 says no-point "| server | 31 | 23 | 8 | 24 |"
 says no-point "- \`server/serve.mbt:25:10\`, a match arm in \`Server::serve\`"
 
+# --- The points no test reaches -------------------------------------------------
+
+# lacks <name> <text>: the report <name> printed no line that holds <text>.
+lacks() {
+  if grep -qF -- "$2" "$tmp/$1.out"; then
+    fail "$1: says $2"
+  else
+    pass "$1: does not say $2"
+  fi
+}
+
+# Those of server, cmd/smock, defdir, watch and openssl, by file and
+# definition: the points whose count is 0 in both reports.
+says fixture "### server: 5 of 14 points unreached"
+says fixture "- \`server/serve.mbt:18:27\` in \`Server::serve\`"
+says fixture "- \`server/serve.mbt:25:10\` in \`Server::serve\`"
+says fixture "- \`server/serve.mbt:34:5\` in \`Server::stop\`"
+says fixture "- \`server/serve.mbt:37:5\` in \`Server::stop\`"
+says fixture "- \`server/serve.mbt:45:3\` in \`Server::unused\`"
+says fixture "### cmd/smock: 1 of 9 points unreached"
+says fixture "- \`cmd/smock/main.mbt:7:41\` in \`main\`"
+says fixture "### watch: 1 of 3 points unreached"
+says fixture "- \`watch/watch.mbt:5:5\` in \`changed\`"
+# The then that only the in-process tests reach is reached.
+lacks fixture "server/serve.mbt:20:5"
+# prng's unreached point is counted in the table, not listed.
+lacks fixture "### prng"
+lacks fixture "prng/prng.mbt:5:5"
+
+# unreached.json holds the same points, which the triage reads.
+if python3 - "$tmp/fixture/unreached.json" >"$tmp/unreached.out" 2>&1 <<'PY'; then
+import json, sys
+found = json.load(open(sys.argv[1], encoding="utf-8"))["packages"]
+assert sorted(found) == ["cmd/smock", "server", "watch"], sorted(found)
+assert found["server"]["points"] == 14
+assert [p["point"] for p in found["server"]["unreached"]] == [
+    "server/serve.mbt:18:27", "server/serve.mbt:25:10", "server/serve.mbt:34:5", "server/serve.mbt:37:5",
+    "server/serve.mbt:45:3"], found["server"]["unreached"]
+assert found["server"]["unreached"][2] == {"point": "server/serve.mbt:34:5", "file": "server/serve.mbt",
+                                           "line": 34, "column": 5, "definition": "Server::stop", "deferred": None}
+assert [p["point"] for p in found["cmd/smock"]["unreached"]] == ["cmd/smock/main.mbt:7:41"]
+assert found["server"]["accepted"] == []
+PY
+  pass "fixture: unreached.json holds the unreached points of server, cmd/smock and watch"
+else
+  fail "fixture: unreached.json: $(cat "$tmp/unreached.out")"
+fi
+
+# With an exclusion list, whose definitions the site finder's parser
+# reads, so only where moonc is installed: a DEFERRED entry's point stays
+# unreached, with its issue; another entry's point is accepted, apart.
+if command -v moonc >/dev/null 2>&1; then
+  cp -R "$fixtures/tree" "$tmp/listed-tree"
+  {
+    python3 scripts/mutation/exclusions.py --root "$tmp/listed-tree" new server/serve.mbt:34:5 |
+      sed 's/^category = .*/category = "DEFERRED"/; s/^reason = .*/reason = "a test of a forced stop"/'
+    echo 'issue = 9001'
+    python3 scripts/mutation/exclusions.py --root "$tmp/listed-tree" new server/serve.mbt:45:3 |
+      sed 's/^category = .*/category = "UNREACHABLE"/; s/^reason = .*/reason = "nothing calls it"/'
+    echo 'argument = "no caller"'
+  } >"$tmp/listed-tree/exclusions.toml"
+  status=0
+  python3 scripts/coverage-e2e.py report --root "$tmp/listed-tree" --trees "$fixtures/trees" \
+    --in-process "$fixtures/in-process.bisect" --e2e "$fixtures/e2e.bisect" --out "$tmp/listed" \
+    >"$tmp/listed.out" 2>&1 || status=$?
+  echo "$status" >"$tmp/listed.status"
+  exits listed 0
+  says listed "### server: 4 of 14 points unreached"
+  says listed "- \`server/serve.mbt:34:5\` in \`Server::stop\` (DEFERRED to #9001)"
+  says listed "### server: 1 point accepted by the exclusion list"
+  says listed "- \`server/serve.mbt:45:3\` in \`Server::unused\`, UNREACHABLE"
+  says listed "| server | 14 | 7 (50.0%) | 8 (57.1%) | 9 (64.3%) | 4 |"
+else
+  echo "skip listed: moonc is not installed, and the exclusion list's definitions need it"
+fi
+
 # --- Reports it cannot read together --------------------------------------------
 
 # broken <name> <in-process text> <e2e text> <message>: the report of the
