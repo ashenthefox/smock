@@ -603,6 +603,79 @@ mentions monthly-not-read "$url/201"
 downloads_not monthly-not-read 219
 downloads monthly-not-read 201
 
+# --- What the run's report shows ----------------------------------------------------
+
+# report_case <name> <jq update>: the latest weekly run, 221, is on the
+# tag's commit, and its report is changed by the update; the check runs.
+report_case() {
+  mruns "$(mrun 221 "$at_run")"
+  weekly_report 221 "$2"
+  weekly "$1" "$at_run"
+}
+exclusions() {
+  echo "{unexplained: $1, stale_covered: $2, accepted: $3, accepted_by_category: {}}"
+}
+read_survivors="check-weekly-run: its report lists them: gh run download 221 -R hirunefu/smock --name mutation-report --dir mutation-report"
+
+# An unexplained survivor in calc, those that a DEFERRED entry covers
+# among them, stops the release.
+report_case unexplained ".packages[0].survived = 3 | .packages[0].exclusions = $(exclusions 2 0 1)"
+exits unexplained 1
+says unexplained "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main shows unexplained survivors in a package at L4: calc 2: $url/221"
+says unexplained "$read_survivors"
+
+# A stale-covered survivor counts as unexplained (#316, "Which run").
+report_case stale-covered ".packages[0].survived = 1 | .packages[0].exclusions = $(exclusions 0 1 0)"
+exits stale-covered 1
+says stale-covered "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main shows unexplained survivors in a package at L4: calc 1 (1 stale-covered): $url/221"
+
+report_case both ".packages[0].survived = 4 | .packages[0].exclusions = $(exclusions 2 1 1)"
+exits both 1
+mentions both "shows unexplained survivors in a package at L4: calc 3 (1 stale-covered): $url/221"
+
+# Survivors that no exclusion list judged are unexplained, as the report
+# counts them.
+report_case no-exclusion-list ".packages[0].survived = 1"
+exits no-exclusion-list 1
+mentions no-exclusion-list "shows unexplained survivors in a package at L4: calc 1: $url/221"
+
+# Accepted survivors do not stop it.
+report_case accepted ".packages[0].survived = 2 | .packages[0].exclusions = $(exclusions 0 0 2)"
+exits accepted 0
+mentions accepted "may be released"
+
+# A package at L4 that the run ran no mutant of shows no survivor; one it
+# did not run at all shows nothing, and stops the release.
+report_case no-mutant 'del(.packages[0])'
+exits no-mutant 0
+mentions no-mutant "may be released"
+
+report_case not-run '.selection.packages = ["grid"] | del(.packages[0])'
+exits not-run 1
+says not-run "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main did not run calc, a package at L4: $url/221"
+says not-run "$start_weekly"
+
+# The report must be of the pinned set, and readable.
+report_case full-set '.set = "full" | .selection.set = "full"'
+exits full-set 1
+says full-set "check-weekly-run: $(short "$at_run") may not be released: the report of the latest weekly run over the pinned set on main is of the full set, not the pinned set: $url/221"
+
+mruns "$(mrun 222 "$at_run")"
+weekly no-report "$at_run"
+exits no-report 1
+says no-report "check-weekly-run: $(short "$at_run") may not be released: the report of the latest weekly run over the pinned set on main (the artifact mutation-report, summary.json) cannot be read: $url/222"
+
+weekly_report 222
+echo 'not json' >"$tmp/artifacts/222/mutation-report/summary.json"
+weekly report-not-json "$at_run"
+exits report-not-json 1
+mentions report-not-json "(the artifact mutation-report, summary.json) cannot be read: $url/222"
+
+weekly_report 222 '.packages = {}'
+weekly report-of-another-shape "$at_run"
+exits report-of-another-shape 1
+mentions report-of-another-shape "(the artifact mutation-report, summary.json) cannot be read: $url/222"
+
 echo
 echo "test-release-gates: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

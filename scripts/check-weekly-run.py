@@ -111,21 +111,45 @@ def latest_weekly(repository):
 
 
 def unexplained(package):
-    """A package's unexplained survivors in a weekly run's summary, those
-    stale-covered included, as the run's report counts them."""
+    """A package's unexplained survivors in a weekly run's summary, and how
+    many of them are stale-covered, as the run's report counts them: those
+    that a DEFERRED entry covers are among the unexplained, and survivors
+    that no exclusion list judged are unexplained."""
     found = package.get("exclusions") or {}
     if not found:
-        return package.get("survived", 0)
-    return found.get("unexplained", 0) + found.get("stale_covered", 0)
+        return int(package.get("survived", 0)), 0
+    stale = int(found["stale_covered"])
+    return int(found["unexplained"]) + stale, stale
 
 
 def survivors_at_l4(repository, run, at_l4):
-    """Each package at L4 with its unexplained survivors in the run's
-    report, for those that have some."""
+    """Refuses unless the run's report is of the pinned set, ran every
+    package at L4, and shows no unexplained survivor in any of them."""
     text = artifact(repository, run, "mutation-report", "summary.json")
-    summary = json.loads(text)
-    packages = {p["directory"]: p for p in summary["packages"]}
-    return [(d, unexplained(packages[d])) for d in at_l4 if unexplained(packages.get(d, {})) > 0]
+    try:
+        summary = json.loads(text) if text is not None else None
+        ran, listed = summary["selection"]["packages"], summary["packages"]
+        if not isinstance(ran, list) or not isinstance(listed, list):
+            raise TypeError("the packages are not lists")
+        packages = {p["directory"]: p for p in listed}
+        counts = {d: unexplained(packages.get(d, {})) for d in at_l4}
+    except (ValueError, KeyError, TypeError) as problem:
+        raise Refused("the report of the latest weekly run over the pinned set on main (the artifact mutation-report,"
+                      f" summary.json) cannot be read: {run['html_url']}") from problem
+    if summary.get("set") != "pinned":
+        raise Refused(f"the report of the latest weekly run over the pinned set on main is of the {summary.get('set')}"
+                      f" set, not the pinned set: {run['html_url']}")
+    for directory in at_l4:
+        if directory not in ran:
+            raise Refused(f"the latest weekly run over the pinned set on main did not run {directory}, a package at L4:"
+                          f" {run['html_url']}", start_weekly(repository))
+    found = [f"{d} {n}" + (f" ({stale} stale-covered)" if stale else "")
+             for d, (n, stale) in counts.items() if n]
+    if found:
+        raise Refused("the latest weekly run over the pinned set on main shows unexplained survivors in a package at"
+                      f" L4: {', '.join(found)}: {run['html_url']}",
+                      f"its report lists them: gh run download {run['id']} -R {repository} --name mutation-report"
+                      " --dir mutation-report")
 
 
 def l4_packages(repo, sha):
@@ -148,8 +172,7 @@ def check(repo, sha, repository):
         return True
     try:
         run = latest_weekly(repository)
-        if survivors_at_l4(repository, run, at_l4):
-            raise Refused("survivors")
+        survivors_at_l4(repository, run, at_l4)
         if run["head_sha"] != sha:
             raise Refused("not on the tag's commit")
         print(f"check-weekly-run: {named} may be released: the latest weekly run over the pinned set, on the tag's"
