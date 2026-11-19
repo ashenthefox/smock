@@ -2473,8 +2473,10 @@ native-only packages, which the runner runs wholly natively (`bulk.py`'s
 evening UTC, when the repository has seen the fewest commits, and days
 away from the weekly run with the latest MoonBit, on Mondays at 03:17
 UTC. When the 1st is a Friday, the monthly run starts two hours and
-twenty minutes after the weekly one, which takes about one to one and a
-half hours (*estimate*). A push during either waits for free jobs.
+twenty minutes after the weekly one, which took 2 h 9 min the first
+time, from its first job's start to its last job's end
+([run 44423781036](https://github.com/hirunefu/smock/actions/runs/44423781036)).
+A push during either waits for free jobs.
 `bulk.py`'s `SCHEDULES` maps each schedule to its run, and the workflow's
 check pins both.
 

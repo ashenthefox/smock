@@ -238,10 +238,12 @@ a package at L4. The release commit touches none. Otherwise, start a
 weekly run on `main` while it is at the release commit, and push the tag
 once it has passed.
 A weekly run of the pinned set holds the account's 20 jobs for about two
-hours: the first, on `main` on 2026-11-19, had 18,403 mutants in 40
-shards, two waves of 20, at about 7 s a mutant on one runner (the timing
-run's 6.9 s) *(estimate, until that run's report gives its wall time)*.
-A push meanwhile waits for free jobs.
+hours. The first, started by hand on `main` on 2026-11-19
+([run 44423781036](https://github.com/hirunefu/smock/actions/runs/44423781036)),
+had 18,403 mutants in 40 shards, two waves of 20, and its report gives
+2 h 9 min from its first job's start to its last job's end, and 32 h
+44 min of runner time over its 44 jobs. A push meanwhile waits for free
+jobs.
 
 ```sh
 gh workflow run mutation-runs.yml -R hirunefu/smock --ref main -f mode=weekly   # while main is at the release commit
