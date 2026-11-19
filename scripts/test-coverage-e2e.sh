@@ -251,6 +251,137 @@ else
   echo "skip listed: moonc is not installed, and the exclusion list's definitions need it"
 fi
 
+# --- The triage tickets ---------------------------------------------------------
+
+# triage <name> [option]...: cuts the unreached points of the report
+# fixture into triage tickets, into $tmp/<name>/, its output into
+# $tmp/<name>.out and its exit status into $tmp/<name>.status.
+triage() {
+  name=$1
+  shift
+  status=0
+  python3 scripts/coverage-e2e.py triage --report "$tmp/fixture" --out "$tmp/$name" "$@" \
+    >"$tmp/$name.out" 2>&1 || status=$?
+  echo "$status" >"$tmp/$name.status"
+}
+
+# holds <name> <file> <line>: the file <file> that the triage <name> wrote
+# holds the line <line>.
+holds() {
+  if [ -f "$tmp/$1/$2" ] && grep -qxF -- "$3" "$tmp/$1/$2"; then
+    pass "$1: $2 holds $3"
+  else
+    fail "$1: $2 does not hold $3"
+    sed 's/^/     /' "$tmp/$1/$2" 2>/dev/null || true
+  fi
+}
+
+# tickets <name> <expected>: tickets.json lists, for each ticket, its body's
+# file, its points, its title, labels, blockers and the ticket it blocks,
+# as <expected>, one ticket a line.
+tickets() {
+  if python3 - "$tmp/$1/tickets.json" >"$tmp/$1.tickets" 2>&1 <<'PY'; then
+import json, sys
+for ticket in json.load(open(sys.argv[1], encoding="utf-8")):
+    print(ticket["body"], " ".join(ticket["points"]), "|", ticket["title"], "|", ",".join(ticket["labels"]),
+          "|", " ".join(f"#{n}" for n in ticket["blocked_by"]), "| blocks", f"#{ticket['blocks']}")
+PY
+    if [ "$(cat "$tmp/$1.tickets")" = "$2" ]; then
+      pass "$1: tickets.json lists the tickets"
+      return
+    fi
+  fi
+  fail "$1: tickets.json lists: $(cat "$tmp/$1.tickets")"
+}
+
+# The closing ticket's body, as the triage reads it from --bodies: its
+# criteria for a point's class, dead code, missing tests, exclusions, the
+# points no dump can show and the request path are carried; the one that
+# checks the result after the triage is not.
+mkdir -p "$tmp/bodies"
+cat >"$tmp/bodies/343.md" <<'MD'
+## Acceptance criteria
+
+- [ ] Every point of server and cmd/smock that the merged report shows unreached has a class.
+- [ ] **Dead code** is deleted.
+- [ ] **Missing tests** go through e2e.
+- [ ] **Exclusions** go in the exclusion list.
+- [ ] **Points no dump can show.** A point that a test reaches only in a process that writes no dump is listed.
+- [ ] After the triage, the weekly report shows no unreached point in server or cmd/smock outside exclusions.
+- [ ] Request path: tests only.
+MD
+
+# Six points of server and cmd/smock unreached, no more than about 40: no
+# ticket; #343 triages them itself.
+triage few --bodies "$tmp/bodies"
+exits few 0
+holds few tickets.md "| #343 | server, cmd/smock | 6 | none: triaged in #343 |"
+tickets few ""
+
+# At most 5 a ticket: server/serve.mbt holds 5, so it is never split, and
+# cmd/smock/main.mbt's point goes into a ticket of its own.
+triage at-most-5 --max 5 --bodies "$tmp/bodies" --run-url https://example.com/runs/1
+exits at-most-5 0
+holds at-most-5 tickets.md "| #343 | server, cmd/smock | 6 | 2 |"
+tickets at-most-5 "343-1.md server/serve.mbt:18:27 server/serve.mbt:25:10 server/serve.mbt:34:5 server/serve.mbt:37:5 server/serve.mbt:45:3 | Triage the points no test reaches in server/serve.mbt (1 of 2) | ready-for-agent | #342 #318 #319 | blocks #343
+343-2.md cmd/smock/main.mbt:7:41 | Triage the points no test reaches in cmd/smock/main.mbt (2 of 2) | ready-for-agent | #342 #318 #319 | blocks #343"
+holds at-most-5 343-1.md "#343"
+holds at-most-5 343-1.md "Part 1 of 2 of the triage of what no test reaches in server and cmd/smock for #343, in step 5 of #275: the 5 points of [the e2e coverage report](https://example.com/runs/1) that no test reaches, in server/serve.mbt. A point that a DEFERRED entry of the exclusion list covers counts as unreached."
+holds at-most-5 343-1.md "- \`server/serve.mbt:34:5\` in \`Server::stop\`"
+holds at-most-5 343-1.md "For the 5 points above only."
+holds at-most-5 343-1.md "- [ ] Every point of server and cmd/smock that the merged report shows unreached has a class."
+holds at-most-5 343-1.md "- [ ] **Dead code** is deleted."
+holds at-most-5 343-1.md "- [ ] **Missing tests** go through e2e."
+holds at-most-5 343-1.md "- [ ] **Exclusions** go in the exclusion list."
+holds at-most-5 343-1.md "- [ ] **Points no dump can show.** A point that a test reaches only in a process that writes no dump is listed."
+holds at-most-5 343-1.md "- [ ] Request path: tests only."
+holds at-most-5 343-1.md "- #319"
+holds at-most-5 343-2.md "- \`cmd/smock/main.mbt:7:41\` in \`main\`"
+if grep -qF "After the triage" "$tmp/at-most-5/343-1.md"; then
+  fail "at-most-5: 343-1.md carries the criterion that checks the result after the triage"
+else
+  pass "at-most-5: 343-1.md leaves out the criterion that checks the result after the triage"
+fi
+
+# At most 2 a ticket: server/serve.mbt holds more, so it is cut into equal
+# parts, 2, 2 and 1. Without the closing ticket's body, a ticket names its
+# criteria.
+triage at-most-2 --max 2
+exits at-most-2 0
+holds at-most-2 tickets.md "| #343 | server, cmd/smock | 6 | 4 |"
+tickets at-most-2 "343-1.md server/serve.mbt:18:27 server/serve.mbt:25:10 | Triage the points no test reaches in server/serve.mbt (1 of 4) | ready-for-agent | #342 #318 #319 | blocks #343
+343-2.md server/serve.mbt:34:5 server/serve.mbt:37:5 | Triage the points no test reaches in server/serve.mbt (2 of 4) | ready-for-agent | #342 #318 #319 | blocks #343
+343-3.md server/serve.mbt:45:3 | Triage the points no test reaches in server/serve.mbt (3 of 4) | ready-for-agent | #342 #318 #319 | blocks #343
+343-4.md cmd/smock/main.mbt:7:41 | Triage the points no test reaches in cmd/smock/main.mbt (4 of 4) | ready-for-agent | #342 #318 #319 | blocks #343"
+holds at-most-2 343-3.md "- [ ] #343's criteria on each point's class, dead code, missing tests, exclusions, the points no dump can show and the request path, as #343 states them."
+
+# Files that hold fewer than the most share a ticket, in order; a title
+# names one file, two, or the first and the last with their count, since
+# GitHub's titles hold at most 256 characters. A DEFERRED point counts.
+mkdir -p "$tmp/several"
+python3 - "$tmp/several/unreached.json" <<'PY'
+import json, sys
+def point(file, line, deferred=None):
+    return {"point": f"{file}:{line}:3", "file": file, "line": line, "column": 3, "definition": "f",
+            "deferred": deferred}
+server = [point("server/a.mbt", n) for n in (1, 2, 3)] + [point("server/b.mbt", 4)]
+server += [point("server/c.mbt", 5, deferred=9001), point("server/d.mbt", 6)]
+cmd = [point("cmd/smock/main.mbt", n) for n in (7, 8)]
+json.dump({"packages": {"server": {"points": 60, "unreached": server, "accepted": []},
+                        "cmd/smock": {"points": 9, "unreached": cmd, "accepted": []},
+                        "watch": {"points": 3, "unreached": [point("watch/watch.mbt", 9)], "accepted": []}}},
+          open(sys.argv[1], "w"))
+PY
+status=0
+python3 scripts/coverage-e2e.py triage --report "$tmp/several" --out "$tmp/several-tickets" --max 4 \
+  >"$tmp/several-tickets.out" 2>&1 || status=$?
+echo "$status" >"$tmp/several-tickets.status"
+exits several-tickets 0
+holds several-tickets tickets.md "| #343 | server, cmd/smock | 8 | 2 |"
+tickets several-tickets "343-1.md server/a.mbt:1:3 server/a.mbt:2:3 server/a.mbt:3:3 server/b.mbt:4:3 | Triage the points no test reaches in server/a.mbt and server/b.mbt (1 of 2) | ready-for-agent | #342 #318 #319 | blocks #343
+343-2.md server/c.mbt:5:3 server/d.mbt:6:3 cmd/smock/main.mbt:7:3 cmd/smock/main.mbt:8:3 | Triage the points no test reaches in server/c.mbt to cmd/smock/main.mbt, 3 files (2 of 2) | ready-for-agent | #342 #318 #319 | blocks #343"
+holds several-tickets 343-2.md "- \`server/c.mbt:5:3\` in \`f\` (DEFERRED to #9001)"
+
 # --- Reports it cannot read together --------------------------------------------
 
 # broken <name> <in-process text> <e2e text> <message>: the report of the

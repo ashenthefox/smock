@@ -7,6 +7,8 @@ suites and then this report.
 
 usage: python3 scripts/coverage-e2e.py report --in-process <report> --e2e <report> --out <dir>
            [--root <dir>] [--trees <dir>] [--moonc <moonc>]
+       python3 scripts/coverage-e2e.py triage --report <dir> --out <dir> [--max <n>]
+           [--bodies <dir>] [--run-url <url>]
 
 report  reads two bisect reports of moon_cove, the toolchain's coverage
         reader, made of the same trace sources (scripts/coverage-report.py
@@ -39,6 +41,17 @@ report  reads two bisect reports of moon_cove, the toolchain's coverage
         <trees>/<path>.ast when --trees is given, as the tests give it.
         RULE says when e2e covers a position.
 
+triage  cuts the points that no test reaches in server and cmd/smock, in
+        unreached.json of a report's output (<report>), those that a
+        DEFERRED entry covers included, into triage tickets for their
+        closing ticket (CLOSING) when there are more than --max of them
+        (about 40, TRIAGE_MAX): at most --max each, a source file that holds
+        fewer never split, a larger one cut into equal parts. It writes into
+        <out> a body for each ticket, tickets.json (each ticket's title,
+        label, points, blockers and the ticket it blocks) and tickets.md;
+        each body carries the closing ticket's triage criteria for its
+        points, from <bodies>/<number>.md when it is given.
+
 It exits with 2, saying why, when it cannot read a report, when the two
 reports do not hold the same points, which were then made of other trace
 sources, or when a file does not parse.
@@ -55,6 +68,7 @@ from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "mutation"))
+import bulk  # noqa: E402 (the bulk runs' cut of triage tickets)
 import sites as finder  # noqa: E402 (the site finder, beside the runner)
 
 # The packages whose positions the report decides: those that only the
@@ -64,6 +78,17 @@ POSITION_PACKAGES = ("server", "cmd/smock")
 # that only the binary runs, and the small native-only packages that e2e
 # reaches too (#347).
 LISTED = ("server", "cmd/smock", "defdir", "watch", "openssl")
+# The closing ticket of the triage of what no test reaches in server and
+# cmd/smock, what its triage tickets wait for (this ticket and the two
+# that moved server's parsers out, #318 and #319), and the starts of its
+# criteria that they carry: all but the one that checks the result after
+# the triage.
+CLOSING = 343
+BLOCKERS = (342, 318, 319)
+TRIAGE_CRITERIA = ("Every point", "**Dead code**", "**Missing tests**", "**Exclusions**",
+                   "**Points no dump can show.**", "Request path")
+# How many points a triage ticket holds at most (#342: "about 40").
+TRIAGE_MAX = 40
 # The bodies whose point decides a position, as #342 names them, and how
 # the report names one.
 KINDS = {"function": "a function", "then": "a then", "else": "an else", "arm": "a match arm"}
@@ -436,6 +461,86 @@ def report(args):
     return text
 
 
+def closing_criteria(bodies):
+    """The criteria of the closing ticket that its triage tickets carry,
+    from its body in bodies; None without it."""
+    path = Path(bodies) / f"{CLOSING}.md" if bodies else None
+    if path is None or not path.is_file():
+        return None
+    return [line for line in path.read_text(encoding="utf-8").splitlines()
+            if line.startswith(tuple(f"- [ ] {start}" for start in TRIAGE_CRITERIA))]
+
+
+def triage_body(ticket, part, criteria, run_url):
+    """The body of a triage ticket."""
+    files = list(dict.fromkeys(p["file"] for p in ticket))
+    count = len(ticket)
+    points = f"{count} point{'s' if count != 1 else ''}"
+    run = f"[the e2e coverage report]({run_url})" if run_url else "the e2e coverage report"
+    lines = ["## Parent", "", f"#{CLOSING}", "", "## What to build", "",
+             f"Part {part} of the triage of what no test reaches in server and cmd/smock for #{CLOSING}, in step 5"
+             f" of #275: the {points} of {run} that no test reaches, in {', '.join(files)}. A point that a DEFERRED"
+             " entry of the exclusion list covers counts as unreached.", "", "## Points", ""]
+    lines += [f"- `{p['point']}` in `{p['definition']}`"
+              + (f" (DEFERRED to #{p['deferred']})" if p.get("deferred") is not None else "") for p in ticket]
+    lines += ["", "## Acceptance criteria", "", f"For the {points} above only.", ""]
+    if criteria is None:
+        lines += [f"- [ ] #{CLOSING}'s criteria on each point's class, dead code, missing tests, exclusions, the"
+                  f" points no dump can show and the request path, as #{CLOSING} states them."]
+    else:
+        lines += criteria
+    lines += ["", "## Blocked by", "", *[f"- #{n}" for n in BLOCKERS], "", "## Blocks", "", f"- #{CLOSING}"]
+    return "\n".join(lines) + "\n"
+
+
+def named(files):
+    """Files, as a ticket's title names them: one, two, or the first and the
+    last with their count, since a title holds at most 256 characters."""
+    if len(files) <= 2:
+        return " and ".join(files)
+    return f"{files[0]} to {files[-1]}, {len(files)} files"
+
+
+def triage(args):
+    """Writes the triage tickets; returns the summary."""
+    found = json.loads((Path(args.report) / "unreached.json").read_text(encoding="utf-8"))["packages"]
+    points = [p for package in POSITION_PACKAGES for p in found.get(package, {}).get("unreached", [])]
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    tickets = []
+    packages = ", ".join(POSITION_PACKAGES)
+    if len(points) <= args.max:
+        row = f"| #{CLOSING} | {packages} | {len(points)} | none: triaged in #{CLOSING} |"
+    else:
+        cuts = bulk.cut(points, args.max)
+        row = f"| #{CLOSING} | {packages} | {len(points)} | {len(cuts)} |"
+        criteria = closing_criteria(args.bodies)
+        for part, ticket in enumerate(cuts, 1):
+            files = list(dict.fromkeys(p["file"] for p in ticket))
+            name = f"{CLOSING}-{part}.md"
+            (out / name).write_text(triage_body(ticket, f"{part} of {len(cuts)}", criteria, args.run_url),
+                                    encoding="utf-8")
+            tickets.append({"closing": CLOSING, "packages": list(dict.fromkeys(package_of(f) for f in files)),
+                            "files": files, "points": [p["point"] for p in ticket],
+                            "title": f"Triage the points no test reaches in {named(files)} ({part} of {len(cuts)})",
+                            "labels": ["ready-for-agent"], "blocked_by": list(BLOCKERS), "blocks": CLOSING,
+                            "body": name})
+    (out / "tickets.json").write_text(json.dumps(tickets, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    summary = "\n".join(["# The triage tickets of what no test reaches in server and cmd/smock", "",
+                         f"At most {args.max} points a ticket, a source file that holds fewer never split.", "",
+                         "| closing ticket | packages | unreached points | triage tickets |", "|---|---|---:|---|",
+                         row]) + "\n"
+    (out / "tickets.md").write_text(summary, encoding="utf-8")
+    return summary
+
+
+def positive(text):
+    """A whole number above 0, for argparse."""
+    if not text.isdigit() or int(text) < 1:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number above 0")
+    return int(text)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Report coverage from the e2e tests beside the in-process tests'.")
     steps = parser.add_subparsers(dest="step", required=True)
@@ -446,9 +551,15 @@ def main():
     reporting.add_argument("--root", default=".", help="the directory the reports' paths are relative to")
     reporting.add_argument("--trees", help="the compiler's parse trees of the sources, as <path>.ast")
     reporting.add_argument("--moonc", default="moonc", help="the compiler, which writes the parse trees")
+    triaging = steps.add_parser("triage", help="cut the points no test reaches into triage tickets")
+    triaging.add_argument("--report", required=True, help="the report's output, which holds unreached.json")
+    triaging.add_argument("--out", required=True, help="where the tickets go")
+    triaging.add_argument("--max", type=positive, default=TRIAGE_MAX, help="the most points a ticket holds")
+    triaging.add_argument("--bodies", help="the closing ticket's body, as <number>.md")
+    triaging.add_argument("--run-url", help="the link of the run that made the report")
     args = parser.parse_args()
     try:
-        print(report(args))
+        print(report(args) if args.step == "report" else triage(args))
     except (ReportError, finder.FinderError) as error:
         print(f"coverage-e2e: {error}", file=sys.stderr)
         sys.exit(2)
