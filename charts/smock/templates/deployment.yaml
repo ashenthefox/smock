@@ -227,12 +227,12 @@ spec:
         {{- if .Values.tls.secretName }}
         - name: tls
           secret:
-            secretName: {{ .Values.tls.secretName | quote }}
+            secretName: {{ include "smock.string" .Values.tls.secretName | quote }}
             defaultMode: 0440
         {{- end }}
         {{- range $mock, $secret := .Values.tls.mockSecrets }}
         - name: {{ include "smock.tlsMockVolume" $mock }}
           secret:
-            secretName: {{ $secret | quote }}
+            secretName: {{ include "smock.string" $secret | quote }}
             defaultMode: 0440
         {{- end }}

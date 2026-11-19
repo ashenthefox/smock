@@ -594,6 +594,21 @@ render tls-mocks-and-default --values "$tmp/values-token.yaml" --values "$tmp/va
 check tls-mocks-and-default "the Mocks' certificates go with a default certificate from tls.secretName" \
   'env("SMOCK_TLS_CERT_FILE").value == "/etc/smock/tls/tls.crt"
    and (env("SMOCK_TLS_MOCK_CERTS").value | fromjson | keys) == ["orders.v2", "users"]'
+# Secret names written as digits, which YAML reads as numbers, name the
+# Secrets with the digits of the values file (#396). A million or more each,
+# so that a number written as Go writes a float (1.000443e+06) shows too.
+cat >"$tmp/values-tls-digits.yaml" <<'YAML'
+tls:
+  secretName: 1000443
+  mockSecrets:
+    users: 2000443
+YAML
+render tls-digits --values "$tmp/values-token.yaml" --values "$tmp/values-tls-digits.yaml"
+check_text tls-digits "a TLS Secret and a Mock's Secret written as digits are mounted with those digits" \
+  'volume("tls").secret.secretName == $default
+   and ([pod | .volumes[] | select(.secret.secretName == $users)] | length) == 1' \
+  --arg default "$(yq '.tls.secretName' "$tmp/values-tls-digits.yaml")" \
+  --arg users "$(yq '.tls.mockSecrets.users' "$tmp/values-tls-digits.yaml")"
 refuse tls-mocks-no-secret "a Mock without the name of its Secret" \
   'tls.mockSecrets: the Mock "users" has no Secret name' \
   --values "$tmp/values-token.yaml" --set tls.mockSecrets.users=
