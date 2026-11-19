@@ -676,6 +676,129 @@ weekly report-of-another-shape "$at_run"
 exits report-of-another-shape 1
 mentions report-of-another-shape "(the artifact mutation-report, summary.json) cannot be read: $url/222"
 
+# --- Which commit: the changes to main after the run --------------------------------
+
+# From here on, the latest weekly run, 231, is a clean one on the commit
+# where calc joined L4. Each case's history starts there, on a branch of
+# its own that stands for main, and its head is the tag's commit.
+mruns "$(mrun 231 "$at_run")"
+weekly_report 231
+
+# on <branch>: starts the history <branch> at the run's commit.
+on() {
+  git -C "$repo" checkout --quiet -b "$1" "$at_run"
+}
+
+# straight <subject> <file> <line>: a commit pushed straight to main that
+# adds <line> at the end of <file>.
+straight() {
+  mkdir -p "$repo/$(dirname "$2")"
+  printf '%s\n' "$3" >>"$repo/$2"
+  git -C "$repo" add --all
+  git -C "$repo" commit --quiet -m "$1"
+}
+
+# release_commit: the release commit, which gives the version in moon.mod
+# and its section in CHANGELOG.md, pushed straight to main.
+release_commit() {
+  printf 'name = "smock/smock"\n\nversion = "0.5.0"\n' >"$repo/moon.mod"
+  printf '# Changelog\n\n## [Unreleased]\n\n## [0.5.0] - 2026-11-21\n' >"$repo/CHANGELOG.md"
+  git -C "$repo" commit --quiet -am "Make the version 0.5.0, and give it its CHANGELOG section"
+}
+
+# head: the current commit.
+head() {
+  git -C "$repo" rev-parse HEAD
+}
+
+asks_no_branch_checks() {
+  if grep -q "branch-checks.yml" "$tmp/$1.args"; then
+    fail "$1: asks for the branch checks: $(cat "$tmp/$1.args")"
+  else
+    pass "$1: does not ask for the branch checks"
+  fi
+}
+
+# A release commit pushed straight to main after the run meets the second
+# condition: it touches no non-test source of a package at L4.
+on release
+release_commit
+release=$(head)
+weekly release-commit "$release"
+exits release-commit 0
+says release-commit "check-weekly-run: $(short "$release") may be released: the latest weekly run over the pinned set, on $(short "$at_run"), an ancestor of the tag's commit, shows no unexplained survivor in the packages at L4 (calc): $url/231"
+says release-commit "check-weekly-run: the one change to main after it is covered:"
+says release-commit "check-weekly-run:   $(short "$release") Make the version 0.5.0, and give it its CHANGELOG section: it touches no non-test source of a package at L4"
+asks_no_branch_checks release-commit
+
+# Nor do tests, generated files, another package, or a package in a
+# directory below calc, which is a package of its own.
+on quiet
+straight "Test add" calc/calc_test.mbt 'test "add again" { inspect(add(2, 2), content="4") }'
+straight "Test add from inside" calc/calc_wbtest.mbt 'test "inside" { inspect(add(0, 0), content="0") }'
+straight "Grow the table" calc/table.mbt 'let more : Array[Int] = [3]'
+straight "Widen the grid" grid/grid.mbt 'pub fn height() -> Int { 24 }'
+straight "Add a package below calc" calc/deep/deep.mbt 'pub fn deep() -> Int { 1 }'
+straight "Configure calc" calc/moon.pkg 'options("is-main": false)'
+weekly quiet-changes "$(head)"
+exits quiet-changes 0
+says quiet-changes "check-weekly-run: each of the 6 changes to main after it is covered:"
+for subject in "Test add" "Test add from inside" "Grow the table" "Widen the grid" "Add a package below calc" \
+  "Configure calc"; do
+  mentions quiet-changes " $subject: it touches no non-test source of a package at L4"
+done
+asks_no_branch_checks quiet-changes
+
+# A source change pushed straight to main has no branch's report, so it
+# stops the release (#316); so does a deleted source file.
+on straight
+straight "Fix add" calc/calc.mbt '// add adds'
+fixed=$(head)
+release_commit
+weekly straight-source "$(head)"
+exits straight-source 1
+says straight-source "check-weekly-run: $(short "$(head)") may not be released: $(short "$fixed") (Fix add), a change to main after the latest weekly run over the pinned set ($url/231), changes non-test source of calc, a package at L4, and no run of the branch checks is on $(short "$fixed"), as none is on a change pushed straight to main"
+says straight-source "$start_weekly"
+
+on deleted
+git -C "$repo" rm --quiet calc/calc.mbt
+git -C "$repo" commit --quiet -m "Drop add"
+weekly deleted-source "$(head)"
+exits deleted-source 1
+mentions deleted-source "(Drop add), a change to main after the latest weekly run over the pinned set ($url/231), changes non-test source of calc, a package at L4"
+
+# A generated file that a person rewrote is source.
+on ungenerated
+printf 'let table : Array[Int] = [1, 2, 3]\n' >"$repo/calc/table.mbt"
+git -C "$repo" commit --quiet -am "Write the table by hand"
+weekly ungenerated "$(head)"
+exits ungenerated 1
+mentions ungenerated "(Write the table by hand), a change to main after the latest weekly run over the pinned set ($url/231), changes non-test source of calc, a package at L4"
+
+# The run must be on the tag's commit or on its first-parent history,
+# main's: not on a commit the tag's commit does not hold, nor on one it
+# holds only through a merge.
+git -C "$repo" checkout --quiet -b elsewhere "$listless"
+printf 'calc\n' >>"$repo/mutation/l4-packages.txt"
+git -C "$repo" commit --quiet -am "calc at L4, elsewhere"
+weekly not-held "$(head)"
+exits not-held 1
+says not-held "check-weekly-run: $(short "$(head)") may not be released: the latest weekly run over the pinned set on main ran on $(short "$at_run"), which the tag's commit does not hold: $url/231"
+says not-held "$start_weekly"
+
+git -C "$repo" merge --quiet --no-ff -m "Merge main" "$at_run"
+weekly through-a-merge "$(head)"
+exits through-a-merge 1
+says through-a-merge "check-weekly-run: $(short "$(head)") may not be released: the latest weekly run over the pinned set on main ran on $(short "$at_run"), which is not on the first-parent history of the tag's commit, as main's commits are: $url/231"
+
+# A run on a later commit than the tag's does not cover it.
+mruns "$(mrun 232 "$fixed")"
+weekly_report 232
+weekly later-run "$at_run"
+exits later-run 1
+says later-run "check-weekly-run: $(short "$at_run") may not be released: the latest weekly run over the pinned set on main ran on $(short "$fixed"), which the tag's commit does not hold: $url/232"
+mruns "$(mrun 231 "$at_run")"
+
 echo
 echo "test-release-gates: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

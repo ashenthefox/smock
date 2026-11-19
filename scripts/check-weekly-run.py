@@ -18,11 +18,15 @@ It exits with 0 when the tag's commit may be released, and with 2 when
 import argparse
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "mutation"))
+import sites as finder  # noqa: E402
 
 L4_LIST = "mutation/l4-packages.txt"
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -53,7 +57,8 @@ class Unusable(Exception):
 
 def git(repo, *args):
     """Runs git in repo, and gives its output, or None when it fails."""
-    result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    result = subprocess.run(["git", "-C", str(repo), "-c", "core.quotepath=off", *args], capture_output=True,
+                            text=True, encoding="utf-8", errors="replace")
     return result.stdout if result.returncode == 0 else None
 
 
@@ -162,6 +167,66 @@ def l4_packages(repo, sha):
     return found
 
 
+def later_changes(repo, repository, run, sha):
+    """The commits of the tag's commit's first-parent history after the
+    run's commit, oldest first: main's changes since the run."""
+    ran = run["head_sha"]
+    if ran == sha:
+        return []
+    if git(repo, "merge-base", "--is-ancestor", ran, sha) is None:
+        raise Refused(f"the latest weekly run over the pinned set on main ran on {ran[:12]}, which the tag's commit"
+                      f" does not hold: {run['html_url']}", start_weekly(repository))
+    listed = (git(repo, "rev-list", "--first-parent", f"{ran}..{sha}") or "").split()
+    if not listed or parents(repo, listed[-1])[:1] != [ran]:
+        raise Refused(f"the latest weekly run over the pinned set on main ran on {ran[:12]}, which is not on the"
+                      f" first-parent history of the tag's commit, as main's commits are: {run['html_url']}",
+                      start_weekly(repository))
+    return listed[::-1]
+
+
+def parents(repo, commit):
+    """The commit's parents, the first first."""
+    return (git(repo, "rev-list", "--parents", "-n", "1", commit) or "").split()[1:]
+
+
+def subject(repo, commit):
+    """The commit's subject."""
+    return (git(repo, "log", "-1", "--format=%s", commit) or "").strip()
+
+
+def is_source(repo, file, commits):
+    """Whether a .mbt file is non-test source on any of the commits that
+    have it: not a test file, and not a generated one (the site finder's
+    rules)."""
+    if not file.endswith(".mbt") or finder.is_test_file(PurePosixPath(file)):
+        return False
+    texts = [git(repo, "show", f"{c}:{file}") for c in commits]
+    return any(t is not None and not finder.is_generated(t) for t in texts)
+
+
+def source_touched(repo, change, at_l4):
+    """The packages at L4 whose non-test source a commit adds, changes or
+    deletes against its first parent."""
+    before = parents(repo, change)[0]
+    names = git(repo, "diff", "--no-renames", "--name-only", before, change)
+    if names is None:
+        raise Refused(f"git cannot tell what {change[:12]} changes")
+    touched = {posixpath.dirname(f) for f in names.splitlines()
+               if posixpath.dirname(f) in at_l4 and is_source(repo, f, (before, change))}
+    return [d for d in at_l4 if d in touched]
+
+
+def covered(repo, repository, run, change, at_l4):
+    """How a change to main after the run is covered, or a refusal."""
+    touched = source_touched(repo, change, at_l4)
+    if not touched:
+        return "it touches no non-test source of a package at L4"
+    what = (f"{change[:12]} ({subject(repo, change)}), a change to main after the latest weekly run over the pinned"
+            f" set ({run['html_url']}), changes non-test source of {', '.join(touched)}, a package at L4, and")
+    raise Refused(f"{what} no run of the branch checks is on {change[:12]}, as none is on a change pushed straight to"
+                  " main", start_weekly(repository))
+
+
 def check(repo, sha, repository):
     """Prints whether the commit may be released, and why; whether it may."""
     named = sha[:12]
@@ -173,10 +238,16 @@ def check(repo, sha, repository):
     try:
         run = latest_weekly(repository)
         survivors_at_l4(repository, run, at_l4)
-        if run["head_sha"] != sha:
-            raise Refused("not on the tag's commit")
-        print(f"check-weekly-run: {named} may be released: the latest weekly run over the pinned set, on the tag's"
-              f" commit, shows no unexplained survivor in the packages at L4 ({', '.join(at_l4)}): {run['html_url']}")
+        changes = later_changes(repo, repository, run, sha)
+        lines = [f"{c[:12]} {subject(repo, c)}: {covered(repo, repository, run, c, at_l4)}" for c in changes]
+        where = "the tag's commit" if not changes else f"{run['head_sha'][:12]}, an ancestor of the tag's commit"
+        print(f"check-weekly-run: {named} may be released: the latest weekly run over the pinned set, on {where},"
+              f" shows no unexplained survivor in the packages at L4 ({', '.join(at_l4)}): {run['html_url']}")
+        if changes:
+            count = "the one change" if len(changes) == 1 else f"each of the {len(changes)} changes"
+            print(f"check-weekly-run: {count} to main after it is covered:")
+            for line in lines:
+                print(f"check-weekly-run:   {line}")
         return True
     except Refused as why:
         print(f"check-weekly-run: {named} may not be released: {why}", file=sys.stderr)
