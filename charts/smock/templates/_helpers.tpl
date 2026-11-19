@@ -29,9 +29,12 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
-{{/* The name of the ConfigMap the Definition files come from. */}}
+{{/*
+The name of the ConfigMap the Definition files come from, as text, as
+smock.string writes it.
+*/}}
 {{- define "smock.definitionsConfigMap" -}}
-{{- .Values.definitions.configMap.name | default (printf "%s-definitions" (include "smock.fullname" .) | trunc 63 | trimSuffix "-") -}}
+{{- include "smock.string" (.Values.definitions.configMap.name | default (printf "%s-definitions" (include "smock.fullname" .) | trunc 63 | trimSuffix "-")) -}}
 {{- end -}}
 
 {{/*

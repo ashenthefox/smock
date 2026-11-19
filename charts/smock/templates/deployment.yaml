@@ -212,7 +212,8 @@ spec:
         {{- else }}
         - name: definitions
           configMap:
-            name: {{ include "smock.definitionsConfigMap" . }}
+            {{- /* toYaml quotes a name that YAML would read as a number, and only such a name. */}}
+            name: {{ include "smock.definitionsConfigMap" . | toYaml }}
             {{- with include "smock.definitionsItems" . }}
             items:
               {{- . | trim | nindent 14 }}

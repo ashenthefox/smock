@@ -141,14 +141,17 @@ def restricted_violations:
   ];
 '
 
-# check <name> <description> <jq filter>: the filter, run on the manifests
-# rendered as <name>, must give true.
+# check <name> <description> <jq filter> [jq arguments...]: the filter, run
+# on the manifests rendered as <name>, must give true. The arguments, such
+# as --arg, give the filter its variables.
 check() {
-  if jq -e "$defs $3" "$tmp/$1.json" >/dev/null 2>"$tmp/jq.err"; then
-    pass "$1: $2"
+  name=$1 description=$2 filter=$3
+  shift 3
+  if jq -e "$@" "$defs $filter" "$tmp/$name.json" >/dev/null 2>"$tmp/jq.err"; then
+    pass "$name: $description"
   else
-    fail "$1: $2"
-    echo "     filter: $3"
+    fail "$name: $description"
+    echo "     filter: $filter"
     if [ -s "$tmp/jq.err" ]; then
       sed 's/^/     /' "$tmp/jq.err"
     fi
@@ -248,6 +251,15 @@ check existing-configmap "an existing ConfigMap is mounted, and the chart makes 
 refuse existing-configmap-and-files "Definition files in the values and an existing ConfigMap" \
   "definitions.configMap.name names an existing ConfigMap, so definitions.configMap.files and definitions.configMap.bodyFiles must be empty" \
   --values "$tmp/values-token.yaml" --values "$tmp/values-files.yaml" --set definitions.configMap.name=team-definitions
+# A ConfigMap's name may be digits alone, which YAML reads as a number; the
+# volume names it with the digits of the values file, and as a string, which
+# is what Kubernetes takes for a name (#396). A million or more, so that a
+# number written as Go writes a float (2.0261119e+07) shows too.
+printf 'definitions:\n  configMap:\n    name: 20261119\n' >"$tmp/values-configmap-digits.yaml"
+render existing-configmap-digits --values "$tmp/values-token.yaml" --values "$tmp/values-configmap-digits.yaml"
+check existing-configmap-digits "an existing ConfigMap named with digits is mounted by that name, as a string" \
+  'configmaps == [] and volume("definitions").configMap == {"name": $name}' \
+  --arg name "$(yq '.definitions.configMap.name' "$tmp/values-configmap-digits.yaml")"
 
 # --- Body files in the same ConfigMap ---------------------------------------
 
