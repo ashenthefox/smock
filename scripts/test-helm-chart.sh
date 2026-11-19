@@ -449,6 +449,14 @@ check_text git-sync-digits "a ref, an image, a repository, a period and extra fl
   --arg repository "$(yq '.definitions.gitSync.image.repository' "$tmp/values-git-sync-digits.yaml")" \
   --arg tag "$(yq '.definitions.gitSync.image.tag' "$tmp/values-git-sync-digits.yaml")" \
   --arg digest "$(yq '.definitions.gitSync.image.digest' "$chart/values.yaml")"
+# A definitions directory named with digits, such as a date, is a number to
+# YAML too; smock reads it with those digits.
+printf 'definitions:\n  gitSync:\n    path: 20261119\n' >"$tmp/values-git-sync-path-digits.yaml"
+render git-sync-path-digits --values "$tmp/values-token.yaml" --values "$tmp/values-git-sync.yaml" \
+  --values "$tmp/values-git-sync-path-digits.yaml"
+check_text git-sync-path-digits "a definitions directory written as digits is the one smock reads from the synced tree" \
+  'env("SMOCK_DIR").value == "/git/current/\($path)"' \
+  --arg path "$(yq '.definitions.gitSync.path' "$tmp/values-git-sync-path-digits.yaml")"
 
 render git-sync-root --values "$tmp/values-token.yaml" --set definitions.source=gitSync --set definitions.gitSync.repo=https://example.com/m.git
 check git-sync-root "without a path, the Definition files are at the top of the repository" \
@@ -482,6 +490,22 @@ fi
 refuse image-no-reference "an image volume without a reference" \
   "definitions.image.reference is empty, but definitions.source is image" \
   --values "$tmp/values-token.yaml" --set definitions.source=image
+# An image reference may be digits alone, in the grammar of image references,
+# and a definitions directory may be named with digits; YAML reads both as
+# numbers, and the volume and smock get them with the digits of the values
+# file (#396).
+cat >"$tmp/values-image-digits.yaml" <<'YAML'
+definitions:
+  source: image
+  image:
+    reference: 1000000
+    path: 20261119
+YAML
+render image-digits --values "$tmp/values-token.yaml" --values "$tmp/values-image-digits.yaml"
+check_text image-digits "an image reference and a definitions directory written as digits are the volume's and smock's, with those digits" \
+  'volume("definitions").image.reference == $reference and env("SMOCK_DIR").value == "/definitions/\($path)"' \
+  --arg reference "$(yq '.definitions.image.reference' "$tmp/values-image-digits.yaml")" \
+  --arg path "$(yq '.definitions.image.path' "$tmp/values-image-digits.yaml")"
 
 # --- Admin API token ----------------------------------------------------------
 

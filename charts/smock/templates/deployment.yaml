@@ -207,7 +207,7 @@ spec:
         */}}
         - name: definitions
           image:
-            reference: {{ .Values.definitions.image.reference | quote }}
+            reference: {{ include "smock.string" .Values.definitions.image.reference | quote }}
             pullPolicy: {{ .Values.definitions.image.pullPolicy }}
         {{- else }}
         - name: definitions

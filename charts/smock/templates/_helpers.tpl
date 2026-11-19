@@ -100,9 +100,9 @@ new one (e2e/reload_test.mbt has a test of that).
 {{- define "smock.definitionsDir" -}}
 {{- $d := .Values.definitions -}}
 {{- if eq $d.source "gitSync" -}}
-{{- list "/git/current" ($d.gitSync.path | trimAll "/") | compact | join "/" -}}
+{{- list "/git/current" (include "smock.string" $d.gitSync.path | trimAll "/") | compact | join "/" -}}
 {{- else if eq $d.source "image" -}}
-{{- list "/definitions" ($d.image.path | trimAll "/") | compact | join "/" -}}
+{{- list "/definitions" (include "smock.string" $d.image.path | trimAll "/") | compact | join "/" -}}
 {{- else -}}
 /definitions
 {{- end -}}
