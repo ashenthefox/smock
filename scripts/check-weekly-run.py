@@ -16,13 +16,25 @@ It exits with 0 when the tag's commit may be released, and with 2 when
 """
 
 import argparse
+import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 L4_LIST = "mutation/l4-packages.txt"
 SHA = re.compile(r"[0-9a-f]{40}")
+REPOSITORY = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
+# The bulk mutation runs' workflow, and the name it gives a weekly run.
+RUNS = "mutation-runs.yml"
+WEEKLY = "Mutation runs: weekly"
+EVENTS = ("schedule", "workflow_dispatch")
+
+
+class Refused(Exception):
+    """Why the commit may not be released."""
 
 
 class Unusable(Exception):
@@ -36,6 +48,68 @@ def git(repo, *args):
     return result.stdout if result.returncode == 0 else None
 
 
+def gh(*args):
+    """Runs gh, and gives its output, or None when it fails."""
+    result = subprocess.run(["gh", *args], capture_output=True, text=True)
+    return result.stdout if result.returncode == 0 else None
+
+
+def artifact(repository, run, name, file):
+    """The text of a file of a run's artifact, or None when it cannot be
+    read."""
+    with tempfile.TemporaryDirectory() as directory:
+        if gh("run", "download", str(run["id"]), "-R", repository, "-n", name, "--dir", directory) is None:
+            return None
+        path = Path(directory) / file
+        return path.read_text(encoding="utf-8") if path.is_file() else None
+
+
+def runs_of(repository, query, keep):
+    """The runs of a workflow that the Actions API lists for the query and
+    keep keeps, latest first."""
+    answer = gh("api", f"repos/{repository}/actions/workflows/{query}")
+    if answer is None:
+        raise Refused(f"gh cannot list the runs of {query.split('/', 1)[0]}")
+    try:
+        runs = json.loads(answer)["workflow_runs"]
+        if not isinstance(runs, list):
+            raise ValueError
+        kept = [r for r in runs if keep(r)]
+        kept.sort(key=lambda r: (r["created_at"], r["id"]), reverse=True)
+    except (ValueError, KeyError, TypeError) as problem:
+        raise Refused("the Actions API gave an answer that cannot be read") from problem
+    return kept
+
+
+def latest_weekly(repository):
+    """The latest weekly run on main that has ended."""
+    weekly = runs_of(repository, f"{RUNS}/runs?branch=main&per_page=100",
+                     lambda r: r["display_title"] == WEEKLY and r["head_branch"] == "main" and r["event"] in EVENTS)
+    ended = [r for r in weekly if r["status"] == "completed"]
+    run = ended[0]
+    if run["conclusion"] != "success":
+        raise Refused(f"the latest weekly run failed ({run['conclusion']}): {run['html_url']}")
+    return run
+
+
+def unexplained(package):
+    """A package's unexplained survivors in a weekly run's summary, those
+    stale-covered included, as the run's report counts them."""
+    found = package.get("exclusions") or {}
+    if not found:
+        return package.get("survived", 0)
+    return found.get("unexplained", 0) + found.get("stale_covered", 0)
+
+
+def survivors_at_l4(repository, run, at_l4):
+    """Each package at L4 with its unexplained survivors in the run's
+    report, for those that have some."""
+    text = artifact(repository, run, "mutation-report", "summary.json")
+    summary = json.loads(text)
+    packages = {p["directory"]: p for p in summary["packages"]}
+    return [(d, unexplained(packages[d])) for d in at_l4 if unexplained(packages.get(d, {})) > 0]
+
+
 def l4_packages(repo, sha):
     """The packages at L4 that the list names on the commit, in its order."""
     found = []
@@ -46,7 +120,7 @@ def l4_packages(repo, sha):
     return found
 
 
-def check(repo, sha):
+def check(repo, sha, repository):
     """Prints whether the commit may be released, and why; whether it may."""
     named = sha[:12]
     at_l4 = l4_packages(repo, sha)
@@ -54,7 +128,18 @@ def check(repo, sha):
         print(f"check-weekly-run: no package is at L4 on {named} ({L4_LIST} names none), so the release reads no"
               " weekly run and waits for none")
         return True
-    return False
+    try:
+        run = latest_weekly(repository)
+        if survivors_at_l4(repository, run, at_l4):
+            raise Refused("survivors")
+        if run["head_sha"] != sha:
+            raise Refused("not on the tag's commit")
+        print(f"check-weekly-run: {named} may be released: the latest weekly run over the pinned set, on the tag's"
+              f" commit, shows no unexplained survivor in the packages at L4 ({', '.join(at_l4)}): {run['html_url']}")
+        return True
+    except Refused as why:
+        print(f"check-weekly-run: {named} may not be released: {why}", file=sys.stderr)
+        return False
 
 
 def main():
@@ -72,7 +157,8 @@ def main():
     except Unusable as error:
         print(f"check-weekly-run: {error}", file=sys.stderr)
         return 2
-    return 0 if check(repo, args.commit) else 1
+    repository = args.repository or os.environ.get("GITHUB_REPOSITORY", "")
+    return 0 if check(repo, args.commit, repository) else 1
 
 
 if __name__ == "__main__":

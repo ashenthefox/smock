@@ -450,6 +450,68 @@ exits no-package-at-l4 0
 says no-package-at-l4 "check-weekly-run: no package is at L4 on $(short "$listless") (mutation/l4-packages.txt names none), so the release reads no weekly run and waits for none"
 asks_nothing no-package-at-l4
 
+# Then calc joins L4, and the weekly run runs on that commit.
+printf 'calc\n' >>"$repo/mutation/l4-packages.txt"
+git -C "$repo" commit --quiet -am "calc at L4"
+at_run=$(git -C "$repo" rev-parse HEAD)
+url=https://github.com/hirunefu/smock/actions/runs
+
+# mrun <id> <commit> [<jq update>]: prints the run <id> of the mutation
+# runs' workflow on <commit> as the Actions API lists it: by default a
+# weekly run on main that its schedule started and that succeeded, with
+# the name the workflow gives it, changed by the update.
+mrun() {
+  jq -n --argjson id "$1" --arg sha "$2" '{
+    id: $id, name: "Mutation runs", path: ".github/workflows/mutation-runs.yml",
+    display_title: "Mutation runs: weekly", head_branch: "main", head_sha: $sha, event: "schedule",
+    status: "completed", conclusion: "success",
+    html_url: "https://github.com/hirunefu/smock/actions/runs/\($id)",
+    created_at: "2026-11-20T20:30:00Z", updated_at: "2026-11-20T22:30:00Z", run_attempt: 1
+  }' | jq "${3:-.}"
+}
+
+# mruns <run>...: writes the answer that lists the runs of the mutation
+# runs' workflow.
+mruns() {
+  printf '%s\n' "$@" | jq -s '{total_count: length, workflow_runs: .}' >"$tmp/mutation-runs.json"
+}
+
+# weekly_report <id> [<jq update>]: writes the artifact mutation-report of
+# the run <id>, its summary.json as scripts/mutation/merge.py writes it,
+# changed by the update: by default the pinned set over calc and grid,
+# calc with no survivor, grid with two unexplained ones.
+weekly_report() {
+  rm -rf "$tmp/artifacts/$1/mutation-report"
+  mkdir -p "$tmp/artifacts/$1/mutation-report"
+  jq -n '{
+    operator_set: "v1", set: "pinned",
+    selection: {set: "pinned", packages: ["calc", "grid"], mutants: [], operators: [], list: null, sample: null,
+                shard: null},
+    packages: [
+      {package: "smock/smock/calc", directory: "calc", operator_set: "v1", set: "pinned", mutants: 40, killed: 38,
+       timed_out: 2, survived: 0, unviable: 1, unconfirmed: 0},
+      {package: "smock/smock/grid", directory: "grid", operator_set: "v1", set: "pinned", mutants: 10, killed: 8,
+       timed_out: 0, survived: 2, unviable: 0, unconfirmed: 0,
+       exclusions: {unexplained: 2, stale_covered: 0, accepted: 0, accepted_by_category: {}}}
+    ]
+  }' | jq "${2:-.}" >"$tmp/artifacts/$1/mutation-report/summary.json"
+  printf '# Mutation run: the weekly run\n' >"$tmp/artifacts/$1/mutation-report/report.md"
+}
+
+# A clean weekly run on the tag's commit: survivors in grid, which is not
+# at L4, stop no release.
+mruns "$(mrun 201 "$at_run")"
+weekly_report 201
+weekly on-the-run "$at_run"
+exits on-the-run 0
+says on-the-run "check-weekly-run: $(short "$at_run") may be released: the latest weekly run over the pinned set, on the tag's commit, shows no unexplained survivor in the packages at L4 (calc): $url/201"
+if grep -qxF "api repos/hirunefu/smock/actions/workflows/mutation-runs.yml/runs?branch=main&per_page=100" \
+  "$tmp/on-the-run.args"; then
+  pass "on-the-run: asks for the runs of the mutation runs' workflow on main"
+else
+  fail "on-the-run: asks gh: $(cat "$tmp/on-the-run.args")"
+fi
+
 echo
 echo "test-release-gates: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
