@@ -198,8 +198,8 @@ class PlanTest(unittest.TestCase):
         # within a job's time with room to spare, its mutants within 5 of
         # the job's 6 hours, at the pace of the slowest shard recorded, not
         # at the average's. The average's 7 s would not: the monthly run's
-        # 26,619 mutants at 7eac627b would go in 20 shards of 1,331, 5.3
-        # hours at the baseline's slowest 14.27 s a mutant.
+        # 26,619 mutants at 7eac627b would go in 20 shards of 1,331, 5.6
+        # hours at the first weekly run's slowest 15.19 s a mutant.
         slowest = float(outputs(bulk("pace").stdout)["slowest_s"])
         for mode in ("weekly", "monthly"):
             plan, _ = self.plan(f"smock-{mode}", "--mode", mode, root=REPO)
@@ -519,15 +519,16 @@ class PaceTest(unittest.TestCase):
     def test_bulk_runs_are_planned_at_what_the_committed_record_gives(self):
         # CONTRIBUTING.md, "Bulk runs on Actions": the record holds the
         # shards of step 2's baseline, run on main (#275, "Step 2's
-        # baseline"): the sample, the BODY pass and the timing.
+        # baseline"): the sample, the BODY pass and the timing; and those
+        # of the first weekly run.
         import bulk as steps
 
         result = bulk("pace")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(outputs(result.stdout)["seconds_per_mutant"], str(steps.SECONDS_PER_MUTANT))
-        baseline = {f"https://github.com/hirunefu/smock/actions/runs/{run}"
-                    for run in (44417735318, 44419874781, 44422395058)}
-        self.assertLessEqual(baseline, {line["run"] for line in read_lines(steps.SHARD_TIMES)})
+        recorded = {f"https://github.com/hirunefu/smock/actions/runs/{run}"
+                    for run in (44417735318, 44419874781, 44422395058, 44423781036)}
+        self.assertLessEqual(recorded, {line["run"] for line in read_lines(steps.SHARD_TIMES)})
 
 
 class PackageRowsTest(unittest.TestCase):

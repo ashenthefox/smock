@@ -174,11 +174,14 @@ BUDGET_S = 5 * 3600
 # run does included: what pace() gives for the record SHARD_TIMES, the
 # slowest shard's time a mutant rounded up to a whole second, so that a
 # plan keeps every shard within BUDGET_S at the pace of the slowest shard
-# seen, not at the average's. In step 2's baseline (#275), engine's shard
-# 5-of-20 of the BODY pass, 68 mutants in 970 s, 14.27 s each, gives 15 s;
-# a mutant took 7.0 s of runner time on average. A run added to the
-# record that gives more raises it.
-SECONDS_PER_MUTANT = 15
+# seen, not at the average's. In step 2's baseline (#275) the slowest was
+# engine's shard 5-of-20 of the BODY pass, 68 mutants in 970 s, 14.27 s
+# each, while a mutant took 7.0 s of runner time on average over the
+# sample; in the first weekly run (run 44423781036), protobuf's shard
+# 20-of-40, 460 mutants, half of them at an unchecked access and so also
+# run natively, in 6,990 s, 15.19 s each: 16 s. A run added to the record
+# that gives more raises it.
+SECONDS_PER_MUTANT = 16
 # The mutants at once that the mode timing compares.
 TIMING_WORKERS = (1, 2, 4)
 # How many mutants a shard builds and tests at once unless given: one. In
