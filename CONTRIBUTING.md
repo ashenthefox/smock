@@ -275,7 +275,10 @@ real gRPC client, and the calls grpcurl makes, each with what it prints
 `scripts/coverage-tests/` holds the small bisect reports, and the small
 source tree they describe, that test the coverage report of
 `scripts/coverage.sh` and the coverage ratchet (see
-[Build and test](#build-and-test)).
+[Build and test](#build-and-test)); `e2e/` under it, those that test the
+report of the coverage from the e2e tests, with the compiler's parse trees
+of its files (see
+[Coverage from the e2e tests](#coverage-from-the-e2e-tests)).
 
 `coverage/` holds the coverage floors, each package's most uncovered
 points, and the list of the raises of a floor that a change recorded (see
@@ -373,6 +376,8 @@ scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs 
 scripts/test-check-mutation-canary-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only on their weekly and monthly schedules and by hand, named by their mode, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
 scripts/test-check-mutation-runs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
+scripts/check-coverage-e2e-workflow.sh    # the coverage from the e2e tests runs only by hand or when the weekly mutation run calls it, on amd64, and keeps its report (needs yq and jq)
+scripts/test-check-coverage-e2e-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
 scripts/test-yaml-test-suite-verdict.sh   # how a run of yaml-test-suite is judged against its lists of cases
@@ -380,6 +385,7 @@ scripts/test-check-schema.sh         # the JSON Schema cross-check, with a fake 
 scripts/test-check-doc-examples.sh   # the check of the documents' examples, with a fake smock and a fake jsonnet (needs python3 and jq)
 scripts/test-coverage-report.sh      # the coverage report, on small bisect reports (needs python3)
 scripts/test-coverage-ratchet.sh     # the coverage ratchet, on small bisect reports in small git histories (needs python3 and git)
+scripts/test-coverage-e2e.sh         # the report of the coverage from the e2e tests, on small bisect reports and parse trees (needs python3)
 scripts/test-random-seeds.sh         # the script that writes random seeds into the properties, on a copy of re2's property and on small trees (needs python3)
 python3 scripts/check-doc-links.py   # the documents' links into the repository lead to a file, and to a heading when they name one (needs git)
 scripts/test-check-doc-links.sh      # that check, on small trees (needs python3 and git)
@@ -636,6 +642,11 @@ find _coverage -name '*.trace.source' -exec moonrun "$(dirname "$(command -v moo
   -- -f bisect -o _coverage/e2e.bisect -t _coverage/e2e.txt {} +
 python3 scripts/coverage-report.py _coverage/e2e.bisect
 ```
+
+`scripts/coverage-e2e.sh --out <dir>` takes all these steps, the
+in-process tests' included, and writes the report that the weekly run
+keeps into `<dir>`
+([Coverage from the e2e tests](#coverage-from-the-e2e-tests)).
 
 A smock process writes no counters when it does not reach its exit:
 when a signal it leaves at its default action ends it (SIGKILL, SIGINT
@@ -990,8 +1001,9 @@ merge base with `main`:
 
 `server` and `cmd/smock` have floors too, of their in-process points. Most
 of their code only the binary runs, so a change that adds code there that
-only the e2e tests reach records a raise; e2e coverage is reported apart
-([#342](https://github.com/hirunefu/smock/issues/342)).
+only the e2e tests reach records a raise; e2e coverage is reported apart,
+every week, and holds no floor
+([Coverage from the e2e tests](#coverage-from-the-e2e-tests)).
 
 The job writes the table of the packages, with their points and floors,
 to its summary, and keeps the report and the bisect report as the
@@ -1000,6 +1012,105 @@ runs on linux/amd64 beside the other jobs, and `keep` waits for it, on
 `main` too. Coverage counted the same points on linux/amd64 and
 linux/arm64 when step 0 measured it
 ([#276](https://github.com/hirunefu/smock/issues/276)).
+
+### Coverage from the e2e tests
+
+Most of `server`'s and `cmd/smock`'s code only the binary runs, so the
+in-process tests reach little of it. The weekly mutation run reports
+their coverage from the e2e tests and the in-process tests together
+([#342](https://github.com/hirunefu/smock/issues/342)), in the job
+`coverage-e2e`, beside the mutation shards
+([Bulk runs on Actions](#bulk-runs-on-actions)). The job is the workflow
+`.github/workflows/coverage-e2e.yml`, which can also be started alone by
+hand:
+
+```sh
+gh workflow run coverage-e2e.yml --ref main
+gh run download <run id> --name coverage-e2e --dir coverage-e2e
+```
+
+It runs `scripts/coverage-e2e.sh` on an amd64 runner, which does what
+[Build and test](#build-and-test) shows by hand:
+
+- `scripts/coverage.sh` runs the in-process tests with coverage, and
+  builds the instrumented binary in the same target directory: `cmd/smock`
+  with coverage, the native debug build that step 0 found to work on
+  amd64 ([#276](https://github.com/hirunefu/smock/issues/276));
+- the e2e package is built as a plain build, in moon's own target
+  directory, so the e2e tests' own process writes no coverage: its tests
+  call `openssl`'s TLS client, `log`'s time parser, `http1`'s date cache
+  and `re2` directly, which is not smock's behaviour;
+- the e2e tests run with `SMOCK_E2E_BINARY` naming the instrumented
+  binary and `SMOCK_COVERAGE_DUMP` naming a directory, where the harness
+  keeps the counters of each smock process;
+- moon_cove reads those logs, joined into one, with the trace sources
+  that made the in-process report, and `scripts/coverage-e2e.py report`
+  writes the report.
+
+The report starts with how many e2e tests ran and how long each step
+took. It then gives, for each package, its points, those the in-process
+tests reach, those the e2e tests reach and those either reaches, and the
+points neither reaches after the exclusion list. It lists, by file and
+definition, the points that no test reaches in `server`, `cmd/smock`,
+`defdir`, `watch` and `openssl`; a point that a DEFERRED entry covers is
+listed with its issue, and the points the list's other entries accept
+are listed apart. No package gets a percentage target here: the list is
+for triage ([#343](https://github.com/hirunefu/smock/issues/343)).
+
+It also decides which positions of `server` and `cmd/smock` the e2e
+tests cover, which the run at operator level through e2e mutates
+([#346](https://github.com/hirunefu/smock/issues/346)), and states the
+rule in the report: a position counts as covered by e2e when the point
+that starts the innermost function, then, else or match-arm body around
+it has a count above zero in the e2e tests' report. A function is any
+function, closures and local functions included, and holds its
+parameters' default values; an else is an if's or a guard's; a match arm
+is an arm of a match, a loop, a catch or a noraise. A loop's body is none
+of these, nor is a body that the compiler started with no point, which
+the report lists. A position in no such body, in a top-level value or a
+constant, counts as covered when its package has a point that the e2e
+tests reach, since the program initialises its values when it starts.
+The positions come from the site finder, and the bodies from the
+compiler's parse tree.
+
+The job keeps the artifact `coverage-e2e` for 90 days: `report.md`,
+which is also in the job's summary; the two bisect reports and their
+merge (`in-process.bisect`, `e2e.bisect`, `either.bisect`); the
+pinned set's mutants of `server` and `cmd/smock` at the positions e2e
+covers, `covered-by-e2e.jsonl`, and at the others,
+`not-covered-by-e2e.jsonl`, each a list of mutants by key that the
+mutation runner reads (`run.py --list`); `unreached.json`, the points
+that no test reaches; and what moon printed. The job reports only: a
+failed e2e test fails nothing, and the report names it and says that the
+e2e tests' report may then lack points. It fails only when there can be
+no report, as when a build or an in-process test fails. The weekly run's
+finish does not wait for it.
+
+The first report's points that no test reaches in `server` and
+`cmd/smock` are cut into triage tickets for #343 when there are more than
+about 40, at most 40 each, a source file that holds fewer never split:
+
+```sh
+mkdir -p bodies
+gh issue view 343 -R hirunefu/smock --json body --jq .body >bodies/343.md
+python3 scripts/coverage-e2e.py triage --report coverage-e2e --bodies bodies --out tickets \
+  --run-url <run link>
+```
+
+It writes a body per ticket into `tickets/`, with the ticket's points and
+#343's triage criteria for them; `tickets.json` gives each ticket's
+title, label, blockers (#342, #318 and #319) and the ticket it blocks,
+#343, which gains each as a native blocker; `tickets.md` the count. Like
+stage 1's, the tickets become sub-issues of the closing ticket they
+block.
+
+`scripts/test-coverage-e2e.sh`, in CI's job `scripts`, tests the report
+on small bisect reports over a small tree whose points the pinned
+compiler placed, with a position in each kind of body and one after an
+if whose then-body did not run, and the triage on its output.
+`scripts/check-coverage-e2e-workflow.sh`, with its test, checks that the
+workflow runs only by hand or when the weekly run calls it, on amd64,
+and keeps the report.
 
 ### The ladder
 
@@ -2441,6 +2552,11 @@ which the plan downloads. Beside them:
   stale entries of the exclusion list (`bulk.py stale`);
 - the job `canary` calls `.github/workflows/mutation-canary.yml`, which
   replays [the canary](#the-canary) with the toolchain its commit pins;
+- the job `coverage-e2e` calls `.github/workflows/coverage-e2e.yml`,
+  which reports the coverage of `server` and `cmd/smock` from the e2e
+  tests and the in-process tests together
+  ([Coverage from the e2e tests](#coverage-from-the-e2e-tests)); it
+  reports only, and the finish does not wait for it;
 - the job `seeds` runs the properties with random seeds
   (`bulk.py seeds`), in a working copy of its own that no shard reads: it
   writes a random seed into each seed constant
@@ -2613,7 +2729,8 @@ within 5 hours at the pace of the slowest recorded shard.
 test, checks when the workflow runs, that each run's name says its mode,
 that it passes each input to the plan, that `workers` is 1 unless given,
 that its shards take their matrix and their width from the plan and run
-on amd64 within a job's time, the weekly run's other jobs, that only the
+on amd64 within a job's time, the weekly run's other jobs, that the
+finish does not wait for the coverage from the e2e tests, that only the
 job of the stale entries writes, and only issues, and that it keeps the
 merged report.
 

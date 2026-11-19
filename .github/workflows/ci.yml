@@ -198,6 +198,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/test-check-mutation-runs-workflow.sh
 
+      # The coverage from the e2e tests runs only by hand or when the weekly
+      # mutation run calls it (coverage-e2e.yml). This checks when that
+      # workflow runs, that it runs on amd64, and that it keeps the report.
+      - name: Check the e2e coverage workflow
+        if: ${{ !cancelled() }}
+        run: scripts/check-coverage-e2e-workflow.sh
+
+      - name: Test the check of the e2e coverage workflow
+        if: ${{ !cancelled() }}
+        run: scripts/test-check-coverage-e2e-workflow.sh
+
       # --- The scripts that build-test.yml runs --------------------------------
 
       # build-test.yml makes and checks the SBOM of the image it builds.
@@ -252,6 +263,16 @@ jobs:
       - name: Test the coverage ratchet
         if: ${{ !cancelled() }}
         run: scripts/test-coverage-ratchet.sh
+
+      # The weekly run reports server's and cmd/smock's coverage from the
+      # e2e tests beside the in-process tests' (scripts/coverage-e2e.py,
+      # coverage-e2e.yml). This tests the report on small committed bisect
+      # reports and parse trees: the points each reaches, the positions
+      # e2e covers by the rule of #342, the points no test reaches, and
+      # their triage tickets.
+      - name: Test the e2e coverage report
+        if: ${{ !cancelled() }}
+        run: scripts/test-coverage-e2e.sh
 
       # Each property runs with the seed committed beside it, and the weekly
       # run writes random seeds into a working copy with

@@ -1158,7 +1158,9 @@ mentions floors '+prng 1 the abort arm waits for the exclusion list (#302)'
 # weakening report": the canary's mutants with their recorded verdicts,
 # its list of explained differences (mutation/canary/) and its workflow.
 # #275, "Weakening report": "the mutation and coverage workflows", among
-# them the bulk runs' (#313).
+# them the bulk runs' (#313) and the coverage from the e2e tests (#342),
+# with its report, which decides the positions e2e covers and the points
+# no test reaches.
 tree
 package
 branch
@@ -1166,7 +1168,8 @@ mkdir -p "$repo/scripts"
 cp "$list" "$repo/$list"
 git ls-files -- scripts/mutation scripts/coverage.sh scripts/coverage-report.py scripts/coverage-tests \
   scripts/coverage-ratchet.py mutation/canary .github/workflows/mutation-canary.yml \
-  .github/workflows/mutation-runs.yml >"$tmp/tool-files"
+  .github/workflows/mutation-runs.yml scripts/coverage-e2e.sh scripts/coverage-e2e.py \
+  .github/workflows/coverage-e2e.yml >"$tmp/tool-files"
 tools=0
 while read -r path; do
   tools=$((tools + 1))

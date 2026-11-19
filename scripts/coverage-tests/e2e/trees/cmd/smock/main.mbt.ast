@@ -1,0 +1,52 @@
+((base_pos 1:1
+  (Ptop_expr
+   (Pexpr_let (Ppat_var ((binder_name server) (loc_ 4:7-4:13)))
+    (Pexpr_apply
+     (Pexpr_method ((name @server.Server) (loc_ 4:16-4:30))
+      ((label_name new) (loc_ 4:32-4:35)) 4:16-4:35)
+     () 4:16-4:37)
+    (Pexpr_let (Ppat_var ((binder_name answer) (loc_ 5:7-5:13)))
+     (Pexpr_function
+      ((parameters
+        ((((binder_name path) (loc_ 5:17-5:21))
+          ((Ptype_name ((lid String) (loc_ 5:24-5:30)) () 5:24-5:30)))))
+       (params_loc_ 5:16-5:31)
+       (body
+        (Pexpr_dot_apply
+         (Pexpr_ident ((var_name server) (loc_ 5:35-5:41)) 5:35-5:41)
+         ((label_name serve) (loc_ 5:42-5:47))
+         ((Pexpr_ident ((var_name path) (loc_ 5:48-5:52)) 5:48-5:52))
+         5:35-5:53))
+       (return_type ()) (error_type No_error_typ) (kind_ Arrow)
+       (loc_ 5:16-5:53))
+      5:16-5:53)
+     (Pexpr_let (Ppat_var ((binder_name unused_handler) (loc_ 6:7-6:21)))
+      (Pexpr_function
+       ((parameters
+         ((((binder_name code) (loc_ 6:27-6:31))
+           ((Ptype_name ((lid Int) (loc_ 6:34-6:37)) () 6:34-6:37)))))
+        (params_loc_ 6:26-6:38)
+        (body
+         (Pexpr_infix ((var_name +) (loc_ 6:46-6:47))
+          (Pexpr_ident ((var_name code) (loc_ 6:41-6:45)) 6:41-6:45)
+          (Pexpr_constant 1 6:48-6:49) 6:41-6:49))
+        (return_type ()) (error_type No_error_typ) (loc_ 6:24-6:51))
+       6:24-6:51)
+      (Pexpr_sequence
+       ((Pexpr_apply (Pexpr_ident ((var_name ignore) (loc_ 7:3-7:9)) 7:3-7:9)
+         ((Pexpr_apply
+           (Pexpr_ident ((var_name answer) (loc_ 7:10-7:16)) 7:10-7:16)
+           ((Pexpr_constant /x 7:17-7:21)) 7:10-7:22))
+         7:3-7:23)
+        (Pexpr_apply (Pexpr_ident ((var_name ignore) (loc_ 8:3-8:9)) 8:3-8:9)
+         ((Pexpr_ident ((var_name unused_handler) (loc_ 8:10-8:24))
+           8:10-8:24))
+         8:3-8:25))
+       (Pexpr_dot_apply
+        (Pexpr_ident ((var_name server) (loc_ 9:3-9:9)) 9:3-9:9)
+        ((label_name stop) (loc_ 9:10-9:14)) () 9:3-9:16)
+       7:3-9:16)
+      6:3-9:16)
+     5:3-9:16)
+    4:3-9:16)
+   true No_error_typ 3:1-10:2)))

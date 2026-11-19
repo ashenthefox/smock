@@ -32,13 +32,15 @@
 #   end when one fails, runs on an amd64 runner set up for x86_64, where
 #   native verdicts decide, stops within a job's 6 hours, keeps each
 #   shard's output, also when the shard fails, and writes no random seed;
-# - in the weekly run, a job replays the canary (mutation-canary.yml), and
-#   one of its own runs the properties with random seeds (bulk.py seeds)
-#   and keeps their seeds and results;
+# - in the weekly run, a job replays the canary (mutation-canary.yml), one
+#   of its own runs the properties with random seeds (bulk.py seeds) and
+#   keeps their seeds and results, and one reports the coverage from the
+#   e2e tests (coverage-e2e.yml, #342);
 # - one job merges the shards (bulk.py finish): it needs the shards, the
 #   canary and the properties with random seeds, runs also when one of
 #   them failed, keeps the report as the artifact mutation-report, and, in
-#   the weekly run, the flake records as the artifact mutation-flakes.
+#   the weekly run, the flake records as the artifact mutation-flakes; it
+#   does not wait for the coverage from the e2e tests, which reports only.
 #
 # It needs yq (mikefarah/yq v4, on GitHub's Ubuntu runners) and jq.
 #
@@ -112,6 +114,8 @@ problems=$(printf '%s\n' "$json" | jq -r '
   | ($seeds[0].key // "seeds") as $seed
   | ([.jobs | to_entries[] | select(.value.uses == "./.github/workflows/mutation-canary.yml") | .key][0] // "canary")
     as $canary
+  | ([.jobs | to_entries[] | select(.value.uses == "./.github/workflows/coverage-e2e.yml") | .key][0] // "coverage-e2e")
+    as $coverage
 
   # The inputs.
   | ([$inputs.mode.options[]?] | sort | join(", ")) as $modes
@@ -182,6 +186,10 @@ problems=$(printf '%s\n' "$json" | jq -r '
     | (if $called.uses == "./.github/workflows/mutation-canary.yml" and ($called.if | weekly($plan))
           and any($called | needs[]; . == $plan) then empty
        else "it should replay the canary in the weekly run, in a job that calls ./.github/workflows/mutation-canary.yml with if: needs.\($plan).outputs.mode == '"'"'weekly'"'"'" end),
+    (.jobs[$coverage] // {}) as $called
+    | (if $called.uses == "./.github/workflows/coverage-e2e.yml" and ($called.if | weekly($plan))
+          and any($called | needs[]; . == $plan) then empty
+       else "it should report the coverage from the e2e tests in the weekly run, in a job that calls ./.github/workflows/coverage-e2e.yml with if: needs.\($plan).outputs.mode == '"'"'weekly'"'"'" end),
     one($seeds; "run the properties with random seeds (scripts/mutation/bulk.py seeds)"),
     ($seeds[] | .key as $job | .value
      | (if (.if | weekly($plan)) then empty
@@ -204,6 +212,9 @@ problems=$(printf '%s\n' "$json" | jq -r '
      | (if any(needs[]; . == $shard) then empty else "job \($job) should need the shards" end),
        (if any(needs[]; . == $canary) and any(needs[]; . == $seed) then empty
         else "job \($job) should need the canary and the properties with random seeds, so that the report names a failure of theirs" end),
+       (if any(needs[]; . == $coverage) then
+          "job \($job) should not wait for the coverage from the e2e tests, which reports only"
+        else empty end),
        (if (.if // "" | tostring | not_cancelled) then empty
         else "job \($job) should run also when a shard failed: if: ${{ !cancelled() && ... }}" end),
        (if any(.steps[]; (.uses // "" | startswith("actions/upload-artifact@")) and .with.name == "mutation-report"
@@ -223,4 +234,4 @@ fi
 if [ "$failed" -ne 0 ]; then
   exit 1
 fi
-echo "check-mutation-runs-workflow: $workflow runs on its schedules and by hand, plans its shards within the width and a job's 6 hours, runs them on amd64, runs the weekly run's canary and random seeds, and keeps the merged report"
+echo "check-mutation-runs-workflow: $workflow runs on its schedules and by hand, plans its shards within the width and a job's 6 hours, runs them on amd64, runs the weekly run's canary, random seeds and coverage from e2e, and keeps the merged report"
