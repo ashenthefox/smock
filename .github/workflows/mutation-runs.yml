@@ -82,8 +82,11 @@ on:
         description: "How many shards run at once, from 1 to 20; a run at 20 holds every job of the account"
         type: number
         default: 20
+      # One at a time: in the baseline's timing (run 44422395058), 1, 2 and
+      # 4 at once took 6.9, 6.6 and 7.2 s a mutant with the same outcomes
+      # (CONTRIBUTING.md, "Bulk runs on Actions").
       workers:
-        description: "How many mutants each shard builds and tests at once"
+        description: "How many mutants each shard builds and tests at once; 1, as the baseline's timing found two at once 4% faster and four 5% slower"
         type: number
         default: 1
 

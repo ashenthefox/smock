@@ -95,6 +95,10 @@ class PlanTest(unittest.TestCase):
         weekly, out = self.plan("weekly", "--schedule", "23 20 * * 5", *empty)
         self.assertEqual((weekly["mode"], weekly["args"]), ("weekly", ["--set", "pinned", *FIXTURE_PURE]))
         self.assertEqual((out["mode"], out["width"]), ("weekly", "20"))
+        # One mutant at a time on each runner: in the baseline's timing
+        # (#275, "Step 2's baseline"), two at once gained 4% and four lost
+        # 5% (CONTRIBUTING.md, "Bulk runs on Actions").
+        self.assertEqual({s["workers"] for s in json.loads(out["shards"])}, {1})
         monthly, out = self.plan("monthly", "--schedule", "43 22 1 * *", *empty)
         self.assertEqual((monthly["mode"], monthly["args"]), ("monthly", ["--set", "full", *FIXTURE_PURE]))
         self.assertEqual(out["mode"], "monthly")

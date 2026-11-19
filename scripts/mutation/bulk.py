@@ -181,6 +181,11 @@ BUDGET_S = 5 * 3600
 SECONDS_PER_MUTANT = 15
 # The mutants at once that the mode timing compares.
 TIMING_WORKERS = (1, 2, 4)
+# How many mutants a shard builds and tests at once unless given: one. In
+# the baseline's timing (#275, run 44422395058), 1, 2 and 4 at once took
+# 6.9, 6.6 and 7.2 s a mutant with the same outcomes: two gained 4% and
+# four lost 5%.
+WORKERS = 1
 # The sample's default size: the baseline's.
 SAMPLE_SIZE = 1000
 
@@ -867,7 +872,7 @@ def main():
     planning.add_argument("--list", help="with --mode list, the list of mutants")
     planning.add_argument("--width", type=width_spec, default=MAX_WIDTH,
                           help=f"how many shards run at once, from 1 to {MAX_WIDTH}")
-    planning.add_argument("--workers", type=positive_or(1), default=1,
+    planning.add_argument("--workers", type=positive_or(WORKERS), default=WORKERS,
                           help="how many mutants each shard builds and tests at once")
     planning.add_argument("--seconds-per-mutant", type=positive, default=SECONDS_PER_MUTANT,
                           help="the planned time of a mutant, which sizes the shards")
