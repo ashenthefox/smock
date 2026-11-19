@@ -924,6 +924,32 @@ check env "other smock settings are set as SMOCK_<NAME> variables, numbers writt
    and env("SMOCK_STATE_MAX_BYTES").value == "1000000000000000000000"
    and env("SMOCK_WRITE_TIMEOUT_MS").value == "1234567.5"'
 check env "each variable is set once" 'envs | length == (unique | length)'
+# The README's values section: in a values file, "12345678901234567 becomes
+# 12345678901234568", "1.10 becomes 1.1, 0123 becomes 83, 1_000 becomes
+# 1000, and yes and on become true"; quoted, or given with --set, they stay
+# as written. The chart writes what Helm gave it (#396).
+cat >"$tmp/values-yaml-forms.yaml" <<'YAML'
+env:
+  SMOCK_BIG: 12345678901234567
+  SMOCK_VERSION: 1.10
+  SMOCK_OCTAL: 0123
+  SMOCK_UNDERSCORE: 1_000
+  SMOCK_YES: yes
+  SMOCK_ON: on
+  SMOCK_QUOTED_BIG: "12345678901234567"
+  SMOCK_QUOTED_VERSION: "1.10"
+YAML
+render yaml-forms --values "$tmp/values-token.yaml" --values "$tmp/values-yaml-forms.yaml"
+check yaml-forms "a values file changes the forms the README lists, and quotes keep them" \
+  '[env("SMOCK_BIG", "SMOCK_VERSION", "SMOCK_OCTAL", "SMOCK_UNDERSCORE", "SMOCK_YES", "SMOCK_ON",
+     "SMOCK_QUOTED_BIG", "SMOCK_QUOTED_VERSION") | .value]
+   == ["12345678901234568", "1.1", "83", "1000", "true", "true", "12345678901234567", "1.10"]'
+render yaml-forms-set --values "$tmp/values-token.yaml" --set env.SMOCK_BIG=12345678901234567 \
+  --set env.SMOCK_VERSION=1.10 --set env.SMOCK_OCTAL=0123 --set env.SMOCK_UNDERSCORE=1_000 \
+  --set env.SMOCK_YES=yes --set env.SMOCK_ON=on
+check yaml-forms-set "--set keeps the forms the README lists as written" \
+  '[env("SMOCK_BIG", "SMOCK_VERSION", "SMOCK_OCTAL", "SMOCK_UNDERSCORE", "SMOCK_YES", "SMOCK_ON") | .value]
+   == ["12345678901234567", "1.10", "0123", "1_000", "yes", "on"]'
 # The chart's README sets the mockoon log format this way: through env,
 # with no value of the chart's own.
 render env-log-format --values "$tmp/values-token.yaml" --set env.SMOCK_LOG_FORMAT=mockoon
