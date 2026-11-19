@@ -10,9 +10,10 @@
 # - it takes the mode (each of bulk.py's, the weekly and the monthly run
 #   among them), the packages, the set, the seed, the size, the list, the
 #   width, whose default is the account's 20 concurrent jobs, and the
-#   mutants at once, and passes each to the plan, with the schedule that
-#   started the run and the flake records of the latest weekly run, which
-#   it downloads before the plan;
+#   mutants at once, whose default is 1, as the baseline's timing measured
+#   (CONTRIBUTING.md, "Bulk runs on Actions"), and passes each to the plan,
+#   with the schedule that started the run and the flake records of the
+#   latest weekly run, which it downloads before the plan;
 # - its permissions are read-only but in one job, which opens or comments
 #   on the issue of the stale entries: it may write issues and nothing
 #   else, checks out nothing, runs no script of the repository's, and runs
@@ -107,6 +108,8 @@ problems=$(printf '%s\n' "$json" | jq -r '
      else "its input mode should offer the modes body, list, matrix, monthly, packages, sample, timing, weekly, not: \($modes)" end),
     (if ($inputs.width.default | tostring) == "20" then empty
      else "it should take the width as an input whose default is 20, the account'"'"'s concurrent jobs" end),
+    (if ($inputs.workers.default | tostring) == "1" then empty
+     else "it should take the mutants at once as an input whose default is 1: in the baseline'"'"'s timing, two at once gained 4% and four lost 5%" end),
 
   # No job goes on after an error.
     (.jobs | to_entries[] | select(.value["continue-on-error"] != null and .value["continue-on-error"] != false)

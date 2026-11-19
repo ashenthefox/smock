@@ -118,6 +118,14 @@ refuses a-narrower-default-width \
   '.on.workflow_dispatch.inputs.width.default = 10' \
   "it should take the width as an input whose default is 20, the account's concurrent jobs"
 
+refuses more-mutants-at-once-by-default \
+  '.on.workflow_dispatch.inputs.workers.default = 2' \
+  "it should take the mutants at once as an input whose default is 1: in the baseline's timing, two at once gained 4% and four lost 5%"
+
+refuses no-mutants-at-once \
+  'del(.on.workflow_dispatch.inputs.workers)' \
+  "it should take the mutants at once as an input whose default is 1: in the baseline's timing, two at once gained 4% and four lost 5%"
+
 refuses an-input-left-out \
   '(.jobs.plan.steps[] | select(.id == "plan") | .run) |= sub("--seed [^ ]+ "; "")' \
   "the plan should pass the input seed to scripts/mutation/bulk.py plan as --seed"
