@@ -13,8 +13,9 @@ scripts/test-coverage-e2e.sh runs scripts/coverage-e2e.py on these files.
   needs no compiler.
 - `in-process.bisect` and `e2e.bisect` are bisect reports of format 4
   over that tree. Their points are where the compiler put them when the
-  tree was built with coverage; their counts are set by hand. The test
-  makes a few variants of them, each said where it is made:
+  tree was built with coverage; their counts are set by hand, as below.
+  The test makes a few variants of them, each described where it is
+  made.
 
 | point | what starts there | in-process | e2e |
 |---|---|---:|---:|
