@@ -29,9 +29,12 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
-{{/* The name of the ConfigMap the Definition files come from. */}}
+{{/*
+The name of the ConfigMap the Definition files come from, as text, as
+smock.string writes it.
+*/}}
 {{- define "smock.definitionsConfigMap" -}}
-{{- .Values.definitions.configMap.name | default (printf "%s-definitions" (include "smock.fullname" .) | trunc 63 | trimSuffix "-") -}}
+{{- include "smock.string" (.Values.definitions.configMap.name | default (printf "%s-definitions" (include "smock.fullname" .) | trunc 63 | trimSuffix "-")) -}}
 {{- end -}}
 
 {{/*
@@ -62,7 +65,7 @@ the Pods; new content for the same files still reaches smock by reload.
 {{- end }}
 {{- range $path, $_ := $cm.bodyFiles }}
 - key: {{ include "smock.bodyFileKey" $path }}
-  path: {{ printf "%s/%s" $.Values.definitions.bodyFileDir $path | quote }}
+  path: {{ printf "%s/%s" (include "smock.string" $.Values.definitions.bodyFileDir) $path | quote }}
 {{- end }}
 {{- end -}}
 {{- end -}}
@@ -100,9 +103,9 @@ new one (e2e/reload_test.mbt has a test of that).
 {{- define "smock.definitionsDir" -}}
 {{- $d := .Values.definitions -}}
 {{- if eq $d.source "gitSync" -}}
-{{- list "/git/current" ($d.gitSync.path | trimAll "/") | compact | join "/" -}}
+{{- list "/git/current" (include "smock.string" $d.gitSync.path | trimAll "/") | compact | join "/" -}}
 {{- else if eq $d.source "image" -}}
-{{- list "/definitions" ($d.image.path | trimAll "/") | compact | join "/" -}}
+{{- list "/definitions" (include "smock.string" $d.image.path | trimAll "/") | compact | join "/" -}}
 {{- else -}}
 /definitions
 {{- end -}}
@@ -111,26 +114,27 @@ new one (e2e/reload_test.mbt has a test of that).
 {{/*
 A git-sync container that syncs the repository into the definitions volume:
 the init container, which syncs once so that smock starts with its files
-(oneTime), or the sidecar, which keeps syncing.
+(oneTime), or the sidecar, which keeps syncing. Each value it takes is
+text, as smock.string writes it, so a ref or a tag of digits keeps them.
 */}}
 {{- define "smock.gitSyncContainer" -}}
 {{- $g := .root.Values.definitions.gitSync -}}
 - name: {{ ternary "git-sync-init" "git-sync" .oneTime }}
-  image: {{ printf "%s:%s" $g.image.repository $g.image.tag }}{{ with $g.image.digest }}@{{ . }}{{ end }}
+  image: {{ printf "%s:%s" (include "smock.string" $g.image.repository) (include "smock.string" $g.image.tag) }}{{ with $g.image.digest }}@{{ . }}{{ end }}
   imagePullPolicy: {{ $g.image.pullPolicy }}
   args:
-    - {{ printf "--repo=%s" $g.repo | quote }}
-    - {{ printf "--ref=%s" $g.ref | quote }}
+    - {{ printf "--repo=%s" (include "smock.string" $g.repo) | quote }}
+    - {{ printf "--ref=%s" (include "smock.string" $g.ref) | quote }}
     - --root=/git
     - --link=current
     - {{ printf "--depth=%s" (include "smock.string" $g.depth) | quote }}
     {{- if .oneTime }}
     - --one-time
     {{- else }}
-    - {{ printf "--period=%s" $g.period | quote }}
+    - {{ printf "--period=%s" (include "smock.string" $g.period) | quote }}
     {{- end }}
     {{- range $g.extraArgs }}
-    - {{ . | quote }}
+    - {{ include "smock.string" . | quote }}
     {{- end }}
   {{- with $g.env }}
   env:
@@ -177,14 +181,17 @@ the JSON object smock reads.
 {{- end -}}
 
 {{/*
-A value as text, such as an environment variable's. Numbers from values
-files reach templates as floating point, which Go would write as
-1.048576e+07; they are written out in full, whatever their size: a whole
-one with all its digits, a fraction as JSON writes it, which is in full
-from a millionth up.
+A value as text, such as an environment variable's, an image tag or a Git
+ref. Numbers from values files reach templates as floating point, which Go
+would write as 1.048576e+07, and printf "%s" as %!s(float64=2024); they are
+written out in full, whatever their size: a whole one with all its digits,
+a fraction as JSON writes it, which is in full from a millionth up. Null,
+a value the values removed, is no text, so that a default for an empty
+value applies to it.
 */}}
 {{- define "smock.string" -}}
-{{- if not (kindIs "float64" .) -}}
+{{- if kindIs "invalid" . -}}
+{{- else if not (kindIs "float64" .) -}}
 {{- toString . -}}
 {{- else if eq (floor .) . -}}
 {{- printf "%.0f" . -}}
@@ -210,7 +217,10 @@ to a second, plus 10 s. It is always above the sleep plus the drain timeout
 {{/* The smock image's own user, nonroot of its distroless base. */}}
 {{- define "smock.uid" -}}65532{{- end -}}
 
-{{/* The smock image: the tag defaults to the chart's appVersion. */}}
+{{/*
+The smock image: the tag defaults to the chart's appVersion. Both parts
+are text, as smock.string writes them, so a tag of digits keeps them.
+*/}}
 {{- define "smock.image" -}}
-{{- printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) -}}
+{{- printf "%s:%s" (include "smock.string" .Values.image.repository) (include "smock.string" .Values.image.tag | default .Chart.AppVersion) -}}
 {{- end -}}

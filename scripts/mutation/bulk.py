@@ -13,6 +13,7 @@ usage: python3 scripts/mutation/bulk.py plan --out <dir> [--root <dir>] [--mode 
            [--root <dir>] [--work <dir>] [--moon <moon>]
        python3 scripts/mutation/bulk.py finish --plan <plan.json> --out <dir> [--jobs <file>]
            [--run-url <url>] <shard's out>...
+       python3 scripts/mutation/bulk.py pace [--record <file>] [--run-url <url> <shard's out>...]
        python3 scripts/mutation/bulk.py stale --out <file> [--root <dir>] [--moonc <moonc>]
        python3 scripts/mutation/bulk.py seeds --out <dir> [--root <dir>] [--moon <moon>]
        python3 scripts/mutation/bulk.py triage --report <dir> --out <dir> [--max <n>]
@@ -59,6 +60,17 @@ finish merges the shards' outputs with merge.py into <out>, and starts
        not succeed, such as the canary, a shard whose self-test failed or
        the properties with random seeds, makes the report a failed run's.
 
+pace   gives the planned time of a mutant that the record of earlier
+       runs' shards (SHARD_TIMES, one JSON object per shard) holds, by
+       the rule of pace(): the slowest shard that ran its mutants, by its
+       run's time over its mutants, rounded up to a whole second. Given a
+       run's link and the outputs its shards wrote, it first adds a line
+       per shard to the record: the run, the shard, its mutants at once,
+       the mutants it ran, how long its run took and how it exited; a run
+       already recorded is refused. It prints the slowest shard, and
+       slowest_s and seconds_per_mutant as name=value lines.
+       SECONDS_PER_MUTANT is what it prints for the committed record.
+
 stale  lists the stale entries of the exclusion list (exclusions.py) into
        <out>, for their re-triage in a batch, and prints stale=<count>.
 
@@ -101,6 +113,9 @@ HERE = Path(__file__).resolve().parent
 RUN = HERE / "run.py"
 MERGE = HERE / "merge.py"
 RANDOM_SEEDS = HERE.parent / "random-seeds.py"
+# The record of earlier bulk runs' shards and their times, which the
+# planned time of a mutant comes from (pace).
+SHARD_TIMES = HERE.parent.parent / "mutation" / "shard-times.jsonl"
 
 # What a run runs, by its mode, and how its report names it.
 MODES = {
@@ -151,18 +166,29 @@ MAX_WIDTH = 20
 # The most jobs a matrix of GitHub Actions makes.
 MAX_JOBS = 256
 # How long a job may run on GitHub's runners is six hours; a shard's
-# mutants take at most five of them, which leaves the rest for the
-# checkout, the setup and the runs without a mutant.
+# mutants take at most five of them, at the planned time a mutant, which
+# leaves the rest for the checkout and the setup, under a minute in the
+# baseline, and as room to spare.
 BUDGET_S = 5 * 3600
-# The planned time of a mutant on an amd64 runner, kill confirmation
-# included: the costliest package's tests, engine's, took about 3 s a
-# mutant on wasm-gc on a laptop (#275's cost model), a runner is about
-# 1.7 times slower, and a kill is built and run three times; a mutant at
-# an unchecked access also runs natively. Bulk runs set it from their
-# times.
-SECONDS_PER_MUTANT = 20
+# The planned time of a mutant on an amd64 runner, everything a shard's
+# run does included: what pace() gives for the record SHARD_TIMES, the
+# slowest shard's time a mutant rounded up to a whole second, so that a
+# plan keeps every shard within BUDGET_S at the pace of the slowest shard
+# seen, not at the average's. In step 2's baseline (#275) the slowest was
+# engine's shard 5-of-20 of the BODY pass, 68 mutants in 970 s, 14.27 s
+# each, while a mutant took 7.0 s of runner time on average over the
+# sample; in the first weekly run (run 44423781036), protobuf's shard
+# 20-of-40, 460 mutants, half of them at an unchecked access and so also
+# run natively, in 6,990 s, 15.19 s each: 16 s. A run added to the record
+# that gives more raises it.
+SECONDS_PER_MUTANT = 16
 # The mutants at once that the mode timing compares.
 TIMING_WORKERS = (1, 2, 4)
+# How many mutants a shard builds and tests at once unless given: one. In
+# the baseline's timing (#275, run 44422395058), 1, 2 and 4 at once took
+# 6.9, 6.6 and 7.2 s a mutant with the same outcomes: two gained 4% and
+# four lost 5%.
+WORKERS = 1
 # The sample's default size: the baseline's.
 SAMPLE_SIZE = 1000
 
@@ -241,9 +267,7 @@ def sites_only(root, options, out):
     if result.returncode != 0:
         raise BulkError(f"run.py --sites-only {shlex.join(options)} failed:\n{result.stderr.strip()}")
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
-    chosen = [json.loads(line) for line in (out / "chosen.jsonl").read_text(encoding="utf-8").splitlines()
-              if line.strip()]
-    return summary, chosen
+    return summary, json_lines(out / "chosen.jsonl")
 
 
 def shard_count(mutants, width, seconds_per_mutant):
@@ -474,12 +498,20 @@ def unexplained(record):
     return record.get("outcome") == "survived" and record.get("exclusion", {}).get("status") != "accepted"
 
 
+def json_lines(path):
+    """The JSON objects of a file of JSON lines. A line ends at "\n" alone:
+    run.py writes a record's strings unescaped (ensure_ascii=False), and a
+    test's output in a record's message may hold U+2028, U+2029 or U+0085,
+    which str.splitlines() would also split at."""
+    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").split("\n") if line.strip()]
+
+
 def read_records(path):
     """The records of a run's output."""
     path = Path(path)
     if not path.is_file():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return json_lines(path)
 
 
 def alternative_rows(summary, records):
@@ -497,7 +529,7 @@ def read_jobs(path):
     """The run's jobs, one JSON object per line."""
     if not path:
         return []
-    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    return json_lines(path)
 
 
 def link(url):
@@ -566,8 +598,7 @@ def finish_timing(plan, args, out):
     runs = []
     for shard in args.shards:
         done = json.loads((Path(shard) / "bulk.json").read_text(encoding="utf-8"))
-        records = [json.loads(line) for line in (Path(shard) / "mutants.jsonl").read_text(encoding="utf-8")
-                   .splitlines() if line.strip()]
+        records = json_lines(Path(shard) / "mutants.jsonl")
         runs.append((done, {r["id"]: r["outcome"] for r in records}))
     runs.sort(key=lambda r: r[0]["workers"])
     if [r[0]["workers"] for r in runs] != list(TIMING_WORKERS):
@@ -606,6 +637,54 @@ def finish_timing(plan, args, out):
     report = "\n".join(lines) + "\n"
     (out / "report.md").write_text(report, encoding="utf-8")
     return report
+
+
+def shard_line(out, run_url):
+    """A shard's line of the record, from what bulk.py shard wrote into out:
+    its run, its name, its mutants at once, the mutants it ran, how long its
+    run took and how it exited; with the key that orders a run's shards."""
+    done = json.loads((Path(out) / "bulk.json").read_text(encoding="utf-8"))
+    line = {"run": run_url, "shard": done["name"], "workers": done["workers"],
+            "mutants": len(read_records(Path(out) / "mutants.jsonl")), "wall_s": done["wall_s"],
+            "status": done["status"]}
+    return (done["index"], done["workers"]), line
+
+
+def pace(lines):
+    """The planned time of a mutant by its rule, from the record's lines:
+    of the shards that ran their mutants (run.py exited with 0, with at
+    least one mutant), the slowest by its run's time over its mutants,
+    rounded up to a whole second. Returns it, the slowest shard's line and
+    how many shards ran their mutants."""
+    ran = [line for line in lines if line["status"] == 0 and line["mutants"] > 0]
+    if not ran:
+        raise BulkError("no recorded shard ran its mutants, so none says how long a mutant takes")
+    slowest = max(ran, key=lambda line: line["wall_s"] / line["mutants"])
+    return math.ceil(slowest["wall_s"] / slowest["mutants"]), slowest, len(ran)
+
+
+def pace_run(args):
+    """Adds the shards given to the record, and prints the planned time of
+    a mutant that the record gives; returns it."""
+    record = Path(args.record)
+    lines = read_records(record)
+    added = []
+    if args.shards:
+        if any(line["run"] == args.run_url for line in lines):
+            raise BulkError(f"the record already holds the shards of {args.run_url}")
+        added = [line for _, line in sorted((shard_line(s, args.run_url) for s in args.shards), key=lambda p: p[0])]
+    seconds, slowest, count = pace(lines + added)
+    if added:
+        record.parent.mkdir(parents=True, exist_ok=True)
+        with record.open("a", encoding="utf-8") as out:
+            out.writelines(json.dumps(line, ensure_ascii=False) + "\n" for line in added)
+    per_mutant = round(slowest["wall_s"] / slowest["mutants"], 3)
+    print(f"The slowest of the {count} recorded shards that ran their mutants: {slowest['shard']} of"
+          f" {slowest['run']}, {slowest['mutants']} mutants in {duration(slowest['wall_s'])}, {per_mutant} s a"
+          " mutant.")
+    print(f"slowest_s={per_mutant}")
+    print(f"seconds_per_mutant={seconds}")
+    return seconds
 
 
 def stale_run(args):
@@ -801,7 +880,7 @@ def main():
     planning.add_argument("--list", help="with --mode list, the list of mutants")
     planning.add_argument("--width", type=width_spec, default=MAX_WIDTH,
                           help=f"how many shards run at once, from 1 to {MAX_WIDTH}")
-    planning.add_argument("--workers", type=positive_or(1), default=1,
+    planning.add_argument("--workers", type=positive_or(WORKERS), default=WORKERS,
                           help="how many mutants each shard builds and tests at once")
     planning.add_argument("--seconds-per-mutant", type=positive, default=SECONDS_PER_MUTANT,
                           help="the planned time of a mutant, which sizes the shards")
@@ -819,6 +898,12 @@ def main():
     finishing.add_argument("--jobs", help="the run's jobs, as GitHub's API gives them, one JSON object per line")
     finishing.add_argument("--run-url", help="the run's link")
     finishing.add_argument("shards", nargs="+", help="the directories the shards wrote")
+    pacing = steps.add_parser("pace", help="record a run's shard times and give the planned time of a mutant")
+    pacing.add_argument("--record", default=str(SHARD_TIMES), help="the record of earlier runs' shards and their"
+                                                                  " times")
+    pacing.add_argument("--run-url", help="the link of the run whose shards are given, which their lines name")
+    pacing.add_argument("shards", nargs="*", help="the directories the run's shards wrote, as its artifacts"
+                                                  " mutation-shard-* hold them")
     staling = steps.add_parser("stale", help="list the stale entries of the exclusion list")
     staling.add_argument("--out", required=True, help="the file the list goes into")
     staling.add_argument("--root", default=".", help="the workspace")
@@ -836,11 +921,15 @@ def main():
     args = parser.parse_args()
     if args.step == "plan" and args.mode == "list" and not args.list and not args.schedule:
         parser.error("--mode list needs --list")
+    if args.step == "pace" and args.shards and not args.run_url:
+        parser.error("shards are recorded with the run they are of: give --run-url")
     try:
         if args.step == "plan":
             plan_run(args)
         elif args.step == "shard":
             sys.exit(run_shard(args))
+        elif args.step == "pace":
+            pace_run(args)
         elif args.step == "stale":
             stale_run(args)
         elif args.step == "seeds":

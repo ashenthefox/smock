@@ -100,6 +100,29 @@ refuses a-third-schedule \
   '.on.schedule += [{"cron": "0 12 * * 3"}]' \
   "its schedules should be the weekly run's, 23 20 * * 5, and the monthly run's, 43 22 1 * *, as scripts/mutation/bulk.py's SCHEDULES gives them, not: 23 20 * * 5, 43 22 1 * *, 0 12 * * 3"
 
+# --- A run's name says its mode ---------------------------------------------------
+
+# The release check (scripts/check-weekly-run.py, #316) finds the weekly
+# runs by their name, "Mutation runs: weekly", whether a schedule or a
+# person started them.
+run_name_message="it should name each run by its mode, as the release check finds the weekly runs by their names: run-name: \"Mutation runs: \${{ github.event.schedule == '23 20 * * 5' && 'weekly' || github.event.schedule == '43 22 1 * *' && 'monthly' || inputs.mode }}\""
+
+refuses no-run-name \
+  'del(."run-name")' \
+  "$run_name_message"
+
+refuses a-run-name-without-the-mode \
+  '."run-name" = "Mutation runs"' \
+  "$run_name_message"
+
+refuses a-run-name-of-another-schedule \
+  '."run-name" |= sub("23 20"; "17 3")' \
+  "$run_name_message"
+
+refuses a-run-name-that-swaps-the-modes \
+  '."run-name" |= sub("'"'"'weekly'"'"'"; "'"'"'monthly'"'"'")' \
+  "$run_name_message"
+
 # --- What a run takes ------------------------------------------------------------
 
 refuses a-mode-missing \
@@ -117,6 +140,14 @@ refuses no-width \
 refuses a-narrower-default-width \
   '.on.workflow_dispatch.inputs.width.default = 10' \
   "it should take the width as an input whose default is 20, the account's concurrent jobs"
+
+refuses more-mutants-at-once-by-default \
+  '.on.workflow_dispatch.inputs.workers.default = 2' \
+  "it should take the mutants at once as an input whose default is 1: in the baseline's timing, two at once gained 4% and four lost 5%"
+
+refuses no-mutants-at-once \
+  'del(.on.workflow_dispatch.inputs.workers)' \
+  "it should take the mutants at once as an input whose default is 1: in the baseline's timing, two at once gained 4% and four lost 5%"
 
 refuses an-input-left-out \
   '(.jobs.plan.steps[] | select(.id == "plan") | .run) |= sub("--seed [^ ]+ "; "")' \
@@ -242,6 +273,18 @@ refuses a-canary-in-every-run \
   'del(.jobs.canary.if)' \
   "it should replay the canary in the weekly run, in a job that calls ./.github/workflows/mutation-canary.yml with if: needs.plan.outputs.mode == 'weekly'"
 
+refuses no-coverage-from-e2e \
+  'del(.jobs."coverage-e2e")' \
+  "it should report the coverage from the e2e tests in the weekly run, in a job that calls ./.github/workflows/coverage-e2e.yml with if: needs.plan.outputs.mode == 'weekly'"
+
+refuses coverage-from-e2e-in-every-run \
+  'del(.jobs."coverage-e2e".if)' \
+  "it should report the coverage from the e2e tests in the weekly run, in a job that calls ./.github/workflows/coverage-e2e.yml with if: needs.plan.outputs.mode == 'weekly'"
+
+refuses coverage-from-e2e-without-the-plan \
+  'del(.jobs."coverage-e2e".needs)' \
+  "it should report the coverage from the e2e tests in the weekly run, in a job that calls ./.github/workflows/coverage-e2e.yml with if: needs.plan.outputs.mode == 'weekly'"
+
 refuses no-random-seeds \
   'del(.jobs.seeds)' \
   "it should run the properties with random seeds (scripts/mutation/bulk.py seeds) in one job, not in: nothing"
@@ -275,6 +318,10 @@ refuses no-flake-records-kept \
 refuses a-finish-without-the-weekly-jobs \
   '.jobs.finish.needs = ["plan", "shard"]' \
   "job finish should need the canary and the properties with random seeds, so that the report names a failure of theirs"
+
+refuses a-finish-that-waits-for-the-coverage-from-e2e \
+  '.jobs.finish.needs += ["coverage-e2e"]' \
+  "job finish should not wait for the coverage from the e2e tests, which reports only"
 
 refuses no-finish \
   'del(.jobs.finish)' \

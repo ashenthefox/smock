@@ -141,14 +141,17 @@ def restricted_violations:
   ];
 '
 
-# check <name> <description> <jq filter>: the filter, run on the manifests
-# rendered as <name>, must give true.
+# check <name> <description> <jq filter> [jq arguments...]: the filter, run
+# on the manifests rendered as <name>, must give true. The arguments, such
+# as --arg, give the filter its variables.
 check() {
-  if jq -e "$defs $3" "$tmp/$1.json" >/dev/null 2>"$tmp/jq.err"; then
-    pass "$1: $2"
+  name=$1 description=$2 filter=$3
+  shift 3
+  if jq -e "$@" "$defs $filter" "$tmp/$name.json" >/dev/null 2>"$tmp/jq.err"; then
+    pass "$name: $description"
   else
-    fail "$1: $2"
-    echo "     filter: $3"
+    fail "$name: $description"
+    echo "     filter: $filter"
     if [ -s "$tmp/jq.err" ]; then
       sed 's/^/     /' "$tmp/jq.err"
     fi
@@ -248,6 +251,15 @@ check existing-configmap "an existing ConfigMap is mounted, and the chart makes 
 refuse existing-configmap-and-files "Definition files in the values and an existing ConfigMap" \
   "definitions.configMap.name names an existing ConfigMap, so definitions.configMap.files and definitions.configMap.bodyFiles must be empty" \
   --values "$tmp/values-token.yaml" --values "$tmp/values-files.yaml" --set definitions.configMap.name=team-definitions
+# A ConfigMap's name may be digits alone, which YAML reads as a number; the
+# volume names it with the digits of the values file, and as a string, which
+# is what Kubernetes takes for a name (#396). A million or more, so that a
+# number written as Go writes a float (2.0261119e+07) shows too.
+printf 'definitions:\n  configMap:\n    name: 20261119\n' >"$tmp/values-configmap-digits.yaml"
+render existing-configmap-digits --values "$tmp/values-token.yaml" --values "$tmp/values-configmap-digits.yaml"
+check existing-configmap-digits "an existing ConfigMap named with digits is mounted by that name, as a string" \
+  'configmaps == [] and volume("definitions").configMap == {"name": $name}' \
+  --arg name "$(yq '.definitions.configMap.name' "$tmp/values-configmap-digits.yaml")"
 
 # --- Body files in the same ConfigMap ---------------------------------------
 
@@ -305,6 +317,25 @@ render body-file-dir --values "$tmp/values-token.yaml" --values "$tmp/values-bod
 check body-file-dir "the body-file subdirectory follows definitions.bodyFileDir" \
   "$layout"' == {"users.json": "{\"stubs\":[]}", "bodies/users/1.json": "{\"id\":1}", "bodies/README.txt": "not a Definition file"}
    and env("SMOCK_BODY_FILE_DIR").value == "bodies"'
+# A subdirectory named with digits, such as a date, is a number to YAML; the
+# volume's items and smock's setting name it with the digits of the values
+# file (#396).
+printf 'definitions:\n  bodyFileDir: 20261119\n' >"$tmp/values-body-file-dir-digits.yaml"
+render body-file-dir-digits --values "$tmp/values-token.yaml" --values "$tmp/values-body-files.yaml" \
+  --values "$tmp/values-body-file-dir-digits.yaml"
+check_text body-file-dir-digits "a body-file subdirectory written as digits holds the body files, and smock reads them from it" \
+  "$layout"' == {"users.json": "{\"stubs\":[]}", "\($dir)/users/1.json": "{\"id\":1}", "\($dir)/README.txt": "not a Definition file"}
+   and env("SMOCK_BODY_FILE_DIR").value == $dir' \
+  --arg dir "$(yq '.definitions.bodyFileDir' "$tmp/values-body-file-dir-digits.yaml")"
+# The chart refuses an empty subdirectory, and a null one, which removes the
+# default, is empty too.
+refuse body-file-dir-empty "an empty body-file subdirectory" \
+  'definitions.bodyFileDir: "" is not a relative path inside the definitions directory' \
+  --values "$tmp/values-token.yaml" --set definitions.bodyFileDir=
+printf 'definitions:\n  bodyFileDir: null\n' >"$tmp/values-body-file-dir-null.yaml"
+refuse body-file-dir-null "a null body-file subdirectory" \
+  'definitions.bodyFileDir: "" is not a relative path inside the definitions directory' \
+  --values "$tmp/values-token.yaml" --values "$tmp/values-body-file-dir-null.yaml"
 
 # A file whose content in a values file is a number of a million or more,
 # such as a JSON body of 1000000, keeps the digits of the values file in
@@ -415,6 +446,49 @@ check_text git-sync-large "a depth and a UID of a million or more from a values 
      and .securityContext.runAsUser == $uid and .securityContext.runAsGroup == $uid)' \
   --arg depth "$depth" --arg uid "$uid"
 
+# A ref written as digits, such as a short commit hash, and an image tag of
+# digits are numbers to YAML; git-sync gets them with the digits of the
+# values file (#396), as it gets every text the values give it: the
+# repository, the period and extra flags too. A million or more each, so
+# that a number written as Go writes a float (8.675309e+06) shows too.
+cat >"$tmp/values-git-sync-digits.yaml" <<'YAML'
+definitions:
+  gitSync:
+    repo: 4242424
+    ref: 8675309
+    period: 1000000
+    extraArgs:
+      - --max-failures
+      - 1000000
+    image:
+      repository: 1000001
+      tag: 20241231
+YAML
+render git-sync-digits --values "$tmp/values-token.yaml" --values "$tmp/values-git-sync.yaml" \
+  --values "$tmp/values-git-sync-digits.yaml"
+check_text git-sync-digits "a ref, an image, a repository, a period and extra flags written as digits reach both git-sync containers with those digits" \
+  '[container("git-sync", "git-sync-init")] as $c
+   | ($c | length) == 2
+   and all($c[]; .image == "\($repository):\($tag)@\($digest)"
+     and (.args | index("--repo=\($repo)") and index("--ref=\($ref)"))
+     and .args[-2:] == ["--max-failures", $failures])
+   and (container("git-sync").args | index("--period=\($period)"))' \
+  --arg repo "$(yq '.definitions.gitSync.repo' "$tmp/values-git-sync-digits.yaml")" \
+  --arg ref "$(yq '.definitions.gitSync.ref' "$tmp/values-git-sync-digits.yaml")" \
+  --arg period "$(yq '.definitions.gitSync.period' "$tmp/values-git-sync-digits.yaml")" \
+  --arg failures "$(yq '.definitions.gitSync.extraArgs[1]' "$tmp/values-git-sync-digits.yaml")" \
+  --arg repository "$(yq '.definitions.gitSync.image.repository' "$tmp/values-git-sync-digits.yaml")" \
+  --arg tag "$(yq '.definitions.gitSync.image.tag' "$tmp/values-git-sync-digits.yaml")" \
+  --arg digest "$(yq '.definitions.gitSync.image.digest' "$chart/values.yaml")"
+# A definitions directory named with digits, such as a date, is a number to
+# YAML too; smock reads it with those digits.
+printf 'definitions:\n  gitSync:\n    path: 20261119\n' >"$tmp/values-git-sync-path-digits.yaml"
+render git-sync-path-digits --values "$tmp/values-token.yaml" --values "$tmp/values-git-sync.yaml" \
+  --values "$tmp/values-git-sync-path-digits.yaml"
+check_text git-sync-path-digits "a definitions directory written as digits is the one smock reads from the synced tree" \
+  'env("SMOCK_DIR").value == "/git/current/\($path)"' \
+  --arg path "$(yq '.definitions.gitSync.path' "$tmp/values-git-sync-path-digits.yaml")"
+
 render git-sync-root --values "$tmp/values-token.yaml" --set definitions.source=gitSync --set definitions.gitSync.repo=https://example.com/m.git
 check git-sync-root "without a path, the Definition files are at the top of the repository" \
   'env("SMOCK_DIR").value == "/git/current"'
@@ -424,6 +498,10 @@ refuse git-sync-no-repo "git-sync without a repository" \
 refuse unknown-source "a delivery mode the chart does not know" \
   'definitions.source must be "configMap", "gitSync" or "image", not "s3"' \
   --values "$tmp/values-token.yaml" --set definitions.source=s3
+printf 'definitions:\n  source: 1000000\n' >"$tmp/values-source-digits.yaml"
+refuse unknown-source-digits "a delivery mode written as digits, named with those digits" \
+  "definitions.source must be \"configMap\", \"gitSync\" or \"image\", not \"$(yq '.definitions.source' "$tmp/values-source-digits.yaml")\"" \
+  --values "$tmp/values-token.yaml" --values "$tmp/values-source-digits.yaml"
 
 # --- OCI image volume alternative ---------------------------------------------
 
@@ -447,6 +525,22 @@ fi
 refuse image-no-reference "an image volume without a reference" \
   "definitions.image.reference is empty, but definitions.source is image" \
   --values "$tmp/values-token.yaml" --set definitions.source=image
+# An image reference may be digits alone, in the grammar of image references,
+# and a definitions directory may be named with digits; YAML reads both as
+# numbers, and the volume and smock get them with the digits of the values
+# file (#396).
+cat >"$tmp/values-image-digits.yaml" <<'YAML'
+definitions:
+  source: image
+  image:
+    reference: 1000000
+    path: 20261119
+YAML
+render image-digits --values "$tmp/values-token.yaml" --values "$tmp/values-image-digits.yaml"
+check_text image-digits "an image reference and a definitions directory written as digits are the volume's and smock's, with those digits" \
+  'volume("definitions").image.reference == $reference and env("SMOCK_DIR").value == "/definitions/\($path)"' \
+  --arg reference "$(yq '.definitions.image.reference' "$tmp/values-image-digits.yaml")" \
+  --arg path "$(yq '.definitions.image.path' "$tmp/values-image-digits.yaml")"
 
 # --- Admin API token ----------------------------------------------------------
 
@@ -470,9 +564,43 @@ check token-env "the token can come from the Secret as the variable SMOCK_ADMIN_
   'env("SMOCK_ADMIN_TOKEN").valueFrom == {"secretKeyRef": {"name": "smock-admin-token", "key": "token"}}
    and env("SMOCK_ADMIN_TOKEN_FILE") == null
    and ([pod | .volumes[] | select(.name == "admin-token")] == [])'
+# A Secret's name and key may be digits alone, which YAML reads as numbers;
+# the token's file, its Secret volume, the variable's secretKeyRef and the
+# notes after an install name them with the digits of the values file
+# (#396). A million or more each, so that a number written as Go writes a
+# float (1.234567e+06) shows too.
+cat >"$tmp/values-token-digits.yaml" <<'YAML'
+adminAuth:
+  tokenSecret:
+    name: 7654321
+    key: 1234567
+YAML
+token_name=$(yq '.adminAuth.tokenSecret.name' "$tmp/values-token-digits.yaml")
+token_key=$(yq '.adminAuth.tokenSecret.key' "$tmp/values-token-digits.yaml")
+render token-digits --values "$tmp/values-token-digits.yaml"
+check_text token-digits "a token Secret and key written as digits are the volume's Secret and the file smock reads, with those digits" \
+  'volume("admin-token").secret.secretName == $name
+   and env("SMOCK_ADMIN_TOKEN_FILE").value == "/etc/smock/admin/\($key)"' \
+  --arg name "$token_name" --arg key "$token_key"
+render token-env-digits --values "$tmp/values-token-digits.yaml" --set adminAuth.tokenAs=env
+check_text token-env-digits "a token Secret and key written as digits are the variable's secretKeyRef, with those digits" \
+  'env("SMOCK_ADMIN_TOKEN").valueFrom == {"secretKeyRef": {"name": $name, "key": $key}}' \
+  --arg name "$token_name" --arg key "$token_key"
+notes token-digits --values "$tmp/values-token-digits.yaml"
+if grep -qF -- "the Admin API needs the token from the Secret $token_name:" "$tmp/token-digits.notes"; then
+  pass "token-digits: the notes after an install name that Secret with those digits"
+else
+  fail "token-digits: the notes after an install do not name the Secret $token_name: $(cat "$tmp/token-digits.notes")"
+fi
 refuse token-as "the token passed in a way smock does not read" \
   'adminAuth.tokenAs must be "file" or "env", not "header"' \
   --set adminAuth.tokenSecret.name=smock-admin-token --set adminAuth.tokenAs=header
+# A refused value that YAML read as a number is named with the digits of the
+# values file (#396).
+printf 'adminAuth:\n  tokenAs: 1000000\n' >"$tmp/values-token-as-digits.yaml"
+refuse token-as-digits "the token passed in a way written as digits, named with those digits" \
+  "adminAuth.tokenAs must be \"file\" or \"env\", not \"$(yq '.adminAuth.tokenAs' "$tmp/values-token-as-digits.yaml")\"" \
+  --values "$tmp/values-token.yaml" --values "$tmp/values-token-as-digits.yaml"
 
 render auth-off --set adminAuth.enabled=false
 check auth-off "a value turns authentication off through smock's setting, and no token is needed" \
@@ -531,6 +659,21 @@ render tls-mocks-and-default --values "$tmp/values-token.yaml" --values "$tmp/va
 check tls-mocks-and-default "the Mocks' certificates go with a default certificate from tls.secretName" \
   'env("SMOCK_TLS_CERT_FILE").value == "/etc/smock/tls/tls.crt"
    and (env("SMOCK_TLS_MOCK_CERTS").value | fromjson | keys) == ["orders.v2", "users"]'
+# Secret names written as digits, which YAML reads as numbers, name the
+# Secrets with the digits of the values file (#396). A million or more each,
+# so that a number written as Go writes a float (1.000443e+06) shows too.
+cat >"$tmp/values-tls-digits.yaml" <<'YAML'
+tls:
+  secretName: 1000443
+  mockSecrets:
+    users: 2000443
+YAML
+render tls-digits --values "$tmp/values-token.yaml" --values "$tmp/values-tls-digits.yaml"
+check_text tls-digits "a TLS Secret and a Mock's Secret written as digits are mounted with those digits" \
+  'volume("tls").secret.secretName == $default
+   and ([pod | .volumes[] | select(.secret.secretName == $users)] | length) == 1' \
+  --arg default "$(yq '.tls.secretName' "$tmp/values-tls-digits.yaml")" \
+  --arg users "$(yq '.tls.mockSecrets.users' "$tmp/values-tls-digits.yaml")"
 refuse tls-mocks-no-secret "a Mock without the name of its Secret" \
   'tls.mockSecrets: the Mock "users" has no Secret name' \
   --values "$tmp/values-token.yaml" --set tls.mockSecrets.users=
@@ -781,6 +924,32 @@ check env "other smock settings are set as SMOCK_<NAME> variables, numbers writt
    and env("SMOCK_STATE_MAX_BYTES").value == "1000000000000000000000"
    and env("SMOCK_WRITE_TIMEOUT_MS").value == "1234567.5"'
 check env "each variable is set once" 'envs | length == (unique | length)'
+# The README's values section: in a values file, "12345678901234567 becomes
+# 12345678901234568", "1.10 becomes 1.1, 0123 becomes 83, 1_000 becomes
+# 1000, and yes and on become true"; quoted, or given with --set, they stay
+# as written. The chart writes what Helm gave it (#396).
+cat >"$tmp/values-yaml-forms.yaml" <<'YAML'
+env:
+  SMOCK_BIG: 12345678901234567
+  SMOCK_VERSION: 1.10
+  SMOCK_OCTAL: 0123
+  SMOCK_UNDERSCORE: 1_000
+  SMOCK_YES: yes
+  SMOCK_ON: on
+  SMOCK_QUOTED_BIG: "12345678901234567"
+  SMOCK_QUOTED_VERSION: "1.10"
+YAML
+render yaml-forms --values "$tmp/values-token.yaml" --values "$tmp/values-yaml-forms.yaml"
+check yaml-forms "a values file changes the forms the README lists, and quotes keep them" \
+  '[env("SMOCK_BIG", "SMOCK_VERSION", "SMOCK_OCTAL", "SMOCK_UNDERSCORE", "SMOCK_YES", "SMOCK_ON",
+     "SMOCK_QUOTED_BIG", "SMOCK_QUOTED_VERSION") | .value]
+   == ["12345678901234568", "1.1", "83", "1000", "true", "true", "12345678901234567", "1.10"]'
+render yaml-forms-set --values "$tmp/values-token.yaml" --set env.SMOCK_BIG=12345678901234567 \
+  --set env.SMOCK_VERSION=1.10 --set env.SMOCK_OCTAL=0123 --set env.SMOCK_UNDERSCORE=1_000 \
+  --set env.SMOCK_YES=yes --set env.SMOCK_ON=on
+check yaml-forms-set "--set keeps the forms the README lists as written" \
+  '[env("SMOCK_BIG", "SMOCK_VERSION", "SMOCK_OCTAL", "SMOCK_UNDERSCORE", "SMOCK_YES", "SMOCK_ON") | .value]
+   == ["12345678901234567", "1.10", "0123", "1_000", "yes", "on"]'
 # The chart's README sets the mockoon log format this way: through env,
 # with no value of the chart's own.
 render env-log-format --values "$tmp/values-token.yaml" --set env.SMOCK_LOG_FORMAT=mockoon
@@ -839,6 +1008,30 @@ check pod "the image, pull Secrets, annotations and scheduling come from the val
    and pod.nodeSelector == {"pool": "mocks"}
    and pod.tolerations == [{"key": "mocks", "operator": "Exists", "effect": "NoSchedule"}]
    and pod.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].weight == 1'
+
+# An image tag written as digits, such as a date, is a number to YAML; the
+# image names it with the digits of the values file all the same (#396). A
+# million or more, so that a number written as Go writes a float (2.0261119e+07)
+# shows too. A repository may be digits alone as well, in the grammar of
+# image references.
+cat >"$tmp/values-pod-digits.yaml" <<'YAML'
+image:
+  repository: 1000000
+  tag: 20261119
+YAML
+render pod-digits --values "$tmp/values-token.yaml" --values "$tmp/values-pod-digits.yaml"
+check_text pod-digits "an image repository and tag written as digits are the image's, with those digits" \
+  'smock.image == "\($repository):\($tag)"' \
+  --arg repository "$(yq '.image.repository' "$tmp/values-pod-digits.yaml")" \
+  --arg tag "$(yq '.image.tag' "$tmp/values-pod-digits.yaml")"
+# The values table: "Empty: the chart's appVersion". A tag of null, which
+# removes the default, is empty too.
+printf 'image:\n  tag: null\n' >"$tmp/values-tag-null.yaml"
+render tag-null --values "$tmp/values-token.yaml" --values "$tmp/values-tag-null.yaml"
+check_text tag-null "a tag of null is the chart's appVersion, as an empty one is" \
+  'smock.image == "\($repository):\($app_version)"' \
+  --arg repository "$(yq '.image.repository' "$chart/values.yaml")" \
+  --arg app_version "$(yq '.appVersion' "$chart/Chart.yaml")"
 
 # --- The released chart -------------------------------------------------------
 

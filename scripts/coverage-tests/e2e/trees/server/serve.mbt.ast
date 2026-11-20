@@ -1,0 +1,176 @@
+((base_pos 1:1
+  (Ptop_typedef
+   ((tycon Server) (tycon_loc_ 4:12-4:18) (params ())
+    (components
+     (Ptd_record
+      (((field_name ((label hits) (loc_ 5:7-5:11)))
+        (field_ty (Ptype_name ((lid Int) (loc_ 5:14-5:17)) () 5:14-5:17))
+        (field_mut true) (field_loc_ 5:3-5:17)))))
+    (doc_
+     ((block_line "")
+      (comment
+       ("" " A server that stands in for smock's, in the tests of"
+        " scripts/coverage-e2e.py: a body of each kind, some reached and some"
+        " not, which scripts/coverage-tests/e2e/README.md lists."))
+      (loc 0:1-3:59)))
+    (type_vis (Vis_pub () 4:1-4:4)) (loc_ 4:1-6:2))))
+ (base_pos 9:1
+  (Ptop_funcdef
+   ((type_name (((name Server) (loc_ 2:8-2:14))))
+    (name ((binder_name new) (loc_ 2:16-2:19))) (decl_params (()))
+    (params_loc_ 2:19-2:21) (quantifiers ())
+    (return_type ((Ptype_name ((lid Server) (loc_ 2:25-2:31)) () 2:25-2:31)))
+    (error_type No_error_typ) (vis (Vis_pub () 2:1-2:4))
+    (doc_
+     ((block_line "") (comment ("" " A server that has answered nothing."))
+      (loc 0:1-1:40)))
+    (loc_ 2:1-2:31))
+   (Decl_body
+    (Pexpr_record
+     ((Field_def ((label_name hits) (loc_ 3:5-3:9))
+       (Pexpr_constant 0 3:11-3:12) false 3:5-3:12))
+     Trailing_none 3:3-3:14))
+   2:1-4:2))
+ (base_pos 15:1
+  (Ptop_funcdef
+   ((type_name (((name Server) (loc_ 2:8-2:14))))
+    (name ((binder_name serve) (loc_ 2:16-2:21)))
+    (decl_params
+     (((((binder_name self) (loc_ 2:22-2:26))
+        ((Ptype_name ((lid Server) (loc_ 2:29-2:35)) () 2:29-2:35)))
+       (((binder_name path) (loc_ 2:37-2:41))
+        ((Ptype_name ((lid String) (loc_ 2:44-2:50)) () 2:44-2:50))))))
+    (params_loc_ 2:21-2:51) (quantifiers ())
+    (return_type ((Ptype_name ((lid Int) (loc_ 2:55-2:58)) () 2:55-2:58)))
+    (error_type No_error_typ) (vis (Vis_pub () 2:1-2:4))
+    (doc_
+     ((block_line "")
+      (comment
+       (""
+        " Answers a request for a path: 400 for no path, 414 for a long one."))
+      (loc 0:1-1:71)))
+    (loc_ 2:1-2:58))
+   (Decl_body
+    (Pexpr_guard
+     (Pexpr_infix ((var_name !=) (loc_ 3:14-3:16))
+      (Pexpr_ident ((var_name path) (loc_ 3:9-3:13)) 3:9-3:13)
+      (Pexpr_constant "" 3:17-3:19) 3:9-3:19)
+     ((Pexpr_return ((Pexpr_constant 400 3:34-3:37)) 3:27-3:37))
+     (Pexpr_sequence
+      ((Pexpr_if
+        (Pexpr_infix ((var_name ==) (loc_ 4:11-4:13))
+         (Pexpr_ident ((var_name path) (loc_ 4:6-4:10)) 4:6-4:10)
+         (Pexpr_constant / 4:14-4:17) 4:6-4:17)
+        (Pexpr_mutate (Pexpr_ident ((var_name self) (loc_ 5:5-5:9)) 5:5-5:9)
+         (Label ((label_name hits) (loc_ 5:10-5:14)))
+         (Pexpr_infix ((var_name +) (loc_ 5:27-5:28))
+          (Pexpr_field
+           (Pexpr_ident ((var_name self) (loc_ 5:17-5:21)) 5:17-5:21)
+           (Label ((label_name hits) (loc_ 5:22-5:26))) 5:17-5:26)
+          (Pexpr_constant 1 5:29-5:30) 5:17-5:30)
+         5:5-5:30)
+        ((Pexpr_mutate (Pexpr_ident ((var_name self) (loc_ 7:5-7:9)) 7:5-7:9)
+          (Label ((label_name hits) (loc_ 7:10-7:14)))
+          (Pexpr_infix ((var_name +) (loc_ 7:27-7:28))
+           (Pexpr_field
+            (Pexpr_ident ((var_name self) (loc_ 7:17-7:21)) 7:17-7:21)
+            (Label ((label_name hits) (loc_ 7:22-7:26))) 7:17-7:26)
+           (Pexpr_constant 2 7:29-7:30) 7:17-7:30)
+          7:5-7:30))
+        4:3-8:4))
+      (Pexpr_match
+       (Pexpr_dot_apply
+        (Pexpr_ident ((var_name path) (loc_ 9:9-9:13)) 9:9-9:13)
+        ((label_name length) (loc_ 9:14-9:20)) () 9:9-9:22)
+       (((Ppat_constant 0 10:5-10:6) (Pexpr_constant 404 10:10-10:13))
+        ((pattern (Ppat_var ((binder_name n) (loc_ 11:5-11:6))))
+         (guard
+          ((Pexpr_infix ((var_name >) (loc_ 11:12-11:13))
+            (Pexpr_ident ((var_name n) (loc_ 11:10-11:11)) 11:10-11:11)
+            (Pexpr_constant 100 11:14-11:17) 11:10-11:17)))
+         (body (Pexpr_constant 414 11:21-11:24)))
+        ((Ppat_var ((binder_name n) (loc_ 12:5-12:6)))
+         (Pexpr_infix ((var_name +) (loc_ 12:20-12:21))
+          (Pexpr_field
+           (Pexpr_ident ((var_name self) (loc_ 12:10-12:14)) 12:10-12:14)
+           (Label ((label_name hits) (loc_ 12:15-12:19))) 12:10-12:19)
+          (Pexpr_ident ((var_name n) (loc_ 12:22-12:23)) 12:22-12:23)
+          12:10-12:23)))
+       9:3-9:24 9:3-13:4)
+      4:3-13:4)
+     false 3:3-13:4))
+   2:1-14:2))
+ (base_pos 31:1
+  (Ptop_funcdef
+   ((type_name (((name Server) (loc_ 2:8-2:14))))
+    (name ((binder_name stop) (loc_ 2:16-2:20)))
+    (decl_params
+     (((((binder_name self) (loc_ 2:21-2:25))
+        ((Ptype_name ((lid Server) (loc_ 2:28-2:34)) () 2:28-2:34)))
+       (Optional ((binder_name force) (loc_ 2:36-2:41))
+        (Pexpr_constant false 2:52-2:57)
+        ((Ptype_name ((lid Bool) (loc_ 2:45-2:49)) () 2:45-2:49))))))
+    (params_loc_ 2:20-2:58) (quantifiers ())
+    (return_type ((Ptype_name ((lid Unit) (loc_ 2:62-2:66)) () 2:62-2:66)))
+    (error_type No_error_typ) (vis (Vis_pub () 2:1-2:4))
+    (doc_
+     ((block_line "")
+      (comment ("" " Stops the server, at once when forced to."))
+      (loc 0:1-1:46)))
+    (loc_ 2:1-2:66))
+   (Decl_body
+    (Pexpr_sequence
+     ((Pexpr_if (Pexpr_ident ((var_name force) (loc_ 3:6-3:11)) 3:6-3:11)
+       (Pexpr_mutate (Pexpr_ident ((var_name self) (loc_ 4:5-4:9)) 4:5-4:9)
+        (Label ((label_name hits) (loc_ 4:10-4:14)))
+        (Pexpr_constant 0 4:17-4:18) 4:5-4:18)
+       () 3:3-5:4)
+      (Pexpr_while
+       (Pexpr_infix ((var_name >) (loc_ 6:19-6:20))
+        (Pexpr_field (Pexpr_ident ((var_name self) (loc_ 6:9-6:13)) 6:9-6:13)
+         (Label ((label_name hits) (loc_ 6:14-6:18))) 6:9-6:18)
+        (Pexpr_constant 1000 6:21-6:25) 6:9-6:25)
+       (Pexpr_mutate (Pexpr_ident ((var_name self) (loc_ 7:5-7:9)) 7:5-7:9)
+        (Label ((label_name hits) (loc_ 7:10-7:14)))
+        (Pexpr_infix ((var_name -) (loc_ 7:27-7:28))
+         (Pexpr_field
+          (Pexpr_ident ((var_name self) (loc_ 7:17-7:21)) 7:17-7:21)
+          (Label ((label_name hits) (loc_ 7:22-7:26))) 7:17-7:26)
+         (Pexpr_constant 1000 7:29-7:33) 7:17-7:33)
+        7:5-7:33)
+       () 6:3-8:4))
+     (Pexpr_mutate (Pexpr_ident ((var_name self) (loc_ 9:3-9:7)) 9:3-9:7)
+      (Label ((label_name hits) (loc_ 9:8-9:12)))
+      (Pexpr_infix ((var_name -) (loc_ 9:25-9:26))
+       (Pexpr_field
+        (Pexpr_ident ((var_name self) (loc_ 9:15-9:19)) 9:15-9:19)
+        (Label ((label_name hits) (loc_ 9:20-9:24))) 9:15-9:24)
+       (Pexpr_constant 1 9:27-9:28) 9:15-9:28)
+      9:3-9:28)
+     3:3-9:28))
+   2:1-10:2))
+ (base_pos 43:1
+  (Ptop_funcdef
+   ((type_name (((name Server) (loc_ 2:8-2:14))))
+    (name ((binder_name unused) (loc_ 2:16-2:22)))
+    (decl_params
+     (((((binder_name self) (loc_ 2:23-2:27))
+        ((Ptype_name ((lid Server) (loc_ 2:30-2:36)) () 2:30-2:36))))))
+    (params_loc_ 2:22-2:37) (quantifiers ())
+    (return_type ((Ptype_name ((lid Int) (loc_ 2:41-2:44)) () 2:41-2:44)))
+    (error_type No_error_typ) (vis (Vis_pub () 2:1-2:4))
+    (doc_
+     ((block_line "") (comment ("" " What no caller asks.")) (loc 0:1-1:25)))
+    (loc_ 2:1-2:44))
+   (Decl_body
+    (Pexpr_infix ((var_name *) (loc_ 3:13-3:14))
+     (Pexpr_field (Pexpr_ident ((var_name self) (loc_ 3:3-3:7)) 3:3-3:7)
+      (Label ((label_name hits) (loc_ 3:8-3:12))) 3:3-3:12)
+     (Pexpr_constant 7 3:15-3:16) 3:3-3:16))
+   2:1-4:2))
+ (base_pos 49:1
+  (Ptop_letdef ((binder_name limit) (loc_ 2:9-2:14))
+   ((Ptype_name ((lid Int) (loc_ 2:17-2:20)) () 2:17-2:20))
+   (Pexpr_constant 100 2:23-2:26) (Vis_pub () 2:1-2:4) 2:1-2:26
+   ((block_line "") (comment ("" " The most requests a server answers."))
+    (loc 0:1-1:40)))))

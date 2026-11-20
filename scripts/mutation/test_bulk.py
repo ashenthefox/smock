@@ -20,6 +20,7 @@ usage: python3 -m unittest discover -s scripts/mutation -v
 """
 
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -52,7 +53,7 @@ def bulk(*args, cwd=None):
 
 def read_lines(path):
     """The JSON objects of a file of JSON lines."""
-    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").split("\n") if line.strip()]
 
 
 def outputs(text):
@@ -94,6 +95,10 @@ class PlanTest(unittest.TestCase):
         weekly, out = self.plan("weekly", "--schedule", "23 20 * * 5", *empty)
         self.assertEqual((weekly["mode"], weekly["args"]), ("weekly", ["--set", "pinned", *FIXTURE_PURE]))
         self.assertEqual((out["mode"], out["width"]), ("weekly", "20"))
+        # One mutant at a time on each runner: in the baseline's timing
+        # (#275, "Step 2's baseline"), two at once gained 4% and four lost
+        # 5% (CONTRIBUTING.md, "Bulk runs on Actions").
+        self.assertEqual({s["workers"] for s in json.loads(out["shards"])}, {1})
         monthly, out = self.plan("monthly", "--schedule", "43 22 1 * *", *empty)
         self.assertEqual((monthly["mode"], monthly["args"]), ("monthly", ["--set", "full", *FIXTURE_PURE]))
         self.assertEqual(out["mode"], "monthly")
@@ -186,6 +191,21 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(len(shards), 8)
         self.assertEqual(out["width"], "2")
         self.assertEqual((plan["budget_s"], plan["seconds_per_mutant"]), (5 * 3600, 3600))
+
+    def test_every_shard_of_the_weekly_and_the_monthly_run_ends_in_time_at_the_slowest_pace_seen(self):
+        # CONTRIBUTING.md, "Bulk runs on Actions": the planned time of a
+        # mutant keeps every shard of smock's weekly and monthly runs
+        # within a job's time with room to spare, its mutants within 5 of
+        # the job's 6 hours, at the pace of the slowest shard recorded, not
+        # at the average's. The average's 7 s would not: the monthly run's
+        # 26,619 mutants at 7eac627b would go in 20 shards of 1,331, 5.6
+        # hours at the first weekly run's slowest 15.19 s a mutant.
+        slowest = float(outputs(bulk("pace").stdout)["slowest_s"])
+        for mode in ("weekly", "monthly"):
+            plan, _ = self.plan(f"smock-{mode}", "--mode", mode, root=REPO)
+            # A run's shards differ by one mutant at most.
+            largest = math.ceil(plan["mutants"] / len(plan["shards"]))
+            self.assertLessEqual(largest * slowest, 5 * 3600, f"{mode}: {largest} mutants a shard")
 
     def test_more_shards_than_a_matrix_holds_and_a_mutant_longer_than_a_shard_are_refused(self):
         # GitHub's matrix makes at most 256 jobs; engine has more mutants
@@ -400,6 +420,115 @@ class TimingTest(unittest.TestCase):
         for run in timing["runs"]:
             # The shard's run over its mutants, to the millisecond.
             self.assertEqual(run["per_mutant_s"], round(run["wall_s"] / 4, 3))
+
+
+def made_up_shard(out, name, mutants, wall_s, status=0, workers=1):
+    """A shard's output as bulk.py shard writes it, with as many records as
+    mutants and the run's time and exit status given."""
+    out.mkdir(parents=True)
+    index, count = (int(n) for n in name.split("-of-"))
+    (out / "bulk.json").write_text(json.dumps({"name": name, "index": index, "count": count, "workers": workers,
+                                               "machine": "x86_64", "wall_s": wall_s, "status": status}))
+    (out / "mutants.jsonl").write_text("".join(json.dumps({"id": f"m{i}"}) + "\n" for i in range(mutants)))
+    return out
+
+
+class PaceTest(unittest.TestCase):
+    """The planned time of a mutant, from the shards' times of earlier bulk
+    runs (bulk.py pace; CONTRIBUTING.md, "Bulk runs on Actions"): the
+    slowest shard's run over its mutants, rounded up to a whole second, so
+    that a plan holds every shard within a job's time at the pace of the
+    slowest shard seen, not at the average's."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="test-bulk-pace-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.record = self.tmp / "shard-times.jsonl"
+
+    def test_the_slowest_shard_that_ran_its_mutants_sets_the_planned_time_rounded_up(self):
+        # Shard 2's pace is the BODY pass's slowest shard's in the
+        # baseline: 68 mutants in 970.4 s, 14.271 s each. Shard 3 stopped
+        # (run.py exits with 1 when it cannot run the mutants), and shard
+        # 4 ran none: neither says how long a mutant takes.
+        shards = [made_up_shard(self.tmp / "1", "1-of-4", 50, 300.0),
+                  made_up_shard(self.tmp / "2", "2-of-4", 68, 970.4),
+                  made_up_shard(self.tmp / "3", "3-of-4", 10, 900.0, status=1),
+                  made_up_shard(self.tmp / "4", "4-of-4", 0, 30.0)]
+        result = bulk("pace", "--record", self.record, "--run-url", "https://github.com/o/r/actions/runs/1", *shards)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(outputs(result.stdout), {"slowest_s": "14.271", "seconds_per_mutant": "15"})
+        self.assertIn("The slowest of the 2 recorded shards that ran their mutants: 2-of-4 of"
+                      " https://github.com/o/r/actions/runs/1, 68 mutants in 16 min 10 s, 14.271 s a mutant.",
+                      result.stdout)
+        # Each shard is recorded, also those the rule leaves out.
+        self.assertEqual(read_lines(self.record), [
+            {"run": "https://github.com/o/r/actions/runs/1", "shard": "1-of-4", "workers": 1, "mutants": 50,
+             "wall_s": 300.0, "status": 0},
+            {"run": "https://github.com/o/r/actions/runs/1", "shard": "2-of-4", "workers": 1, "mutants": 68,
+             "wall_s": 970.4, "status": 0},
+            {"run": "https://github.com/o/r/actions/runs/1", "shard": "3-of-4", "workers": 1, "mutants": 10,
+             "wall_s": 900.0, "status": 1},
+            {"run": "https://github.com/o/r/actions/runs/1", "shard": "4-of-4", "workers": 1, "mutants": 0,
+             "wall_s": 30.0, "status": 0}])
+
+    def test_a_whole_second_stays_and_a_later_run_adds_to_the_record(self):
+        # 60 mutants in 900 s: 15 s each, planned at 15 s, not 16.
+        bulk("pace", "--record", self.record, "--run-url", "https://github.com/o/r/actions/runs/1",
+             made_up_shard(self.tmp / "1", "1-of-1", 60, 900.0))
+        result = bulk("pace", "--record", self.record)
+        self.assertEqual(outputs(result.stdout), {"slowest_s": "15.0", "seconds_per_mutant": "15"})
+        # A later run, slower: 40 mutants in 620 s, 15.5 s each.
+        result = bulk("pace", "--record", self.record, "--run-url", "https://github.com/o/r/actions/runs/2",
+                      made_up_shard(self.tmp / "2", "1-of-1", 40, 620.0))
+        self.assertEqual(outputs(result.stdout), {"slowest_s": "15.5", "seconds_per_mutant": "16"})
+        self.assertEqual([line["run"] for line in read_lines(self.record)],
+                         ["https://github.com/o/r/actions/runs/1", "https://github.com/o/r/actions/runs/2"])
+
+    def test_a_run_recorded_twice_and_a_record_with_no_shard_that_ran_are_refused(self):
+        shard = made_up_shard(self.tmp / "1", "1-of-1", 60, 900.0)
+        bulk("pace", "--record", self.record, "--run-url", "https://github.com/o/r/actions/runs/1", shard)
+        result = bulk("pace", "--record", self.record, "--run-url", "https://github.com/o/r/actions/runs/1", shard)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("the record already holds the shards of https://github.com/o/r/actions/runs/1", result.stderr)
+        self.assertEqual(len(read_lines(self.record)), 1)
+        stopped = self.tmp / "stopped.jsonl"
+        result = bulk("pace", "--record", stopped, "--run-url", "https://github.com/o/r/actions/runs/3",
+                      made_up_shard(self.tmp / "3", "1-of-1", 10, 900.0, status=1))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no recorded shard ran its mutants", result.stderr)
+        self.assertFalse(stopped.exists())
+        # Shards are recorded with the run they belong to.
+        result = bulk("pace", "--record", self.record, shard)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--run-url", result.stderr)
+
+    def test_a_record_whose_test_output_holds_a_line_separator_is_one_mutant(self):
+        # run.py writes each record on one line, with ensure_ascii=False:
+        # a test's output in its message may hold U+2028, U+2029 or U+0085
+        # unescaped, as yaml's is_printable mutants did in the first weekly
+        # run (#314, run 44423781036). JSON lines end at "\n" alone.
+        shard = made_up_shard(self.tmp / "1", "1-of-1", 0, 30.0)
+        (shard / "mutants.jsonl").write_text("".join(
+            json.dumps({"id": f"m{i}", "message": f"expected got {i}\x85"}, ensure_ascii=False) + "\n"
+            for i in range(3)), encoding="utf-8")
+        result = bulk("pace", "--record", self.record, "--run-url", "https://github.com/o/r/actions/runs/1", shard)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(outputs(result.stdout), {"slowest_s": "10.0", "seconds_per_mutant": "10"})
+        self.assertEqual(read_lines(self.record)[0]["mutants"], 3)
+
+    def test_bulk_runs_are_planned_at_what_the_committed_record_gives(self):
+        # CONTRIBUTING.md, "Bulk runs on Actions": the record holds the
+        # shards of step 2's baseline, run on main (#275, "Step 2's
+        # baseline"): the sample, the BODY pass and the timing; and those
+        # of the first weekly run.
+        import bulk as steps
+
+        result = bulk("pace")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(outputs(result.stdout)["seconds_per_mutant"], str(steps.SECONDS_PER_MUTANT))
+        recorded = {f"https://github.com/hirunefu/smock/actions/runs/{run}"
+                    for run in (44417735318, 44419874781, 44422395058, 44423781036)}
+        self.assertLessEqual(recorded, {line["run"] for line in read_lines(steps.SHARD_TIMES)})
 
 
 class PackageRowsTest(unittest.TestCase):

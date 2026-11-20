@@ -176,7 +176,7 @@ def find_sites(finder, root, directories):
                             capture_output=True, text=True)
     if result.returncode != 0:
         raise RatchetError(f"the site finder failed:\n{result.stderr}")
-    lines = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    lines = [json.loads(line) for line in result.stdout.split("\n") if line.strip()]
     return [s for s in lines if "skipped" not in s]
 
 
@@ -270,7 +270,7 @@ def at_base(root, base):
         if name.endswith(".jsonl"):
             package = Path(name).relative_to(COUNTS).as_posix().removesuffix(".jsonl")
             text = git(root, "show", f"{merge_base}:./{name}")
-            counts[package] = [json.loads(line) for line in text.splitlines() if line.strip()]
+            counts[package] = [json.loads(line) for line in text.split("\n") if line.strip()]
     listed = git(root, "ls-tree", "--name-only", merge_base, "--", DROPS.as_posix()).strip()
     drops = git(root, "show", f"{merge_base}:./{DROPS.as_posix()}") if listed else ""
     return merge_base, counts, drops

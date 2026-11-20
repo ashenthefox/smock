@@ -66,7 +66,7 @@ def read(directory):
     lines = {}
     for name in ("mutants.jsonl", "chosen.jsonl", "unapplied.jsonl"):
         path = directory / name
-        lines[name] = ([json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        lines[name] = ([json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
                        if path.is_file() else None)
     flakes_path = directory / "flakes.json"
     flakes = json.loads(flakes_path.read_text(encoding="utf-8")) if flakes_path.is_file() else None

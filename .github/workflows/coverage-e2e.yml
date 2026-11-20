@@ -1,0 +1,62 @@
+# Coverage from the e2e tests (#342; CONTRIBUTING.md, "Coverage from the
+# e2e tests"): server's and cmd/smock's points, which mostly only the
+# binary runs, reported from the e2e tests' smock processes and the
+# in-process tests together, with the points that no test reaches and the
+# positions that the e2e tests cover, which the run at operator level
+# through e2e mutates (#346). scripts/coverage-e2e.sh runs the in-process
+# tests with coverage, builds the instrumented binary and a plain e2e
+# package, runs the e2e tests with that binary, and writes the report
+# (scripts/coverage-e2e.py). It keeps the report and what it is made of as
+# the artifact coverage-e2e, also when a step fails, and shows the report
+# in the job's summary.
+#
+# It reports only: no package has a target, and a failed e2e test fails
+# nothing, since the report names it. It runs when the weekly mutation run
+# (mutation-runs.yml) calls it, beside the mutation shards, and when
+# started by hand from the Actions tab or with
+# `gh workflow run coverage-e2e.yml`, never on a schedule of its own, on
+# pull requests or on pushes (scripts/check-coverage-e2e-workflow.sh checks
+# that). It runs on amd64, whose native builds are about six times faster
+# than arm64's (#276).
+name: Coverage from e2e
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage-e2e:
+    name: Coverage from e2e (server and cmd/smock)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # The runner check, OpenSSL, the pinned MoonBit and moon update.
+      - uses: ./.github/actions/native-setup
+        with:
+          machine: x86_64
+
+      # A job summary holds at most 1 MiB; a larger report is only in the
+      # artifact.
+      - name: Run the in-process and the e2e tests with coverage, and report
+        run: |
+          scripts/coverage-e2e.sh --out "$RUNNER_TEMP/coverage-e2e" >/dev/null
+          report=$RUNNER_TEMP/coverage-e2e/report.md
+          if [ "$(wc -c <"$report")" -le 1000000 ]; then
+            cat "$report" >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "The report is larger than a job summary holds: it is in the artifact coverage-e2e." >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Keep the report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-e2e
+          path: ${{ runner.temp }}/coverage-e2e
+          retention-days: 90
+          if-no-files-found: warn

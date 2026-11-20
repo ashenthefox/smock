@@ -1158,7 +1158,9 @@ mentions floors '+prng 1 the abort arm waits for the exclusion list (#302)'
 # weakening report": the canary's mutants with their recorded verdicts,
 # its list of explained differences (mutation/canary/) and its workflow.
 # #275, "Weakening report": "the mutation and coverage workflows", among
-# them the bulk runs' (#313).
+# them the bulk runs' (#313) and the coverage from the e2e tests (#342),
+# with its report, which decides the positions e2e covers and the points
+# no test reaches.
 tree
 package
 branch
@@ -1166,7 +1168,8 @@ mkdir -p "$repo/scripts"
 cp "$list" "$repo/$list"
 git ls-files -- scripts/mutation scripts/coverage.sh scripts/coverage-report.py scripts/coverage-tests \
   scripts/coverage-ratchet.py mutation/canary .github/workflows/mutation-canary.yml \
-  .github/workflows/mutation-runs.yml >"$tmp/tool-files"
+  .github/workflows/mutation-runs.yml scripts/coverage-e2e.sh scripts/coverage-e2e.py \
+  .github/workflows/coverage-e2e.yml >"$tmp/tool-files"
 tools=0
 while read -r path; do
   tools=$((tools + 1))
@@ -1189,15 +1192,19 @@ fi
 # steps that test that judgment. Each script such a step runs, and each
 # script that one of those runs, decides a verdict, so the committed list
 # names it and the report shows a change to it (#395, which names the YAML
-# test suite's verdict script and its test). A step is named by its
-# workflow, its job and its name: a step renamed or gone fails the check,
-# so that it is looked at again.
+# test suite's verdict script and its test). The release's check of the
+# latest weekly mutation run judges that run against the list of packages
+# at L4, which the committed list names too (#316); its test, in
+# scripts/test-release-gates.sh, is a test of a check, which #310 left
+# off the list. A step is named by its workflow, its job and its name: a
+# step renamed or gone fails the check, so that it is looked at again.
 cat >"$tmp/verdict-steps" <<'TXT'
 .github/workflows/ci.yml	yaml-test-suite	Run yaml-test-suite against smock/yaml in both modes
 .github/workflows/ci.yml	scripts	Test the yaml-test-suite verdict
 .github/workflows/build-test.yml	release	Run h2spec against the plain port (h2c) and the TLS port (h2)
 .github/workflows/ci.yml	scripts	Test the h2spec verdict
 .github/workflows/build-test.yml	protobuf-conformance	Run protobuf's conformance suite against smock/protobuf
+.github/workflows/release.yml	plan	Check that the latest weekly mutation run is clean in the packages at L4
 TXT
 
 # step_scripts <root> <steps>: the scripts under <root> that the steps of
@@ -1350,7 +1357,8 @@ if step_scripts . "$tmp/verdict-steps" >"$tmp/step-scripts" 2>"$tmp/step-scripts
 else
   fail "verdict-steps: $(cat "$tmp/step-scripts.err")"
 fi
-for path in scripts/yaml-test-suite-verdict.py scripts/test-yaml-test-suite-verdict.sh scripts/h2spec-verdict.py; do
+for path in scripts/yaml-test-suite-verdict.py scripts/test-yaml-test-suite-verdict.sh scripts/h2spec-verdict.py \
+  scripts/check-weekly-run.py; do
   if grep -qxF -- "$path" "$tmp/step-scripts"; then
     pass "verdict-steps: the verdict steps run $path"
   else

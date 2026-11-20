@@ -95,7 +95,7 @@ def run_runner(root, work, out, moon, *args):
 
 def read_lines(path):
     """The JSON objects of a file of JSON lines."""
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
 
 
 def matrix_name(test):

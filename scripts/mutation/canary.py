@@ -115,7 +115,7 @@ def read_data(path):
     that makes it or the rule of v1 that leaves it out, and all are on one
     commit."""
     entries = []
-    for number, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+    for number, line in enumerate(Path(path).read_text(encoding="utf-8").split("\n"), 1):
         if not line.strip():
             continue
         where = f"{path}:{number}"
@@ -232,7 +232,7 @@ def finder_sites(command, root, packages):
                             text=True)
     if result.returncode != 0:
         raise CanaryError(f"the site finder failed on {root}:\n{result.stderr}")
-    return [s for s in map(json.loads, result.stdout.splitlines()) if "id" in s]
+    return [s for s in map(json.loads, filter(str.strip, result.stdout.split("\n"))) if "id" in s]
 
 
 def trimmed(source, start, end):
@@ -394,7 +394,7 @@ def compare_output(entries, explained, out, names):
     canary.json there: whether every verdict matched or was explained."""
     path = out / "mutants.jsonl"
     try:
-        records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        records = [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
     except (OSError, ValueError) as problem:
         raise CanaryError(f"cannot read the replay's records {path}: {problem}") from problem
     summary = compare(entries, explained, records, names)

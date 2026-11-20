@@ -2,8 +2,12 @@
 # starts it. It never runs on pull requests.
 #
 # Before anything else, its job plan checks that a tag names the version in
-# moon.mod (scripts/check-tag-version.sh) and that CI passed on the commit
-# of a pushed tag (scripts/check-ci-passed.sh): CI does not run on tags.
+# moon.mod (scripts/check-tag-version.sh) and, for a pushed tag, that CI
+# passed on its commit (scripts/check-ci-passed.sh), since CI does not run
+# on tags, and that the latest weekly mutation run over the pinned set is
+# clean in the packages at L4 and covers the commit
+# (scripts/check-weekly-run.py, decision 7). Every job that publishes needs
+# plan.
 #
 # 1. build: on an amd64 and an arm64 runner, each building for its own
 #    architecture without emulation, it builds smock with the MoonBit
@@ -66,13 +70,20 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      actions: read # scripts/check-ci-passed.sh looks up CI's run on the tagged commit
+      # scripts/check-ci-passed.sh looks up CI's run on the tagged commit,
+      # and scripts/check-weekly-run.py the weekly mutation runs, the
+      # branch checks and their reports.
+      actions: read
     outputs:
       version: ${{ steps.plan.outputs.version }}
       commit: ${{ steps.plan.outputs.commit }}
       toolchain: ${{ steps.plan.outputs.toolchain }}
     steps:
+      # The whole history: the check of the weekly run walks main's commits
+      # from the run's to the tagged one.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       # A tag names the version. A run by hand on a branch gets a
       # development version.
@@ -110,6 +121,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: scripts/check-ci-passed.sh "$(git rev-parse HEAD)"
+
+      # A release reads the latest weekly mutation run over the pinned set
+      # on main (decision 7, docs/releasing.md): for the packages at L4 it
+      # must show no unexplained survivor, on the tagged commit, or on an
+      # ancestor whose later changes the changed-lines reports cover or
+      # that touch no non-test source of a package at L4. With no package
+      # at L4, it reads nothing and passes. When this fails because the
+      # weekly run is still running, re-run this workflow once it has
+      # passed.
+      - name: Check that the latest weekly mutation run is clean in the packages at L4
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/check-weekly-run.py "$(git rev-parse HEAD)"
 
       - name: Write the release notes
         env:

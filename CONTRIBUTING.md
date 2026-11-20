@@ -275,7 +275,10 @@ real gRPC client, and the calls grpcurl makes, each with what it prints
 `scripts/coverage-tests/` holds the small bisect reports, and the small
 source tree they describe, that test the coverage report of
 `scripts/coverage.sh` and the coverage ratchet (see
-[Build and test](#build-and-test)).
+[Build and test](#build-and-test)); `e2e/` under it, those that test the
+report of the coverage from the e2e tests, with the compiler's parse trees
+of its files (see
+[Coverage from the e2e tests](#coverage-from-the-e2e-tests)).
 
 `coverage/` holds the coverage floors, each package's most uncovered
 points, and the list of the raises of a floor that a change recorded (see
@@ -343,9 +346,11 @@ scripts/test-check-grpcurl.sh dist/smock   # that check fails on each difference
 docker build --tag smock:dev .
 scripts/smoke-test-image.sh smock:dev 0.0.0-dev <commit> "moonc <version>"   # the container image
 scripts/test-helm-chart-on-kind.sh smock:dev   # the chart on a kind cluster (needs kind, kubectl and helm)
-scripts/check-release-workflow.sh    # the release workflow publishes only for tags (needs yq and jq)
+scripts/check-release-workflow.sh    # the release workflow publishes only for tags, and only after its checks of the tag (needs yq and jq)
+scripts/test-check-release-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-release-notes.sh        # the release notes, with CHANGELOG.md's links at the release's tag
-scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit and that the tag names moon.mod's version (needs jq)
+scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit, that the tag names moon.mod's version, and that the latest weekly mutation run is clean in the packages at L4, with fake gh runs on small git histories (needs python3, git and jq)
+python3 scripts/check-weekly-run.py <commit>   # whether the latest weekly mutation run lets the commit be released (needs git and gh)
 scripts/check-benchmark-workflow.sh  # the benchmark workflow runs only by hand (needs yq and jq)
 scripts/check-measure-costs-workflow.sh   # the workflow that measures the tests' costs runs only by hand, with no C flags (needs yq and jq)
 scripts/test-check-measure-costs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
@@ -369,8 +374,10 @@ python3 scripts/check-merge.py <branch>   # whether the branch checks on the bra
 scripts/test-check-merge.sh          # the merge check, with a fake gh and canned runs on a small git history (needs python3, git and jq)
 scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs only by hand or when the weekly mutation run calls it, and installs its commit's toolchain before the replay (needs yq and jq)
 scripts/test-check-mutation-canary-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
-scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only on their weekly and monthly schedules and by hand, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
+scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only on their weekly and monthly schedules and by hand, named by their mode, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
 scripts/test-check-mutation-runs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
+scripts/check-coverage-e2e-workflow.sh    # the coverage from the e2e tests runs only by hand or when the weekly mutation run calls it, on amd64, and keeps its report (needs yq and jq)
+scripts/test-check-coverage-e2e-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/test-sbom.sh                 # the SBOM scripts, and the check that the SBOM and NOTICE agree (needs jq)
 scripts/test-h2spec-verdict.sh       # how a run of h2spec is judged against its list of cases
 scripts/test-yaml-test-suite-verdict.sh   # how a run of yaml-test-suite is judged against its lists of cases
@@ -378,6 +385,7 @@ scripts/test-check-schema.sh         # the JSON Schema cross-check, with a fake 
 scripts/test-check-doc-examples.sh   # the check of the documents' examples, with a fake smock and a fake jsonnet (needs python3 and jq)
 scripts/test-coverage-report.sh      # the coverage report, on small bisect reports (needs python3)
 scripts/test-coverage-ratchet.sh     # the coverage ratchet, on small bisect reports in small git histories (needs python3 and git)
+scripts/test-coverage-e2e.sh         # the report of the coverage from the e2e tests, on small bisect reports and parse trees (needs python3)
 scripts/test-random-seeds.sh         # the script that writes random seeds into the properties, on a copy of re2's property and on small trees (needs python3)
 python3 scripts/check-doc-links.py   # the documents' links into the repository lead to a file, and to a heading when they name one (needs git)
 scripts/test-check-doc-links.sh      # that check, on small trees (needs python3 and git)
@@ -497,6 +505,13 @@ definition and operator ([The site counts](#the-site-counts)). CI's job
 `checks` fails when they are not what the site finder gives on the
 commit, so a change to a package's source, other than to its tests, runs
 `python3 scripts/mutation/ratchet.py write` and commits what it writes.
+
+`mutation/shard-times.jsonl` records the shards of earlier bulk mutation
+runs and how long each took, from which the bulk runs' planned time of a
+mutant comes ([Bulk runs on Actions](#bulk-runs-on-actions)). The bulk
+runs' tests fail when `SECONDS_PER_MUTANT` in `scripts/mutation/bulk.py`
+is not what the record gives, so a change that adds a slower run raises
+it too.
 
 [`docs/ledgers/`](docs/ledgers/use-cases.md) holds the use-case and
 boundary ledgers of the test review
@@ -627,6 +642,11 @@ find _coverage -name '*.trace.source' -exec moonrun "$(dirname "$(command -v moo
   -- -f bisect -o _coverage/e2e.bisect -t _coverage/e2e.txt {} +
 python3 scripts/coverage-report.py _coverage/e2e.bisect
 ```
+
+`scripts/coverage-e2e.sh --out <dir>` takes all these steps, the
+in-process tests' included, and writes the report that the weekly run
+keeps into `<dir>`
+([Coverage from the e2e tests](#coverage-from-the-e2e-tests)).
 
 A smock process writes no counters when it does not reach its exit:
 when a signal it leaves at its default action ends it (SIGKILL, SIGINT
@@ -981,8 +1001,9 @@ merge base with `main`:
 
 `server` and `cmd/smock` have floors too, of their in-process points. Most
 of their code only the binary runs, so a change that adds code there that
-only the e2e tests reach records a raise; e2e coverage is reported apart
-([#342](https://github.com/hirunefu/smock/issues/342)).
+only the e2e tests reach records a raise; e2e coverage is reported apart,
+every week, and holds no floor
+([Coverage from the e2e tests](#coverage-from-the-e2e-tests)).
 
 The job writes the table of the packages, with their points and floors,
 to its summary, and keeps the report and the bisect report as the
@@ -991,6 +1012,105 @@ runs on linux/amd64 beside the other jobs, and `keep` waits for it, on
 `main` too. Coverage counted the same points on linux/amd64 and
 linux/arm64 when step 0 measured it
 ([#276](https://github.com/hirunefu/smock/issues/276)).
+
+### Coverage from the e2e tests
+
+Most of `server`'s and `cmd/smock`'s code only the binary runs, so the
+in-process tests reach little of it. The weekly mutation run reports
+their coverage from the e2e tests and the in-process tests together
+([#342](https://github.com/hirunefu/smock/issues/342)), in the job
+`coverage-e2e`, beside the mutation shards
+([Bulk runs on Actions](#bulk-runs-on-actions)). The job is the workflow
+`.github/workflows/coverage-e2e.yml`, which can also be started alone by
+hand:
+
+```sh
+gh workflow run coverage-e2e.yml --ref main
+gh run download <run id> --name coverage-e2e --dir coverage-e2e
+```
+
+It runs `scripts/coverage-e2e.sh` on an amd64 runner, which does what
+[Build and test](#build-and-test) shows by hand:
+
+- `scripts/coverage.sh` runs the in-process tests with coverage, and
+  builds the instrumented binary in the same target directory: `cmd/smock`
+  with coverage, the native debug build that step 0 found to work on
+  amd64 ([#276](https://github.com/hirunefu/smock/issues/276));
+- the e2e package is built as a plain build, in moon's own target
+  directory, so the e2e tests' own process writes no coverage: its tests
+  call `openssl`'s TLS client, `log`'s time parser, `http1`'s date cache
+  and `re2` directly, which is not smock's behaviour;
+- the e2e tests run with `SMOCK_E2E_BINARY` naming the instrumented
+  binary and `SMOCK_COVERAGE_DUMP` naming a directory, where the harness
+  keeps the counters of each smock process;
+- moon_cove reads those logs, joined into one, with the trace sources
+  that made the in-process report, and `scripts/coverage-e2e.py report`
+  writes the report.
+
+The report starts with how many e2e tests ran and how long each step
+took. It then gives, for each package, its points, those the in-process
+tests reach, those the e2e tests reach and those either reaches, and the
+points neither reaches after the exclusion list. It lists, by file and
+definition, the points that no test reaches in `server`, `cmd/smock`,
+`defdir`, `watch` and `openssl`; a point that a DEFERRED entry covers is
+listed with its issue, and the points the list's other entries accept
+are listed apart. No package gets a percentage target here: the list is
+for triage ([#343](https://github.com/hirunefu/smock/issues/343)).
+
+It also decides which positions of `server` and `cmd/smock` the e2e
+tests cover, which the run at operator level through e2e mutates
+([#346](https://github.com/hirunefu/smock/issues/346)), and states the
+rule in the report: a position counts as covered by e2e when the point
+that starts the innermost function, then, else or match-arm body around
+it has a count above zero in the e2e tests' report. A function is any
+function, closures and local functions included, and holds its
+parameters' default values; an else is an if's or a guard's; a match arm
+is an arm of a match, a loop, a catch or a noraise. A loop's body is none
+of these, nor is a body that the compiler started with no point, which
+the report lists. A position in no such body, in a top-level value or a
+constant, counts as covered when its package has a point that the e2e
+tests reach, since the program initialises its values when it starts.
+The positions come from the site finder, and the bodies from the
+compiler's parse tree.
+
+The job keeps the artifact `coverage-e2e` for 90 days: `report.md`,
+which is also in the job's summary; the two bisect reports and their
+merge (`in-process.bisect`, `e2e.bisect`, `either.bisect`); the
+pinned set's mutants of `server` and `cmd/smock` at the positions e2e
+covers, `covered-by-e2e.jsonl`, and at the others,
+`not-covered-by-e2e.jsonl`, each a list of mutants by key that the
+mutation runner reads (`run.py --list`); `unreached.json`, the points
+that no test reaches; and what moon printed. The job reports only: a
+failed e2e test fails nothing, and the report names it and says that the
+e2e tests' report may then lack points. It fails only when there can be
+no report, as when a build or an in-process test fails. The weekly run's
+finish does not wait for it.
+
+The first report's points that no test reaches in `server` and
+`cmd/smock` are cut into triage tickets for #343 when there are more than
+about 40, at most 40 each, a source file that holds fewer never split:
+
+```sh
+mkdir -p bodies
+gh issue view 343 -R hirunefu/smock --json body --jq .body >bodies/343.md
+python3 scripts/coverage-e2e.py triage --report coverage-e2e --bodies bodies --out tickets \
+  --run-url <run link>
+```
+
+It writes a body per ticket into `tickets/`, with the ticket's points and
+#343's triage criteria for them; `tickets.json` gives each ticket's
+title, label, blockers (#342, #318 and #319) and the ticket it blocks,
+#343, which gains each as a native blocker; `tickets.md` the count. Like
+stage 1's, the tickets become sub-issues of the closing ticket they
+block.
+
+`scripts/test-coverage-e2e.sh`, in CI's job `scripts`, tests the report
+on small bisect reports over a small tree whose points the pinned
+compiler placed, with a position in each kind of body and one after an
+if whose then-body did not run, and the triage on its output.
+`scripts/check-coverage-e2e-workflow.sh`, with its test, checks that the
+workflow runs only by hand or when the weekly run calls it, on amd64,
+and keeps the report.
 
 ### The ladder
 
@@ -1411,9 +1531,10 @@ report lists every entry whose reviewer changed.
   the tag's commit or on an ancestor whose later changes the changed-lines
   reports cover or touch no non-test source of a package at L4. The
   release checks it before it publishes, beside the check that CI passed
-  on the tag's commit
-  ([What a tag does](docs/releasing.md#what-a-tag-does)). So a release may
-  wait for one weekly run.
+  on the tag's commit (`scripts/check-weekly-run.py`,
+  [What a tag does](docs/releasing.md#what-a-tag-does)). So a release may
+  wait for one weekly run. While no package is at L4, the check reads no
+  run and passes.
 - **Bulk runs go to Actions**: the baseline of 1,000 mutants, the weekly
   and monthly runs, `server` through e2e, and the kill matrices. On a
   developer's machine, only single mutants and the diff mode run, which
@@ -2363,7 +2484,13 @@ Its inputs:
 - `seed` and `size`: a sample's, 0 and 1,000 unless given.
 - `width`: how many shards run at once, from 1 to 20, the default.
 - `workers`: how many mutants each shard builds and tests at once, 1
-  unless given.
+  unless given. That is the baseline's measurement: in its timing
+  ([run 44422395058](https://github.com/hirunefu/smock/actions/runs/44422395058),
+  one shard of 50 mutants on `main`), 1, 2 and 4 at once took 6.9, 6.6
+  and 7.2 s a mutant, with the same outcome for each mutant. Two at once
+  gained 4% and four lost 5%, so bulk runs keep one at a time on each
+  runner. `bulk.py`'s `WORKERS` and the workflow's input say so, and the
+  workflow's check refuses another default.
 
 A run runs the runner as any run does: each package's own tests, then
 its importers' tests for the survivors, kill confirmation, the comparison
@@ -2374,16 +2501,16 @@ three jobs, and `scripts/mutation/bulk.py` holds the steps they take:
   no mutant, and cuts the mutants into shards: as many as the width, or
   more when a shard would not end within a job's time. A job on GitHub's
   runners stops after 6 hours; a shard's mutants may take 5 of them, at
-  20 s a mutant (`bulk.py plan --seconds-per-mutant`). That is the
-  costliest package's mutant on a runner with its kill confirmed:
-  `engine`'s tests took about 3 s a mutant on wasm-gc on a laptop, a
-  runner is about 1.7 times slower, and a kill is built and run three
-  times. More shards than the width run in waves, as jobs come free, so
-  their count is then a multiple of the width, which fills each wave. A
-  run never has more shards than mutants, and one that would need more
-  than the 256 jobs a matrix makes is refused. The job's summary
-  gives the run's mutants per package, and how many of them are at an
-  unchecked access, and the plan is kept as the artifact `mutation-plan`.
+  the planned time of a mutant, 16 s (below; `bulk.py plan
+  --seconds-per-mutant` overrides it), so a shard holds at most 1,125
+  mutants. The sixth hour is for the checkout and the setup, under a
+  minute in the baseline, and is room to spare. More shards than the
+  width run in waves, as jobs come free, so their count is then a
+  multiple of the width, which fills each wave. A run never has more
+  shards than mutants, and one that would need more than the 256 jobs a
+  matrix makes is refused. The job's summary gives the run's mutants per
+  package, and how many of them are at an unchecked access, and the plan
+  is kept as the artifact `mutation-plan`.
 - **shard** runs each shard (`bulk.py shard`), at most the width at once,
   on an amd64 runner (`ubuntu-24.04`) with the native setup. Verdicts of
   a pure package are taken on wasm-gc, which any runner gives alike, but a
@@ -2425,6 +2552,11 @@ which the plan downloads. Beside them:
   stale entries of the exclusion list (`bulk.py stale`);
 - the job `canary` calls `.github/workflows/mutation-canary.yml`, which
   replays [the canary](#the-canary) with the toolchain its commit pins;
+- the job `coverage-e2e` calls `.github/workflows/coverage-e2e.yml`,
+  which reports the coverage of `server` and `cmd/smock` from the e2e
+  tests and the in-process tests together
+  ([Coverage from the e2e tests](#coverage-from-the-e2e-tests)); it
+  reports only, and the finish does not wait for it;
 - the job `seeds` runs the properties with random seeds
   (`bulk.py seeds`), in a working copy of its own that no shard reads: it
   writes a random seed into each seed constant
@@ -2447,6 +2579,15 @@ the run, and the report starts with the jobs that did not succeed. The
 report keeps this run's flake records as the artifact `mutation-flakes`
 for 90 days, which the next weekly run reads.
 
+Each run's name says its mode: "Mutation runs: weekly" for the weekly
+run, whether its schedule or a person started it, and "Mutation runs:
+monthly", "Mutation runs: sample" and so on for the others. The release
+workflow's check of the latest weekly run
+([What a tag does](docs/releasing.md#what-a-tag-does)) finds the weekly
+runs by that name, those on `main` and one started by hand on a tag alike.
+A run from before the workflow named its runs is called "Mutation runs"
+alone, and the check does not read it.
+
 **The monthly run**, on the 1st of each month at 22:43 UTC, and by hand
 before a release, runs the full set over the pure packages. It reports
 only: its report gives, per package, the unexplained survivors at the
@@ -2462,8 +2603,14 @@ native-only packages, which the runner runs wholly natively (`bulk.py`'s
 evening UTC, when the repository has seen the fewest commits, and days
 away from the weekly run with the latest MoonBit, on Mondays at 03:17
 UTC. When the 1st is a Friday, the monthly run starts two hours and
-twenty minutes after the weekly one, which takes about one to one and a
-half hours (*estimate*). A push during either waits for free jobs.
+twenty minutes after the weekly one. The weekly run took 2 h 9 min the
+first time, from its first job's start to its last job's end
+([run 44423781036](https://github.com/hirunefu/smock/actions/runs/44423781036)),
+in 40 shards; planned at 16 s a mutant, it takes about 2 hours 50
+minutes (*estimate*, above): two of the weekly run's shards, `engine`'s
+and `protobuf`'s, still hold their jobs then, so two of the monthly
+run's first 20 shards wait for them, up to about half an hour. A push
+during either waits for free jobs.
 `bulk.py`'s `SCHEDULES` maps each schedule to its run, and the workflow's
 check pins both.
 
@@ -2505,10 +2652,66 @@ over the pure packages, whose survivor rate applies to positions as step
 3's triage budget does, and a BODY pass over every pure function:
 `-f mode=sample -f size=1000 -f seed=<seed>` and `-f mode=body`. The
 mode `timing` times one shard of it, 50 mutants, with 1, 2 and 4 mutants
-at once, and its report gives the time per mutant for each; the default
-of `workers` is set from it. The runs' reports, with their links and their
-wall and runner times, are posted on
-[#275](https://github.com/hirunefu/smock/issues/275).
+at once, and its report gives the time per mutant for each. The baseline
+ran on `main` at 7eac627b: the sample in
+[run 44417735318](https://github.com/hirunefu/smock/actions/runs/44417735318)
+(20 shards of 50 mutants), the BODY pass in
+[run 44419874781](https://github.com/hirunefu/smock/actions/runs/44419874781)
+(20 shards of 67 or 68) and the timing in
+[run 44422395058](https://github.com/hirunefu/smock/actions/runs/44422395058).
+The runs' reports, with their links and their wall and runner times, are
+posted on [#275](https://github.com/hirunefu/smock/issues/275). They set
+the default of `workers` (above) and the planned time of a mutant.
+
+**The planned time of a mutant** comes from the times of earlier runs'
+shards, by a rule: the slowest shard that ran its mutants, by its run's
+time over its mutants, rounded up to a whole second.
+`mutation/shard-times.jsonl` records each shard of the runs it comes
+from, one JSON object per line: its run, its name, its mutants at once,
+the mutants it ran, how long its run took (`bulk.json`'s `wall_s`, which
+holds everything `run.py` does) and how it exited. A shard that stopped,
+or ran no mutant, says nothing of a mutant's time. The record holds the
+baseline's 43 shards and the 40 of the first weekly run
+([run 44423781036](https://github.com/hirunefu/smock/actions/runs/44423781036),
+the pinned set on `main` at 7eac627b, planned at 20 s a mutant). A
+mutant took 7.0 s of runner time on average over the baseline's sample,
+and 6.3 s over the weekly run, but the slowest shards took twice as long
+a mutant or more. In the baseline they were `engine`'s: the BODY pass's
+shard 5-of-20 took 16 min 10 s for 68 mutants, 14.27 s each. In the
+weekly run it was `protobuf`'s shard 20-of-40, whose 460 mutants, half of
+them at an unchecked access and so also run natively, took 1 h 56 min
+30 s, 15.19 s each. So bulk runs plan 16 s a mutant (`bulk.py`'s
+`SECONDS_PER_MUTANT`); before the baseline they planned 20 s, from #275's
+cost model. The rule takes the slowest shard, not the average, because a
+shard holds a stretch of the run's order, mostly one or two packages,
+and the costly stretches are not spread over the shards. At the
+average's 7 s, the monthly run's shards would hold 1,331 mutants each:
+5.6 hours at 15.19 s a mutant.
+
+At 16 s, on 7eac627b's tree, the weekly run's 18,403 mutants go in 20
+shards of 920 or 921, all at once, where 20 s cut them into 40 shards in
+two waves. At the slowest pace a shard would take 3.9 hours. Each of the
+20 holds exactly two of the first weekly run's 40 shards, whose times add
+up to between 39 minutes and 2 hours 46 minutes, so the run is expected
+to take about 2 hours 50 minutes, its `protobuf` shard the longest
+(*estimate*), where the first weekly run took 2 hours 9 minutes. The
+monthly run's 26,619 mutants go in 40 shards of 665 or 666, as at 20 s,
+in two waves of 20: at most 2.8 hours a shard at the slowest pace. With
+each mutant at the pace of the first weekly run's shard that held its
+stretch of its package, the run takes about 3 hours 15 minutes
+(*estimate*).
+
+To add a later run's shards to the record, and see the time it gives:
+
+```sh
+gh run download <run id> --pattern 'mutation-shard-*' --dir shards
+python3 scripts/mutation/bulk.py pace --run-url https://github.com/hirunefu/smock/actions/runs/<run id> shards/*
+```
+
+It prints the slowest shard of the record, then `slowest_s` and
+`seconds_per_mutant`. A run that gives more than `SECONDS_PER_MUTANT`
+raises it in the same change: the bulk runs' tests fail until the two
+agree. A shard's artifact is kept for 7 days.
 
 The tests (`scripts/mutation/test_bulk.py`) plan a run of each mode on
 the fixture module and on smock's packages, run a plan's two shards and
@@ -2518,12 +2721,18 @@ with 1, 2 and 4 at once. They run a weekly run of `log` that reads an
 earlier run's flake records and a monthly run of it, list the fixture's
 stale entry, run the properties with random seeds on a small module with
 a moon that fails one, and cut made-up survivors into triage tickets.
+They record made-up shards and check the planned time that the rule
+gives, check that `SECONDS_PER_MUTANT` is what the committed record
+gives, and that every shard of smock's weekly and monthly runs then ends
+within 5 hours at the pace of the slowest recorded shard.
 `scripts/check-mutation-runs-workflow.sh`, in CI's job `scripts` with its
-test, checks when the workflow runs, that it passes each input to the
-plan, that its shards take their matrix and their width from the plan and
-run on amd64 within a job's time, the weekly run's other jobs, that only
-the job of the stale entries writes, and only issues, and that it keeps
-the merged report.
+test, checks when the workflow runs, that each run's name says its mode,
+that it passes each input to the plan, that `workers` is 1 unless given,
+that its shards take their matrix and their width from the plan and run
+on amd64 within a job's time, the weekly run's other jobs, that the
+finish does not wait for the coverage from the e2e tests, that only the
+job of the stale entries writes, and only issues, and that it keeps the
+merged report.
 
 ## The weakening report
 

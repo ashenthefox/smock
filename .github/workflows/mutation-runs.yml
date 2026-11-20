@@ -9,8 +9,9 @@
 #
 # - The weekly run, on Fridays, is the pinned set over the pure packages,
 #   which L4 is defined over, so it verifies L4. Beside it run the canary
-#   (mutation-canary.yml) and the properties with random seeds, each in a
-#   job of its own; its plan checks the site counts and lists the stale
+#   (mutation-canary.yml), the properties with random seeds, and the
+#   coverage from the e2e tests (coverage-e2e.yml), which reports only,
+#   each in a job of its own; its plan checks the site counts and lists the stale
 #   entries of the exclusion list, and the job stale-entries opens an
 #   issue for their re-triage, or comments on the one open. Its shards
 #   read the flake records of the latest weekly run, and its report keeps
@@ -43,7 +44,15 @@
 # tab or with `gh workflow run mutation-runs.yml -f mode=sample -f
 # seed=<seed>`; scripts/check-mutation-runs-workflow.sh checks when it runs
 # and what it runs.
+#
+# Each run's name says its mode, "Mutation runs: weekly" for the weekly
+# run whether its schedule or a person started it: the release workflow's
+# check of the latest weekly run (scripts/check-weekly-run.py) finds the
+# weekly runs by their names.
 name: Mutation runs
+# The mode each schedule starts, as bulk.py's SCHEDULES gives it, or the
+# input mode of a run started by hand.
+run-name: "Mutation runs: ${{ github.event.schedule == '23 20 * * 5' && 'weekly' || github.event.schedule == '43 22 1 * *' && 'monthly' || inputs.mode }}"
 
 on:
   # scripts/mutation/bulk.py's SCHEDULES gives the run each one starts.
@@ -82,8 +91,11 @@ on:
         description: "How many shards run at once, from 1 to 20; a run at 20 holds every job of the account"
         type: number
         default: 20
+      # One at a time: in the baseline's timing (run 44422395058), 1, 2 and
+      # 4 at once took 6.9, 6.6 and 7.2 s a mutant with the same outcomes
+      # (CONTRIBUTING.md, "Bulk runs on Actions").
       workers:
-        description: "How many mutants each shard builds and tests at once"
+        description: "How many mutants each shard builds and tests at once; 1, as the baseline's timing found two at once 4% faster and four 5% slower"
         type: number
         default: 1
 
@@ -252,6 +264,18 @@ jobs:
           path: ${{ runner.temp }}/seeds
           retention-days: 90
           if-no-files-found: warn
+
+  # Coverage from the e2e tests, in the weekly run, beside the shards:
+  # server's and cmd/smock's coverage from e2e and the in-process tests
+  # together, and the positions e2e covers, which step 5's run at operator
+  # level mutates (#342). A workflow of its own (coverage-e2e.yml), so that
+  # it can also be started alone by hand. It reports only, so the finish
+  # does not wait for it.
+  coverage-e2e:
+    name: Coverage from e2e (weekly)
+    needs: plan
+    if: needs.plan.outputs.mode == 'weekly'
+    uses: ./.github/workflows/coverage-e2e.yml
 
   # Runs once every shard has ended, also when one failed, so that the
   # run's times are read; the merge then fails on the missing shard.
