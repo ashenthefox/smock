@@ -333,6 +333,35 @@ test "panic: bucket bounds increase" {
 }
 
 ///|
+/// The text format 0.0.4: "The buckets of a histogram ... must appear in
+/// increasing numerical order of their label values", and two equal bounds
+/// would be two buckets with the same `le`.
+test "panic: bucket bounds increase strictly: two equal bounds abort" {
+  let _ = @metrics.Registry().histogram("smock_size_bytes", help="A size.", buckets=[
+    1, 1,
+  ])
+}
+
+///|
+/// The text format 0.0.4: "A histogram _must_ have a bucket with
+/// `{le="+Inf"}`", which `Registry::histogram` adds last, so a bound of
+/// `+Inf` would be a second one, not in increasing order.
+test "panic: a bucket bound is not +Inf, the bucket every histogram has last" {
+  let _ = @metrics.Registry().histogram("smock_size_bytes", help="A size.", buckets=[
+    @double.infinity,
+  ])
+}
+
+///|
+/// NaN is neither below nor above any bound (IEEE 754), so no order of the
+/// text format's "increasing numerical order" holds for a bucket of it.
+test "panic: a bucket bound is not NaN" {
+  let _ = @metrics.Registry().histogram("smock_size_bytes", help="A size.", buckets=[
+    @double.not_a_number,
+  ])
+}
+
+///|
 test "panic: the label names of a metric differ" {
   let _ = @metrics.Registry().counter("smock_requests", help="Requests.", labels=[
     "mock", "mock",
