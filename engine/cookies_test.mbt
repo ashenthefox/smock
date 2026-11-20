@@ -6,8 +6,11 @@
 /// 4.2.1) has a user agent send them and where the cookie rules of
 /// docs/definition-files/matching.md read them ("smock reads cookies from
 /// the `Cookie` header"). `X-Cookie` is another field, and so are `Cook`,
-/// whose name is the start of `Cookie`, and `Cookie2`, RFC 2965's field,
-/// which RFC 6265 obsoletes and registers apart (section 9.3).
+/// whose name is the start of `Cookie`, `Cookie2`, RFC 2965's field,
+/// which RFC 6265 obsoletes and registers apart (section 9.3), and
+/// `Xookie`, as long as `Cookie` and different from it in its first letter
+/// alone, by more than case (field names compare case-insensitively, RFC
+/// 9110 section 5.1).
 test "a cookie condition holds when a cookie with that name has the value, wherever it sits in the Cookie field" {
   let h = stubs([
     (
@@ -25,6 +28,7 @@ test "a cookie condition holds when a cookie with that name has the value, where
       ("GET", "/", [("X-Cookie", "session=abc")], ""),
       ("GET", "/", [("Cook", "session=abc")], ""),
       ("GET", "/", [("Cookie2", "session=abc")], ""),
+      ("GET", "/", [("Xookie", "session=abc")], ""),
       ("GET", "/", [], ""),
     ]),
     content=(
@@ -35,6 +39,7 @@ test "a cookie condition holds when a cookie with that name has the value, where
       #|GET / [X-Cookie: session=abc] -> none
       #|GET / [Cook: session=abc] -> none
       #|GET / [Cookie2: session=abc] -> none
+      #|GET / [Xookie: session=abc] -> none
       #|GET / -> none
     ),
   )
