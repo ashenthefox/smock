@@ -346,10 +346,10 @@ scripts/test-check-grpcurl.sh dist/smock   # that check fails on each difference
 docker build --tag smock:dev .
 scripts/smoke-test-image.sh smock:dev 0.0.0-dev <commit> "moonc <version>"   # the container image
 scripts/test-helm-chart-on-kind.sh smock:dev   # the chart on a kind cluster (needs kind, kubectl and helm)
-scripts/check-release-workflow.sh    # the release workflow publishes only for tags, and only after its checks of the tag (needs yq and jq)
-scripts/test-check-release-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
+scripts/check-release-workflow.sh    # the release workflow publishes only for tags, and only after its checks of the tag, and the check of the weekly mutation run knows each job of that run (needs yq, jq and python3)
+scripts/test-check-release-workflow.sh   # that check, on copies of the workflows changed one thing at a time (needs yq, jq and python3)
 scripts/test-release-notes.sh        # the release notes, with CHANGELOG.md's links at the release's tag
-scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit, that the tag names moon.mod's version, and that the latest weekly mutation run is clean in the packages at L4, with fake gh runs on small git histories (needs python3, git and jq)
+scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit, that the tag names moon.mod's version, and that the latest weekly mutation run passed its jobs that decide a verdict and is clean in the packages at L4, with fake gh runs on small git histories (needs python3, git and jq)
 python3 scripts/check-weekly-run.py <commit>   # whether the latest weekly mutation run lets the commit be released (needs git and gh)
 scripts/check-benchmark-workflow.sh  # the benchmark workflow runs only by hand (needs yq and jq)
 scripts/check-measure-costs-workflow.sh   # the workflow that measures the tests' costs runs only by hand, with no C flags (needs yq and jq)
@@ -374,7 +374,7 @@ python3 scripts/check-merge.py <branch>   # whether the branch checks on the bra
 scripts/test-check-merge.sh          # the merge check, with a fake gh and canned runs on a small git history (needs python3, git and jq)
 scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs only by hand or when the weekly mutation run calls it, and installs its commit's toolchain before the replay (needs yq and jq)
 scripts/test-check-mutation-canary-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
-scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only on their weekly and monthly schedules and by hand, named by their mode, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
+scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only on their weekly and monthly schedules and by hand, named by their mode, in shards within the width and a job's 6 hours, on amd64, with the weekly run's canary, properties with random seeds and coverage from the e2e tests (needs yq and jq)
 scripts/test-check-mutation-runs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/check-coverage-e2e-workflow.sh    # the coverage from the e2e tests runs only by hand or when the weekly mutation run calls it, on amd64, and keeps its report (needs yq and jq)
 scripts/test-check-coverage-e2e-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
@@ -1084,7 +1084,9 @@ that no test reaches; and what moon printed. The job reports only: a
 failed e2e test fails nothing, and the report names it and says that the
 e2e tests' report may then lack points. It fails only when there can be
 no report, as when a build or an in-process test fails. The weekly run's
-finish does not wait for it.
+finish does not wait for it, and when it fails, the release's check of
+the weekly run goes ahead ([The weekly mutation
+run](docs/releasing.md#the-weekly-mutation-run)).
 
 The first report's points that no test reaches in `server` and
 `cmd/smock` are cut into triage tickets for #343 when there are more than
@@ -1531,7 +1533,9 @@ report lists every entry whose reviewer changed.
 - **Releases.** For the packages at L4, the latest weekly run over the
   pinned set must also show no unexplained survivor before a release, on
   the tag's commit or on an ancestor whose later changes the changed-lines
-  reports cover or touch no non-test source of a package at L4. The
+  reports cover or touch no non-test source of a package at L4, and its
+  jobs that decide a verdict must have passed: a job that only reports,
+  as the coverage from the e2e tests does, stops no release. The
   release checks it before it publishes, beside the check that CI passed
   on the tag's commit (`scripts/check-weekly-run.py`,
   [What a tag does](docs/releasing.md#what-a-tag-does)). So a release may
@@ -2558,7 +2562,8 @@ which the plan downloads. Beside them:
   which reports the coverage of `server` and `cmd/smock` from the e2e
   tests and the in-process tests together
   ([Coverage from the e2e tests](#coverage-from-the-e2e-tests)); it
-  reports only, and the finish does not wait for it;
+  reports only: the finish does not wait for it, and the release's check
+  does not read it;
 - the job `seeds` runs the properties with random seeds
   (`bulk.py seeds`), in a working copy of its own that no shard reads: it
   writes a random seed into each seed constant
