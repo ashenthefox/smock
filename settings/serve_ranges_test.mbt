@@ -327,6 +327,12 @@ test "ranges: without --seed, smock picks a seed from 0 to 2^53 - 1, one that --
     ].join(" "),
     content="true true",
   )
+  // It is a fresh seed, picked at each start ("smock picks its seed at
+  // startup and logs it. To replay a run, start smock with that seed",
+  // docs/definition-files/faults.md, Seeds; "a fresh seed",
+  // docs/definition-files/templates.md, Rendering a template): one pick
+  // from 2^53 values is 0 once in 2^53, so smock does not settle on 0.
+  inspect(picked == 0, content="false")
 }
 
 ///|
