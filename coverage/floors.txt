@@ -27,7 +27,7 @@ http1 10
 importopenapi 39
 llm 21
 log 12
-metrics 1
+metrics 0
 openssl 24
 prng 0
 protobuf 113
