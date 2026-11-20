@@ -304,3 +304,73 @@ category = "UNREACHABLE"
 reason = "The else arm of --journal's default, \"off\", which only a change of the engine's default would run."
 argument = "--journal's default is \"on\" when journal_defaults.enabled is true, and \"off\" otherwise. journal_defaults is @engine.JournalSettings() with no arguments, whose enabled is true by default (engine/journal.mbt), and the running guide's Settings table gives `on` as the default. It is a top-level value that no input and no test can change, so the arm runs only if the engine's default changes; it stays so that the help follows the engine then."
 reviewer = "the maintainer, 2026-11-18"
+
+# grpc's equivalent mutants (#327): seven survivors of the first weekly run
+# (44423781036) that no input can tell from the code. Each argument is in
+# its reason. The compiler's output differs for each. The separate context
+# that tries to kill each from the spec comes after the implementer who
+# wrote these entries, and fills in `adversarial`; until then it says so.
+# The maintainer reads every entry, since grpc is a protocol package.
+
+[[exclusion]]
+mutant = "grpc/framing.mbt,Deframer::Deframer,INT,0,1,1"
+text = "46faf196ebac120c"
+category = "EQUIVALENT"
+reason = "A new deframer's `length` starts at 1 instead of 0. Only `ending()` reads `length`, in its InMessage arm, when `left > 0`. `left` starts at 0, and only `take` makes it positive, in the step that sets `length` from a whole prefix. So the starting value is never read."
+compiler_output = "differs"
+adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+reviewer = ""
+
+[[exclusion]]
+mutant = "grpc/framing.mbt,Deframer::take,AOR,-,+,0"
+text = "1e98b4b3f0a4c6e1"
+category = "EQUIVALENT"
+reason = "`room = (n - i)` becomes `(n + i)`, but the branch that takes a message's octets only runs with `i` at 0. `left` is positive when `take` starts only if an earlier call left it so; then that branch is the call's first step. In the same call it never runs again: once the message's last octet is taken, the loop reads prefix octets, and it returns as soon as a prefix is whole, which is the only step that makes `left` positive. With `i` at 0, `n + i` is `n - i`."
+compiler_output = "differs"
+adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+reviewer = ""
+
+[[exclusion]]
+mutant = "grpc/framing.mbt,Deframer::take,ROR,<,<=,1"
+text = "1e98b4b3f0a4c6e1"
+category = "EQUIVALENT"
+reason = "`if self.left < room { self.left } else { room }` becomes `<=`. The two differ only when `left` equals `room`, and then both arms give the same value, so `part` is the same for every input."
+compiler_output = "differs"
+adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+reviewer = ""
+
+[[exclusion]]
+mutant = "grpc/metadata.mbt,unpadded_base64,INT,0,1,0"
+text = "4043f93d42d43430"
+category = "EQUIVALENT"
+reason = "`while end > 0 && value[end - 1] == '='` becomes `end > 1`. The loops differ only when `end` reaches 1 with `value[0]` an `=`, that is for a value of `=` alone. The code then gives `None`: `end` is 0, so for 1 to 3 `=` the length is no multiple of 4, and for 4 or more the padding is longer than 2. The mutant gives `None` too, since it keeps `value[0]`, an `=`, among the characters it checks against base64's alphabet. Every other value takes the same steps."
+compiler_output = "differs"
+adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+reviewer = ""
+
+[[exclusion]]
+mutant = "grpc/metadata.mbt,unpadded_base64,INT,2,3,0"
+text = "4043f93d42d43430"
+category = "EQUIVALENT"
+reason = "`n - end > 2` becomes `n - end > 3`. They differ only for exactly 3 `=` of padding in a value whose length is a multiple of 4 (`n % 4 != 0` refuses the others first). Then `end % 4` is 1, which the condition's first test, `end % 4 == 1`, refuses already. So both give `None` there, and agree on every other value."
+compiler_output = "differs"
+adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+reviewer = ""
+
+[[exclusion]]
+mutant = "grpc/metadata.mbt,unpadded_elements,ROR,<=,<,0"
+text = "c1d42263555ff505"
+category = "EQUIVALENT"
+reason = "`while start <= n` becomes `start < n`. The one pass the mutant leaves out is the one with `start` at `n`, after a comma that ends the value. That pass finds `end` at `n`, keeps nothing (`kept` stays at `start`), writes an empty view, and writes no comma, since `end < n` is false. It writes nothing, so the result is the same. The empty value has no padding, so it returns before the loop in both."
+compiler_output = "differs"
+adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+reviewer = ""
+
+[[exclusion]]
+mutant = "grpc/status_message.mbt,percent_encode,INT,0xDC00,0xDBFF,2"
+text = "44af2fa09f227c0d"
+category = "EQUIVALENT"
+reason = "`else if unit >= 0xDC00 && unit <= 0xDFFF` becomes `unit >= 0xDBFF`. The else-if is reached only when `unit >= 0xD800 && unit <= 0xDBFF` is false, so only for units below 0xD800 or above 0xDBFF. Among those, `unit >= 0xDBFF` and `unit >= 0xDC00` hold for the same units, so the branch takes the same units."
+compiler_output = "differs"
+adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+reviewer = ""
