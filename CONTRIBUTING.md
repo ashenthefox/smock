@@ -1455,8 +1455,10 @@ report lists every entry whose reviewer changed.
   wasm-gc; and any change to what decides a verdict: the exclusion list,
   the operator set, the runner and its committed data, the coverage
   floors and scope, the flake threshold, the lists of packages at L4 and
-  of tests kept, the merge and release checks, and the mutation and
-  coverage workflows. The maintainer acknowledges it at the merge.
+  of tests kept with their checks, the merge and release checks, the
+  mutation and coverage workflows, the suites' lists of cases with their
+  verdicts and the installs of their tools, and the tests of those
+  scripts. The maintainer acknowledges it at the merge.
 - **The mutator is governed too.** A ratchet on each package's number of
   sites, compared per definition: a package's sites may drop by at most
   as many as the base tree had in the definitions that a change deletes
@@ -2803,28 +2805,48 @@ among the tests moved or renamed.
 `scripts/verdict-files.txt` names, by path, every file that decides a
 verdict: the mutation runner and its data, the exclusion list, the
 coverage wrapper with its floors and scope, the canary's verdicts, the
-lists of packages at L4 and of tests kept, the merge and release checks,
-the mutation and coverage workflows, the lists of cases that protobuf's
-conformance suite, h2spec and the YAML test suite may fail, and the
-scripts that run those suites and judge their results, with the tests of
-the verdicts. Most of these files do not exist yet: the list fixes the
-paths they will have, and each line names the issue that creates them. A
-change that adds a file that decides a verdict puts it at a path the list
-names, or adds its path to the list in the same change. The report reads
-the base's list and the head's, so a file still shows when the same
-change takes its path off the list. The report's tests
-(`scripts/test-weakening-report.sh`) read the verdict steps of the
-workflows, the steps that judge a suite's results against its list of
-cases and the steps that test that judgment, and fail when the list
-leaves out a script that such a step runs, or a script that one of those
-runs. A new verdict step goes into that test's list of steps.
+lists of packages at L4 and of tests kept, the checks of the keep list
+and of the ledgers, the merge and release checks, the mutation and
+coverage workflows, the lists of cases that protobuf's conformance suite,
+h2spec and the YAML test suite may fail, the scripts that run those
+suites and judge their results, and the scripts that install or build
+their tools at the versions they pin: h2spec's install, and the build of
+protobuf's conformance runner with the protoc it needs. It also names the
+own test of each script it names, such as the merge check's, the coverage
+ratchet's and the changed-lines job's, since a loosened test lets its
+script change unseen. The list fixes the paths of the files that do not
+exist yet, and each line names the issue that creates them. A change that
+adds a file that decides a verdict puts it at a path the list names, or
+adds its path to the list in the same change. The report reads the
+base's list and the head's, so a file still shows when the same change
+takes its path off the list.
+
+The report's tests (`scripts/test-weakening-report.sh`) hold the list to
+three rules, and fail when it leaves out a file that one of them names:
+
+- **The verdict steps.** The steps of the workflows that judge a suite's
+  results against its list of cases, the steps that test that judgment,
+  the release's check of the latest weekly run, and the checks of the
+  keep list and of the ledgers. The list names each script that such a
+  step runs, and each script that one of those runs.
+- **The tool steps.** The steps that install or build a verdict step's
+  tool. The list names their scripts in the same way.
+- **The own tests.** Each script the list names has its own test listed
+  too: the script beside it named `test-<name>.sh` or `test_<name>.py`,
+  `<name>` being the script's name without its extension, or, for a test
+  named otherwise, the one the test's table names, as
+  `scripts/test-release-gates.sh` is for `scripts/check-weekly-run.py`.
+
+A new verdict step or tool step goes into that test's list of steps, and
+a test named otherwise into its table.
 
 The report reads MoonBit by its lines and by `moon fmt`'s layout, not as
 the compiler does. So it may list a line that weakens nothing, such as a
 comparison in a helper's loop. A changed call of a helper that asserts is
 among the other lines, unless the call is an assertion itself; a change
 to the helper's own lines is in the helper's entry. It reads only the
-MoonBit tests: the tests of the scripts are not in it.
+MoonBit tests test by test: the test of a listed script shows whole,
+with its diff, among the files that decide a verdict.
 
 To read it for a branch before pushing it:
 
