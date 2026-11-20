@@ -369,7 +369,7 @@ def diagnostics(output, tree):
     paths relative to the tree."""
     prefix = f"{tree}/"
     messages = []
-    for line in output.splitlines():
+    for line in output.split("\n"):
         try:
             item = json.loads(line)
         except ValueError:
@@ -383,7 +383,7 @@ def diagnostics(output, tree):
 def failed_tests(output):
     """The tests that failed, from moon test --test-failure-json."""
     tests = []
-    for line in output.splitlines():
+    for line in output.split("\n"):
         try:
             item = json.loads(line)
         except ValueError:
@@ -464,7 +464,7 @@ def find_sites(finder, root, directory):
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         raise RunnerError(f"the site finder failed on {directory}:\n{result.stderr}")
-    lines = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    lines = [json.loads(line) for line in result.stdout.split("\n") if line.strip()]
     versions = {line.get("operator_set") for line in lines}
     if None in versions or len(versions) > 1:
         raise RunnerError(f"the site finder's lines for {directory} do not name one operator set:"
