@@ -114,4 +114,33 @@ test "a lone surrogate, which UTF-8 cannot hold, is encoded as U+FFFD" {
   let last_low = (0xDFFF).unsafe_to_char()
   inspect(ascii(@grpc.percent_encode("a\{last_low}")), content="a%EF%BF%BD")
   inspect(ascii(@grpc.percent_encode("a\u{E000}")), content="a%EE%80%80")
+  // The edges of the surrogates, from the Unicode Standard, chapter 3: the
+  // high surrogates are U+D800 to U+DBFF (D71), the low ones U+DC00 to
+  // U+DFFF (D73), and only a high one followed by a low one is a pair
+  // (D75). So U+D800, the guide's own example, U+DBFF and U+DC00 are lone
+  // when nothing pairs them; a low surrogate after a low one, a high one
+  // after a high one, and a high one before U+E000 pair with nothing. Each
+  // lone one becomes U+FFFD (Python, decoding such UTF-16 with "replace",
+  // gives one U+FFFD for each too), and U+D7FF, the code point before the
+  // surrogates, and U+E000 are characters UTF-8 holds in three octets
+  // (RFC 3629, section 3).
+  let first_high = (0xD800).unsafe_to_char()
+  let last_high = (0xDBFF).unsafe_to_char()
+  let first_low = (0xDC00).unsafe_to_char()
+  let texts = [
+    "a\{first_high}b", "a\{last_high}b", "a\{first_low}b", "a\{first_low}\{first_low}b",
+    "a\{first_high}\{last_high}b", "a\{first_high}\u{E000}b", "a\u{D7FF}b",
+  ]
+  inspect(
+    texts.map(text => ascii(@grpc.percent_encode(text))).join("\n"),
+    content=(
+      #|a%EF%BF%BDb
+      #|a%EF%BF%BDb
+      #|a%EF%BF%BDb
+      #|a%EF%BF%BD%EF%BF%BDb
+      #|a%EF%BF%BD%EF%BF%BDb
+      #|a%EF%BF%BD%EE%80%80b
+      #|a%ED%9F%BFb
+    ),
+  )
 }
