@@ -358,3 +358,28 @@ reason = "With `end >= start`, the loop also tests `field[start - 1]` once `end`
 compiler_output = "differs"
 adversarial = { context = "pending: a separate agent context, after #328's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: the package's tests and its wasm-gc importers' tests, which pass with the mutant (run 44423781036, and ticket/328's tests)"] }
 reviewer = ""
+
+[[exclusion]]
+mutant = "metrics/metrics.mbt,CounterSeries::advance_to,ROR,>,>=,0"
+text = "cd3b42a1a4399734"
+category = "EQUIVALENT"
+reason = "With `>=`, a total equal to the counter's value is written over it. Two doubles that compare equal are the same number, but for 0 and -0, so the only change is that a counter at 0 given -0 holds -0 instead of 0. render, the one reader of the value, writes -0 as 0 (Double::to_string, whose documentation gives (-0.0).to_string() as \"0\"), and later calls compare and add -0 as they do 0, but for the sign of a zero result. So no sequence of calls renders differently."
+compiler_output = "differs"
+adversarial = { context = "pending: a separate agent context, after #328's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: the package's tests and its wasm-gc importers' tests, which pass with the mutant (run 44423781036, and ticket/328's tests)"] }
+reviewer = ""
+
+[[exclusion]]
+mutant = "metrics/metrics.mbt,Family::series_for,INT,0,1,0"
+text = "40ba567fcc5d92e7"
+category = "EQUIVALENT"
+reason = "A counter's or a gauge's series gets a bucket array of one element instead of none. Only a histogram's series reads its buckets: render's Histogram arm, and HistogramSeries::observe, which only Histogram::labels makes, from a family of the kind Histogram. A family's kind never changes, so nothing reads the element, and no call renders differently."
+compiler_output = "differs"
+adversarial = { context = "pending: a separate agent context, after #328's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: the package's tests and its wasm-gc importers' tests, which pass with the mutant (run 44423781036, and ticket/328's tests)"] }
+reviewer = ""
+
+[[exclusion]]
+mutant = "metrics/metrics.mbt,Family::series_for,INT,0L,1L,1"
+text = "40ba567fcc5d92e7"
+category = "ARID"
+reason = "The fill value of an empty array: FixedArray::make(0, 1L), the bucket array of a counter's or a gauge's series, holds no element to fill."
+reviewer = ""
