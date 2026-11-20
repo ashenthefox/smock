@@ -1440,7 +1440,7 @@ fi
 # A script's own test is the script beside it named test-<name>.sh or
 # test_<name>.py, <name> being the script's file name without its
 # extension, or the test that this table names for a script whose test is
-# named otherwise. A test's own test is not asked for.
+# named otherwise.
 cat >"$tmp/own-tests" <<'TXT'
 scripts/check-weekly-run.py	scripts/test-release-gates.sh
 TXT
@@ -1475,7 +1475,6 @@ own_tests() {
   while read -r path; do
     grep -qF -- "### \`$path\` (added)" "$tmp/$2.out" || continue
     name=${path##*/}
-    case $name in test-* | test_*) continue ;; esac
     own=$(awk -F '\t' -v path="$path" '$1 == path { print $2 }' "$tmp/own-tests")
     for candidate in "${path%/*}/test-${name%.*}.sh" "${path%/*}/test_${name%.*}.py"; do
       if [ -z "$own" ] && grep -qxF -- "$candidate" "$tmp/scripts"; then
