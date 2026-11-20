@@ -334,7 +334,7 @@ reviewer = ""
 
 [[exclusion]]
 mutant = "cookies/cookies.mbt,find,ROR,<=,<,0"
-text = "ece579a39b76c6ee"
+text = "65e5a474b5c21c7d"
 category = "EQUIVALENT"
 reason = "With `start < field.length()`, the search stops one turn earlier, when `start` is the field's length. That turn reads the empty part after a last `;` (or an empty field, or a `from` given as the length), which has no `=`: equals_at gives -1 and the turn finds nothing, so both return -1. A `start` past the length runs no turn in either, and a negative one reads before the field in both."
 compiler_output = "differs"
