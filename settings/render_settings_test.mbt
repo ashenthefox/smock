@@ -8,14 +8,17 @@
 ///|
 /// What `smock render <argv>`, with the variables `env`, makes of its
 /// settings, after the Stub ID `get-user`, `--dir defs` and `--request
-/// sample.json` unless `argv` gives them: `show` of the settings when they
-/// are valid, or the message a user sees when they are not.
+/// sample.json` unless `argv` gives them or `without` names them: `show` of
+/// the settings when they are valid, or the message a user sees when they
+/// are not.
 fn render_shows(
   argv : Array[String],
   env~ : Map[String, String] = {},
+  without~ : Array[String] = [],
   show : (@settings.RenderSettings) -> String,
 ) -> String {
   let given = (flag : String) => {
+    without.contains(flag) ||
     argv.iter().any(arg => arg == flag || arg.has_prefix("\{flag}="))
   }
   let argv = [
@@ -70,6 +73,32 @@ test "render: the Stub ID is its argument, and --dir, by its flag or SMOCK_DIR, 
       #|invalid value "" for --dir (SMOCK_DIR): must not be empty
       #|invalid value "" for --dir (SMOCK_DIR): must not be empty
       #|invalid value "" for --request: must not be empty
+    ),
+  )
+}
+
+///|
+test "render: without --dir or SMOCK_DIR, or without --request, the command line is refused as missing a required argument" {
+  // smock render --help: "Usage: smock render --dir <dir> --request
+  // <request> [options] <stub-id>", so both are required; SMOCK_DIR is
+  // --dir's variable (docs/running.md, Settings), which the test above
+  // gives alone. The words are the command-line parser's, which
+  // e2e/render_test.mbt "smock render needs the definitions directory, a
+  // Stub ID and a sample request" pins too: the maintainer decided on
+  // 2026-11-18 that the words of usage errors stay as they are (#320). The
+  // usage and the help that follow the first line are the help's own test.
+  let shown = (settings : @settings.RenderSettings) => {
+    "\{settings.dir} \{settings.request_file}"
+  }
+  let first_line = (text : String) => text.split("\n").next().unwrap_or("")
+  inspect(
+    [
+      first_line(render_shows([], without=["--dir"], shown)),
+      first_line(render_shows([], without=["--request"], shown)),
+    ].join("\n"),
+    content=(
+      #|parse: error: the following required argument was not provided: 'dir'
+      #|parse: error: the following required argument was not provided: 'request'
     ),
   )
 }
