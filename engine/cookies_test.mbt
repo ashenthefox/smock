@@ -121,6 +121,13 @@ test "a cookie value is compared exactly as sent: quotes are part of it, and not
 }
 
 ///|
+/// The rules of docs/definition-files/matching.md, "Cookies": "The first
+/// `=` of a part separates the name from the value" even at the very start
+/// of the field, so `=x` is the cookie with the empty name and the value
+/// `x`, which a condition on the name `""` reads. "A part without `=` is
+/// skipped", so `x` is no cookie, not one with the empty name. RFC 6265's
+/// grammar has no empty cookie name, so the documents are the source here,
+/// as for template's `cookie['']`.
 test "each part of a Cookie field is trimmed of spaces and tabs, its first = ends the name, and a part without = is skipped" {
   let h = stubs([
     (
@@ -138,6 +145,11 @@ test "each part of a Cookie field is trimmed of spaces and tabs, its first = end
       #|    "cookies": { "a ": " 1" } },
       #|  "response": { "status": 200 } }
     ),
+    (
+      #|{ "id": "unnamed", "mock": "m", "request": { "path": "/u",
+      #|    "cookies": { "": "x" } },
+      #|  "response": { "status": 200 } }
+    ),
   ])
   inspect(
     winners(h, [
@@ -149,6 +161,8 @@ test "each part of a Cookie field is trimmed of spaces and tabs, its first = end
       ("GET", "/f", [("Cookie", "flag=")], ""),
       ("GET", "/s", [("Cookie", "a = 1")], ""),
       ("GET", "/s", [("Cookie", "a=1")], ""),
+      ("GET", "/u", [("Cookie", "=x")], ""),
+      ("GET", "/u", [("Cookie", "x")], ""),
     ]),
     content=(
       #|GET /t [Cookie: a=1;b=x=y;c=] -> trimmed
@@ -159,6 +173,8 @@ test "each part of a Cookie field is trimmed of spaces and tabs, its first = end
       #|GET /f [Cookie: flag=] -> flag
       #|GET /s [Cookie: a = 1] -> spaced
       #|GET /s [Cookie: a=1] -> none
+      #|GET /u [Cookie: =x] -> unnamed
+      #|GET /u [Cookie: x] -> none
     ),
   )
 }
