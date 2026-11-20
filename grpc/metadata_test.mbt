@@ -96,6 +96,12 @@ test "a call's binary metadata loses the padding that ends each comma-separated 
   inspect(@grpc.unpadded_elements("not base64!="), content="not base64!")
   inspect(@grpc.unpadded_elements("=,==,"), content=",,")
   inspect(@grpc.unpadded_elements(""), content="")
+  // docs/grpc/metadata-and-status.md: "A call's `-bin` value loses the `=`
+  // that end each comma-separated element, and keeps the commas." The
+  // first element ends with `=` here even when that `=` is the value's
+  // first character, and no other element has padding.
+  inspect(@grpc.unpadded_elements("="), content="")
+  inspect(@grpc.unpadded_elements("=,AA"), content=",AA")
 }
 
 ///|

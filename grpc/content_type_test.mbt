@@ -97,6 +97,20 @@ test "the content type is compared as sent, in its case" {
       #|APPLICATION/GRPC+PROTO: not a call
     ),
   )
+  // docs/grpc.md, "smock compares the content type as sent, in its case,
+  // as grpc-go does": every octet counts, the first and the last of
+  // `application/grpc` as much as the others, so a value that differs from
+  // it in the case of one of them alone makes no call either.
+  inspect(
+    calls_of([
+      b"Application/grpc", b"application/grpC", b"Application/grpc+proto",
+    ]),
+    content=(
+      #|Application/grpc: not a call
+      #|application/grpC: not a call
+      #|Application/grpc+proto: not a call
+    ),
+  )
 }
 
 ///|

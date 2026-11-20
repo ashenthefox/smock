@@ -52,6 +52,26 @@ test "gRPC's interop message, with controls, BMP and non-BMP characters, is enco
     content="%09%0Atest with whitespace%0D%0Aand Unicode BMP %E2%98%BA and non-BMP %F0%9F%98%88%09%0A",
   )
   inspect(ascii(@grpc.percent_encode("é")), content="%C3%A9")
+  // The first and the last code point of each length that RFC 3629's
+  // table, in section 3, gives a UTF-8 sequence: U+0080 and U+07FF take
+  // two octets, U+0800 and U+FFFF three, U+10000 and U+10FFFF four
+  // (Python's UTF-8 encoder gives the same octets). The last two are
+  // surrogate pairs in the text, D800 DC00 and DBFF DFFF (RFC 2781,
+  // section 2.1), so each pair is one code point.
+  let edges = [
+    "\u{80}", "\u{7FF}", "\u{800}", "\u{FFFF}", "\u{10000}", "\u{10FFFF}",
+  ]
+  inspect(
+    edges.map(text => ascii(@grpc.percent_encode("a\{text}b"))).join("\n"),
+    content=(
+      #|a%C2%80b
+      #|a%DF%BFb
+      #|a%E0%A0%80b
+      #|a%EF%BF%BFb
+      #|a%F0%90%80%80b
+      #|a%F4%8F%BF%BFb
+    ),
+  )
 }
 
 ///|
@@ -94,4 +114,38 @@ test "a lone surrogate, which UTF-8 cannot hold, is encoded as U+FFFD" {
   let last_low = (0xDFFF).unsafe_to_char()
   inspect(ascii(@grpc.percent_encode("a\{last_low}")), content="a%EF%BF%BD")
   inspect(ascii(@grpc.percent_encode("a\u{E000}")), content="a%EE%80%80")
+  // The edges of the surrogates, from the Unicode Standard, chapter 3: the
+  // high surrogates are U+D800 to U+DBFF (D71), the low ones U+DC00 to
+  // U+DFFF (D73), and only a high one followed by a low one is a pair
+  // (D75). So U+D800, the guide's own example, U+DBFF and U+DC00 are lone
+  // when nothing pairs them; a low surrogate after a low one, a high one
+  // after a high one, and a high one before U+E000 pair with nothing. Each
+  // lone one becomes U+FFFD (Python, decoding such UTF-16 with "replace",
+  // gives one U+FFFD for each too), and U+D7FF, the code point before the
+  // surrogates, and U+E000 are characters UTF-8 holds in three octets
+  // (RFC 3629, section 3).
+  let first_high = (0xD800).unsafe_to_char()
+  let last_high = (0xDBFF).unsafe_to_char()
+  let first_low = (0xDC00).unsafe_to_char()
+  let texts = [
+    "a\{first_high}b",
+    "a\{last_high}b",
+    "a\{first_low}b",
+    "a\{first_low}\{first_low}b",
+    "a\{first_high}\{last_high}b",
+    "a\{first_high}\u{E000}b",
+    "a\u{D7FF}b",
+  ]
+  inspect(
+    texts.map(text => ascii(@grpc.percent_encode(text))).join("\n"),
+    content=(
+      #|a%EF%BF%BDb
+      #|a%EF%BF%BDb
+      #|a%EF%BF%BDb
+      #|a%EF%BF%BD%EF%BF%BDb
+      #|a%EF%BF%BD%EF%BF%BDb
+      #|a%EF%BF%BD%EE%80%80b
+      #|a%ED%9F%BFb
+    ),
+  )
 }
