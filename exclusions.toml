@@ -307,9 +307,9 @@ reviewer = "the maintainer, 2026-11-18"
 
 # grpc's equivalent mutants (#327): seven survivors of the first weekly run
 # (44423781036) that no input can tell from the code. Each argument is in
-# its reason. The compiler's output differs for each. The separate context
-# that tries to kill each from the spec comes after the implementer who
-# wrote these entries, and fills in `adversarial`; until then it says so.
+# its reason. The compiler's output differs for each. A separate agent
+# context, which wrote neither these entries nor grpc's tests, then tried to
+# kill each from the spec, and `adversarial` records what it tried.
 # The maintainer reads every entry, since grpc is a protocol package.
 
 [[exclusion]]
@@ -318,7 +318,7 @@ text = "46faf196ebac120c"
 category = "EQUIVALENT"
 reason = "A new deframer's `length` starts at 1 instead of 0. Only `ending()` reads `length`, in its InMessage arm, when `left > 0`. `left` starts at 0, and only `take` makes it positive, in the step that sets `length` from a whole prefix. So the starting value is never read."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+adversarial = { context = "a separate agent context of #275's step 3, on 2026-11-20, which wrote neither this entry nor any of grpc's tests", tests = ["a differential in a scratch white-box test of grpc, not committed: a copy of Deframer's take, whole_messages and ending carrying the mutation, fed beside the real Deframer the way server feeds it (each Prefix's rest taken next), the Taken, whole_messages() and ending() compared after every call; bodies of 0 to 3 messages of 0 to 3 octets, each cut short at every octet, and four prefixes announcing 0xFFFFFFFF, 0x80000000, 0x7FFFFFFF and 7 octets with fewer after; pieces cut at every subset of the inner points for bodies of up to 11 octets, else at none, one, two or three points (three up to 17 octets) and at every point; 372,375 runs for each of the three framing mutants and for an unmutated copy, no difference. The same harness reports a difference for a starting `length` that ending() would read before any prefix, and for a room one octet too large", "among them the states where `length` still holds its starting value, before the first prefix is whole: the empty body and every body cut inside its first prefix, where ending() gives Whole(messages=0) or InPrefix and reads no length"] }
 reviewer = ""
 
 [[exclusion]]
@@ -327,7 +327,7 @@ text = "1e98b4b3f0a4c6e1"
 category = "EQUIVALENT"
 reason = "`room = (n - i)` becomes `(n + i)`, but the branch that takes a message's octets only runs with `i` at 0. `left` is positive when `take` starts only if an earlier call left it so; then that branch is the call's first step. In the same call it never runs again: once the message's last octet is taken, the loop reads prefix octets, and it returns as soon as a prefix is whole, which is the only step that makes `left` positive. With `i` at 0, `n + i` is `n - i`."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+adversarial = { context = "a separate agent context of #275's step 3, on 2026-11-20, which wrote neither this entry nor any of grpc's tests", tests = ["a differential in a scratch white-box test of grpc, not committed: a copy of Deframer's take, whole_messages and ending carrying the mutation, fed beside the real Deframer the way server feeds it (each Prefix's rest taken next), the Taken, whole_messages() and ending() compared after every call; bodies of 0 to 3 messages of 0 to 3 octets, each cut short at every octet, and four prefixes announcing 0xFFFFFFFF, 0x80000000, 0x7FFFFFFF and 7 octets with fewer after; pieces cut at every subset of the inner points for bodies of up to 11 octets, else at none, one, two or three points (three up to 17 octets) and at every point; 372,375 runs for each of the three framing mutants and for an unmutated copy, no difference. The same harness reports a difference for a starting `length` that ending() would read before any prefix, and for a room one octet too large", "among them pieces that hold a message's last octets and the next prefix, where the loop goes on with `i` past 0 and the branch does not run again, pieces that end before or at a message's last octet, and announced lengths larger than any piece"] }
 reviewer = ""
 
 [[exclusion]]
@@ -336,7 +336,7 @@ text = "1e98b4b3f0a4c6e1"
 category = "EQUIVALENT"
 reason = "`if self.left < room { self.left } else { room }` becomes `<=`. The two differ only when `left` equals `room`, and then both arms give the same value, so `part` is the same for every input."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+adversarial = { context = "a separate agent context of #275's step 3, on 2026-11-20, which wrote neither this entry nor any of grpc's tests", tests = ["a differential in a scratch white-box test of grpc, not committed: a copy of Deframer's take, whole_messages and ending carrying the mutation, fed beside the real Deframer the way server feeds it (each Prefix's rest taken next), the Taken, whole_messages() and ending() compared after every call; bodies of 0 to 3 messages of 0 to 3 octets, each cut short at every octet, and four prefixes announcing 0xFFFFFFFF, 0x80000000, 0x7FFFFFFF and 7 octets with fewer after; pieces cut at every subset of the inner points for bodies of up to 11 octets, else at none, one, two or three points (three up to 17 octets) and at every point; 372,375 runs for each of the three framing mutants and for an unmutated copy, no difference. The same harness reports a difference for a starting `length` that ending() would read before any prefix, and for a room one octet too large", "among them pieces that end exactly at a message's last octet, where `left` equals `room`"] }
 reviewer = ""
 
 [[exclusion]]
@@ -345,7 +345,7 @@ text = "4043f93d42d43430"
 category = "EQUIVALENT"
 reason = "`while end > 0 && value[end - 1] == '='` becomes `end > 1`. The loops differ only when `end` reaches 1 with `value[0]` an `=`, that is for a value of `=` alone. The code then gives `None`: `end` is 0, so for 1 to 3 `=` the length is no multiple of 4, and for 4 or more the padding is longer than 2. The mutant gives `None` too, since it keeps `value[0]`, an `=`, among the characters it checks against base64's alphabet. Every other value takes the same steps."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+adversarial = { context = "a separate agent context of #275's step 3, on 2026-11-20, which wrote neither this entry nor any of grpc's tests", tests = ["a differential in a scratch white-box test of grpc, not committed: a copy of unpadded_base64 carrying the mutation against the real function, on every string of up to 8 characters from `A`, `=`, `/`, `!` and `,` (488,281 strings), no difference. The same harness reports a difference for a mutant that allows one `=` of padding at most", "among them values of `=` alone, 1 to 8 of them, the only values on which the two loops differ, and the documented `AA==` and `AA`; docs/grpc/metadata-and-status.md makes a value that is not base64 a problem, and both refuse each value of `=` alone"] }
 reviewer = ""
 
 [[exclusion]]
@@ -354,7 +354,7 @@ text = "4043f93d42d43430"
 category = "EQUIVALENT"
 reason = "`n - end > 2` becomes `n - end > 3`. They differ only for exactly 3 `=` of padding in a value whose length is a multiple of 4 (`n % 4 != 0` refuses the others first). Then `end % 4` is 1, which the condition's first test, `end % 4 == 1`, refuses already. So both give `None` there, and agree on every other value."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+adversarial = { context = "a separate agent context of #275's step 3, on 2026-11-20, which wrote neither this entry nor any of grpc's tests", tests = ["a differential in a scratch white-box test of grpc, not committed: a copy of unpadded_base64 carrying the mutation against the real function, on every string of up to 8 characters from `A`, `=`, `/`, `!` and `,` (488,281 strings), no difference. The same harness reports a difference for a mutant that allows one `=` of padding at most", "among them 3 `=` of padding in a length that is a multiple of 4 (`A===`, `AAAAA===`), the only values on which the two conditions differ: both refuse them, through `end % 4 == 1`"] }
 reviewer = ""
 
 [[exclusion]]
@@ -363,7 +363,7 @@ text = "c1d42263555ff505"
 category = "EQUIVALENT"
 reason = "`while start <= n` becomes `start < n`. The one pass the mutant leaves out is the one with `start` at `n`, after a comma that ends the value. That pass finds `end` at `n`, keeps nothing (`kept` stays at `start`), writes an empty view, and writes no comma, since `end < n` is false. It writes nothing, so the result is the same. The empty value has no padding, so it returns before the loop in both."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+adversarial = { context = "a separate agent context of #275's step 3, on 2026-11-20, which wrote neither this entry nor any of grpc's tests", tests = ["a differential in a scratch white-box test of grpc, not committed: a copy of unpadded_elements carrying the mutation against the real function, on every string of up to 9 characters from `A`, `=`, `,` and the space (349,525 strings), no difference. The same harness reports a difference for a mutant that drops a last element of one character", "among them values that end with a comma, the only ones that reach the pass the mutant leaves out, docs/grpc/metadata-and-status.md's `=,==,` included (`,,` in both)"] }
 reviewer = ""
 
 [[exclusion]]
@@ -372,5 +372,5 @@ text = "44af2fa09f227c0d"
 category = "EQUIVALENT"
 reason = "`else if unit >= 0xDC00 && unit <= 0xDFFF` becomes `unit >= 0xDBFF`. The else-if is reached only when `unit >= 0xD800 && unit <= 0xDBFF` is false, so only for units below 0xD800 or above 0xDBFF. Among those, `unit >= 0xDBFF` and `unit >= 0xDC00` hold for the same units, so the branch takes the same units."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #327's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: grpc's tests and its wasm-gc importers' tests on ticket/327, which pass with the mutant"] }
+adversarial = { context = "a separate agent context of #275's step 3, on 2026-11-20, which wrote neither this entry nor any of grpc's tests", tests = ["a differential in a scratch white-box test of grpc, not committed: a copy of percent_encode carrying the mutation against the real function, on every code unit alone and between two letters, on each of 0xD800, 0xDBFE, 0xDBFF, 0xDC00 and 0xDFFF before and after every code unit, and on every three units from 21 edges (0x0, 0x20, 0x25, 0x41, 0x7E, 0x7F, 0x80, 0x7FF, 0x800, 0xD7FF, 0xD800, 0xD801, 0xDBFE, 0xDBFF, 0xDC00, 0xDC01, 0xDFFE, 0xDFFF, 0xE000, 0xFFFD, 0xFFFF): 795,693 texts, no difference. The same harness reports a difference for a mutant that takes U+DC00 out of the low surrogates", "among them U+DBFF alone and before every code unit, the only unit both tests of the else-if could disagree on, which the first branch takes in both (docs/grpc/metadata-and-status.md: a lone surrogate goes out as `%EF%BF%BD`)"] }
 reviewer = ""
