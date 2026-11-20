@@ -14,6 +14,11 @@ test "process CPU: utime and stime of /proc/<pid>/stat, in seconds, after a comm
       @usage.cpu_seconds(
         "1 (smock) R 0 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 5 0 0 0\n",
       ),
+      // A line that ends at field 15, stime, still holds both counts, which
+      // are the only fields read (`cpu_seconds`: "fields 14 (`utime`) and
+      // 15 (`stime`)"), though the kernel writes 52. The first of the lines
+      // below, one field shorter, ends at utime.
+      @usage.cpu_seconds("1 (smock) R 0 1 1 0 -1 0 0 0 0 0 7 3\n"),
       // Too few fields, a field that is not a number, and no line.
       @usage.cpu_seconds("1 (smock) R 0 1 1 0 -1 0 0 0 0 0 7\n"),
       @usage.cpu_seconds(
@@ -22,7 +27,7 @@ test "process CPU: utime and stime of /proc/<pid>/stat, in seconds, after a comm
       @usage.cpu_seconds(""),
     ],
     content=(
-      #|[Some(12.9), Some(0.1), Some(0), None, None, None]
+      #|[Some(12.9), Some(0.1), Some(0), Some(0.1), None, None, None]
     ),
   )
 }
