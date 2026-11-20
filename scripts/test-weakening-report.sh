@@ -1194,10 +1194,12 @@ fi
 # names it and the report shows a change to it (#395, which names the YAML
 # test suite's verdict script and its test). The release's check of the
 # latest weekly mutation run judges that run against the list of packages
-# at L4, which the committed list names too (#316); its test, in
-# scripts/test-release-gates.sh, is a test of a check, which #310 left
-# off the list. A step is named by its workflow, its job and its name: a
-# step renamed or gone fails the check, so that it is looked at again.
+# at L4, which the committed list names too (#316). The checks of the keep
+# list and of the ledgers judge each test those lists name against the
+# tests there are (the maintainer, 2026-11-20, on what #395 left off). The
+# tests of these scripts are asked for below, with every listed script's.
+# A step is named by its workflow, its job and its name: a step renamed or
+# gone fails the check, so that it is looked at again.
 cat >"$tmp/verdict-steps" <<'TXT'
 .github/workflows/ci.yml	yaml-test-suite	Run yaml-test-suite against smock/yaml in both modes
 .github/workflows/ci.yml	scripts	Test the yaml-test-suite verdict
@@ -1205,6 +1207,8 @@ cat >"$tmp/verdict-steps" <<'TXT'
 .github/workflows/ci.yml	scripts	Test the h2spec verdict
 .github/workflows/build-test.yml	protobuf-conformance	Run protobuf's conformance suite against smock/protobuf
 .github/workflows/release.yml	plan	Check that the latest weekly mutation run is clean in the packages at L4
+.github/workflows/ci.yml	scripts	Check that every test on the keep list is still there
+.github/workflows/ci.yml	scripts	Check that every test the ledgers name is still there
 TXT
 
 # step_scripts <root> <steps>: the scripts under <root> that the steps of
@@ -1331,11 +1335,12 @@ else
   fail "step-scripts: says $(cat "$tmp/steps-uses.err")"
 fi
 
-# unlisted <list> <name>: writes into $tmp/<name>.missing the scripts of
-# the verdict steps that the report does not show as files that decide a
-# verdict, under the list <list>, on a branch that adds each of them; the
-# report is <name>.
+# unlisted <list> <name> [<paths>]: writes into $tmp/<name>.missing the
+# paths of the file <paths>, by default the scripts of the verdict steps,
+# that the report does not show as files that decide a verdict, under the
+# list <list>, on a branch that adds each of them; the report is <name>.
 unlisted() {
+  paths=${3:-$tmp/step-scripts}
   tree
   package
   branch
@@ -1343,12 +1348,12 @@ unlisted() {
   cp "$1" "$repo/$list"
   while read -r path; do
     file "$path" </dev/null
-  done <"$tmp/step-scripts"
+  done <"$paths"
   report "$2"
   : >"$tmp/$2.missing"
   while read -r path; do
     grep -qF -- "### \`$path\` (added)" "$tmp/$2.out" || echo "$path" >>"$tmp/$2.missing"
-  done <"$tmp/step-scripts"
+  done <"$paths"
 }
 
 # The committed list names every script of the verdict steps.
@@ -1358,7 +1363,7 @@ else
   fail "verdict-steps: $(cat "$tmp/step-scripts.err")"
 fi
 for path in scripts/yaml-test-suite-verdict.py scripts/test-yaml-test-suite-verdict.sh scripts/h2spec-verdict.py \
-  scripts/check-weekly-run.py; do
+  scripts/check-weekly-run.py scripts/check-kept-tests.py scripts/check-ledgers.py; do
   if grep -qxF -- "$path" "$tmp/step-scripts"; then
     pass "verdict-steps: the verdict steps run $path"
   else
@@ -1380,6 +1385,146 @@ if [ "$(cat "$tmp/verdict-steps-short.missing")" = scripts/yaml-test-suite-verdi
   pass "verdict-steps: a list without the YAML test suite's verdict script fails the check"
 else
   fail "verdict-steps: a list without the YAML test suite's verdict script misses $(tr '\n' ' ' <"$tmp/verdict-steps-short.missing")"
+fi
+
+# --- The steps that install or build a verdict step's tool ---------------------
+
+# A verdict step judges what its tool says, so the step that installs or
+# builds that tool, at the version it pins, decides the verdict as surely
+# as the list of cases does: the committed list names each script such a
+# step runs, and each script that one of those runs (the maintainer,
+# 2026-11-20, on what #395 left off). h2spec is installed before its runs;
+# protobuf's conformance runner is built, with the protoc of the same
+# release, before the conformance suite runs. The YAML test suite's run
+# fetches its pinned release itself, so that script is among the verdict
+# steps' scripts. A step is named as a verdict step is; a new tool step
+# goes into this table.
+cat >"$tmp/tool-steps" <<'TXT'
+.github/workflows/build-test.yml	release	Install h2spec
+.github/workflows/build-test.yml	protobuf-conformance	Build protobuf's conformance runner
+TXT
+if step_scripts . "$tmp/tool-steps" >"$tmp/tool-scripts" 2>"$tmp/tool-scripts.err"; then
+  pass "tool-steps: each tool step is in its workflow"
+else
+  fail "tool-steps: $(cat "$tmp/tool-scripts.err")"
+fi
+for path in scripts/install-h2spec.sh scripts/build-conformance-runner.sh scripts/install-protoc.sh; do
+  if grep -qxF -- "$path" "$tmp/tool-scripts"; then
+    pass "tool-steps: the tool steps run $path"
+  else
+    fail "tool-steps: the tool steps do not run $path"
+  fi
+done
+unlisted "$list" tool-steps "$tmp/tool-scripts"
+if [ -s "$tmp/tool-steps.missing" ]; then
+  fail "tool-steps: the committed list does not name $(tr '\n' ' ' <"$tmp/tool-steps.missing")"
+else
+  pass "tool-steps: the committed list names the $(wc -l <"$tmp/tool-scripts") scripts of the tool steps"
+fi
+
+# The check fails when the list leaves one of them out: here h2spec's
+# install.
+grep -v '^scripts/install-h2spec\.sh[[:space:]]' "$list" >"$tmp/short-list"
+unlisted "$tmp/short-list" tool-steps-short "$tmp/tool-scripts"
+if [ "$(cat "$tmp/tool-steps-short.missing")" = scripts/install-h2spec.sh ]; then
+  pass "tool-steps: a list without h2spec's install fails the check"
+else
+  fail "tool-steps: a list without h2spec's install misses $(tr '\n' ' ' <"$tmp/tool-steps-short.missing")"
+fi
+
+# --- The tests of the listed scripts -------------------------------------------
+
+# A script that the committed list names decides a verdict, and so does its
+# own test, which says what the script must do: a test loosened lets the
+# script change unseen (the maintainer, 2026-11-20, on what #395 left off).
+# A script's own test is the script beside it named test-<name>.sh or
+# test_<name>.py, <name> being the script's file name without its
+# extension, or the test that this table names for a script whose test is
+# named otherwise.
+cat >"$tmp/own-tests" <<'TXT'
+scripts/check-weekly-run.py	scripts/test-release-gates.sh
+TXT
+
+# Each test of the table is there and runs its script.
+while IFS="$(printf '\t')" read -r path own; do
+  if [ -f "$own" ] && grep -qF -- "$path" "$own"; then
+    pass "own-tests: $own runs $path"
+  else
+    fail "own-tests: $own is not there, or does not run $path"
+  fi
+done <"$tmp/own-tests"
+
+# own_tests <list> <name>: on a branch that adds every script of the
+# checkout, under the list <list> (the report <name>), writes into
+# $tmp/<name>.asked the own test of each script that the report shows as a
+# file that decides a verdict, with the script, and into $tmp/<name>.missing
+# those of them that it does not show.
+git ls-files -- 'scripts/*.sh' 'scripts/*.py' >"$tmp/scripts"
+own_tests() {
+  tree
+  package
+  branch
+  mkdir -p "$repo/scripts"
+  cp "$1" "$repo/$list"
+  while read -r path; do
+    file "$path" </dev/null
+  done <"$tmp/scripts"
+  report "$2"
+  : >"$tmp/$2.asked"
+  : >"$tmp/$2.missing"
+  # shellcheck disable=SC2094 # the loop and grep both read the list of scripts; nothing writes it
+  while read -r path; do
+    grep -qF -- "### \`$path\` (added)" "$tmp/$2.out" || continue
+    name=${path##*/}
+    own=$(awk -F '\t' -v path="$path" '$1 == path { print $2 }' "$tmp/own-tests")
+    for candidate in "${path%/*}/test-${name%.*}.sh" "${path%/*}/test_${name%.*}.py"; do
+      if [ -z "$own" ] && grep -qxF -- "$candidate" "$tmp/scripts"; then
+        own=$candidate
+      fi
+    done
+    [ -n "$own" ] || continue
+    echo "$own (the test of $path)" >>"$tmp/$2.asked"
+    grep -qF -- "### \`$own\` (added)" "$tmp/$2.out" || echo "$own (the test of $path)" >>"$tmp/$2.missing"
+  done <"$tmp/scripts"
+}
+
+# The committed list names the own test of every script it names: among
+# them those that #395 left off, as #310 had left off the tests of checks.
+own_tests "$list" own-tests
+for test in "scripts/test-coverage-ratchet.sh (the test of scripts/coverage-ratchet.py)" \
+  "scripts/test-check-merge.sh (the test of scripts/check-merge.py)" \
+  "scripts/test-changed-lines.sh (the test of scripts/changed-lines.py)" \
+  "scripts/test-release-gates.sh (the test of scripts/check-weekly-run.py)" \
+  "scripts/test-check-kept-tests.sh (the test of scripts/check-kept-tests.py)" \
+  "scripts/test-check-ledgers.sh (the test of scripts/check-ledgers.py)" \
+  "scripts/mutation/test_bulk.py (the test of scripts/mutation/bulk.py)"; do
+  if grep -qxF -- "$test" "$tmp/own-tests.asked"; then
+    pass "own-tests: asks for $test"
+  else
+    fail "own-tests: does not ask for $test"
+  fi
+done
+if [ -s "$tmp/own-tests.missing" ]; then
+  fail "own-tests: the committed list does not name $(tr '\n' ' ' <"$tmp/own-tests.missing")"
+else
+  pass "own-tests: the committed list names the $(wc -l <"$tmp/own-tests.asked") own tests of the scripts it names"
+fi
+
+# The check fails when the list leaves one of them out: here the merge
+# check's test, and the release's check's, which the table names.
+grep -v '^scripts/test-check-merge\.sh[[:space:]]' "$list" >"$tmp/short-list"
+own_tests "$tmp/short-list" own-tests-short
+if [ "$(cat "$tmp/own-tests-short.missing")" = "scripts/test-check-merge.sh (the test of scripts/check-merge.py)" ]; then
+  pass "own-tests: a list without the merge check's test fails the check"
+else
+  fail "own-tests: a list without the merge check's test misses $(tr '\n' ' ' <"$tmp/own-tests-short.missing")"
+fi
+grep -v '^scripts/test-release-gates\.sh[[:space:]]' "$list" >"$tmp/short-list"
+own_tests "$tmp/short-list" own-tests-table
+if [ "$(cat "$tmp/own-tests-table.missing")" = "scripts/test-release-gates.sh (the test of scripts/check-weekly-run.py)" ]; then
+  pass "own-tests: a list without the release's check's test fails the check"
+else
+  fail "own-tests: a list without the release's check's test misses $(tr '\n' ' ' <"$tmp/own-tests-table.missing")"
 fi
 
 echo

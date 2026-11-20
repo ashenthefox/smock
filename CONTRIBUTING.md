@@ -346,10 +346,10 @@ scripts/test-check-grpcurl.sh dist/smock   # that check fails on each difference
 docker build --tag smock:dev .
 scripts/smoke-test-image.sh smock:dev 0.0.0-dev <commit> "moonc <version>"   # the container image
 scripts/test-helm-chart-on-kind.sh smock:dev   # the chart on a kind cluster (needs kind, kubectl and helm)
-scripts/check-release-workflow.sh    # the release workflow publishes only for tags, and only after its checks of the tag (needs yq and jq)
-scripts/test-check-release-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
+scripts/check-release-workflow.sh    # the release workflow publishes only for tags, and only after its checks of the tag, and the check of the weekly mutation run knows each job of that run (needs yq, jq and python3)
+scripts/test-check-release-workflow.sh   # that check, on copies of the workflows changed one thing at a time (needs yq, jq and python3)
 scripts/test-release-notes.sh        # the release notes, with CHANGELOG.md's links at the release's tag
-scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit, that the tag names moon.mod's version, and that the latest weekly mutation run is clean in the packages at L4, with fake gh runs on small git histories (needs python3, git and jq)
+scripts/test-release-gates.sh        # the release workflow's checks that CI passed on a tag's commit, that the tag names moon.mod's version, and that the latest weekly mutation run passed its jobs that decide a verdict and is clean in the packages at L4, with fake gh runs on small git histories (needs python3, git and jq)
 python3 scripts/check-weekly-run.py <commit>   # whether the latest weekly mutation run lets the commit be released (needs git and gh)
 scripts/check-benchmark-workflow.sh  # the benchmark workflow runs only by hand (needs yq and jq)
 scripts/check-measure-costs-workflow.sh   # the workflow that measures the tests' costs runs only by hand, with no C flags (needs yq and jq)
@@ -374,7 +374,7 @@ python3 scripts/check-merge.py <branch>   # whether the branch checks on the bra
 scripts/test-check-merge.sh          # the merge check, with a fake gh and canned runs on a small git history (needs python3, git and jq)
 scripts/check-mutation-canary-workflow.sh   # the mutation canary workflow runs only by hand or when the weekly mutation run calls it, and installs its commit's toolchain before the replay (needs yq and jq)
 scripts/test-check-mutation-canary-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
-scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only on their weekly and monthly schedules and by hand, named by their mode, in shards within the width and a job's 6 hours, on amd64 (needs yq and jq)
+scripts/check-mutation-runs-workflow.sh   # the bulk mutation runs run only on their weekly and monthly schedules and by hand, named by their mode, in shards within the width and a job's 6 hours, on amd64, with the weekly run's canary, properties with random seeds and coverage from the e2e tests (needs yq and jq)
 scripts/test-check-mutation-runs-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
 scripts/check-coverage-e2e-workflow.sh    # the coverage from the e2e tests runs only by hand or when the weekly mutation run calls it, on amd64, and keeps its report (needs yq and jq)
 scripts/test-check-coverage-e2e-workflow.sh   # that check, on copies of the workflow changed one thing at a time (needs yq and jq)
@@ -1084,7 +1084,9 @@ that no test reaches; and what moon printed. The job reports only: a
 failed e2e test fails nothing, and the report names it and says that the
 e2e tests' report may then lack points. It fails only when there can be
 no report, as when a build or an in-process test fails. The weekly run's
-finish does not wait for it.
+finish does not wait for it, and when it fails, the release's check of
+the weekly run goes ahead ([The weekly mutation
+run](docs/releasing.md#the-weekly-mutation-run)).
 
 The first report's points that no test reaches in `server` and
 `cmd/smock` are cut into triage tickets for #343 when there are more than
@@ -1455,8 +1457,10 @@ report lists every entry whose reviewer changed.
   wasm-gc; and any change to what decides a verdict: the exclusion list,
   the operator set, the runner and its committed data, the coverage
   floors and scope, the flake threshold, the lists of packages at L4 and
-  of tests kept, the merge and release checks, and the mutation and
-  coverage workflows. The maintainer acknowledges it at the merge.
+  of tests kept with their checks, the merge and release checks, the
+  mutation and coverage workflows, the suites' lists of cases with their
+  verdicts and the installs of their tools, and the tests of those
+  scripts. The maintainer acknowledges it at the merge.
 - **The mutator is governed too.** A ratchet on each package's number of
   sites, compared per definition: a package's sites may drop by at most
   as many as the base tree had in the definitions that a change deletes
@@ -1529,7 +1533,9 @@ report lists every entry whose reviewer changed.
 - **Releases.** For the packages at L4, the latest weekly run over the
   pinned set must also show no unexplained survivor before a release, on
   the tag's commit or on an ancestor whose later changes the changed-lines
-  reports cover or touch no non-test source of a package at L4. The
+  reports cover or touch no non-test source of a package at L4, and its
+  jobs that decide a verdict must have passed: a job that only reports,
+  as the coverage from the e2e tests does, stops no release. The
   release checks it before it publishes, beside the check that CI passed
   on the tag's commit (`scripts/check-weekly-run.py`,
   [What a tag does](docs/releasing.md#what-a-tag-does)). So a release may
@@ -2556,7 +2562,8 @@ which the plan downloads. Beside them:
   which reports the coverage of `server` and `cmd/smock` from the e2e
   tests and the in-process tests together
   ([Coverage from the e2e tests](#coverage-from-the-e2e-tests)); it
-  reports only, and the finish does not wait for it;
+  reports only: the finish does not wait for it, and the release's check
+  does not read it;
 - the job `seeds` runs the properties with random seeds
   (`bulk.py seeds`), in a working copy of its own that no shard reads: it
   writes a random seed into each seed constant
@@ -2803,28 +2810,48 @@ among the tests moved or renamed.
 `scripts/verdict-files.txt` names, by path, every file that decides a
 verdict: the mutation runner and its data, the exclusion list, the
 coverage wrapper with its floors and scope, the canary's verdicts, the
-lists of packages at L4 and of tests kept, the merge and release checks,
-the mutation and coverage workflows, the lists of cases that protobuf's
-conformance suite, h2spec and the YAML test suite may fail, and the
-scripts that run those suites and judge their results, with the tests of
-the verdicts. Most of these files do not exist yet: the list fixes the
-paths they will have, and each line names the issue that creates them. A
-change that adds a file that decides a verdict puts it at a path the list
-names, or adds its path to the list in the same change. The report reads
-the base's list and the head's, so a file still shows when the same
-change takes its path off the list. The report's tests
-(`scripts/test-weakening-report.sh`) read the verdict steps of the
-workflows, the steps that judge a suite's results against its list of
-cases and the steps that test that judgment, and fail when the list
-leaves out a script that such a step runs, or a script that one of those
-runs. A new verdict step goes into that test's list of steps.
+lists of packages at L4 and of tests kept, the checks of the keep list
+and of the ledgers, the merge and release checks, the mutation and
+coverage workflows, the lists of cases that protobuf's conformance suite,
+h2spec and the YAML test suite may fail, the scripts that run those
+suites and judge their results, and the scripts that install or build
+their tools at the versions they pin: h2spec's install, and the build of
+protobuf's conformance runner with the protoc it needs. It also names the
+own test of each script it names, such as the merge check's, the coverage
+ratchet's and the changed-lines job's, since a loosened test lets its
+script change unseen. The list fixes the paths of the files that do not
+exist yet, and each line names the issue that creates them. A change that
+adds a file that decides a verdict puts it at a path the list names, or
+adds its path to the list in the same change. The report reads the
+base's list and the head's, so a file still shows when the same change
+takes its path off the list.
+
+The report's tests (`scripts/test-weakening-report.sh`) hold the list to
+three rules, and fail when it leaves out a file that one of them names:
+
+- **The verdict steps.** The steps of the workflows that judge a suite's
+  results against its list of cases, the steps that test that judgment,
+  the release's check of the latest weekly run, and the checks of the
+  keep list and of the ledgers. The list names each script that such a
+  step runs, and each script that one of those runs.
+- **The tool steps.** The steps that install or build a verdict step's
+  tool. The list names their scripts in the same way.
+- **The own tests.** Each script the list names has its own test listed
+  too: the script beside it named `test-<name>.sh` or `test_<name>.py`,
+  `<name>` being the script's name without its extension, or, for a test
+  named otherwise, the one the test's table names, as
+  `scripts/test-release-gates.sh` is for `scripts/check-weekly-run.py`.
+
+A new verdict step or tool step goes into that test's list of steps, and
+a test named otherwise into its table.
 
 The report reads MoonBit by its lines and by `moon fmt`'s layout, not as
 the compiler does. So it may list a line that weakens nothing, such as a
 comparison in a helper's loop. A changed call of a helper that asserts is
 among the other lines, unless the call is an assertion itself; a change
 to the helper's own lines is in the helper's entry. It reads only the
-MoonBit tests: the tests of the scripts are not in it.
+MoonBit tests test by test: the test of a listed script shows whole,
+with its diff, among the files that decide a verdict.
 
 To read it for a branch before pushing it:
 
