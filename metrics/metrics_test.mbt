@@ -233,9 +233,10 @@ test "a metric name is a Prometheus metric name: one with a colon, a capital Z o
   // by exporters or direct instrumentation." Each gauge renders a sample of
   // 0 at once, as Prometheus's guidelines for client libraries ask: "Gauges
   // MUST start at 0" and "Metrics without labels MUST always be
-  // initialized".
+  // initialized". `a0` has its digit as early as the regex allows one, as
+  // the second character.
   let registry = @metrics.Registry()
-  for name in ["job:smock_requests:sum", "smock_A_Z", "smock_0_9"] {
+  for name in ["job:smock_requests:sum", "smock_A_Z", "smock_0_9", "a0"] {
     let _ = registry.gauge(name, help="A name.")
   }
   inspect(
@@ -250,6 +251,9 @@ test "a metric name is a Prometheus metric name: one with a colon, a capital Z o
       #|# HELP smock_0_9 A name.
       #|# TYPE smock_0_9 gauge
       #|smock_0_9 0
+      #|# HELP a0 A name.
+      #|# TYPE a0 gauge
+      #|a0 0
       #|
     ),
   )
@@ -277,6 +281,21 @@ test "panic: a metric name can be registered once" {
 ///|
 test "panic: a metric name is a Prometheus metric name" {
   let _ = @metrics.Registry().counter("smock-requests", help="Requests.")
+}
+
+///|
+/// The text format 0.0.4 writes a metric name unquoted, with "the usual
+/// Prometheus expression language restrictions": the data model's
+/// `[a-zA-Z_:][a-zA-Z0-9_:]*`, one character at least.
+test "panic: a metric name is not empty" {
+  let _ = @metrics.Registry().counter("", help="Requests.")
+}
+
+///|
+/// The data model's `[a-zA-Z_:][a-zA-Z0-9_:]*`: a digit only after the
+/// first character.
+test "panic: a metric name does not start with a digit" {
+  let _ = @metrics.Registry().counter("2xx_requests_total", help="Requests.")
 }
 
 ///|
