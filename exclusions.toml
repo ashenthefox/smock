@@ -305,14 +305,14 @@ reason = "The else arm of --journal's default, \"off\", which only a change of t
 argument = "--journal's default is \"on\" when journal_defaults.enabled is true, and \"off\" otherwise. journal_defaults is @engine.JournalSettings() with no arguments, whose enabled is true by default (engine/journal.mbt), and the running guide's Settings table gives `on` as the default. It is a top-level value that no input and no test can change, so the arm runs only if the engine's default changes; it stays so that the help follows the engine then."
 reviewer = "the maintainer, 2026-11-18"
 
-# #328's batch (cookies, metrics, usage and prng; the survivors of the
-# first weekly run, 44423781036, that no test can kill): mutants that no
-# input can tell from the code, and the fill value of an empty array. The
-# compiler's output differs for each. Each EQUIVALENT entry waits for the
-# adversarial attempt of a separate agent context, the route's second step,
-# which comes after the implementer who wrote these entries and fills in
-# `adversarial`; until then it says so. cookies is reached through its
-# importers' tests (engine's and template's).
+# #328's batch (cookies and metrics; the survivors of the first weekly
+# run, 44423781036, that no test can kill): mutants that no input can tell
+# from the code, and the fill value of an empty array. The compiler's
+# output differs for each. `adversarial` records the route's second step,
+# a separate agent context that wrote none of these entries and tried to
+# kill each mutant from the documents; it killed the batch's one entry in
+# usage (cpu_seconds,INT,1,2,0), which is gone. cookies is reached through
+# its importers' tests (engine's and template's).
 
 [[exclusion]]
 mutant = "cookies/cookies.mbt,is_field,ROR,>=,>,0"
@@ -320,7 +320,7 @@ text = "64f80cc3fa3406ad"
 category = "EQUIVALENT"
 reason = "With `c > 'A'`, `A` itself stays `A` instead of becoming `a`; every other character is mapped as before. Neither `A` nor `a` is a letter of \"cookie\", so a name with `A` at any place differs from \"cookie\" at that place either way, and is not a Cookie field: no name tells the two apart."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #328's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: the package's tests and its wasm-gc importers' tests, which pass with the mutant (run 44423781036, and ticket/328's tests)"] }
+adversarial = { context = "#328's adversarial step, 2026-11-20: a separate agent context that wrote none of #328's tests or entries", tests = ["is_field of every name that differs from \"cookie\" in one place, at each of the six places, by each code unit from 0 to 127 and U+00C0, U+00C1, U+00DA, U+0130, U+212A, U+FF21, U+FF3A: true only where the unit is that letter in either case (\"Cookie, in any case\")", "is_field of COOKIE, Cookie, CoOkIe, cookie (true) and AOOKIE, ZOOKIE, cookiA, cookiZ, cookia, cookiz, Aookie, Zookie, AAAAAA, ZZZZZZ, the empty name, cookies, Cooki (false)", "both passed with the mutant applied by hand, on wasm-gc"] }
 reviewer = ""
 
 [[exclusion]]
@@ -329,7 +329,7 @@ text = "64f80cc3fa3406ad"
 category = "EQUIVALENT"
 reason = "With `c < 'Z'`, `Z` itself stays `Z` instead of becoming `z`; every other character is mapped as before. Neither `Z` nor `z` is a letter of \"cookie\", so a name with `Z` at any place differs from \"cookie\" at that place either way, and is not a Cookie field: no name tells the two apart."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #328's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: the package's tests and its wasm-gc importers' tests, which pass with the mutant (run 44423781036, and ticket/328's tests)"] }
+adversarial = { context = "#328's adversarial step, 2026-11-20: a separate agent context that wrote none of #328's tests or entries", tests = ["is_field of every name that differs from \"cookie\" in one place, at each of the six places, by each code unit from 0 to 127 and U+00C0, U+00C1, U+00DA, U+0130, U+212A, U+FF21, U+FF3A: true only where the unit is that letter in either case (\"Cookie, in any case\")", "is_field of COOKIE, Cookie, CoOkIe, cookie (true) and AOOKIE, ZOOKIE, cookiA, cookiZ, cookia, cookiz, Aookie, Zookie, AAAAAA, ZZZZZZ, the empty name, cookies, Cooki (false)", "both passed with the mutant applied by hand, on wasm-gc"] }
 reviewer = ""
 
 [[exclusion]]
@@ -338,7 +338,7 @@ text = "65e5a474b5c21c7d"
 category = "EQUIVALENT"
 reason = "With `start < field.length()`, the search stops one turn earlier, when `start` is the field's length. That turn reads the empty part after a last `;` (or an empty field, or a `from` given as the length), which has no `=`: equals_at gives -1 and the turn finds nothing, so both return -1. A `start` past the length runs no turn in either, and a negative one reads before the field in both."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #328's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: the package's tests and its wasm-gc importers' tests, which pass with the mutant (run 44423781036, and ticket/328's tests)"] }
+adversarial = { context = "#328's adversarial step, 2026-11-20: a separate agent context that wrote none of #328's tests or entries", tests = ["find at the end of a field: \"\" for \"\" and for a, \";\" for \"\", \"a=1;\" for \"\", a and b, \"a=1\" for a from 3 and from 9, \"a=1;\" for a from 4, \"a=1; \" for \"\", \"a=1;=2\" for \"\" (5), \"=1\" and \"=\" for \"\" (1), \"a=1;a=\" for a from 3 (6)", "passed with the mutant applied by hand, on wasm-gc: the turn at the field's length reads an empty part, whose -1 for `=` is no name's length"] }
 reviewer = ""
 
 [[exclusion]]
@@ -347,7 +347,7 @@ text = "ff5631d478b787a8"
 category = "EQUIVALENT"
 reason = "With `start < field.length()`, the loop over a field's parts stops one turn earlier, when `start` is the field's length. That turn reads the empty part after a last `;`, or an empty field, which has no `=`, so it adds no cookie: every request gives the same cookies."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #328's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: the package's tests and its wasm-gc importers' tests, which pass with the mutant (run 44423781036, and ticket/328's tests)"] }
+adversarial = { context = "#328's adversarial step, 2026-11-20: a separate agent context that wrote none of #328's tests or entries", tests = ["parse of one Cookie field: \"\", \";\", a (none), \"a=1;\", \"a=1; \", \"a=1;;\" (a=1), \"a=1;=\" (a=1 and the empty name with the empty value), = (the empty name with the empty value)", "passed with the mutant applied by hand, on wasm-gc"] }
 reviewer = ""
 
 [[exclusion]]
@@ -356,7 +356,7 @@ text = "f64a9a3d322d81fd"
 category = "EQUIVALENT"
 reason = "With `end >= start`, the loop also tests `field[start - 1]` once `end` is back at `start`. value_end takes a `start` as `find` gives it (its documentation), the index just after a cookie's `=`, and both of its callers keep to that: engine's has_cookie passes find's result, and parse `equals + 1`. So `field[start - 1]` is that `=`, which is no space or tab, and the loop stops at `start` either way, for every request. Only a call outside that contract tells them apart, such as value_end(\"  \", 0), which then reads before the field."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #328's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: the package's tests and its wasm-gc importers' tests, which pass with the mutant (run 44423781036, and ticket/328's tests)"] }
+adversarial = { context = "#328's adversarial step, 2026-11-20: a separate agent context that wrote none of #328's tests or entries", tests = ["value_end of the start find gives, and the repeat search from its end as engine's has_cookie makes it: a= (2), \"a= \" (2), \"a=  ;b=1\" (2), = for the empty name (1), \" = \" (2), a= and a tab (2), \"a= x ;\" (4), a=x (3), \"b=1; a= \" with a tab and a space (7)", "passed with the mutant applied by hand, on wasm-gc; outside the contract the mutant differs, as the reason says: value_end(\" \", 1) gives 0 instead of 1, and value_end(\"  \", 0) stops on an access out of bounds instead of giving 0, but find never gives such a start"] }
 reviewer = ""
 
 [[exclusion]]
@@ -365,7 +365,7 @@ text = "cd3b42a1a4399734"
 category = "EQUIVALENT"
 reason = "With `>=`, a total equal to the counter's value is written over it. Two doubles that compare equal are the same number, but for 0 and -0, so the only change is that a counter at 0 given -0 holds -0 instead of 0. render, the one reader of the value, writes -0 as 0 (Double::to_string, whose documentation gives (-0.0).to_string() as \"0\"), and later calls compare and add -0 as they do 0, but for the sign of a zero result. So no sequence of calls renders differently."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #328's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: the package's tests and its wasm-gc importers' tests, which pass with the mutant (run 44423781036, and ticket/328's tests)"] }
+adversarial = { context = "#328's adversarial step, 2026-11-20: a separate agent context that wrote none of #328's tests or entries", tests = ["render after counters given -0: advance_to(-0) alone, with labels and then inc(by=-0), then inc(by=0), between advance_to(-1) and advance_to(0), and after inc(by=-0) and advance_to(NaN): each sample renders 0", "advance_to(+Inf) twice and inc(by=+Inf): +Inf", "passed with the mutant applied by hand, on wasm-gc; (-0.0).to_string() is \"0\" on wasm-gc and natively, checked with moonc v0.10.20"] }
 reviewer = ""
 
 [[exclusion]]
@@ -374,7 +374,7 @@ text = "40ba567fcc5d92e7"
 category = "EQUIVALENT"
 reason = "A counter's or a gauge's series gets a bucket array of one element instead of none. Only a histogram's series reads its buckets: render's Histogram arm, and HistogramSeries::observe, which only Histogram::labels makes, from a family of the kind Histogram. A family's kind never changes, so nothing reads the element, and no call renders differently."
 compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #328's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: the package's tests and its wasm-gc importers' tests, which pass with the mutant (run 44423781036, and ticket/328's tests)"] }
+adversarial = { context = "#328's adversarial step, 2026-11-20: a separate agent context that wrote none of #328's tests or entries", tests = ["render of a registry with a counter and a gauge, each without labels and with one, beside histograms with buckets [1], none and [1, 2] (one with a label), each observed: the counters' and gauges' samples, then each histogram's cumulative buckets, sum and count", "passed with the mutant applied by hand, on wasm-gc"] }
 reviewer = ""
 
 [[exclusion]]
