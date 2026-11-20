@@ -306,6 +306,16 @@ test "panic: a label name is a Prometheus label name" {
 }
 
 ///|
+/// The text format 0.0.4 writes a label name unquoted, with "the usual
+/// Prometheus expression language restrictions": the data model's
+/// `[a-zA-Z_][a-zA-Z0-9_]*`, which has no `:`, unlike a metric name's.
+test "panic: a label name has no colon, which only a metric name may have" {
+  let _ = @metrics.Registry().counter("smock_requests", help="Requests.", labels=[
+    "mock:stub",
+  ])
+}
+
+///|
 test "panic: le is the bucket label of a histogram" {
   let _ = @metrics.Registry().histogram(
     "smock_size_bytes",
