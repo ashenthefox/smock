@@ -259,6 +259,11 @@ test "steal: the eighth count of the cpu line of /proc/stat, the whole machine's
       ),
       // Bare metal: no steal.
       @usage.cpu_steal_seconds("cpu  56507 6 13025 902483 799 3381 893 0 0 0\n"),
+      // A kernel that counts steal but not guest: the manual of /proc/stat
+      // (proc(5), now proc_stat(5)) gives steal "(since Linux 2.6.11)" and
+      // guest "(since Linux 2.6.24)", so from 2.6.11 to 2.6.23 steal is the
+      // last of eight counts.
+      @usage.cpu_steal_seconds("cpu  56507 6 13025 902483 799 3381 893 1234\n"),
       // A kernel before steal was counted, a line that is not the machine's,
       // and no line.
       @usage.cpu_steal_seconds("cpu  56507 6 13025 902483 799 3381 893\n"),
@@ -266,7 +271,7 @@ test "steal: the eighth count of the cpu line of /proc/stat, the whole machine's
       @usage.cpu_steal_seconds(""),
     ],
     content=(
-      #|[Some(12.34), Some(0), None, None, None]
+      #|[Some(12.34), Some(0), Some(12.34), None, None, None]
     ),
   )
 }
