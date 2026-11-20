@@ -52,6 +52,26 @@ test "gRPC's interop message, with controls, BMP and non-BMP characters, is enco
     content="%09%0Atest with whitespace%0D%0Aand Unicode BMP %E2%98%BA and non-BMP %F0%9F%98%88%09%0A",
   )
   inspect(ascii(@grpc.percent_encode("é")), content="%C3%A9")
+  // The first and the last code point of each length that RFC 3629's
+  // table, in section 3, gives a UTF-8 sequence: U+0080 and U+07FF take
+  // two octets, U+0800 and U+FFFF three, U+10000 and U+10FFFF four
+  // (Python's UTF-8 encoder gives the same octets). The last two are
+  // surrogate pairs in the text, D800 DC00 and DBFF DFFF (RFC 2781,
+  // section 2.1), so each pair is one code point.
+  let edges = [
+    "\u{80}", "\u{7FF}", "\u{800}", "\u{FFFF}", "\u{10000}", "\u{10FFFF}",
+  ]
+  inspect(
+    edges.map(text => ascii(@grpc.percent_encode("a\{text}b"))).join("\n"),
+    content=(
+      #|a%C2%80b
+      #|a%DF%BFb
+      #|a%E0%A0%80b
+      #|a%EF%BF%BFb
+      #|a%F0%90%80%80b
+      #|a%F4%8F%BF%BFb
+    ),
+  )
 }
 
 ///|
