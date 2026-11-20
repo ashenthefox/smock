@@ -383,12 +383,3 @@ text = "40ba567fcc5d92e7"
 category = "ARID"
 reason = "The fill value of an empty array: FixedArray::make(0, 1L), the bucket array of a counter's or a gauge's series, holds no element to fill."
 reviewer = ""
-
-[[exclusion]]
-mutant = "usage/usage.mbt,cpu_seconds,INT,1,2,0"
-text = "7bbbe5d5e8a41fe2"
-category = "EQUIVALENT"
-reason = "The fields are taken from two characters after the last `)` instead of one. Linux writes the command name's closing parenthesis and a space before the state (fs/proc/array.c, do_task_stat: seq_puts(m, \") \")), and `trim` removes that space anyway, so for every /proc/<pid>/stat text the fields start at the state either way. A text that ends at that `)`, or at the space or line feed after it, leaves nothing either way, since a slice past the end of a string is empty. Only a made-up line with a character other than white space just after the last `)` tells the two apart, and no kernel writes one."
-compiler_output = "differs"
-adversarial = { context = "pending: a separate agent context, after #328's implementer, who wrote this entry and is not that context", tests = ["none yet; the implementer's own check: the package's tests and its wasm-gc importers' tests, which pass with the mutant (run 44423781036, and ticket/328's tests)"] }
-reviewer = ""

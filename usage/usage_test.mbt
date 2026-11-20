@@ -24,10 +24,21 @@ test "process CPU: utime and stime of /proc/<pid>/stat, in seconds, after a comm
       @usage.cpu_seconds(
         "1 (smock) R 0 1 1 0 -1 0 0 0 0 0 -7 3 0 0 20 0 1 0 5 0 0 0\n",
       ),
+      // The same line without the space between the command's `)` and the
+      // state is no stat line either, however its fields are counted:
+      // taking the `R` as the state, which proc_pid_stat(5) puts right after
+      // the command in parentheses, utime (field 14, `%lu`) is still -7;
+      // passing over the `R`, field 3 would be `0`, none of the states the
+      // manual lists. `cpu_seconds`: "`None` when it is not such a line",
+      // and admin-api.md: a metric whose file smock cannot understand at a
+      // scrape keeps the value it last read.
+      @usage.cpu_seconds(
+        "1 (smock)R 0 1 1 0 -1 0 0 0 0 0 -7 3 0 0 20 0 1 0 5 0 0 0\n",
+      ),
       @usage.cpu_seconds(""),
     ],
     content=(
-      #|[Some(12.9), Some(0.1), Some(0), Some(0.1), None, None, None]
+      #|[Some(12.9), Some(0.1), Some(0), Some(0.1), None, None, None, None]
     ),
   )
 }
