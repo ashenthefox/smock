@@ -7,10 +7,15 @@ publishes, beside its check that CI passed on the tag's commit
 (scripts/check-ci-passed.sh).
 
 usage: python3 scripts/check-weekly-run.py [--repo <dir>] [--repository <owner/repo>] <commit sha>
+       python3 scripts/check-weekly-run.py --jobs
 
 <commit sha> is the full id of the tag's commit; <dir> is the checkout,
 with the whole history, this one unless given; <owner/repo> is
-GITHUB_REPOSITORY unless given.
+GITHUB_REPOSITORY unless given. With --jobs, it prints the jobs of a
+weekly run that it knows (JOBS below), one a line: the name that
+mutation-runs.yml gives the job, what the job is there (job, matrix or
+workflow), and whether it decides a verdict, separated by tabs.
+scripts/check-release-workflow.sh compares them with the workflow.
 
 The packages at L4 are those that mutation/l4-packages.txt names on the
 tag's commit. With none, the check reads nothing and passes, and says so.
@@ -491,8 +496,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     parser.add_argument("--repo", default=".", help="the checkout")
     parser.add_argument("--repository", help="owner/repo on GitHub (GITHUB_REPOSITORY unless given)")
-    parser.add_argument("commit", help="the full id of the tag's commit")
+    parser.add_argument("--jobs", action="store_true", help="print the jobs of a weekly run it knows, and exit")
+    parser.add_argument("commit", nargs="?", help="the full id of the tag's commit")
     args = parser.parse_args()
+    if args.jobs:
+        for name, shape, decides in JOBS:
+            print(f"{name}\t{shape}\t{'decides a verdict' if decides else 'decides no verdict'}")
+        return 0
+    if args.commit is None:
+        parser.error("the commit is required")
     repo = Path(args.repo)
     try:
         if not SHA.fullmatch(args.commit):

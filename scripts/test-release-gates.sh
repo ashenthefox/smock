@@ -1329,6 +1329,30 @@ echo "$status" >"$tmp/no-argument.status"
 exits no-argument 2
 mentions no-argument "usage: "
 
+# --jobs lists the weekly run's jobs it knows, by the names mutation-runs.yml
+# gives them, with what each is and whether it decides a verdict, and asks
+# nothing; scripts/check-release-workflow.sh compares the list with the
+# workflow. The coverage from the e2e tests decides none (the maintainer,
+# 2026-11-20); the finish does.
+rm -f "$tmp/gh.args"
+status=0
+env -u GITHUB_REPOSITORY PATH="$tmp/runs-bin:$PATH" python3 scripts/check-weekly-run.py --jobs \
+  >"$tmp/jobs-list.out" 2>&1 || status=$?
+echo "$status" >"$tmp/jobs-list.status"
+touch "$tmp/gh.args"
+mv "$tmp/gh.args" "$tmp/jobs-list.args"
+exits jobs-list 0
+asks_nothing jobs-list
+says jobs-list "$(printf 'Merge the shards into one report\tjob\tdecides a verdict')"
+# shellcheck disable=SC2016 # the ${{ ... }} is the workflow's own syntax
+says jobs-list "$(printf 'shard ${{ matrix.name }}\tmatrix\tdecides a verdict')"
+says jobs-list "$(printf 'Coverage from e2e (weekly)\tworkflow\tdecides no verdict')"
+if [ "$(wc -l <"$tmp/jobs-list.out")" = 7 ]; then
+  pass "jobs-list: lists the weekly run's seven jobs"
+else
+  fail "jobs-list: lists $(wc -l <"$tmp/jobs-list.out") lines"
+fi
+
 echo
 echo "test-release-gates: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
