@@ -10,15 +10,17 @@
 ///|
 /// What `smock import-openapi <argv>` makes of its settings, after the
 /// document `api/openapi.yaml`, `--mock petstore` and `--output
-/// defs/petstore.yaml` unless `argv` gives them (`document` gives the
-/// document): `show` of the settings when they are valid, or the message a
-/// user sees when they are not.
+/// defs/petstore.yaml` unless `argv` gives them or `without` names them
+/// (`document` gives the document): `show` of the settings when they are
+/// valid, or the message a user sees when they are not.
 fn import_shows(
   argv : Array[String],
   document~ : String = "api/openapi.yaml",
+  without~ : Array[String] = [],
   show : (@settings.ImportOpenapiSettings) -> String,
 ) -> String {
   let given = (flag : String) => {
+    without.contains(flag) ||
     argv.iter().any(arg => arg == flag || arg.has_prefix("\{flag}="))
   }
   let argv = [
@@ -120,6 +122,29 @@ test "import-openapi: --output names a .json, .yaml or .yml file, whose own name
       #|invalid value "defs/.m.json" for --output: must not name a file that starts with ., which smock skips
       #|invalid value ".m.yaml" for --output: must not name a file that starts with ., which smock skips
       #|invalid value "" for --output: must name a .json, .yaml or .yml file
+    ),
+  )
+}
+
+///|
+test "import-openapi: without --mock or without --output, the command line is refused as missing a required argument" {
+  // docs/commands.md, smock import-openapi: --mock and --output are each
+  // "Required", and the command exits with "2 for a usage error". The
+  // words are the command-line parser's, which e2e/import_openapi_test.mbt
+  // "smock import-openapi rejects bad arguments as usage errors, on stderr
+  // with exit status 2" pins too: the maintainer decided on 2026-11-18 that
+  // the words of usage errors stay as they are (#320). The usage and the
+  // help that follow the first line are the help's own test.
+  let mock = (settings : @settings.ImportOpenapiSettings) => settings.mock
+  let first_line = (text : String) => text.split("\n").next().unwrap_or("")
+  inspect(
+    [
+      first_line(import_shows([], without=["--mock"], mock)),
+      first_line(import_shows([], without=["--output"], mock)),
+    ].join("\n"),
+    content=(
+      #|parse: error: the following required argument was not provided: 'mock'
+      #|parse: error: the following required argument was not provided: 'output'
     ),
   )
 }
