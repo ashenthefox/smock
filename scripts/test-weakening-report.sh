@@ -1472,6 +1472,7 @@ own_tests() {
   report "$2"
   : >"$tmp/$2.asked"
   : >"$tmp/$2.missing"
+  # shellcheck disable=SC2094 # the loop and grep both read the list of scripts; nothing writes it
   while read -r path; do
     grep -qF -- "### \`$path\` (added)" "$tmp/$2.out" || continue
     name=${path##*/}
