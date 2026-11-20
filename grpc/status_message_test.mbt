@@ -128,8 +128,13 @@ test "a lone surrogate, which UTF-8 cannot hold, is encoded as U+FFFD" {
   let last_high = (0xDBFF).unsafe_to_char()
   let first_low = (0xDC00).unsafe_to_char()
   let texts = [
-    "a\{first_high}b", "a\{last_high}b", "a\{first_low}b", "a\{first_low}\{first_low}b",
-    "a\{first_high}\{last_high}b", "a\{first_high}\u{E000}b", "a\u{D7FF}b",
+    "a\{first_high}b",
+    "a\{last_high}b",
+    "a\{first_low}b",
+    "a\{first_low}\{first_low}b",
+    "a\{first_high}\{last_high}b",
+    "a\{first_high}\u{E000}b",
+    "a\u{D7FF}b",
   ]
   inspect(
     texts.map(text => ascii(@grpc.percent_encode(text))).join("\n"),

@@ -102,7 +102,9 @@ test "the content type is compared as sent, in its case" {
   // `application/grpc` as much as the others, so a value that differs from
   // it in the case of one of them alone makes no call either.
   inspect(
-    calls_of([b"Application/grpc", b"application/grpC", b"Application/grpc+proto"]),
+    calls_of([
+      b"Application/grpc", b"application/grpC", b"Application/grpc+proto",
+    ]),
     content=(
       #|Application/grpc: not a call
       #|application/grpC: not a call
