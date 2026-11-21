@@ -410,7 +410,8 @@ scripts/fetch-yaml-test-suite.sh     # the pinned release of the YAML test suite
 scripts/check-yaml-test-suite.sh     # the YAML test suite against smock/yaml in both modes, judged by yaml-test-suite/safe.txt and openapi.txt (fetches the suite first)
 scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, read smock's LLM responses (needs python3 and PyPI)
 python3 -m unittest discover -s scripts/mutation -v   # the mutation runner and its site finder, on a module whose mutants are known, the exclusion list and the bulk runs' steps (needs git, moon and moonc)
-python3 scripts/mutation/exclusions.py check   # each entry of the exclusion list has a category and what it needs, and the stale ones are listed (needs moonc)
+python3 scripts/mutation/exclusions.py check   # each entry of the exclusion list has a category and what it needs, no adversarial attempt is still pending, and the stale ones are listed (needs moonc)
+python3 scripts/mutation/exclusions.py check --allow-pending   # the same on a ticket branch before the separate context has made the adversarial attempts, listing the pending ones
 python3 scripts/mutation/exclusions.py review --base origin/main   # the entries this branch adds or changes, and those the maintainer reads (--seed <run ID of the packages run on the frozen tip> draws one in five)
 python3 scripts/check-e2e-helpers.py   # no e2e test file uses what another test file defines (needs moon and moonc)
 scripts/test-check-e2e-helpers.sh    # that check, on small modules (needs python3, moon and moonc)
@@ -1355,7 +1356,21 @@ An equivalence claim reaches the maintainer in three steps:
    this before any test runs ([The compiler's
    output](#mutation-runner)).
 2. **Adversarial.** For each claim that remains, a separate agent context
-   tries to write a test that kills the mutant, from the spec.
+   tries to write a test that kills the mutant, from the spec. Who writes
+   what, and when:
+   - The context that proposes the entry writes it whole, with the
+     attempt still pending: its `adversarial` has a context that starts
+     with `pending`, and the tests it ran itself, as in
+     `adversarial = { context = "pending: a separate agent context, after <who proposed it>", tests = ["none yet; <its own check>"] }`.
+   - The separate context, one that did not propose the entry, then
+     replaces that with its own name and the tests it tried, which
+     passed, on the same ticket branch. A test that kills the mutant goes
+     in instead, and the entry goes.
+   - Nothing pending reaches the integration branch.
+     `exclusions.py check --allow-pending` passes a pending attempt on a
+     ticket branch until the separate context has run; CI's check runs
+     without it and fails on one, and a merger refuses a branch that
+     still holds one.
 3. **The maintainer.** What survives both goes to the maintainer: every
    entry in the protocol packages and in `serverparsers`, and one in five
    of the others, as a sample. The sample is drawn after the batch is
@@ -1393,10 +1408,11 @@ reviewer = ""
   comparison found (`"differs"`, or `"not compared"` where the comparison
   cannot compare the mutant), and
   `adversarial = { context = "...", tests = ["..."] }`: the agent context
-  that made the attempt and the tests it tried, which passed. An
-  UNREACHABLE entry that is not a point at an abort adds `argument`, its
-  written argument. A DEFERRED entry adds `issue`, its issue's number.
-  UB-NATIVE is for a mutant only.
+  that made the attempt and the tests it tried, which passed, or a
+  context that starts with `pending` while the attempt is still to be
+  made (step 2 above). An UNREACHABLE entry that is not a point at an
+  abort adds `argument`, its written argument. A DEFERRED entry adds
+  `issue`, its issue's number. UB-NATIVE is for a mutant only.
 
 `python3 scripts/mutation/exclusions.py new <file>:<line>:<column>`, a
 point as the coverage report names it, or `new <mutant id>`, prints a new
@@ -1404,7 +1420,10 @@ entry's stanza with the definition's text, for the author to fill in.
 `python3 scripts/mutation/exclusions.py check`, in CI's job `checks`,
 fails an entry in another category, without what its category needs, with
 a field the list does not know, or a second entry for the same mutant or
-point; it lists the stale entries, and passes with them.
+point, and an EQUIVALENT entry whose adversarial attempt is still
+pending; it lists the stale entries, and passes with them.
+`check --allow-pending`, for a ticket branch before the separate context
+has run, passes the pending entries too and lists them.
 
 Both ledgers read the list. The coverage report and the coverage floors
 count only the uncovered points that no current entry other than
