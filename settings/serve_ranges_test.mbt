@@ -208,12 +208,14 @@ test "ranges: --journal-max-entries takes 1073741824 and refuses 1073741825" {
 
 ///|
 test "ranges: --replicas, by its flag or SMOCK_REPLICAS, takes 1 and 10000, and refuses 0, 10001 and a value that is not a decimal integer" {
-  // docs/running.md, Settings: --replicas takes 1 to 10000.
+  // docs/running.md, Settings: --replicas takes 1 to 10000. A larger value
+  // is refused however large it is (#426): 18446744073709551617, 2^64 + 1,
+  // is not 1, which it would be in a 64-bit integer that wraps.
   inspect(
     each_by_flag_and_variable(
       "--replicas",
       "SMOCK_REPLICAS",
-      ["1", "10000", "0", "10001", "two"],
+      ["1", "10000", "0", "10001", "two", "18446744073709551617"],
       settings => settings.replicas.to_string(),
     ),
     content=(
@@ -222,6 +224,7 @@ test "ranges: --replicas, by its flag or SMOCK_REPLICAS, takes 1 and 10000, and 
       #|0: invalid value "0" for --replicas (SMOCK_REPLICAS): must be an integer from 1 to 10000
       #|10001: invalid value "10001" for --replicas (SMOCK_REPLICAS): must be an integer from 1 to 10000
       #|two: invalid value "two" for --replicas (SMOCK_REPLICAS): must be an integer from 1 to 10000
+      #|18446744073709551617: invalid value "18446744073709551617" for --replicas (SMOCK_REPLICAS): must be an integer from 1 to 10000
     ),
   )
 }
