@@ -411,7 +411,7 @@ scripts/check-yaml-test-suite.sh     # the YAML test suite against smock/yaml in
 scripts/check-llm-sdks.sh dist/smock # the official LLM SDKs, pinned by hash, read smock's LLM responses (needs python3 and PyPI)
 python3 -m unittest discover -s scripts/mutation -v   # the mutation runner and its site finder, on a module whose mutants are known, the exclusion list and the bulk runs' steps (needs git, moon and moonc)
 python3 scripts/mutation/exclusions.py check   # each entry of the exclusion list has a category and what it needs, and the stale ones are listed (needs moonc)
-python3 scripts/mutation/exclusions.py review --base origin/main   # the entries this branch adds or changes, and those the maintainer reads (--seed draws one in five)
+python3 scripts/mutation/exclusions.py review --base origin/main   # the entries this branch adds or changes, and those the maintainer reads (--seed <run ID of the packages run on the frozen tip> draws one in five)
 python3 scripts/check-e2e-helpers.py   # no e2e test file uses what another test file defines (needs moon and moonc)
 scripts/test-check-e2e-helpers.sh    # that check, on small modules (needs python3, moon and moonc)
 python3 scripts/mutation/run.py --root scripts/mutation/fixture --self-test-only calc log   # the mutation runner's self-test, on its fixture (needs git, moon and moonc)
@@ -1358,10 +1358,13 @@ An equivalence claim reaches the maintainer in three steps:
    tries to write a test that kills the mutant, from the spec.
 3. **The maintainer.** What survives both goes to the maintainer: every
    entry in the protocol packages and in `serverparsers`, and one in five
-   of the others, as a sample. The maintainer draws the sample after the batch is frozen, so
-   that its author cannot know which entries will be read. If a sampled
-   entry is rejected, its author triages the whole batch again, and the
-   maintainer draws a new sample.
+   of the others, as a sample. The sample is drawn after the batch is
+   frozen, with a seed that no agent can know before: the run ID that
+   GitHub Actions gives the packages run of the bulk workflow on the
+   frozen tip. No one picks the seed, so the batch's author cannot know
+   which entries will be read. If a sampled entry is rejected, its author
+   triages the whole batch again, and a new sample is drawn with the ID
+   of the packages run on the batch's new frozen tip.
 
 The list is `exclusions.toml`, at the root, and
 `scripts/mutation/exclusions.py` reads it. Each entry is a table of the
@@ -1419,9 +1422,12 @@ entry is triaged again.
 branch adds or changes against its merge base with `main`, the batch, and
 which of them the maintainer reads: every one in the protocol packages
 and in `serverparsers`, and one in five of the others. Once the batch is
-frozen (the branch's last push), the maintainer draws that sample with a
-seed of the maintainer's choosing: `review --seed <seed>`. The weakening
-report lists every entry whose reviewer changed.
+frozen (the branch's last push), a packages run of the bulk workflow
+(`-f mode=packages`, [Bulk runs on Actions](#bulk-runs-on-actions)) runs
+on the frozen tip, and its run ID is the seed of the sample:
+`review --seed <run ID>`. GitHub Actions gives that number only once the
+run starts, so no agent can know it before. The weakening report lists
+every entry whose reviewer changed.
 
 ### Rules for the work
 
@@ -1551,13 +1557,15 @@ report lists every entry whose reviewer changed.
 ### Snapshot audits
 
 When a package's turn comes to climb to L4, about ten of its snapshots
-are audited. They are drawn, with a seed the maintainer picks, among the
-tests that alone kill some mutant in a kill-matrix run of the package, at
-least half of them from tests that the work added. A separate agent
-context, one that wrote none of that package's tests under these rules,
-checks each against its source. The maintainer reads only the snapshots
-that this context finds in disagreement with their source, and each of
-those becomes an issue (a bug) or a corrected test.
+are audited. They are drawn among the tests that alone kill some mutant
+in a kill-matrix run of the package (`-f mode=matrix`), at least half of
+them from tests that the work added. The seed of the draw is that
+kill-matrix run's ID, a number that GitHub Actions gives once the run
+starts, so no agent can know it before and no one picks it. A separate
+agent context, one that wrote none of that package's tests under these
+rules, checks each against its source. The maintainer reads only the
+snapshots that this context finds in disagreement with their source, and
+each of those becomes an issue (a bug) or a corrected test.
 
 Step 1's tests close the gaps that the review found before it had any
 tooling. Every expected value they add is checked the same way: before

@@ -392,9 +392,10 @@ class ReviewTest(unittest.TestCase):
     """`review` lists the batch, the entries that a branch adds or changes
     against its merge base with main, and those the maintainer reads:
     every one in the protocol packages (http1, grpc, yaml, re2, xml and
-    protobuf) and in serverparsers, and one in five of the others, which
-    the maintainer draws with a seed after the batch is frozen (#302,
-    CONTRIBUTING.md, "Exclusions")."""
+    protobuf) and in serverparsers, and one in five of the others, drawn
+    once the batch is frozen with a seed that no agent can know before:
+    the run ID that GitHub Actions gives the packages run on the frozen
+    tip (#302, #275, CONTRIBUTING.md, "Exclusions")."""
 
     OTHERS = ["engine/a.mbt,a,INT,1,2,0", "engine/b.mbt,b,INT,1,2,0", "engine/c.mbt,c,INT,1,2,0",
               "engine/d.mbt,d,INT,1,2,0", "engine/e.mbt,e,INT,1,2,0", "protobuf-conformance/f.mbt,f,INT,1,2,0"]
@@ -454,8 +455,8 @@ class ReviewTest(unittest.TestCase):
     def test_without_a_seed_it_says_how_many_of_the_others_the_maintainer_draws(self):
         # The changed entry and the six others: one in five of seven is 2.
         text = self.review()
-        self.assertIn("One in five of the other 7: 2, which the maintainer draws once the batch is frozen,"
-                      " with `review --seed <seed>`.", text)
+        self.assertIn("One in five of the other 7: 2, drawn once the batch is frozen, with `review --seed <run ID>`:"
+                      " the ID of the packages run on the frozen tip, which no agent can know before.", text)
         self.assertNotIn("log/l.mbt,reviewed", text)
 
     def test_with_a_seed_it_draws_one_in_five_of_the_others(self):

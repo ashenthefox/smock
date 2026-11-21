@@ -57,10 +57,12 @@ review lists the batch: the entries that the tree adds or changes against
        a change of the reviewer alone aside. Of the batch, the maintainer
        reads every entry in the protocol packages (http1, grpc, yaml, re2,
        xml and protobuf) and in serverparsers, and one in five of the
-       others, rounded up. The maintainer draws those once the batch is
-       frozen, with a seed of the maintainer's choosing, so that the
-       author cannot know which: with --seed, it lists them; without, it
-       says how many there are to draw.
+       others, rounded up. Those are drawn once the batch is frozen, with
+       a seed that no agent can know before, so that the author cannot
+       know which: the run ID that GitHub Actions gives the packages run
+       of the bulk workflow (mutation-runs.yml) on the frozen tip. No one
+       picks the seed. With --seed, it lists them; without, it says how
+       many there are to draw.
 
 The coverage report (scripts/coverage-report.py, through points()) and
 the mutation runner (run.py and merge.py, through annotate() and counts())
@@ -480,8 +482,9 @@ def review(root, base, seed):
     lines += [f"  {e.key}  {e.category}" for e in every]
     lines.append("")
     if seed is None:
-        lines.append(f"One in five of the other {len(others)}: {drawn}, which the maintainer draws once the batch is"
-                     " frozen, with `review --seed <seed>`.")
+        lines.append(f"One in five of the other {len(others)}: {drawn}, drawn once the batch is frozen, with"
+                     " `review --seed <run ID>`: the ID of the packages run on the frozen tip, which no agent can"
+                     " know before.")
     else:
         chosen = random.Random(seed).sample(sorted(e.key for e in others), drawn)
         lines.append(f"One in five of the other {len(others)}: {drawn}, drawn with the seed {seed!r}:")
@@ -500,7 +503,8 @@ def main():
     reviewing = commands.add_parser("review", help="list the entries of the batch that the maintainer reads")
     reviewing.add_argument("--base", default="origin/main", help="the batch is what HEAD's tree changes against"
                                                                  " its merge base with this")
-    reviewing.add_argument("--seed", help="the maintainer's seed, which draws one in five of the other entries")
+    reviewing.add_argument("--seed", help="the run ID of the packages run on the frozen tip, which draws one in five"
+                                          " of the other entries")
     args = parser.parse_args()
     root = Path(args.root).resolve()
     try:
