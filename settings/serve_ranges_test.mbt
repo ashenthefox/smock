@@ -77,13 +77,17 @@ test "ranges: each port, by its flag or its variable, takes 0 and 65535, and ref
   // docs/running.md, Settings: each port's flag and variable, and "0 picks
   // a free port". RFC 9293, section 3.1: a TCP header's Source Port and
   // Destination Port are 16 bits each, so a port is a number from 0 to
-  // 65535.
+  // 65535. A value with leading zeros is the integer it writes, however
+  // many zeros it has (#426): 00000008080, eleven characters, and 8080
+  // after twenty zeros are 8080.
   inspect(
     [
       each_by_flag_and_variable(
         "--port",
         "SMOCK_PORT",
-        ["0", "65535", "-1", "65536", "eighty"],
+        [
+          "0", "65535", "-1", "65536", "eighty", "00000008080", "000000000000000000008080",
+        ],
         settings => settings.port.to_string(),
       ),
       each_by_flag_and_variable(
@@ -105,6 +109,8 @@ test "ranges: each port, by its flag or its variable, takes 0 and 65535, and ref
       #|-1: invalid value "-1" for --port (SMOCK_PORT): must be an integer from 0 to 65535
       #|65536: invalid value "65536" for --port (SMOCK_PORT): must be an integer from 0 to 65535
       #|eighty: invalid value "eighty" for --port (SMOCK_PORT): must be an integer from 0 to 65535
+      #|00000008080: 8080
+      #|000000000000000000008080: 8080
       #|0: 0
       #|65535: 65535
       #|-1: invalid value "-1" for --tls-port (SMOCK_TLS_PORT): must be an integer from 0 to 65535
@@ -297,12 +303,16 @@ test "ranges: --seed, by its flag or SMOCK_SEED, takes 0 and 2^53 - 1, and refus
   // docs/running.md, Settings: --seed and SMOCK_SEED set the seed of the
   // process generator, which smock otherwise picks "from 0 to
   // 9007199254740991" (2^53 - 1), as a Stub's seed takes
-  // (docs/definition-files/faults.md, Seeds).
+  // (docs/definition-files/faults.md, Seeds). A value with leading zeros is
+  // the integer it writes (#426): 00000000000000007, seventeen characters,
+  // is 7.
   inspect(
     each_by_flag_and_variable(
       "--seed",
       "SMOCK_SEED",
-      ["0", "9007199254740991", "-1", "9007199254740992", "0x2a"],
+      [
+        "0", "9007199254740991", "-1", "9007199254740992", "0x2a", "00000000000000007",
+      ],
       seed,
     ),
     content=(
@@ -311,6 +321,7 @@ test "ranges: --seed, by its flag or SMOCK_SEED, takes 0 and 2^53 - 1, and refus
       #|-1: invalid value "-1" for --seed (SMOCK_SEED): must be an integer from 0 to 9007199254740991
       #|9007199254740992: invalid value "9007199254740992" for --seed (SMOCK_SEED): must be an integer from 0 to 9007199254740991
       #|0x2a: invalid value "0x2a" for --seed (SMOCK_SEED): must be an integer from 0 to 9007199254740991
+      #|00000000000000007: 7
     ),
   )
 }
