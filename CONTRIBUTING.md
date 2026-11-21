@@ -826,6 +826,16 @@ at a time. A check that must compute for longer, and needs no `smock`,
 goes in a package of its own, whose tests get a process of their own, as
 `schema` does.
 
+`server` runs its async tests one at a time instead
+(`max_concurrent_tests = 1` in its `moon.pkg`). Two of them check that the
+process's resident memory stays flat: the stopwatch's test and the test of
+stdout's lines. That memory counts what every test running beside them
+holds. The first certificate pair a process loads grows it by about 5 MiB,
+most of it OpenSSL's libraries read in, and a load that came between a
+test's two readings once made the stopwatch's test fail on CI
+([#427](https://github.com/hirunefu/smock/issues/427)). One at a time,
+`server`'s tests take about 7 s instead of about 3.
+
 A timing test that fails once in ten runs passes most single runs of CI.
 The e2e repeat workflow (`.github/workflows/e2e-repeat.yml`) runs the e2e
 tests a given number of times, one run after another, on one runner of the
