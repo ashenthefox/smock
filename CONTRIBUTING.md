@@ -420,6 +420,21 @@ python3 scripts/mutation/ratchet.py write   # the site counts of each package, i
 python3 scripts/mutation/ratchet.py check --base origin/main   # the site counts are the commit's, and no package's sites drop beyond what the change deletes or changes (needs git and moonc)
 ```
 
+To run one package's tests, name it with `-p`. The six protocol modules,
+`grpc`, `http1`, `protobuf`, `re2`, `xml` and `yaml`, are modules of their
+own in `moon.work`, so their packages are `smock/<name>`; every other
+package is `smock/smock/<directory>`:
+
+```sh
+moon test --target wasm-gc -p smock/grpc
+moon test --target native -p smock/smock/engine
+```
+
+A wrong package path runs no test and still exits with 0: moon only warns
+that the package is not found, and reports `Total tests: 0`. So
+`-p smock/smock/grpc` looks like a pass. Read the count of tests that the
+run reports.
+
 `scripts/test-helm-chart.sh` renders `charts/smock` for each delivery mode
 of the Definition files and each Admin API authentication and TLS option,
 and checks the manifests, the Restricted Pod Security Standard included,
