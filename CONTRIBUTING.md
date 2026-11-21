@@ -1577,14 +1577,41 @@ every entry whose reviewer changed.
 
 When a package's turn comes to climb to L4, about ten of its snapshots
 are audited. They are drawn among the tests that alone kill some mutant
-in a kill-matrix run of the package (`-f mode=matrix`), at least half of
-them from tests that the work added. The seed of the draw is that
+in a kill-matrix run of the package (`-f mode=matrix`,
+[Bulk runs on Actions](#bulk-runs-on-actions)), at least half of them
+from tests that the work added or changed. The seed of the draw is that
 kill-matrix run's ID, a number that GitHub Actions gives once the run
 starts, so no agent can know it before and no one picks it. A separate
 agent context, one that wrote none of that package's tests under these
 rules, checks each against its source. The maintainer reads only the
 snapshots that this context finds in disagreement with their source, and
 each of those becomes an issue (a bug) or a corrected test.
+
+`matrix.py draw` makes the draw from the run's matrices, in a checkout of
+the commit that the run ran on:
+
+```sh
+gh run download <run ID> --name mutation-report --dir mutation-report
+python3 scripts/mutation/matrix.py draw --seed <run ID> mutation-report/matrix/<package directory>.json...
+```
+
+- It draws among the tests that alone kill some mutant in the matrices
+  given ([The kill matrix](#the-kill-matrix)).
+- A test is the work's when its block, from the `///|` at or before its
+  line to the line before the next `///|`, holds a line that differs from
+  `d953f320`, the commit of `main` at which the test review began
+  (`--base` names another): a line that `git diff -U0 d953f320 HEAD` adds
+  or changes, or the line at which it deletes some.
+- It draws ten (`--size` names another number), or every one when there
+  are fewer. The tests are sorted by their names in the matrix.
+  `random.Random(<run ID>)`, with the ID as text, samples half of the
+  ten, rounded up, of the work's tests, or all of them when there are
+  fewer. The same generator then samples the rest of the ten from every
+  test not yet drawn. So the same matrices, run ID and base give the same
+  tests, in the same order.
+- It prints one JSON line per test, in the order of the draw: the test as
+  the matrix lists it, its file (`path`), whether it is the work's
+  (`work`), and the mutants it alone kills (`alone`).
 
 Step 1's tests close the gaps that the review found before it had any
 tooling. Every expected value they add is checked the same way: before
@@ -2353,6 +2380,7 @@ python3 scripts/mutation/matrix.py alone --none _build/mutation/out
 python3 scripts/mutation/matrix.py kills --without --test '<test>' _build/mutation/out
 python3 scripts/mutation/matrix.py kills --package smock/smock/usage _build/mutation/out
 python3 scripts/mutation/matrix.py kills --without --test '<test>' --layer in-process _build/mutation/out
+python3 scripts/mutation/matrix.py draw --seed <run ID> _build/mutation/out
 ```
 
 - `alone` lists the tests that alone kill some mutant, each with those
@@ -2366,6 +2394,8 @@ python3 scripts/mutation/matrix.py kills --without --test '<test>' --layer in-pr
   holds as killed survives unless a test of the set kills it. So, with one
   test left out, the mutants that only it killed show as survivors, as
   they do in a run without that test.
+- `draw` draws the tests of a snapshot audit, with the kill-matrix run's
+  ID as the seed: the rule is in [Snapshot audits](#snapshot-audits).
 
 The tests (`scripts/mutation/test_matrix.py`) run the mode on the
 fixture's package `units`, whose mutants the tests of `units`, `meter` and
@@ -2376,7 +2406,10 @@ makes one killing test flaky, or failing without the mutant, and the run
 leaves that test out of the matrix. One run leaves `meter`'s test out and
 gets the survivors that `kills --without` gives. The tool's other tests
 read a matrix written by hand, with an e2e test, a duplicate and a
-time-out.
+time-out. The draw's tests read two matrices written by hand against a
+small git workspace laid out as smock's, with a base commit and the work
+on top, and expect the draws that the script which drew the first three
+audits gave there.
 
 ### The canary
 
